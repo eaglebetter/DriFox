@@ -1335,19 +1335,40 @@ class PlainTextViewer(QWidget):
         QTimer.singleShot(0, self._update_height)
 
     def _update_height(self):
-        """避免初始时 document().size() 返回虚高值的问题"""
+        """使用 QTextEdit 的内容高度计算方法"""
+        # 使用 QTextEdit 的 viewport 高度作为参考
         doc = self.text_edit.document()
-        doc_height = int(doc.size().height())
+        fm = self.text_edit.fontMetrics()
         
-        # 获取视口宽度，用于判断是否已布局完成
+        # 获取视口宽度
         viewport_width = self.text_edit.viewport().width()
         
-        # 如果视口宽度为0，说明布局未完成，使用保守高度
+        # 如果视口宽度无效，使用保守高度
         if viewport_width < 10:
-            h = 40  # 最小高度，等resize时再更新
+            h = 40
         else:
-            # 布局完成后，使用文档实际高度 + padding
-            h = max(40, doc_height + 16)
+            # 设置文档宽度确保正确换行
+            doc.setTextWidth(viewport_width)
+            
+            # 使用文档的 idealHeight() 或 size()
+            doc_size = doc.size()
+            doc_height = doc_size.height()
+            
+            # 如果文档高度无效，用行数估算
+            if doc_height < 10:
+                line_count = max(1, doc.blockCount())
+                line_height = fm.lineSpacing()
+                doc_height = line_count * line_height
+            
+            # 计算最终高度：文档高度 + 上下 padding
+            h = int(doc_height) + 16  # 8px top + 8px bottom padding
+            
+            # 使用 QTextEdit 的 sizeHint 作为最大高度参考
+            hint = self.text_edit.sizeHint()
+            if hint.height() > h:
+                h = min(h, hint.height())
+        
+        h = max(40, h)
         
         if abs(self.height() - h) > 2:
             self.setFixedHeight(h)
