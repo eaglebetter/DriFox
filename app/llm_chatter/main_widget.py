@@ -138,6 +138,7 @@ from app.llm_chatter.widgets.ui_helpers import (
     build_node_preview_data,
     find_widgets_to_remove_for_round,
     deduplicate_operations,
+    create_assistant_card_widget,
 )
 from app.tool_window import (
     ToolWindow,
@@ -2182,19 +2183,26 @@ class OpenAIChatToolWindow(ToolWindow):
         session = self.session_manager.get_current_session()
         if session:
             self._displayed_session_id = session.session_id
-        card = MessageCard(parent=self, role="assistant", timestamp=timestamp)
-        # 设置卡片对应的 round_index（来自之前 user message 分配的）
-        card._round_index = self._current_assistant_round_index
-        card.viewer._install_dialog_filter()
-        card.actionRequested.connect(self._on_code_action)
-        card.contextActionRequested.connect(self.handle_recommended_question)
-        card.toolDiffRequested.connect(self._on_tool_diff_requested)
-        card.cardDiffRequested.connect(self._on_card_diff_requested)
-        card.saveFileRequested.connect(self._on_save_file_requested)
-        if hasattr(self.homepage, "on_context_action"):
-            card.contextActionRequested.connect(self.homepage.on_context_action)
-        else:
-            card.contextActionRequested.connect(self.contextActionRequested.emit)
+            
+        # 使用辅助函数创建卡片
+        def on_context_action(action, context):
+            self.handle_recommended_question(action, context)
+            if hasattr(self.homepage, "on_context_action"):
+                self.homepage.on_context_action(action, context)
+            else:
+                self.contextActionRequested.emit(action, context)
+        
+        card = create_assistant_card_widget(
+            parent=self,
+            timestamp=timestamp,
+            round_index=self._current_assistant_round_index,
+            on_action=self._on_code_action,
+            on_context_action=on_context_action,
+            on_tool_diff=self._on_tool_diff_requested,
+            on_card_diff=self._on_card_diff_requested,
+            on_save_file=self._on_save_file_requested,
+        )
+        
         self._add_chat_widget(card)
         self._scroll_to_bottom()
         return card

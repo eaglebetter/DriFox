@@ -495,6 +495,69 @@ def deduplicate_operations(operations: list) -> list:
     return unique_ops
 
 
+def create_assistant_card_widget(
+    parent,
+    timestamp: str,
+    round_index: int,
+    on_action=None,
+    on_context_action=None,
+    on_tool_diff=None,
+    on_card_diff=None,
+    on_save_file=None,
+) -> Any:
+    """
+    创建助手消息卡片（带标准配置）
+    
+    Args:
+        parent: 父控件
+        timestamp: 时间戳
+        round_index: 轮次索引
+        on_action: 动作回调
+        on_context_action: 上下文动作回调
+        on_tool_diff: 工具差异回调
+        on_card_diff: 卡片差异回调
+        on_save_file: 保存文件回调
+        
+    Returns:
+        配置好的 MessageCard
+    """
+    from app.llm_chatter.widgets.message_card import MessageCard
+    
+    card = MessageCard(parent=parent, role="assistant", timestamp=timestamp)
+    card._round_index = round_index
+    card.viewer._install_dialog_filter()
+    
+    if on_action:
+        card.actionRequested.connect(on_action)
+    if on_context_action:
+        card.contextActionRequested.connect(on_context_action)
+    if on_tool_diff:
+        card.toolDiffRequested.connect(on_tool_diff)
+    if on_card_diff:
+        card.cardDiffRequested.connect(on_card_diff)
+    if on_save_file:
+        card.saveFileRequested.connect(on_save_file)
+        
+    return card
+    """
+    对文件操作列表去重
+    
+    Args:
+        operations: 文件操作列表
+        
+    Returns:
+        去重后的列表
+    """
+    seen = set()
+    unique_ops = []
+    for op in operations:
+        key = (op.get("id"), op.get("file_path"), op.get("call_id"))
+        if key not in seen:
+            seen.add(key)
+            unique_ops.append(op)
+    return unique_ops
+
+
 # ==================== 滚动位置辅助 ====================
 
 def calculate_scroll_progress(
