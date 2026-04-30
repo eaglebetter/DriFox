@@ -126,6 +126,7 @@ from app.llm_chatter.widgets.ui_helpers import (
     sanitize_user_message_for_display,
     get_default_timestamp,
     get_action_color,
+    cleanup_stale_card_cache,
 )
 from app.tool_window import (
     ToolWindow,
@@ -1661,30 +1662,14 @@ class OpenAIChatToolWindow(ToolWindow):
         from app.llm_chatter.constants import (
             MAX_SESSION_CARD_CACHE_SIZE,
         )
-
-        if len(self._session_card_cache) <= MAX_SESSION_CARD_CACHE_SIZE:
-            all_session_ids = {
-                s.session_id for s in self.session_manager.get_all_sessions()
-            }
-            stale_ids = set(self._session_card_cache.keys()) - all_session_ids
-            for sid in stale_ids:
-                self._session_card_cache.pop(sid, None)
-            return
-
         all_session_ids = {
             s.session_id for s in self.session_manager.get_all_sessions()
         }
-        stale_ids = set(self._session_card_cache.keys()) - all_session_ids
-        for sid in stale_ids:
-            self._session_card_cache.pop(sid, None)
-
-        if len(self._session_card_cache) > MAX_SESSION_CARD_CACHE_SIZE:
-            current_ids = all_session_ids & set(self._session_card_cache.keys())
-            for sid in list(self._session_card_cache.keys()):
-                if sid not in current_ids:
-                    self._session_card_cache.pop(sid, None)
-                    if len(self._session_card_cache) <= MAX_SESSION_CARD_CACHE_SIZE:
-                        break
+        cleanup_stale_card_cache(
+            self._session_card_cache,
+            all_session_ids,
+            MAX_SESSION_CARD_CACHE_SIZE
+        )
 
     def _is_widget_alive(self, widget: Optional[QWidget]) -> bool:
         if widget is None:
