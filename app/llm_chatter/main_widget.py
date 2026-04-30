@@ -151,6 +151,7 @@ from app.llm_chatter.widgets.ui_helpers import (
     get_round_message_indices,
     create_new_session_state,
     is_session_empty,
+    truncate_messages_at_round,
 )
 from app.tool_window import (
     ToolWindow,
@@ -2203,13 +2204,11 @@ class OpenAIChatToolWindow(ToolWindow):
 
         canonical_messages = consolidate_messages(session.messages)
         round_ranges = get_user_round_ranges(canonical_messages)
-        if round_index < 0 or round_index >= len(round_ranges):
+        
+        # 使用辅助函数截断消息
+        if not truncate_messages_at_round(session, round_index, round_ranges):
             return False
-
-        cutoff_index = round_ranges[round_index][0]
-        session.set_messages(
-            canonical_messages[:cutoff_index], preserve_compaction=False
-        )
+            
         self._persist_session_after_mutation()
         self._remove_cards_from_round(round_index)
         self._finalize_local_session_mutation()

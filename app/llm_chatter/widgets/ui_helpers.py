@@ -717,6 +717,28 @@ def is_session_empty(session) -> bool:
     return not session or not session.messages
 
 
+def truncate_messages_at_round(session, round_index: int, round_ranges: list) -> bool:
+    """
+    截断会话消息到指定 round 之前
+    
+    Args:
+        session: ChatSession 对象
+        round_index: round 索引
+        round_ranges: round 范围列表
+        
+    Returns:
+        是否成功
+    """
+    if round_index < 0 or round_index >= len(round_ranges):
+        return False
+        
+    cutoff_index = round_ranges[round_index][0]
+    session.set_messages(
+        session.messages[:cutoff_index], preserve_compaction=False
+    )
+    return True
+
+
 def refresh_history_card_if_visible(history_card, refresh_func=None) -> None:
     """
     如果历史卡片可见则刷新
