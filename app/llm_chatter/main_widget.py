@@ -164,6 +164,7 @@ from app.llm_chatter.widgets.ui_helpers import (
     find_user_card_at_index,
     clear_and_show_welcome,
     add_message_to_layout,
+    init_new_session_after_archive,
 )
 from app.tool_window import (
     ToolWindow,
@@ -1963,15 +1964,10 @@ class OpenAIChatToolWindow(ToolWindow):
         if archived_current and archived:
             # 使用辅助函数创建新会话状态
             new_state = create_new_session_state(old_session_manager, old_chat_engine)
-            self.session_manager = new_state["session_manager"]
-            self._current_session_id = new_state["new_session_id"]
-
-            if self._tool_executor:
-                self._tool_executor.set_session_context(self._current_session_id)
-
-            self._clear_chat_area()
-            self._show_initial_welcome()
-            self.title_edit.setText("新对话")
+            init_new_session_after_archive(
+                self, new_state, self._tool_executor,
+                self._clear_chat_area, self._show_initial_welcome
+            )
 
         # 刷新历史会话卡片
         refresh_history_card_if_visible(self._history_card, self._refresh_history_toggle_panel)

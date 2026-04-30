@@ -1018,6 +1018,36 @@ def add_message_to_layout(widget, chat_layout, is_alive_func=None) -> None:
         chat_layout.addWidget(widget)
 
 
+def init_new_session_after_archive(
+    self_widget,
+    new_state,
+    tool_executor=None,
+    clear_chat_func=None,
+    show_welcome_func=None
+) -> None:
+    """
+    归档后初始化新会话
+    
+    Args:
+        self_widget: 自身 widget（用于访问 session_manager 等）
+        new_state: create_new_session_state 返回的状态
+        tool_executor: 工具执行器
+        clear_chat_func: 清空聊天函数
+        show_welcome_func: 显示欢迎函数
+    """
+    self_widget.session_manager = new_state["session_manager"]
+    self_widget._current_session_id = new_state["new_session_id"]
+
+    if tool_executor:
+        tool_executor.set_session_context(self_widget._current_session_id)
+
+    if clear_chat_func:
+        clear_chat_func()
+    if show_welcome_func:
+        show_welcome_func()
+    self_widget.title_edit.setText("新对话")
+
+
 def refresh_history_card_if_visible(history_card, refresh_func=None) -> None:
     """
     如果历史卡片可见则刷新
