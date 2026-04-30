@@ -141,6 +141,7 @@ from app.llm_chatter.widgets.ui_helpers import (
     create_assistant_card_widget,
     find_last_tool_call_id_after_round,
     delete_widgets_from_layout,
+    refresh_history_card_if_visible,
 )
 from app.tool_window import (
     ToolWindow,
@@ -2060,16 +2061,14 @@ class OpenAIChatToolWindow(ToolWindow):
             self.title_edit.setText("新对话")
 
         # 刷新历史会话卡片
-        if self._history_card.isVisible():
-            self._refresh_history_toggle_panel()
+        refresh_history_card_if_visible(self._history_card, self._refresh_history_toggle_panel)
 
     def _rename_history_session(self, index: int, new_title: str):
         if not self.history_manager:
             return
         self.history_manager.update_session_title(index, new_title)
         # 刷新历史会话卡片
-        if self._history_card.isVisible():
-            self._refresh_history_toggle_panel()
+        refresh_history_card_if_visible(self._history_card, self._refresh_history_toggle_panel)
 
     def _load_history_session(self, index: int):
         self._load_history_session_from_popup(index)

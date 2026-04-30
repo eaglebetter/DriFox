@@ -495,6 +495,18 @@ def deduplicate_operations(operations: list) -> list:
     return unique_ops
 
 
+def refresh_history_card_if_visible(history_card, refresh_func=None) -> None:
+    """
+    如果历史卡片可见则刷新
+    
+    Args:
+        history_card: 历史卡片控件
+        refresh_func: 刷新函数
+    """
+    if history_card and history_card.isVisible() and refresh_func:
+        refresh_func()
+
+
 def delete_widgets_from_layout(widgets_to_remove: list, chat_layout) -> int:
     """
     从布局中删除指定的 widgets
