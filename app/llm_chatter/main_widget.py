@@ -2081,7 +2081,6 @@ class OpenAIChatToolWindow(ToolWindow):
         if start_idx is None:
             return []
 
-        from app.llm_chatter.utils.message_content import consolidate_messages
         canonical_messages = consolidate_messages(session.messages)
         
         # 使用辅助函数收集剩余的 tool_call_id
@@ -2097,7 +2096,6 @@ class OpenAIChatToolWindow(ToolWindow):
         if start_idx is None:
             return []
 
-        from app.llm_chatter.utils.message_content import consolidate_messages
         canonical_messages = consolidate_messages(session.messages)
         
         # 使用辅助函数收集 tool_call_id
