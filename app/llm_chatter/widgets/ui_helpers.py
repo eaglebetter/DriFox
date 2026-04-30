@@ -801,6 +801,37 @@ def save_or_archive_session(
         return session.session_id
 
 
+def truncate_and_remove_round(
+    session,
+    round_index,
+    round_ranges,
+    remove_cards_func=None
+) -> tuple:
+    """
+    截断并删除指定 round 的消息
+    
+    Args:
+        session: ChatSession 对象
+        round_index: round 索引
+        round_ranges: round 范围列表
+        remove_cards_func: 删除卡片的函数
+        
+    Returns:
+        (success, old_count, new_count)
+    """
+    if round_index < 0 or round_index >= len(round_ranges):
+        return False, 0, 0
+    
+    start_idx, end_idx = round_ranges[round_index]
+    old_count = len(session.messages)
+    new_messages = session.messages[:start_idx] + session.messages[end_idx:]
+    new_count = len(new_messages)
+    
+    session.set_messages(new_messages, preserve_compaction=False)
+    
+    return True, old_count, new_count
+
+
 def refresh_history_card_if_visible(history_card, refresh_func=None) -> None:
     """
     如果历史卡片可见则刷新

@@ -154,6 +154,7 @@ from app.llm_chatter.widgets.ui_helpers import (
     truncate_messages_at_round,
     get_session_compaction_info,
     save_or_archive_session,
+    truncate_and_remove_round,
 )
 from app.tool_window import (
     ToolWindow,
@@ -2208,17 +2209,15 @@ class OpenAIChatToolWindow(ToolWindow):
         # Step 2: 更新 session 数据
         canonical_messages = consolidate_messages(session.messages)
         round_ranges = get_user_round_ranges(canonical_messages)
-        if round_index < 0 or round_index >= len(round_ranges):
+        
+        success, old_count, new_count = truncate_and_remove_round(
+            session, round_index, round_ranges
+        )
+        if not success:
             logger.warning(f"[DELETE] Invalid round_index: {round_index}")
             return
 
-        start_idx, end_idx = round_ranges[round_index]
-        new_messages = canonical_messages[:start_idx] + canonical_messages[end_idx:]
-        session.set_messages(new_messages, preserve_compaction=False)
-
-        logger.info(
-            f"[DELETE] Session messages updated: {len(canonical_messages)} -> {len(new_messages)}"
-        )
+        logger.info(f"[DELETE] Session messages updated: {old_count} -> {new_count}")
 
         # Step 3: 保存session数据
         try:
