@@ -1420,6 +1420,10 @@ class MessageCard(SimpleCardWidget):
         # WebEngine 上下文恢复标志
         self._webengine_needs_restore = False
         self._setup_ui()
+        
+        # 设置初始高度，避免卡片初始化时高度过大
+        self.setMinimumHeight(40)
+        self.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Minimum)
 
     def _build_theme(self, role: str, error: bool = False) -> Dict[str, str]:
         themes = {
