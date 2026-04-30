@@ -1265,23 +1265,6 @@ def create_assistant_card_widget(
         card.saveFileRequested.connect(on_save_file)
         
     return card
-    """
-    对文件操作列表去重
-    
-    Args:
-        operations: 文件操作列表
-        
-    Returns:
-        去重后的列表
-    """
-    seen = set()
-    unique_ops = []
-    for op in operations:
-        key = (op.get("id"), op.get("file_path"), op.get("call_id"))
-        if key not in seen:
-            seen.add(key)
-            unique_ops.append(op)
-    return unique_ops
 
 
 # ==================== 滚动位置辅助 ====================
