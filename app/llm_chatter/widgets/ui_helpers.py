@@ -1121,6 +1121,28 @@ def build_node_preview_from_session(
     return build_node_preview_data(messages, content_to_text_func, max_len)
 
 
+def get_first_file_operation(operations: list) -> tuple:
+    """
+    获取第一个文件操作
+    
+    Args:
+        operations: 操作列表
+        
+    Returns:
+        (success, backup_path, operation)
+    """
+    if not operations:
+        return False, None, None
+    
+    op = operations[0]
+    backup_path = op.get("backup_path", "")
+    
+    if not backup_path:
+        return False, None, None
+    
+    return True, backup_path, op
+
+
 def refresh_history_card_if_visible(history_card, refresh_func=None) -> None:
     """
     如果历史卡片可见则刷新

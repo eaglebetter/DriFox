@@ -168,6 +168,7 @@ from app.llm_chatter.widgets.ui_helpers import (
     init_new_session_after_archive,
     init_after_loading_session,
     post_append_user_message,
+    get_first_file_operation,
 )
 from app.tool_window import (
     ToolWindow,
@@ -2330,24 +2331,12 @@ class OpenAIChatToolWindow(ToolWindow):
                 call_id=tool_call_id
             )
             
-            if not operations:
+            # 使用辅助函数获取第一个文件操作
+            success, backup_path, _ = get_first_file_operation(operations)
+            if not success:
                 InfoBar.warning(
                     "无差异信息",
                     "此工具没有修改任何文件，或备份信息已丢失",
-                    duration=3000,
-                    parent=self,
-                    position=InfoBarPosition.TOP_RIGHT,
-                )
-                return
-            
-            # 只取该工具产生的第一个文件操作
-            op = operations[0]
-            backup_path = op.get("backup_path", "")
-
-            if not backup_path:
-                InfoBar.warning(
-                    "无差异信息",
-                    "备份路径无效",
                     duration=3000,
                     parent=self,
                     position=InfoBarPosition.TOP_RIGHT,
