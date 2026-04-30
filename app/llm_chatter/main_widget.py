@@ -129,6 +129,8 @@ from app.llm_chatter.widgets.ui_helpers import (
     cleanup_stale_card_cache,
     filter_alive_cards,
     is_widget_alive,
+    collect_tool_call_ids,
+    format_file_list,
 )
 from app.tool_window import (
     ToolWindow,
@@ -2496,7 +2498,7 @@ class OpenAIChatToolWindow(ToolWindow):
         return call_ids
 
     def _get_tool_call_ids_in_round(self, round_index: int) -> List[str]:
-        """获取指定 round 范围内的所有 tool_call_id（不包括后续 round）"""
+        """获取指定 round 范围内的所有 tool_call_id"""
         session = self.session_manager.get_current_session()
         if not session:
             return []
@@ -2510,29 +2512,13 @@ class OpenAIChatToolWindow(ToolWindow):
         # 获取该 round 的范围
         start_idx, end_idx = round_ranges[round_index]
         
-        # 只遍历该 round 范围内的消息
-        call_ids = []
-        for i in range(start_idx, end_idx):
-            msg = canonical_messages[i]
-            role = msg.get("role")
-            if role == "assistant":
-                tool_calls = msg.get("tool_calls", [])
-                for tc in tool_calls:
-                    if isinstance(tc, dict):
-                        tid = tc.get("id")
-                        if tid and tid not in call_ids:
-                            call_ids.append(tid)
-            elif role == "tool":
-                tid = msg.get("tool_call_id")
-                if tid and tid not in call_ids:
-                    call_ids.append(tid)
-
-        return call_ids
+        # 使用辅助函数收集 tool_call_id
+        return collect_tool_call_ids(canonical_messages, start_idx, end_idx)
 
     def _show_undo_result(self, result):
         """显示撤销结果"""
         if result.failed_count > 0:
-            failed_list = "\n".join(f"  - {f}" for f in result.failed_files[:5])
+            failed_list = format_file_list(result.failed_files, max_count=5)
             InfoBar.warning(
                 "部分文件回滚失败",
                 f"成功: {result.success_count}, 失败: {result.failed_count}\n{failed_list}",
