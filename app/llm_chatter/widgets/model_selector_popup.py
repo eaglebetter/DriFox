@@ -160,21 +160,40 @@ class ModelSelectorPopup(QWidget):
         self.search_edit = QLineEdit(self)
         self.search_edit.setPlaceholderText("搜索模型...")
         self.search_edit.setClearButtonEnabled(True)
-        self.search_edit.setStyleSheet("""
-            QLineEdit {
+        self.search_edit.setStyleSheet(f"""
+            QLineEdit {{
                 background-color: #3d3d3d;
                 color: #ffffff;
                 border: 1px solid #555555;
                 border-radius: 6px;
                 padding: 6px 10px;
+                selection-background-color: #0078d4;
+                selection-color: #ffffff;
                 {get_font_family_css()} font-size: 13px;
-            }
-            QLineEdit:focus {
+            }}
+            QLineEdit:focus {{
                 border-color: #0078d4;
-            }
-            QLineEdit::placeholder {
+                background-color: #404040;
+            }}
+            QLineEdit::placeholder {{
                 color: #888888;
-            }
+            }}
+            QLineEdit::text {{
+                background-color: transparent;
+            }}
+            /* 清除按钮样式 */
+            QLineEdit QToolButton {{
+                background-color: transparent;
+                border: none;
+                padding: 2px;
+            }}
+            QLineEdit QToolButton:hover {{
+                background-color: #555555;
+                border-radius: 3px;
+            }}
+            QLineEdit QToolButton:pressed {{
+                background-color: #666666;
+            }}
         """)
         self.search_edit.textChanged.connect(self._on_search_changed)
         layout.addWidget(self.search_edit)

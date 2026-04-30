@@ -2,6 +2,7 @@
 """
 大模型设置卡片 - 垂直列表布局，高度不够滚动
 """
+
 from PyQt5.QtCore import Qt, pyqtSignal, QTimer
 from PyQt5.QtGui import QFont, QFontDatabase, QColor
 from PyQt5.QtWidgets import (
@@ -120,7 +121,10 @@ class LLMSettingsCard(CardWidget):
         content_layout.setSpacing(6)
 
         # 已保存的服务商
-        from app.widgets.card_widget.provider_setting_card import ProviderListSettingCard
+        from app.widgets.card_widget.provider_setting_card import (
+            ProviderListSettingCard,
+        )
+
         self.llmProviderCard = ProviderListSettingCard(
             icon=get_icon("大模型"),
             configItem=self.cfg.llm_saved_providers,
@@ -134,6 +138,7 @@ class LLMSettingsCard(CardWidget):
 
         # 启用技能
         from app.widgets.card_widget.list_setting_card import SkillListSettingCard
+
         self.llmSkillsCard = SkillListSettingCard(
             icon=get_icon("智能体"),
             configItem=self.cfg.llm_enabled_skills,
@@ -221,7 +226,7 @@ class LLMSettingsCard(CardWidget):
             def _apply_font_combo_style(self):
                 """应用字体下拉框样式"""
                 view = self.fontCombo.view()
-                
+
                 self.fontCombo.setStyleSheet("""
                     QFontComboBox {
                         color: #e8e8e8;
@@ -268,7 +273,7 @@ class LLMSettingsCard(CardWidget):
                         color: white;
                     }
                     QScrollBar:vertical {
-                        background: transparent;
+                        background: #2a2a2e;
                         border: none;
                         width: 14px;
                         margin: 4px 2px 4px 2px;
@@ -288,7 +293,7 @@ class LLMSettingsCard(CardWidget):
                         background: none;
                     }
                 """)
-                
+
                 # 通过 palette 强制设置背景色
                 palette = view.palette()
                 palette.setColor(view.backgroundRole(), QColor(42, 42, 46))
@@ -297,25 +302,12 @@ class LLMSettingsCard(CardWidget):
 
                 # 下拉框右边与点击框右边对齐，向左延伸
                 self.fontCombo.view().setTextElideMode(Qt.ElideRight)
-                # 限制下拉框宽度不超过控件本身宽度（首次显示时设置）
-                self._font_combo_initialized = False
-
-            def showEvent(self, event):
-                super().showEvent(event)
-                if not self._font_combo_initialized:
-                    self._font_combo_initialized = True
-                    combo_width = self.fontCombo.width()
-                    if combo_width > 0:
-                        # 计算内容宽度（减去滚动条和padding）
-                        scrollbar_width = 14 + 2 + 2  # width + margins
-                        content_width = combo_width - scrollbar_width - 8  # 减去滚动条和padding
-                        self.fontCombo.view().setFixedWidth(max(content_width, 50))
 
             def _on_font_changed(self, font):
                 self.cfg.set(self.cfg.llm_font_family, font.family(), save=True)
                 self.cfg.save()
                 # 通知父级配置变化
-                if self._parent and hasattr(self._parent, '_on_config_changed'):
+                if self._parent and hasattr(self._parent, "_on_config_changed"):
                     self._parent._on_config_changed()
 
         self.llmFontCard = FontSettingCard(
@@ -348,9 +340,9 @@ class LLMSettingsCard(CardWidget):
                 self.cfg.set(self.cfg.llm_api_port, value, save=True)
                 # 更新 API 服务开关卡片的描述
                 parent = self.parent()
-                while parent and not hasattr(parent, 'llmApiEnabledCard'):
+                while parent and not hasattr(parent, "llmApiEnabledCard"):
                     parent = parent.parent()
-                if parent and hasattr(parent, 'llmApiEnabledCard'):
+                if parent and hasattr(parent, "llmApiEnabledCard"):
                     parent.llmApiEnabledCard.setContent(
                         f"http://localhost:{value}/docs"
                     )
@@ -412,10 +404,8 @@ class LLMSettingsCard(CardWidget):
             service.port = port
             service.start(background=True)
         # 更新 API 服务开关卡片的描述
-        if hasattr(self, 'llmApiEnabledCard'):
-            self.llmApiEnabledCard.setContent(
-                f"http://localhost:{port}/docs"
-            )
+        if hasattr(self, "llmApiEnabledCard"):
+            self.llmApiEnabledCard.setContent(f"http://localhost:{port}/docs")
 
     def show(self):
         self.setVisible(True)
