@@ -1112,7 +1112,6 @@ def clear_and_show_welcome(
     session_card_cache,
     clear_chat_func,
     clear_preview_func,
-    task_state_changed_func,
     get_welcome_func,
     add_widget_func
 ) -> None:
@@ -1124,7 +1123,6 @@ def clear_and_show_welcome(
         session_card_cache: 会话卡片缓存
         clear_chat_func: 清空聊天区域的函数
         clear_preview_func: 清空预览的函数
-        task_state_changed_func: 任务状态变更的函数
         get_welcome_func: 获取欢迎卡片的函数
         add_widget_func: 添加 widget 的函数
     """
@@ -1134,8 +1132,6 @@ def clear_and_show_welcome(
     clear_preview_func()
     if session:
         session.clear()
-        if task_state_changed_func:
-            task_state_changed_func(session.task_state)
     welcome_card = get_welcome_func()
     add_widget_func(welcome_card)
 

@@ -346,9 +346,6 @@ class OpenAIChatToolWindow(ToolWindow):
         self._chat_engine.set_callback("question_asked", self._on_question_asked)
         self._chat_engine.set_callback("agent_switched", self._on_agent_switched)
         self._chat_engine.set_callback(
-            "task_state_changed", self._on_task_state_changed
-        )
-        self._chat_engine.set_callback(
             "permission_approval_requested", self._on_permission_approval_requested
         )
 
@@ -627,7 +624,6 @@ class OpenAIChatToolWindow(ToolWindow):
             self._question_floating_widget.clear()
         self._question_tool_call_id = None
         self._load_agent_list()
-        self._on_task_state_changed(session.task_state)
         QTimer.singleShot(0, self._show_initial_welcome)
         self._refresh_context_usage_indicator()
 
@@ -1256,11 +1252,6 @@ class OpenAIChatToolWindow(ToolWindow):
                 f"{agent.name}: {agent.description}\nMode: {mode}, {hidden}"
             )
 
-    def _on_task_state_changed(self, task_state):
-        if not task_state:
-            return
-        self._latest_task_state = task_state
-
     def _create_new_session(self):
         if self._chat_engine:
             self._chat_engine.stop()
@@ -1301,7 +1292,6 @@ class OpenAIChatToolWindow(ToolWindow):
             self._question_floating_widget.clear()
         self._question_tool_call_id = None
         self._load_agent_list()
-        self._on_task_state_changed(session.task_state)
 
         QTimer.singleShot(0, self._show_initial_welcome)
         self._refresh_context_usage_indicator()
@@ -1312,7 +1302,6 @@ class OpenAIChatToolWindow(ToolWindow):
             self._clear_chat_area()
             return
 
-        self._on_task_state_changed(session.task_state)
         self.title_edit.setText(session.topic_summary or session.name or "新对话")
 
         # 关键修复：同步 _current_session_id 与实际显示的会话
@@ -1776,7 +1765,6 @@ class OpenAIChatToolWindow(ToolWindow):
             session_card_cache=self._session_card_cache,
             clear_chat_func=self._clear_chat_area,
             clear_preview_func=self.node_preview.clear_nodes,
-            task_state_changed_func=self._on_task_state_changed,
             get_welcome_func=self._get_or_create_welcome_card,
             add_widget_func=lambda w: QTimer.singleShot(0, lambda: self._add_chat_widget(w))
         )
