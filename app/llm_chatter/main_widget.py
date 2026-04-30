@@ -136,6 +136,7 @@ from app.llm_chatter.widgets.ui_helpers import (
     generate_multi_file_diff_html,
     calculate_scroll_progress,
     build_node_preview_data,
+    find_widgets_to_remove_for_round,
 )
 from app.tool_window import (
     ToolWindow,
@@ -1909,30 +1910,12 @@ class OpenAIChatToolWindow(ToolWindow):
         if round_index >= user_card_count:
             return False
 
-        user_card_idx = 0
-        removing = False
-        widgets_to_remove = []
-        for i in range(self.chat_layout.count()):
-            item = self.chat_layout.itemAt(i)
-            if not item or not item.widget():
-                continue
-            widget = item.widget()
-            if not isinstance(widget, MessageCard):
-                continue
-            if getattr(widget, "_is_welcome", False):
-                continue
-            if widget.role not in ("user", "assistant"):
-                continue
+        # 使用辅助函数找出需要删除的卡片
+        widgets_to_remove = find_widgets_to_remove_for_round(
+            self.chat_layout, round_index, user_card_count
+        )
 
-            if widget.role == "user":
-                if user_card_idx >= round_index:
-                    widgets_to_remove.append(widget)
-                    removing = True
-                else:
-                    user_card_idx += 1
-            elif widget.role == "assistant" and removing:
-                widgets_to_remove.append(widget)
-
+        # 删除卡片
         for widget in widgets_to_remove:
             for i in range(self.chat_layout.count()):
                 item = self.chat_layout.itemAt(i)

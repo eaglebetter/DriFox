@@ -425,6 +425,56 @@ def build_node_preview_data(messages: list, content_getter: Optional[Callable] =
     return node_data
 
 
+# ==================== 卡片删除辅助 ====================
+
+def find_widgets_to_remove_for_round(
+    chat_layout,
+    round_index: int,
+    user_card_count: int,
+) -> list:
+    """
+    找出指定 round 需要删除的消息卡片
+    
+    Args:
+        chat_layout: 聊天布局
+        round_index: 目标 round 索引
+        user_card_count: 用户消息卡片总数
+        
+    Returns:
+        需要删除的卡片列表
+    """
+    if round_index >= user_card_count:
+        return []
+    
+    widgets_to_remove = []
+    user_card_idx = 0
+    removing = False
+    
+    for i in range(chat_layout.count()):
+        item = chat_layout.itemAt(i)
+        if not item or not item.widget():
+            continue
+        widget = item.widget()
+        
+        if not hasattr(widget, 'role'):
+            continue
+        if getattr(widget, "_is_welcome", False):
+            continue
+        if widget.role not in ("user", "assistant"):
+            continue
+
+        if widget.role == "user":
+            if user_card_idx >= round_index:
+                widgets_to_remove.append(widget)
+                removing = True
+            else:
+                user_card_idx += 1
+        elif widget.role == "assistant" and removing:
+            widgets_to_remove.append(widget)
+    
+    return widgets_to_remove
+
+
 # ==================== 滚动位置辅助 ====================
 
 def calculate_scroll_progress(
