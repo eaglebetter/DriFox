@@ -1856,20 +1856,11 @@ class OpenAIChatToolWindow(ToolWindow):
         if round_index >= user_card_count:
             return False
 
-        # 使用辅助函数找出需要删除的卡片
+        # 使用辅助函数找出并删除需要删除的卡片
         widgets_to_remove = find_widgets_to_remove_for_round(
             self.chat_layout, round_index, user_card_count
         )
-
-        # 删除卡片
-        for widget in widgets_to_remove:
-            for i in range(self.chat_layout.count()):
-                item = self.chat_layout.itemAt(i)
-                if item and item.widget() is widget:
-                    self.chat_layout.removeItem(item)
-                    break
-            widget.deleteLater()
-
+        delete_widgets_from_layout(widgets_to_remove, self.chat_layout)
         return True
 
     def _invalidate_current_session_card_cache(self):
