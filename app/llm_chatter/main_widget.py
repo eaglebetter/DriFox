@@ -163,6 +163,7 @@ from app.llm_chatter.widgets.ui_helpers import (
     restore_input_from_card,
     find_user_card_at_index,
     clear_and_show_welcome,
+    add_message_to_layout,
 )
 from app.tool_window import (
     ToolWindow,
@@ -1934,17 +1935,9 @@ class OpenAIChatToolWindow(ToolWindow):
         self.title_edit.setText("新对话")
 
     def _add_chat_widget(self, widget: QWidget):
-        if not self._is_widget_alive(widget):
-            return
-        widget.show()
+        add_message_to_layout(widget, self.chat_layout, is_widget_alive)
         if isinstance(widget, MessageCard):
             widget.sync_width()
-            if widget.role == "user":
-                self.chat_layout.addWidget(widget, 0, Qt.AlignRight)
-            else:
-                self.chat_layout.addWidget(widget, 0, Qt.AlignLeft)
-        else:
-            self.chat_layout.addWidget(widget)
 
     def _archive_history_session(self, index: int):
         history_list = self.history_manager.get_history_list()
