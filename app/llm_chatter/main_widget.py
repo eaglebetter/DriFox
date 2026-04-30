@@ -200,7 +200,6 @@ class OpenAIChatToolWindow(ToolWindow):
     history_manager = None
     _agent_manager: Optional[AgentManager] = None
     _current_agent: str = "plan"
-    _in_history_mode = False
     _current_session_id: Optional[str] = None
     _settings_popup = None
     _is_welcome = False
@@ -224,9 +223,6 @@ class OpenAIChatToolWindow(ToolWindow):
     _todo_floating_widget = None
     _question_floating_widget = None
     _question_tool_call_id = None
-    _history_preview_session_data: Optional[dict] = None
-    _history_preview_history_index: Optional[int] = None
-    _history_preview_opening: bool = False
     _window_active: bool = True
     _history_preview_messages: Optional[List[dict]] = None
     _history_preview_title: str = ""
@@ -610,8 +606,6 @@ class OpenAIChatToolWindow(ToolWindow):
         session = self.session_manager.create_new_session()
         self._current_session_id = session.session_id
         self._history_preview_messages = None
-        self._history_preview_session_data = None
-        self._history_preview_opening = False
         self._clear_chat_area()
         self.title_edit.setText("新对话")
         self.node_preview.clear_nodes()
@@ -1278,8 +1272,6 @@ class OpenAIChatToolWindow(ToolWindow):
         session = self.session_manager.create_new_session()
         self._current_session_id = session.session_id
         self._history_preview_messages = None
-        self._history_preview_session_data = None
-        self._history_preview_opening = False
         self._clear_chat_area()
         self.title_edit.setText("新对话")
         self.node_preview.clear_nodes()
