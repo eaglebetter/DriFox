@@ -148,6 +148,7 @@ from app.llm_chatter.widgets.ui_helpers import (
     collect_user_card_widgets,
     create_session_from_record,
     collect_operations_for_round,
+    get_round_message_indices,
 )
 from app.tool_window import (
     ToolWindow,
@@ -2321,14 +2322,12 @@ class OpenAIChatToolWindow(ToolWindow):
         if not session:
             return []
 
-        canonical_messages = consolidate_messages(session.messages)
-        round_ranges = get_user_round_ranges(canonical_messages)
-
-        if round_index < 0 or round_index >= len(round_ranges):
+        start_idx, _ = get_round_message_indices(session, round_index)
+        if start_idx is None:
             return []
 
-        # 获取该 round 的起始位置
-        start_idx, _ = round_ranges[round_index]
+        from app.llm_chatter.utils.message_content import consolidate_messages
+        canonical_messages = consolidate_messages(session.messages)
         
         # 使用辅助函数收集剩余的 tool_call_id
         return collect_tool_call_ids(canonical_messages, start_idx, len(canonical_messages))
@@ -2339,14 +2338,12 @@ class OpenAIChatToolWindow(ToolWindow):
         if not session:
             return []
 
-        canonical_messages = consolidate_messages(session.messages)
-        round_ranges = get_user_round_ranges(canonical_messages)
-
-        if round_index < 0 or round_index >= len(round_ranges):
+        start_idx, end_idx = get_round_message_indices(session, round_index)
+        if start_idx is None:
             return []
 
-        # 获取该 round 的范围
-        start_idx, end_idx = round_ranges[round_index]
+        from app.llm_chatter.utils.message_content import consolidate_messages
+        canonical_messages = consolidate_messages(session.messages)
         
         # 使用辅助函数收集 tool_call_id
         return collect_tool_call_ids(canonical_messages, start_idx, end_idx)

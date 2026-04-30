@@ -653,6 +653,28 @@ def collect_operations_for_round(
     return deduplicate_operations(operations)
 
 
+def get_round_message_indices(session, round_index: int) -> tuple:
+    """
+    获取指定 round 的消息索引范围
+    
+    Args:
+        session: ChatSession 对象
+        round_index: round 索引
+        
+    Returns:
+        (start_idx, end_idx) 或 (None, None)
+    """
+    from app.llm_chatter.utils.message_content import consolidate_messages, get_user_round_ranges
+    
+    canonical_messages = consolidate_messages(session.messages)
+    round_ranges = get_user_round_ranges(canonical_messages)
+    
+    if round_index < 0 or round_index >= len(round_ranges):
+        return None, None
+        
+    return round_ranges[round_index]
+
+
 def refresh_history_card_if_visible(history_card, refresh_func=None) -> None:
     """
     如果历史卡片可见则刷新
