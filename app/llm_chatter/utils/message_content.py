@@ -1,9 +1,64 @@
 # -*- coding: utf-8 -*-
 import json
+import re
 from typing import Any, Dict, List, Optional
 
 
 VALID_MESSAGE_ROLES = {"system", "user", "assistant", "tool"}
+
+# 渲染敏感标记（按长度降序排列，避免部分匹配）
+_SENSITIVE_MARKERS = [
+    "</tool>",
+    "<tool>",
+    "",
+    "</think>",
+    "```",
+]
+
+
+def _sanitize_rendering_string(text: str) -> str:
+    """
+    清理字符串中的渲染敏感标记。
+    在字符串进入渲染流程前调用，防止标记被错误解析。
+    """
+    if not text or not isinstance(text, str):
+        return str(text) if text is not None else ""
+
+    result = text
+    for marker in _SENSITIVE_MARKERS:
+        result = result.replace(marker, "")
+
+    return result
+
+
+def _sanitize_tool_args(args: Any) -> Any:
+    """
+    递归清理工具参数中的渲染敏感标记。
+    """
+    if args is None:
+        return {}
+
+    if isinstance(args, dict):
+        return {k: _sanitize_tool_args(v) for k, v in args.items()}
+
+    if isinstance(args, list):
+        return [_sanitize_tool_args(item) for item in args]
+
+    if isinstance(args, str):
+        return _sanitize_rendering_string(args)
+
+    return args
+
+
+def _sanitize_result(result: Any) -> str:
+    """
+    清理工具结果中的渲染敏感标记。
+    """
+    if result is None:
+        return ""
+    if isinstance(result, str):
+        return _sanitize_rendering_string(result)
+    return str(result)
 
 
 def normalize_tool_arguments(arguments: Any) -> Dict[str, Any]:
@@ -40,8 +95,8 @@ def make_tool_result_block(
     block = {
         "type": "tool_result",
         "name": str(tool_name or "tool"),
-        "arguments": normalize_tool_arguments(arguments),
-        "result": "" if result is None else str(result),
+        "arguments": _sanitize_tool_args(normalize_tool_arguments(arguments)),
+        "result": _sanitize_rendering_string("") if result is None else _sanitize_rendering_string(str(result)),
         "success": bool(success),
     }
     if tool_call_id:
@@ -155,15 +210,21 @@ def content_to_markdown(content: Any) -> str:
             if text:
                 parts.append(text)
         elif block_type == "tool_result":
+            # 序列化为单行 JSON，避免换行破坏解析
             args_json = json.dumps(block.get("arguments", {}) or {}, ensure_ascii=False)
-            result = str(block.get("result", ""))
+            
+            # 处理 result：转义 </tool> 标记，避免提前终止解析
+            result_raw = str(block.get("result", ""))
+            result_escaped = result_raw.replace("</tool>", "&lt;/tool&gt;")[:300]
+            
             success = bool(block.get("success", True))
             tool_call_id = block.get("tool_call_id", "")
+            
             tool_lines = [
                 "<tool>",
                 f"name: {block.get('name', 'tool')}",
                 f"args: {args_json}",
-                f"result: {result[:300]}",
+                f"result: {result_escaped}",
                 f"success: {success}",
             ]
             # 保留 tool_call_id 用于差异对比功能

@@ -685,7 +685,7 @@ class OpenAIChatToolWindow(ToolWindow):
         self.chat_scroll_area.setStyleSheet(
             """
             SingleDirectionScrollArea {
-                background-color: rgba(0, 0, 0, 0.3);
+                background-color: rgba(255, 255, 255, 0.02);
                 border: 1px solid rgba(255, 255, 255, 0.04);
                 border-radius: 18px;
             }
@@ -701,7 +701,7 @@ class OpenAIChatToolWindow(ToolWindow):
         self._bg_label.setPixmap(QPixmap(":/icons/fox_bg.png"))
         self._bg_label.setScaledContents(True)  # 允许缩放
         self._bg_opacity = QGraphicsOpacityEffect(self._bg_label)
-        self._bg_opacity.setOpacity(0.05)  # 25% 透明度
+        self._bg_opacity.setOpacity(0.1)  # 25% 透明度
         self._bg_label.setGraphicsEffect(self._bg_opacity)
         self._bg_label.lower()  # 放到底层
         self._bg_label.setAttribute(Qt.WA_TransparentForMouseEvents)  # 鼠标事件穿透

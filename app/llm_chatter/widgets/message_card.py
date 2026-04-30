@@ -186,10 +186,11 @@ def _wrap_code_blocks_with_copy_button_web(html: str) -> str:
         <div style="
             position: relative;
             margin: 12px 0;
-            background: #1E1E1E;
-            border: 1px solid #3A3F47;
+            background: rgba(30, 32, 40, 0.85);
+            border: 1px solid rgba(58, 63, 71, 0.6);
             border-radius: 10px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.25), 0 1px 3px rgba(0,0,0,0.3);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.18), 0 1px 3px rgba(0,0,0,0.2);
+            backdrop-filter: blur(8px);
             font-family: Consolas, monospace;
             font-size: 13px;
         ">
@@ -308,75 +309,99 @@ def _inject_think_cards(md_text: str, completed: bool = True) -> str:
 
 
 def _render_tool_block_content(content: str) -> str:
-    """渲染工具块内容为HTML"""
+    """
+    渲染工具块内容为HTML。
+    
+    解析格式：
+    <tool>
+    name: xxx
+    args: {JSON}  <- 可能跨行，需要正确处理嵌套 JSON
+    result: xxx   <- 可能跨行
+    success: true
+    tool_call_id: xxx
+    </tool>
+    """
     tool_name = ""
-    tool_args = ""
+    tool_args_str = ""
     tool_result = ""
     tool_success = True
     tool_call_id = None
 
-    # 解析每一行 - 改进：按行解析各字段
-    lines = content.strip().split("\n")
-    for line in lines:
-        stripped = line.strip()
-        if not stripped:
-            continue
-        # name: xxx
-        if line.startswith("name: "):
-            tool_name = line[6:].strip()
-        # args: xxx - args 可能包含 JSON 对象，需要保留整行内容
-        elif line.startswith("args: "):
-            tool_args = line[6:].strip()
-        # success: true/false
-        elif line.startswith("success: "):
-            tool_success = stripped[9:].lower() == "true"
-        # tool_call_id: xxx
-        elif line.startswith("tool_call_id: "):
-            tool_call_id = stripped[14:].strip()
-
-    # 解析 result：查找 "\nresult: " 或行首 "result: "
-    # result 可能跨越多行，需要找结束位置
-    result_start = -1
-    for pattern in ["\nresult: ", "result: "]:
-        idx = content.find(pattern)
-        if idx != -1:
-            result_start = idx + len(pattern)
-            break
-
-    if result_start != -1:
-        # 查找 result 的结束位置
-        end_markers = []
-        for marker in ["\nsuccess: ", "\ntool_call_id: ", "\n</tool>"]:
-            marker_idx = content.find(marker, result_start)
-            if marker_idx != -1:
-                end_markers.append(marker_idx)
-
-        if end_markers:
-            end_pos = min(end_markers)
-            tool_result = content[result_start:end_pos].strip()
+    content = content.strip()
+    
+    # ========== 解析 name ==========
+    name_match = re.search(r"^name:\s*(.+?)\s*$", content, re.MULTILINE)
+    if name_match:
+        tool_name = name_match.group(1).strip()
+    
+    # ========== 解析 args（需要正确处理嵌套 JSON）==========
+    # 找到 "args: " 后面第一个 { 的位置
+    args_start = content.find("args:")
+    if args_start != -1:
+        brace_start = content.find("{", args_start)
+        if brace_start != -1:
+            # 使用栈匹配找到对应的 }
+            depth = 0
+            i = brace_start
+            while i < len(content):
+                c = content[i]
+                if c == "{":
+                    depth += 1
+                elif c == "}":
+                    depth -= 1
+                    if depth == 0:
+                        # 找到匹配的 }
+                        tool_args_str = content[brace_start:i + 1]
+                        break
+                i += 1
+            
+            # 继续找 result 起始位置（在 args 结束之后）
+            result_search_start = i + 1
         else:
-            tool_result = content[result_start:].strip()
-
-    # 解析 args 为字典 - 改进：更健壮的 JSON 解析
+            # 没有找到 {，尝试单行解析
+            line = content[args_start:].split("\n")[0]
+            tool_args_str = line[args_start + 5:].strip()
+            result_search_start = args_start + len(line)
+    else:
+        result_search_start = 0
+    
+    # ========== 解析 success ==========
+    success_match = re.search(r"^success:\s*(.+?)\s*$", content, re.MULTILINE)
+    if success_match:
+        tool_success = success_match.group(1).strip().lower() == "true"
+    
+    # ========== 解析 tool_call_id ==========
+    id_match = re.search(r"^tool_call_id:\s*(.+?)\s*$", content, re.MULTILINE)
+    if id_match:
+        tool_call_id = id_match.group(1).strip()
+    
+    # ========== 解析 result（在 args 结束之后，到 success/tool_call_id/</tool> 之前）==========
+    # 找 result: 行
+    result_line_match = re.search(r"^result:\s*(.*)$", content[result_search_start:], re.MULTILINE)
+    if result_line_match:
+        # result 可能跨多行，需要找到下一个字段或 </tool>
+        result_content = result_line_match.group(1)
+        remaining = content[result_search_start + result_line_match.end():]
+        
+        # 查找下一个字段的起始位置
+        next_field_match = re.search(r"\n\w+:", remaining)
+        if next_field_match:
+            # 多行 result：截取到下一个字段之前
+            tool_result = (result_content + remaining[:next_field_match.start()]).strip()
+        else:
+            # 单行或最后一段
+            tool_result = result_content.strip()
+    
+    # ========== 解析 args JSON 为字典 ==========
     args_dict = {}
-    if tool_args:
+    if tool_args_str:
         try:
-            args_dict = json.loads(tool_args)
+            args_dict = json.loads(tool_args_str)
             if not isinstance(args_dict, dict):
                 args_dict = {}
         except json.JSONDecodeError:
-            # 尝试去除可能的空白字符
-            try:
-                args_dict = json.loads(tool_args.strip())
-            except json.JSONDecodeError:
-                # 最后尝试：查找第一个 { 和最后一个 }
-                first_brace = tool_args.find('{')
-                last_brace = tool_args.rfind('}')
-                if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
-                    try:
-                        args_dict = json.loads(tool_args[first_brace:last_brace + 1])
-                    except json.JSONDecodeError:
-                        pass
+            # 如果解析失败，保留原始字符串（会显示为错误但不崩溃）
+            args_dict = {}
 
     return render_tool_block(
         tool_name, args_dict, tool_result, tool_success, collapsed=True,
@@ -752,7 +777,7 @@ class CodeWebViewer(QWebEngineView):
                     --text-muted: #7f8ca3;
                     --accent: #66c6ff;
                     --accent-warm: #ffb65c;
-                    --code-bg: #0f141d;
+                    --code-bg: rgba(15, 20, 29, 0.85);
                     --code-toolbar: #131a25;
                     --code-border: #2a3447;
                     --success: #5fd18c;

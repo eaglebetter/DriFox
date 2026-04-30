@@ -187,7 +187,7 @@ class _HistoryItemCard(CardWidget):
         )
         bottom_row.addWidget(self.meta_label)
 
-        bottom_row.addStretch(1)
+        bottom_row.addStretch()
 
         if preview:
             self.preview_label = CaptionLabel(preview, self)
@@ -195,8 +195,7 @@ class _HistoryItemCard(CardWidget):
                 "color: rgba(255, 255, 255, 0.4); font-style: italic;"
             )
             self.preview_label.setWordWrap(True)
-            self.preview_label.setMaximumWidth(260)
-            bottom_row.addWidget(self.preview_label, 0, Qt.AlignRight)
+            bottom_row.addWidget(self.preview_label, 1, Qt.AlignRight)
 
         layout.addLayout(bottom_row)
 
