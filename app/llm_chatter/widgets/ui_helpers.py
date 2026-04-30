@@ -675,6 +675,34 @@ def get_round_message_indices(session, round_index: int) -> tuple:
     return round_ranges[round_index]
 
 
+def create_new_session_state(old_session_manager=None, old_chat_engine=None) -> dict:
+    """
+    创建新会话所需的状态初始化
+    
+    Args:
+        old_session_manager: 旧的会话管理器
+        old_chat_engine: 旧的聊天引擎
+        
+    Returns:
+        dict 包含 new_session, new_session_id
+    """
+    from app.llm_chatter.utils.chat_session import ChatSession
+    
+    session_manager = SessionManager()
+    session_manager.create_new_session()
+    new_session = session_manager.get_current_session()
+    new_session_id = new_session.session_id
+    
+    if old_chat_engine and hasattr(old_chat_engine, "set_session_manager"):
+        old_chat_engine.set_session_manager(session_manager)
+    
+    return {
+        "session_manager": session_manager,
+        "new_session": new_session,
+        "new_session_id": new_session_id,
+    }
+
+
 def refresh_history_card_if_visible(history_card, refresh_func=None) -> None:
     """
     如果历史卡片可见则刷新

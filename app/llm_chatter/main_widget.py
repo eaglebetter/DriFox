@@ -149,6 +149,7 @@ from app.llm_chatter.widgets.ui_helpers import (
     create_session_from_record,
     collect_operations_for_round,
     get_round_message_indices,
+    create_new_session_state,
 )
 from app.tool_window import (
     ToolWindow,
@@ -1993,13 +1994,10 @@ class OpenAIChatToolWindow(ToolWindow):
         archived = self.history_manager.archive_history(index)
 
         if archived_current and archived:
-            self.session_manager = SessionManager()
-            self.session_manager.create_new_session()
-            new_session = self.session_manager.get_current_session()
-            self._current_session_id = new_session.session_id
-
-            if old_chat_engine and hasattr(old_chat_engine, "set_session_manager"):
-                old_chat_engine.set_session_manager(self.session_manager)
+            # 使用辅助函数创建新会话状态
+            new_state = create_new_session_state(old_session_manager, old_chat_engine)
+            self.session_manager = new_state["session_manager"]
+            self._current_session_id = new_state["new_session_id"]
 
             if self._tool_executor:
                 self._tool_executor.set_session_context(self._current_session_id)
