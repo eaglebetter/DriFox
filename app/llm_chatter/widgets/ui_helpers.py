@@ -140,9 +140,31 @@ def export_messages_to_markdown(messages: list, timestamp: str = None) -> str:
     lines = [f"# 对话记录\n\n", f"导出时间: {timestamp}\n\n"]
     
     for msg in messages:
-        role = "用户" if msg.get("role") == "user" else "助手"
-        content = content_to_text(msg.get("content", ""))
-        lines.append(f"## {role}\n\n{content}\n\n")
+        role = msg.get("role")
+        
+        if role == "user":
+            content = content_to_text(msg.get("content", ""))
+            lines.append(f"## 用户\n\n{content}\n\n")
+        elif role == "assistant":
+            content = content_to_text(msg.get("content", ""))
+            if content:
+                lines.append(f"## 助手\n\n{content}\n\n")
+        elif role == "tool":
+            # 工具调用信息
+            tool_name = msg.get("name", "unknown")
+            tool_call_id = msg.get("tool_call_id", "")
+            arguments = msg.get("arguments", {})
+            content = msg.get("content", "")
+            success = msg.get("success", True)
+            
+            lines.append(f"## 工具调用: {tool_name}\n\n")
+            if tool_call_id:
+                lines.append(f"**Call ID**: `{tool_call_id}`\n\n")
+            if arguments:
+                lines.append(f"**参数**:\n```json\n{arguments}\n```\n\n")
+            if content:
+                lines.append(f"**结果** ({'成功' if success else '失败'}):\n```\n{content}\n```\n\n")
+            lines.append("---\n\n")
     
     return "".join(lines)
 
