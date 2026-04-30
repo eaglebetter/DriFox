@@ -1420,10 +1420,6 @@ class MessageCard(SimpleCardWidget):
         # WebEngine 上下文恢复标志
         self._webengine_needs_restore = False
         self._setup_ui()
-        
-        # 设置初始高度，避免卡片初始化时高度过大
-        self.setMinimumHeight(40)
-        self.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Minimum)
 
     def _build_theme(self, role: str, error: bool = False) -> Dict[str, str]:
         themes = {
@@ -1774,10 +1770,15 @@ class MessageCard(SimpleCardWidget):
             return
         self._last_applied_viewer_height = height
         self.viewer.setFixedHeight(height)
+        # 关键修复：强制 MessageCard 重新计算布局和高度
+        self.viewer.invalidate()
+        self.invalidate()
+        self.update()
         self.updateGeometry()
         parent = self.parentWidget()
         if parent:
             parent.updateGeometry()
+            parent.invalidate()
 
     def sync_width(self, force: bool = False):
         """同步卡片宽度
