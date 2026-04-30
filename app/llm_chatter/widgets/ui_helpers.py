@@ -24,10 +24,100 @@ def _get_content_to_text() -> Callable:
     return _content_to_text_getter
 
 
-# ==================== 样式常量 ====================
+# ==================== 代码保存辅助 ====================
 
-WINDOW_STYLE = """
-    OpenAIChatToolWindow {
+LANG_EXT_MAP = {
+    "python": ".py",
+    "py": ".py",
+    "javascript": ".js",
+    "js": ".js",
+    "typescript": ".ts",
+    "ts": ".ts",
+    "html": ".html",
+    "htm": ".html",
+    "css": ".css",
+    "scss": ".scss",
+    "sass": ".sass",
+    "less": ".less",
+    "json": ".json",
+    "yaml": ".yaml",
+    "yml": ".yaml",
+    "xml": ".xml",
+    "markdown": ".md",
+    "md": ".md",
+    "shell": ".sh",
+    "bash": ".sh",
+    "sh": ".sh",
+    "sql": ".sql",
+    "go": ".go",
+    "java": ".java",
+    "c": ".c",
+    "cpp": ".cpp",
+    "c++": ".cpp",
+    "csharp": ".cs",
+    "cs": ".cs",
+    "rust": ".rs",
+    "ruby": ".rb",
+    "php": ".php",
+    "swift": ".swift",
+    "kotlin": ".kt",
+    "scala": ".scala",
+    "r": ".r",
+    "lua": ".lua",
+    "perl": ".pl",
+    "powershell": ".ps1",
+    "dockerfile": "Dockerfile",
+    "makefile": "Makefile",
+    "toml": ".toml",
+    "ini": ".ini",
+    "cfg": ".cfg",
+    "conf": ".conf",
+    "txt": ".txt",
+    "csv": ".csv",
+    "vue": ".vue",
+    "jsx": ".jsx",
+    "tsx": ".tsx",
+    "graphql": ".graphql",
+    "proto": ".proto",
+    "docker": "Dockerfile",
+}
+
+
+def get_language_extension(lang: str) -> str:
+    """获取语言对应的文件扩展名"""
+    return LANG_EXT_MAP.get(lang.lower() if lang else "", ".txt")
+
+
+def extract_code_suggested_filename(code: str, ext: str) -> str:
+    """从代码中提取建议的文件名"""
+    class_match = re.search(r'class\s+(\w+)', code)
+    func_match = re.search(r'def\s+(\w+)|function\s+(\w+)', code)
+    if class_match:
+        return class_match.group(1) + ext
+    elif func_match:
+        return (func_match.group(1) or func_match.group(2)) + ext
+    return "code" + ext
+
+
+def get_default_save_filename(lang: str, code: str) -> str:
+    """
+    获取默认保存文件名
+    
+    Args:
+        lang: 语言名称
+        code: 代码内容
+        
+    Returns:
+        默认文件名
+    """
+    lang_lower = lang.lower() if lang else ""
+    ext = get_language_extension(lang)
+    
+    # 特殊文件名
+    if lang_lower in ("dockerfile", "makefile"):
+        return lang_lower
+        
+    return extract_code_suggested_filename(code, ext)
         background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
             stop:0 rgba(10, 14, 22, 255),
             stop:1 rgba(15, 20, 30, 255));

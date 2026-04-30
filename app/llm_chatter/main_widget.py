@@ -171,6 +171,7 @@ from app.llm_chatter.widgets.ui_helpers import (
     get_first_file_operation,
     invalidate_session_card_cache,
     refresh_session_view,
+    get_default_save_filename,
 )
 from app.tool_window import (
     ToolWindow,
@@ -2441,82 +2442,9 @@ class OpenAIChatToolWindow(ToolWindow):
             code: 代码内容
             lang: 代码语言
         """
-        # 语言到文件后缀的映射
-        LANG_EXT_MAP = {
-            "python": ".py",
-            "py": ".py",
-            "javascript": ".js",
-            "js": ".js",
-            "typescript": ".ts",
-            "ts": ".ts",
-            "html": ".html",
-            "htm": ".html",
-            "css": ".css",
-            "scss": ".scss",
-            "sass": ".sass",
-            "less": ".less",
-            "json": ".json",
-            "yaml": ".yaml",
-            "yml": ".yaml",
-            "xml": ".xml",
-            "markdown": ".md",
-            "md": ".md",
-            "shell": ".sh",
-            "bash": ".sh",
-            "sh": ".sh",
-            "sql": ".sql",
-            "go": ".go",
-            "java": ".java",
-            "c": ".c",
-            "cpp": ".cpp",
-            "c++": ".cpp",
-            "csharp": ".cs",
-            "cs": ".cs",
-            "rust": ".rs",
-            "ruby": ".rb",
-            "php": ".php",
-            "swift": ".swift",
-            "kotlin": ".kt",
-            "scala": ".scala",
-            "r": ".r",
-            "lua": ".lua",
-            "perl": ".pl",
-            "powershell": ".ps1",
-            "dockerfile": "Dockerfile",
-            "makefile": "Makefile",
-            "toml": ".toml",
-            "ini": ".ini",
-            "cfg": ".cfg",
-            "conf": ".conf",
-            "txt": ".txt",
-            "csv": ".csv",
-            "vue": ".vue",
-            "jsx": ".jsx",
-            "tsx": ".tsx",
-            "graphql": ".graphql",
-            "proto": ".proto",
-            "docker": "Dockerfile",
-        }
-
-        # 获取文件后缀
-        lang_lower = lang.lower() if lang else ""
-        ext = LANG_EXT_MAP.get(lang_lower, ".txt")
-
-        # 如果是 Dockerfile 或 Makefile 等特殊文件名，直接使用
-        if lang_lower in ("dockerfile", "makefile"):
-            default_name = lang_lower
-        else:
-            # 尝试从代码中提取类名/函数名作为建议文件名
-            import re
-            class_match = re.search(r'class\s+(\w+)', code)
-            func_match = re.search(r'def\s+(\w+)|function\s+(\w+)', code)
-            if class_match:
-                default_name = class_match.group(1)
-            elif func_match:
-                default_name = func_match.group(1) or func_match.group(2)
-            else:
-                default_name = "code"
-            default_name += ext
+        # 使用辅助函数获取默认文件名和扩展名
+        ext = get_language_extension(lang)
+        default_name = get_default_save_filename(lang, code)
 
         # 弹出文件保存对话框
         from PyQt5.QtWidgets import QFileDialog
