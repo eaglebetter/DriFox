@@ -58,6 +58,9 @@ from app.llm_chatter.utils.message_content import (
     content_to_text,
     ensure_content_blocks, make_tool_result_block,
 )
+from app.llm_chatter.widgets.render_helpers import (
+    render_tool_block,
+)
 from app.utils.utils import get_font_family_css, get_icon
 
 # ======== Markdown 实例 ========
@@ -290,6 +293,118 @@ def _inject_think_cards(md_text: str, completed: bool = True) -> str:
             content = md_text[think_start:search_end]
             parts.append(_render_think_block(content, completed=False))
             i = search_end
+    return "".join(parts)
+
+
+def _render_tool_block_content(content: str) -> str:
+    """
+    渲染工具块内容为HTML。
+    
+    解析格式：
+    <tool>
+    name: xxx
+    args: {JSON}  <- 可能跨行，需要正确处理嵌套 JSON
+    result: xxx   <- 可能跨行
+    success: true
+    tool_call_id: xxx
+    </tool>
+    """
+    tool_name = ""
+    tool_args_str = ""
+    tool_result = ""
+    tool_success = True
+    tool_call_id = None
+
+    content = content.strip()
+    
+    # ========== 解析 name ==========
+    name_match = re.search(r"^name:\s*(.+?)\s*$", content, re.MULTILINE)
+    if name_match:
+        tool_name = name_match.group(1).strip()
+    
+    # ========== 解析 args（需要正确处理嵌套 JSON）==========
+    args_start = content.find("args:")
+    if args_start != -1:
+        brace_start = content.find("{", args_start)
+        if brace_start != -1:
+            depth = 0
+            i = brace_start
+            while i < len(content):
+                c = content[i]
+                if c == "{":
+                    depth += 1
+                elif c == "}":
+                    depth -= 1
+                    if depth == 0:
+                        tool_args_str = content[brace_start:i + 1]
+                        break
+                i += 1
+            result_search_start = i + 1
+        else:
+            line = content[args_start:].split("\n")[0]
+            tool_args_str = line[args_start + 5:].strip()
+            result_search_start = args_start + len(line)
+    else:
+        result_search_start = 0
+    
+    # ========== 解析 success ==========
+    success_match = re.search(r"^success:\s*(.+?)\s*$", content, re.MULTILINE)
+    if success_match:
+        tool_success = success_match.group(1).strip().lower() == "true"
+    
+    # ========== 解析 tool_call_id ==========
+    id_match = re.search(r"^tool_call_id:\s*(.+?)\s*$", content, re.MULTILINE)
+    if id_match:
+        tool_call_id = id_match.group(1).strip()
+    
+    # ========== 解析 result ==========
+    result_line_match = re.search(r"^result:\s*(.*)$", content[result_search_start:], re.MULTILINE)
+    if result_line_match:
+        result_content = result_line_match.group(1)
+        remaining = content[result_search_start + result_line_match.end():]
+        next_field_match = re.search(r"\n\w+:", remaining)
+        if next_field_match:
+            tool_result = (result_content + remaining[:next_field_match.start()]).strip()
+        else:
+            tool_result = result_content.strip()
+    
+    # ========== 解析 args JSON 为字典 ==========
+    args_dict = {}
+    if tool_args_str:
+        try:
+            args_dict = json.loads(tool_args_str)
+            if not isinstance(args_dict, dict):
+                args_dict = {}
+        except json.JSONDecodeError:
+            args_dict = {}
+
+    return render_tool_block(
+        tool_name, args_dict, tool_result, tool_success, collapsed=True,
+        tool_call_id=tool_call_id
+    )
+
+
+def _inject_tool_blocks(md_text: str, completed: bool = True) -> str:
+    """注入工具块HTML，类似think块"""
+    if not md_text:
+        return md_text
+
+    parts = []
+    i = 0
+    while i < len(md_text):
+        start_idx = md_text.find("<tool>", i)
+        if start_idx == -1:
+            parts.append(md_text[i:])
+            break
+        parts.append(md_text[i:start_idx])
+        end_idx = md_text.find("</tool>", start_idx + len("<tool>"))
+        if end_idx != -1:
+            content = md_text[start_idx + len("<tool>") : end_idx]
+            parts.append(_render_tool_block_content(content))
+            i = end_idx + len("</tool>")
+        else:
+            parts.append(md_text[start_idx:])
+            break
     return "".join(parts)
 
 
@@ -1037,6 +1152,7 @@ class CodeWebViewer(QWebEngineView):
         safe_md = _unwrap_code_blocks_with_context_links(safe_md)
         safe_md = _inject_context_links(safe_md)
         processed_md = _inject_think_cards(safe_md, self._streaming is False)
+        processed_md = _inject_tool_blocks(processed_md, self._streaming is False)
 
         try:
             md = get_markdown_instance()
