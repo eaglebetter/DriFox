@@ -995,29 +995,6 @@ def clear_and_show_welcome(
     add_widget_func(welcome_card)
 
 
-def add_message_to_layout(widget, chat_layout, is_alive_func=None) -> None:
-    """
-    添加消息卡片到布局
-    
-    Args:
-        widget: 要添加的 widget
-        chat_layout: 聊天布局
-        is_alive_func: 检查 widget 是否存活的函数
-    """
-    if is_alive_func and not is_alive_func(widget):
-        return
-    widget.show()
-    if hasattr(widget, 'role'):
-        if widget.role == "user":
-            from PyQt5.QtCore import Qt
-            chat_layout.addWidget(widget, 0, Qt.AlignRight)
-        else:
-            from PyQt5.QtCore import Qt
-            chat_layout.addWidget(widget, 0, Qt.AlignLeft)
-    else:
-        chat_layout.addWidget(widget)
-
-
 def init_new_session_after_archive(
     self_widget,
     new_state,
