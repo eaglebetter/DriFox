@@ -13,7 +13,7 @@ from PyQt5.QtCore import (
     pyqtSignal,
     QThreadPool,
 )
-from PyQt5.QtGui import QFont, QTextCursor, QPixmap
+from PyQt5.QtGui import QTextCursor, QPixmap
 from PyQt5.QtWidgets import (
     QVBoxLayout,
     QHBoxLayout,
