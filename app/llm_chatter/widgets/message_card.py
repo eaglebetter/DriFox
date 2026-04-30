@@ -409,16 +409,8 @@ def _inject_tool_blocks(md_text: str, completed: bool = True) -> str:
 
 
 def _inject_context_links(md_text: str) -> str:
-    def replacer(match):
-        content, action = match.group(1), match.group(2)
-        if action.startswith("http://") or action.startswith("https://"):
-            return match.group(0)
-
-        encoded_c = urllib.parse.quote(content, safe="")
-        encoded_a = urllib.parse.quote(action, safe="")
-        return f'<span class="context-tag" data-type="{action}" data-content="{encoded_c}" data-action="{encoded_a}">{escape(content)}</span>'
-
-    return _CONTEXT_LINK_PATTERN.sub(replacer, md_text)
+    """Context links 功能已移除，返回原始文本"""
+    return md_text
 
 
 # ======== WebViewer ========
@@ -1553,19 +1545,6 @@ class MessageCard(SimpleCardWidget):
         main.addLayout(top)
         main.addWidget(CardSeparator(self))
 
-        if self.role == "user" and self.context_tags:
-            tg_c = QWidget(self)
-            tl = QHBoxLayout(tg_c)
-            tl.setContentsMargins(0, 0, 0, 0)
-            tl.setSpacing(4)
-            for k, (n, _, _, _) in self.context_tags.items():
-                t = TagWidget(k, n)
-                t.doubleClicked.connect(lambda k=k, t=t: self._on_link_click(k, t))
-                tl.addWidget(t)
-            tl.addStretch()
-            main.addWidget(tg_c)
-            main.addWidget(CardSeparator(self))
-
         if self.role == "user":
             self.viewer = PlainTextViewer(self)
             self.viewer.contentHeightChanged.connect(self._update_height)
@@ -1713,15 +1692,6 @@ class MessageCard(SimpleCardWidget):
         else:
             bd, bg = self._base_border, self._base_bg
         self._apply_card_style(border=bd, bg=bg)
-
-    def _on_link_click(self, k, t):
-        if ContextRegistry and k in self.context_tags:
-            try:
-                exe = self.parent.homepage.context_register.get_executor(k)
-                if exe:
-                    exe(self.context_tags[k][2], t)
-            except:
-                pass
 
     def _emit_card_diff_requested(self):
         """发射卡片差异请求信号"""
