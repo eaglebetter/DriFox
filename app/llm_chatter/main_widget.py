@@ -147,6 +147,7 @@ from app.llm_chatter.widgets.ui_helpers import (
     find_last_assistant_card,
     collect_user_card_widgets,
     create_session_from_record,
+    collect_operations_for_round,
 )
 from app.tool_window import (
     ToolWindow,
@@ -2273,14 +2274,12 @@ class OpenAIChatToolWindow(ToolWindow):
 
         # 如果有文件操作，显示预览对话框
         if all_call_ids and self._tool_executor and self._tool_executor.file_recorder:
-            # 获取所有 call_id 对应的操作并去重
-            operations = []
-            for call_id in all_call_ids:
-                ops = self._tool_executor.file_recorder.get_operations_for_preview(
-                    self._current_session_id, call_id
-                )
-                operations.extend(ops)
-            operations = deduplicate_operations(operations)
+            # 使用辅助函数收集操作
+            operations = collect_operations_for_round(
+                self._tool_executor.file_recorder,
+                self._current_session_id,
+                all_call_ids
+            )
             
             if operations:
                 dialog = FileUndoPreviewDialog(operations, self)

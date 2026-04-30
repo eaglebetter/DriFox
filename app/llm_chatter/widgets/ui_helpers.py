@@ -630,6 +630,29 @@ def create_session_from_record(session_record: dict, messages: list, title: str 
     })
 
 
+def collect_operations_for_round(
+    file_recorder, 
+    session_id: str, 
+    call_ids: list
+) -> list:
+    """
+    收集指定 round 的所有文件操作
+    
+    Args:
+        file_recorder: 文件记录器
+        session_id: 会话 ID
+        call_ids: tool call ID 列表
+        
+    Returns:
+        操作列表（已去重）
+    """
+    operations = []
+    for call_id in call_ids:
+        ops = file_recorder.get_operations_for_preview(session_id, call_id)
+        operations.extend(ops)
+    return deduplicate_operations(operations)
+
+
 def refresh_history_card_if_visible(history_card, refresh_func=None) -> None:
     """
     如果历史卡片可见则刷新
