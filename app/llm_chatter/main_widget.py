@@ -170,6 +170,7 @@ from app.llm_chatter.widgets.ui_helpers import (
     post_append_user_message,
     get_first_file_operation,
     invalidate_session_card_cache,
+    refresh_session_view,
 )
 from app.tool_window import (
     ToolWindow,
@@ -1901,10 +1902,13 @@ class OpenAIChatToolWindow(ToolWindow):
             )
 
     def _refresh_session_view_after_mutation(self):
-        self._invalidate_current_session_card_cache()
-        self._history_preview_messages = None
-        self._display_current_session()
-        self._refresh_context_usage_indicator()
+        # 使用辅助函数刷新视图
+        refresh_session_view(
+            self,
+            self._invalidate_current_session_card_cache,
+            self._display_current_session,
+            self._refresh_context_usage_indicator
+        )
 
     def _sync_current_assistant_card_ref(self):
         self._current_assistant_card = find_last_assistant_card(self.chat_layout)

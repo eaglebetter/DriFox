@@ -1132,6 +1132,30 @@ def invalidate_session_card_cache(session, session_card_cache) -> None:
         session_card_cache.pop(session.session_id, None)
 
 
+def refresh_session_view(
+    self_widget,
+    invalidate_cache_func=None,
+    display_session_func=None,
+    refresh_context_func=None
+) -> None:
+    """
+    刷新会话视图
+    
+    Args:
+        self_widget: 自身 widget
+        invalidate_cache_func: 使缓存失效的函数
+        display_session_func: 显示会话的函数
+        refresh_context_func: 刷新上下文的函数
+    """
+    if invalidate_cache_func:
+        invalidate_cache_func()
+    self_widget._history_preview_messages = None
+    if display_session_func:
+        display_session_func()
+    if refresh_context_func:
+        refresh_context_func()
+
+
 def refresh_history_card_if_visible(history_card, refresh_func=None) -> None:
     """
     如果历史卡片可见则刷新
