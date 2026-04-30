@@ -19,6 +19,8 @@ from app.llm_chatter.core.agent import (
 from app.llm_chatter.core.task_state import (
     TaskSessionState,
 )
+from app.llm_chatter.core.event_bus import EventBus
+from app.llm_chatter.core.context_manager import ContextManager
 
 __all__ = [
     "ChatEngine",
@@ -28,4 +30,6 @@ __all__ = [
     "AgentManager",
     "create_agent_manager",
     "TaskSessionState",
+    "EventBus",
+    "ContextManager",
 ]
