@@ -135,6 +135,7 @@ from app.llm_chatter.widgets.ui_helpers import (
     generate_diff_html,
     generate_multi_file_diff_html,
     calculate_scroll_progress,
+    build_node_preview_data,
 )
 from app.tool_window import (
     ToolWindow,
@@ -2224,22 +2225,9 @@ class OpenAIChatToolWindow(ToolWindow):
         if not session:
             return
         messages = consolidate_messages(session.messages)
-
-        node_data = []
-        current_user_msg = None
-
-        for msg in messages:
-            if msg["role"] == "user":
-                current_user_msg = content_to_text(msg.get("content", ""))[:30]
-            elif msg["role"] == "assistant" and current_user_msg:
-                timestamp = (
-                    msg.get("timestamp", "")[-5:] if msg.get("timestamp") else ""
-                )
-                node_data.append((current_user_msg, timestamp))
-                current_user_msg = None
-
-        if current_user_msg:
-            node_data.append((current_user_msg, ""))
+        
+        # 使用辅助函数构建 node preview 数据
+        node_data = build_node_preview_data(messages, content_to_text, max_len=30)
 
         self.node_preview.update_nodes(node_data)
         self._sync_node_preview_to_scroll()

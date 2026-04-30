@@ -377,6 +377,40 @@ def generate_multi_file_diff_html(operations: list) -> str:
     return DiffHtmlGenerator.generate_html_report(combined_diff, "")
 
 
+# ==================== Node Preview 辅助 ====================
+
+def build_node_preview_data(messages: list, content_getter=content_to_text, max_len: int = 30) -> list:
+    """
+    从消息列表构建 node preview 数据
+    
+    Args:
+        messages: 消息列表
+        content_getter: 获取消息内容的函数
+        max_len: 最大内容长度
+        
+    Returns:
+        [(content, timestamp), ...] 列表
+    """
+    node_data = []
+    current_user_msg = None
+
+    for msg in messages:
+        if msg.get("role") == "user":
+            content = content_getter(msg.get("content", ""))[:max_len]
+            current_user_msg = content
+        elif msg.get("role") == "assistant" and current_user_msg:
+            timestamp = msg.get("timestamp", "")
+            timestamp_short = timestamp[-5:] if timestamp else ""
+            node_data.append((current_user_msg, timestamp_short))
+            current_user_msg = None
+
+    # 处理最后未配对的 user message
+    if current_user_msg:
+        node_data.append((current_user_msg, ""))
+
+    return node_data
+
+
 # ==================== 滚动位置辅助 ====================
 
 def calculate_scroll_progress(
