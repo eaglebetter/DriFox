@@ -686,7 +686,8 @@ def create_new_session_state(old_session_manager=None, old_chat_engine=None) -> 
     Returns:
         dict 包含 new_session, new_session_id
     """
-    from app.llm_chatter.utils.chat_session import ChatSession
+    # 延迟导入避免循环依赖
+    from app.llm_chatter.utils.chat_session import ChatSession, SessionManager
     
     session_manager = SessionManager()
     session_manager.create_new_session()
