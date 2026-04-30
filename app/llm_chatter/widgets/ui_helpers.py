@@ -120,6 +120,33 @@ def get_default_save_filename(lang: str, code: str) -> str:
     return extract_code_suggested_filename(code, ext)
 
 
+def export_messages_to_markdown(messages: list, timestamp: str = None) -> str:
+    """
+    将消息列表导出为 Markdown 格式
+    
+    Args:
+        messages: 消息列表
+        timestamp: 时间戳，默认为当前时间
+        
+    Returns:
+        Markdown 格式的对话内容
+    """
+    from datetime import datetime
+    from app.llm_chatter.utils.message_content import content_to_text
+    
+    if timestamp is None:
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    
+    lines = [f"# 对话记录\n\n", f"导出时间: {timestamp}\n\n"]
+    
+    for msg in messages:
+        role = "用户" if msg.get("role") == "user" else "助手"
+        content = content_to_text(msg.get("content", ""))
+        lines.append(f"## {role}\n\n{content}\n\n")
+    
+    return "".join(lines)
+
+
 # ==================== 样式常量 ====================
 
 WINDOW_STYLE = """

@@ -172,6 +172,7 @@ from app.llm_chatter.widgets.ui_helpers import (
     invalidate_session_card_cache,
     refresh_session_view,
     get_default_save_filename,
+    export_messages_to_markdown,
 )
 from app.tool_window import (
     ToolWindow,
@@ -3319,21 +3320,10 @@ class OpenAIChatToolWindow(ToolWindow):
         if not file_path:
             return
         try:
+            # 使用辅助函数导出对话
+            content = export_messages_to_markdown(session.messages)
             with open(file_path, "w", encoding="utf-8") as f:
-                f.write(f"# 对话记录\n\n")
-                f.write(f"导出时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
-                for msg in session.messages:
-                    role = "用户" if msg.get("role") == "user" else "助手"
-                    content = msg.get("content", "")
-                    if isinstance(content, list):
-                        content = "\n".join(
-                            [
-                                item.get("text", "")
-                                for item in content
-                                if item.get("type") == "text"
-                            ]
-                        )
-                    f.write(f"## {role}\n\n{content}\n\n")
+                f.write(content)
             InfoBar.success("导出成功", f"已保存到: {file_path}", parent=self)
         except Exception as e:
             InfoBar.error("导出失败", str(e), parent=self)
