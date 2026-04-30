@@ -5,12 +5,23 @@ UI 辅助模块 - 从 main_widget.py 提取的 UI 辅助方法
 这些方法独立于主类，可以安全使用。
 """
 import re
-from typing import Optional, List, Dict, Any, Tuple
+from typing import Optional, List, Dict, Any, Tuple, Callable
 from datetime import datetime
 from PyQt5.QtGui import QPixmap
 from PyQt5.QtWidgets import QLabel
 from PyQt5.QtCore import Qt
 from loguru import logger
+
+# 延迟导入 content_to_text（避免循环导入）
+_content_to_text_getter: Optional[Callable] = None
+
+def _get_content_to_text() -> Callable:
+    """延迟获取 content_to_text 函数"""
+    global _content_to_text_getter
+    if _content_to_text_getter is None:
+        from app.llm_chatter.utils.message_content import content_to_text
+        _content_to_text_getter = content_to_text
+    return _content_to_text_getter
 
 
 # ==================== 样式常量 ====================
@@ -379,18 +390,21 @@ def generate_multi_file_diff_html(operations: list) -> str:
 
 # ==================== Node Preview 辅助 ====================
 
-def build_node_preview_data(messages: list, content_getter=content_to_text, max_len: int = 30) -> list:
+def build_node_preview_data(messages: list, content_getter: Optional[Callable] = None, max_len: int = 30) -> list:
     """
     从消息列表构建 node preview 数据
     
     Args:
         messages: 消息列表
-        content_getter: 获取消息内容的函数
+        content_getter: 获取消息内容的函数，默认为 content_to_text
         max_len: 最大内容长度
         
     Returns:
         [(content, timestamp), ...] 列表
     """
+    if content_getter is None:
+        content_getter = _get_content_to_text()
+        
     node_data = []
     current_user_msg = None
 
