@@ -134,6 +134,7 @@ from app.llm_chatter.widgets.ui_helpers import (
     read_backup_files,
     generate_diff_html,
     generate_multi_file_diff_html,
+    calculate_scroll_progress,
 )
 from app.tool_window import (
     ToolWindow,
@@ -2265,30 +2266,13 @@ class OpenAIChatToolWindow(ToolWindow):
         scroll_bar = self.chat_scroll_area.verticalScrollBar()
         viewport_height = self.chat_scroll_area.viewport().height()
         visible_top = scroll_bar.value()
-        anchor_y = visible_top + max(viewport_height / 2, 1)
         user_tops = [widget.y() for widget in user_widgets]
 
-        if len(user_tops) == 1:
-            progress = 0.0
-        elif anchor_y <= user_tops[0]:
-            progress = 0.0
-        elif anchor_y >= user_tops[-1]:
-            progress = float(len(user_tops) - 1)
-        else:
-            progress = 0.0
-            for idx in range(len(user_tops) - 1):
-                start_top = user_tops[idx]
-                end_top = user_tops[idx + 1]
-                if start_top <= anchor_y <= end_top:
-                    span = max(end_top - start_top, 1)
-                    ratio = (anchor_y - start_top) / span
-                    progress = idx + ratio
-                    break
-
-        visible_index = min(
-            max(int(round(progress)), 0),
-            len(user_tops) - 1,
+        # 使用辅助函数计算滚动进度
+        progress, visible_index = calculate_scroll_progress(
+            visible_top, viewport_height, user_tops
         )
+
         self.node_preview.set_progress_position(progress)
         if visible_index != self._last_visible_user_pair_index:
             self._last_visible_user_pair_index = visible_index
