@@ -157,6 +157,7 @@ from app.llm_chatter.widgets.ui_helpers import (
     truncate_and_remove_round,
     show_diff_viewer,
     render_batch_to_assistant_card,
+    scroll_to_bottom_if_streaming,
 )
 from app.tool_window import (
     ToolWindow,
@@ -2094,8 +2095,7 @@ class OpenAIChatToolWindow(ToolWindow):
 
     def _update_assistant_message(self, card: MessageCard, new_content: str):
         card.update_content(new_content)
-        if self._is_streaming:
-            self._scroll_to_bottom()
+        scroll_to_bottom_if_streaming(self.chat_scroll_area, self._is_streaming)
 
     def _update_node_preview(self):
         session = self.session_manager.get_current_session()

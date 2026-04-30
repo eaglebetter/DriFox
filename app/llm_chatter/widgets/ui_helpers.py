@@ -873,6 +873,18 @@ def render_batch_to_assistant_card(assistant_card, batch: list) -> None:
     assistant_card.finish_streaming()
 
 
+def scroll_to_bottom_if_streaming(scroll_area, is_streaming: bool) -> None:
+    """
+    如果正在流式输出则滚动到底部
+    
+    Args:
+        scroll_area: 滚动区域
+        is_streaming: 是否正在流式输出
+    """
+    if is_streaming:
+        scroll_area.verticalScrollBar().setValue(scroll_area.verticalScrollBar().maximum())
+
+
 def refresh_history_card_if_visible(history_card, refresh_func=None) -> None:
     """
     如果历史卡片可见则刷新
