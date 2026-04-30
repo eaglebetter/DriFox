@@ -152,6 +152,7 @@ from app.llm_chatter.widgets.ui_helpers import (
     create_new_session_state,
     is_session_empty,
     truncate_messages_at_round,
+    get_session_compaction_info,
 )
 from app.tool_window import (
     ToolWindow,
@@ -1883,7 +1884,7 @@ class OpenAIChatToolWindow(ToolWindow):
 
         session.set_messages(session.messages, preserve_compaction=False)
 
-        if not session.messages:
+        if is_session_empty(session):
             if self._current_session_id is not None and self.history_manager:
                 idx = self.history_manager.find_index_by_session_id(
                     self._current_session_id
@@ -1894,6 +1895,8 @@ class OpenAIChatToolWindow(ToolWindow):
             return
 
         if self.history_manager:
+            compaction_info = get_session_compaction_info(session)
+            
             if self._current_session_id is not None:
                 idx = self.history_manager.find_index_by_session_id(
                     self._current_session_id
@@ -1902,23 +1905,20 @@ class OpenAIChatToolWindow(ToolWindow):
                     self.history_manager.update_session(
                         idx,
                         session.messages,
-                        compaction_state=getattr(session, "compaction_state", {}),
-                        compaction_cache=getattr(session, "compaction_cache", {}),
+                        **compaction_info
                     )
                 else:
                     self.history_manager.save_session(
                         session.messages,
                         session_id=session.session_id,
-                        compaction_state=getattr(session, "compaction_state", {}),
-                        compaction_cache=getattr(session, "compaction_cache", {}),
+                        **compaction_info
                     )
                     self._current_session_id = session.session_id
             else:
                 self.history_manager.save_session(
                     session.messages,
                     session_id=session.session_id,
-                    compaction_state=getattr(session, "compaction_state", {}),
-                    compaction_cache=getattr(session, "compaction_cache", {}),
+                    **compaction_info
                 )
                 self._current_session_id = session.session_id
 

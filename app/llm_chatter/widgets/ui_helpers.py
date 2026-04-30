@@ -739,6 +739,22 @@ def truncate_messages_at_round(session, round_index: int, round_ranges: list) ->
     return True
 
 
+def get_session_compaction_info(session) -> dict:
+    """
+    获取会话的压缩信息
+    
+    Args:
+        session: ChatSession 对象
+        
+    Returns:
+        dict 包含 compaction_state 和 compaction_cache
+    """
+    return {
+        "compaction_state": getattr(session, "compaction_state", {}),
+        "compaction_cache": getattr(session, "compaction_cache", {}),
+    }
+
+
 def refresh_history_card_if_visible(history_card, refresh_func=None) -> None:
     """
     如果历史卡片可见则刷新
