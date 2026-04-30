@@ -1048,6 +1048,37 @@ def init_new_session_after_archive(
     self_widget.title_edit.setText("新对话")
 
 
+def init_after_loading_session(
+    self_widget,
+    session,
+    session_id,
+    title=None,
+    tool_executor=None,
+    history_popup=None
+) -> None:
+    """
+    加载会话后初始化
+    
+    Args:
+        self_widget: 自身 widget
+        session: 加载的会话
+        session_id: 会话 ID
+        title: 会话标题
+        tool_executor: 工具执行器
+        history_popup: 历史弹窗
+    """
+    self_widget.session_manager.set_current_session(session)
+    self_widget._history_preview_messages = None
+    self_widget._current_session_id = session_id
+    self_widget.title_edit.setText(title or "历史对话")
+    
+    if history_popup:
+        history_popup.close()
+
+    if tool_executor:
+        tool_executor.set_session_context(session_id)
+
+
 def refresh_history_card_if_visible(history_card, refresh_func=None) -> None:
     """
     如果历史卡片可见则刷新

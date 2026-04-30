@@ -165,6 +165,7 @@ from app.llm_chatter.widgets.ui_helpers import (
     clear_and_show_welcome,
     add_message_to_layout,
     init_new_session_after_archive,
+    init_after_loading_session,
 )
 from app.tool_window import (
     ToolWindow,
@@ -2010,16 +2011,11 @@ class OpenAIChatToolWindow(ToolWindow):
         # 使用辅助函数创建会话
         restored = create_session_from_record(session_record, messages, title)
         
-        self.session_manager.set_current_session(restored)
-        self._history_preview_messages = None
-        self._current_session_id = session_id
-        self.title_edit.setText(title or "历史对话")
-        if self._history_popup:
-            self._history_popup.close()
-
-        # 更新工具执行器的会话上下文
-        if self._tool_executor:
-            self._tool_executor.set_session_context(self._current_session_id)
+        # 使用辅助函数初始化
+        init_after_loading_session(
+            self, restored, session_id, title,
+            self._tool_executor, self._history_popup
+        )
 
         self._display_current_session()
 
