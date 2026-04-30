@@ -142,6 +142,7 @@ from app.llm_chatter.widgets.ui_helpers import (
     find_last_tool_call_id_after_round,
     delete_widgets_from_layout,
     refresh_history_card_if_visible,
+    collect_message_cards_from_layout,
 )
 from app.tool_window import (
     ToolWindow,
@@ -1771,20 +1772,9 @@ class OpenAIChatToolWindow(ToolWindow):
                 assistant_card.finish_streaming()
 
     def _get_rendered_message_cards(self) -> List[MessageCard]:
-        cards: List[MessageCard] = []
-        for i in range(self.chat_layout.count()):
-            item = self.chat_layout.itemAt(i)
-            if not item or not item.widget():
-                continue
-            widget = item.widget()
-            if not isinstance(widget, MessageCard):
-                continue
-            if getattr(widget, "_is_welcome", False):
-                continue
-            if widget.role not in ("user", "assistant"):
-                continue
-            cards.append(widget)
-        return cards
+        def is_user_or_assistant(widget):
+            return widget.role in ("user", "assistant")
+        return collect_message_cards_from_layout(self.chat_layout, is_user_or_assistant)
 
     def _get_current_user_round_index(self) -> int:
         """获取当前 user message 应该是第几个 user（从 0 开始）"""

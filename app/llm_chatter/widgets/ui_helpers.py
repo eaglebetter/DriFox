@@ -495,6 +495,36 @@ def deduplicate_operations(operations: list) -> list:
     return unique_ops
 
 
+def collect_message_cards_from_layout(
+    chat_layout,
+    filter_func=None,
+) -> list:
+    """
+    从布局中收集消息卡片
+    
+    Args:
+        chat_layout: 聊天布局
+        filter_func: 可选的过滤函数，接受 (widget) 返回 True/False
+        
+    Returns:
+        卡片列表
+    """
+    cards = []
+    for i in range(chat_layout.count()):
+        item = chat_layout.itemAt(i)
+        if not item or not item.widget():
+            continue
+        widget = item.widget()
+        if not isinstance(widget, MessageCard):
+            continue
+        if getattr(widget, "_is_welcome", False):
+            continue
+        if filter_func and not filter_func(widget):
+            continue
+        cards.append(widget)
+    return cards
+
+
 def refresh_history_card_if_visible(history_card, refresh_func=None) -> None:
     """
     如果历史卡片可见则刷新
