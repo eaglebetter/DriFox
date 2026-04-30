@@ -505,6 +505,9 @@ def find_last_assistant_card(chat_layout) -> Any:
     Returns:
         最后一个 assistant 卡片，或 None
     """
+    # 延迟导入避免循环依赖
+    from app.llm_chatter.widgets.message_card import MessageCard
+    
     for i in range(chat_layout.count() - 1, -1, -1):
         item = chat_layout.itemAt(i)
         if not item or not item.widget():
@@ -529,6 +532,9 @@ def count_user_cards_in_layout(chat_layout) -> int:
     Returns:
         用户消息卡片数量
     """
+    # 延迟导入避免循环依赖
+    from app.llm_chatter.widgets.message_card import MessageCard
+    
     count = 0
     for i in range(chat_layout.count()):
         item = chat_layout.itemAt(i)
@@ -554,6 +560,9 @@ def collect_message_cards_from_layout(
     Returns:
         卡片列表
     """
+    # 延迟导入避免循环依赖
+    from app.llm_chatter.widgets.message_card import MessageCard
+    
     cards = []
     for i in range(chat_layout.count()):
         item = chat_layout.itemAt(i)
