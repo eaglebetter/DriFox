@@ -851,6 +851,28 @@ def show_diff_viewer(parent, html) -> Any:
     return viewer
 
 
+def render_batch_to_assistant_card(assistant_card, batch: list) -> None:
+    """
+    将消息批次渲染到 assistant 卡片
+    
+    Args:
+        assistant_card: Assistant 卡片
+        batch: 消息批次列表
+    """
+    for msg in batch:
+        if msg.get("role") == "assistant" and msg.get("content", ""):
+            assistant_card.append_text(msg.get("content", {}))
+        elif msg.get("role") == "tool" and msg.get("content", ""):
+            assistant_card.append_tool_result(
+                tool_name=msg.get("name", ""),
+                arguments=msg.get("arguments", {}),
+                result=msg.get("content", ""),
+                success=bool(msg.get("success", True)),
+                tool_call_id=msg.get("tool_call_id", ""),
+            )
+    assistant_card.finish_streaming()
+
+
 def refresh_history_card_if_visible(history_card, refresh_func=None) -> None:
     """
     如果历史卡片可见则刷新

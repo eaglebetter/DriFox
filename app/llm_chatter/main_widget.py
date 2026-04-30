@@ -156,6 +156,7 @@ from app.llm_chatter.widgets.ui_helpers import (
     save_or_archive_session,
     truncate_and_remove_round,
     show_diff_viewer,
+    render_batch_to_assistant_card,
 )
 from app.tool_window import (
     ToolWindow,
@@ -1743,18 +1744,8 @@ class OpenAIChatToolWindow(ToolWindow):
 
             if role == "assistant" or role == "tool":
                 assistant_card = self._append_assistant_message(timestamp=timestamp)
-                for msg in batch:
-                    if msg.get("role") == "assistant" and msg.get("content", ""):
-                        assistant_card.append_text(msg.get("content", {}))
-                    elif msg.get("role") == "tool" and msg.get("content", ""):
-                        assistant_card.append_tool_result(
-                            tool_name=msg.get("name", ""),
-                            arguments=msg.get("arguments", {}),
-                            result=msg.get("content", ""),
-                            success=bool(msg.get("success", True)),
-                            tool_call_id=msg.get("tool_call_id", ""),
-                        )
-                assistant_card.finish_streaming()
+                # 使用辅助函数渲染消息
+                render_batch_to_assistant_card(assistant_card, batch)
 
     def _get_rendered_message_cards(self) -> List[MessageCard]:
         def is_user_or_assistant(widget):
