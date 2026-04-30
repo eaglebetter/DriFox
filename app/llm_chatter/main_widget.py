@@ -77,12 +77,6 @@ from app.llm_chatter.widgets.context_usage_ring import (
 from app.llm_chatter.widgets.conversation_node_preview import (
     ConversationNodePreview,
 )
-from app.llm_chatter.widgets.llm_config_popup import (
-    LLMConfigPopup,
-)
-from app.llm_chatter.widgets.history_popup import (
-    HistoryPopup,
-)
 from app.llm_chatter.widgets.memory_manager import (
     MemoryManagerDialog,
 )
@@ -216,7 +210,6 @@ class OpenAIChatToolWindow(ToolWindow):
     _current_search_index: int = -1
     _loaded_skill_doc: str = ""
     _skill_enabled: bool = True
-    _is_shell_mode: bool = False
     _chat_engine: Optional[ChatEngine] = None
     _tool_executor: Optional[ToolExecutor] = None
     _memory_manager: Optional[MemoryManagerCore] = None
@@ -250,7 +243,6 @@ class OpenAIChatToolWindow(ToolWindow):
         self._session_card_cache: Dict[str, List[MessageCard]] = {}
         self._welcome_card_cache: Dict[str, MessageCard] = {}
         self._displayed_session_id: Optional[str] = None
-        self._history_popup = None
         self._gen_thread_pool = QThreadPool()
         self._gen_thread_pool.setMaxThreadCount(2)
         self._pending_scroll_to_bottom = False
@@ -1030,26 +1022,6 @@ class OpenAIChatToolWindow(ToolWindow):
             self._load_history_session_from_popup(index)
         # 关闭历史会话卡片
         self._history_card.hide()
-
-    def _open_history_popup(self):
-        if self._history_popup is None:
-            self._history_popup = HistoryPopup(parent=self)
-            self._history_popup.sessionSelected.connect(
-                self._load_history_session_from_popup
-            )
-            self._history_popup.sessionArchived.connect(self._archive_history_session)
-            self._history_popup.sessionRenamed.connect(self._rename_history_session)
-
-        history_list = (
-            self.history_manager.get_history_list() if self.history_manager else []
-        )
-        current_idx = (
-            self.history_manager.find_index_by_session_id(self._current_session_id)
-            if self._current_session_id
-            else None
-        )
-        self._history_popup.set_history(history_list, current_idx)
-        self._history_popup.show_at(self.history_btn)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -1888,7 +1860,7 @@ class OpenAIChatToolWindow(ToolWindow):
         # 使用辅助函数初始化
         init_after_loading_session(
             self, restored, session_id, title,
-            self._tool_executor, self._history_popup
+            self._tool_executor
         )
 
         self._display_current_session()
@@ -2383,9 +2355,6 @@ class OpenAIChatToolWindow(ToolWindow):
     def send_preset_question(self, question: str):
         if not isinstance(question, str) or not question.strip():
             return
-
-        if self._history_popup and self._history_popup.isVisible():
-            self._history_popup.close()
         self._on_send_clicked(user_text=question.strip())
 
     def _on_send_clicked(self, user_text: str = ""):
@@ -2394,13 +2363,6 @@ class OpenAIChatToolWindow(ToolWindow):
 
         if not user_text:
             user_text = self.input_area.toPlainText().strip()
-
-        if self._is_shell_mode:
-            if not user_text:
-                return
-            self.input_area.clear()
-            self._execute_shell_command(user_text)
-            return
 
         if not user_text:
             return

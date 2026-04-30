@@ -1175,8 +1175,7 @@ def init_after_loading_session(
     session,
     session_id,
     title=None,
-    tool_executor=None,
-    history_popup=None
+    tool_executor=None
 ) -> None:
     """
     加载会话后初始化
@@ -1187,15 +1186,11 @@ def init_after_loading_session(
         session_id: 会话 ID
         title: 会话标题
         tool_executor: 工具执行器
-        history_popup: 历史弹窗
     """
     self_widget.session_manager.set_current_session(session)
     self_widget._history_preview_messages = None
     self_widget._current_session_id = session_id
     self_widget.title_edit.setText(title or "历史对话")
-    
-    if history_popup:
-        history_popup.close()
 
     if tool_executor:
         tool_executor.set_session_context(session_id)
