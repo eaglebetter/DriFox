@@ -1313,6 +1313,10 @@ class PlainTextViewer(QWidget):
     def append_chunk(self, text: str):
         self._text += text
         self.text_edit.setPlainText(self._text)
+        # 设置文档宽度以确保正确计算换行
+        vp_width = self.text_edit.viewport().width()
+        if vp_width > 0:
+            self.text_edit.document().setTextWidth(vp_width)
         QTimer.singleShot(0, self._update_height)
 
     def finish_streaming(self):
@@ -1324,6 +1328,10 @@ class PlainTextViewer(QWidget):
     def set_text(self, text: str):
         self._text = text
         self.text_edit.setPlainText(text)
+        # 设置文档宽度以确保正确计算换行
+        vp_width = self.text_edit.viewport().width()
+        if vp_width > 0:
+            self.text_edit.document().setTextWidth(vp_width)
         QTimer.singleShot(0, self._update_height)
 
     def _update_height(self):
