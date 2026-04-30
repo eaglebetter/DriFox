@@ -13,11 +13,22 @@ from app.llm_chatter.core.provider_profile import (
     get_provider_profile,
     supports_vision as provider_supports_vision,
 )
-from app.llm_chatter.core.task_state import (
-    CODING_STAGES,
-    get_stage_prompt as resolve_stage_prompt,
-)
 from app.llm_chatter.tools import get_builtin_tools_schema
+
+# task_state 相关常量 - 从 task_state.py 提取
+CODING_STAGES = ["discover", "plan", "edit", "verify", "review", "summarize"]
+STAGE_PROMPTS = {
+    "discover": "## Active Stage: Discover\n正在分析任务...",
+    "plan": "## Active Stage: Plan\n正在制定计划...",
+    "edit": "## Active Stage: Edit\n正在编写代码...",
+    "verify": "## Active Stage: Verify\n正在验证...",
+    "review": "## Active Stage: Review\n正在审查...",
+    "summarize": "## Active Stage: Summarize\n正在总结...",
+}
+
+def resolve_stage_prompt(stage: str) -> str:
+    """获取阶段的提示文本"""
+    return STAGE_PROMPTS.get(stage, STAGE_PROMPTS.get("discover"))
 from app.llm_chatter.utils.chat_session import (
     ChatSession,
     SessionManager,
