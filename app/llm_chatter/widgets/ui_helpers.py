@@ -885,6 +885,22 @@ def scroll_to_bottom_if_streaming(scroll_area, is_streaming: bool) -> None:
         scroll_area.verticalScrollBar().setValue(scroll_area.verticalScrollBar().maximum())
 
 
+def log_deletion_stats(round_index: int, ui_deleted: bool, old_count: int, new_count: int) -> None:
+    """
+    记录删除操作的统计信息
+    
+    Args:
+        round_index: round 索引
+        ui_deleted: UI 删除是否成功
+        old_count: 旧的消息数量
+        new_count: 新的消息数量
+    """
+    from loguru import logger
+    logger.info(f"[DELETE] Starting deletion: round_index={round_index}")
+    logger.info(f"[DELETE] UI cards deleted: {ui_deleted}")
+    logger.info(f"[DELETE] Session messages updated: {old_count} -> {new_count}")
+
+
 def refresh_history_card_if_visible(history_card, refresh_func=None) -> None:
     """
     如果历史卡片可见则刷新

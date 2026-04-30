@@ -158,6 +158,7 @@ from app.llm_chatter.widgets.ui_helpers import (
     show_diff_viewer,
     render_batch_to_assistant_card,
     scroll_to_bottom_if_streaming,
+    log_deletion_stats,
 )
 from app.tool_window import (
     ToolWindow,
@@ -2192,11 +2193,8 @@ class OpenAIChatToolWindow(ToolWindow):
         if not session:
             return
 
-        logger.info(f"[DELETE] Starting deletion: round_index={round_index}")
-
         # Step 1: 先删除UI卡片，确保用户立即看到效果
         ui_deleted = self._remove_cards_for_round(round_index)
-        logger.info(f"[DELETE] UI cards deleted: {ui_deleted}")
 
         # Step 2: 更新 session 数据
         canonical_messages = consolidate_messages(session.messages)
@@ -2209,7 +2207,8 @@ class OpenAIChatToolWindow(ToolWindow):
             logger.warning(f"[DELETE] Invalid round_index: {round_index}")
             return
 
-        logger.info(f"[DELETE] Session messages updated: {old_count} -> {new_count}")
+        # 记录统计信息
+        log_deletion_stats(round_index, ui_deleted, old_count, new_count)
 
         # Step 3: 保存session数据
         try:
