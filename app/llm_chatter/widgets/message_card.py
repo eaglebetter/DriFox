@@ -197,8 +197,8 @@ def _wrap_code_blocks_with_copy_button_web(html: str) -> str:
             <!-- 顶部工具栏区域 -->
             <div style="
                 display: flex; justify-content: space-between; align-items: center;
-                padding: 6px 10px; height: 30px; background: rgba(28, 28, 28, 0.95);
-                border-bottom: 1px solid #2d2d2d; border-radius: 10px 10px 0 0;
+                padding: 6px 10px; height: 30px; background: rgba(28, 28, 36, 0.75);
+                border-bottom: 1px solid rgba(45, 45, 57, 0.5); border-radius: 10px 10px 0 0;
             ">
                 {f'<span style="color: #FFA500; font-size: 13px; font-weight: bold;">{lang}</span>' if lang else '<span style="color: #888;">Plain Text</span>'}
                 <div style="display: flex; gap: 12px; align-items: center; padding-right: 4px;">
@@ -778,7 +778,7 @@ class CodeWebViewer(QWebEngineView):
                     --accent: #66c6ff;
                     --accent-warm: #ffb65c;
                     --code-bg: rgba(15, 20, 29, 0.85);
-                    --code-toolbar: #131a25;
+                    --code-toolbar: rgba(28, 28, 36, 0.7);
                     --code-border: #2a3447;
                     --success: #5fd18c;
                     --danger: #ff7b7b;
@@ -827,7 +827,8 @@ class CodeWebViewer(QWebEngineView):
                     width: 100%;
                     border-collapse: collapse;
                     margin: 10px 0;
-                    background: rgba(18, 23, 34, 0.92);
+                    background: rgba(30, 32, 40, 0.75);
+                    border: 1px solid rgba(58, 63, 71, 0.5);
                     border-radius: 10px;
                     overflow: hidden;
                     border: 1px solid var(--border);
@@ -871,7 +872,7 @@ class CodeWebViewer(QWebEngineView):
                     display: flex;
                     overflow-x: auto;
                     overflow-y: hidden;
-                    background: var(--code-bg);
+                    background: rgba(20, 25, 35, 0.7);
                     font-family: Consolas, monospace;
                     font-size: 13px;
                     line-height: 1.5;
