@@ -58,12 +58,6 @@ from app.llm_chatter.utils.message_content import (
     content_to_text,
     ensure_content_blocks, make_tool_result_block,
 )
-from app.llm_chatter.widgets.context_selector import (
-    ContextRegistry,
-)
-from app.llm_chatter.widgets.render_helpers import (
-    render_tool_block,
-)
 from app.utils.utils import get_font_family_css, get_icon
 
 # ======== Markdown 实例 ========
@@ -263,15 +257,6 @@ def _render_think_block(content: str, completed: bool = True) -> str:
 </div>"""
 
 
-def _render_tool_block(
-    tool_name: str, tool_args: dict, result: str, success: bool = True,
-    tool_call_id: str = None,
-) -> str:
-    """渲染工具执行折叠框（默认折叠）- 委托给 render_helpers"""
-    from app.llm_chatter.widgets.render_helpers import render_tool_block as render_block
-    return render_block(tool_name, tool_args, result, success, collapsed=True, tool_call_id=tool_call_id)
-
-
 def _inject_think_cards(md_text: str, completed: bool = True) -> str:
     """注入思考框HTML。
     
@@ -305,133 +290,6 @@ def _inject_think_cards(md_text: str, completed: bool = True) -> str:
             content = md_text[think_start:search_end]
             parts.append(_render_think_block(content, completed=False))
             i = search_end
-    return "".join(parts)
-
-
-def _render_tool_block_content(content: str) -> str:
-    """
-    渲染工具块内容为HTML。
-    
-    解析格式：
-    <tool>
-    name: xxx
-    args: {JSON}  <- 可能跨行，需要正确处理嵌套 JSON
-    result: xxx   <- 可能跨行
-    success: true
-    tool_call_id: xxx
-    </tool>
-    """
-    tool_name = ""
-    tool_args_str = ""
-    tool_result = ""
-    tool_success = True
-    tool_call_id = None
-
-    content = content.strip()
-    
-    # ========== 解析 name ==========
-    name_match = re.search(r"^name:\s*(.+?)\s*$", content, re.MULTILINE)
-    if name_match:
-        tool_name = name_match.group(1).strip()
-    
-    # ========== 解析 args（需要正确处理嵌套 JSON）==========
-    # 找到 "args: " 后面第一个 { 的位置
-    args_start = content.find("args:")
-    if args_start != -1:
-        brace_start = content.find("{", args_start)
-        if brace_start != -1:
-            # 使用栈匹配找到对应的 }
-            depth = 0
-            i = brace_start
-            while i < len(content):
-                c = content[i]
-                if c == "{":
-                    depth += 1
-                elif c == "}":
-                    depth -= 1
-                    if depth == 0:
-                        # 找到匹配的 }
-                        tool_args_str = content[brace_start:i + 1]
-                        break
-                i += 1
-            
-            # 继续找 result 起始位置（在 args 结束之后）
-            result_search_start = i + 1
-        else:
-            # 没有找到 {，尝试单行解析
-            line = content[args_start:].split("\n")[0]
-            tool_args_str = line[args_start + 5:].strip()
-            result_search_start = args_start + len(line)
-    else:
-        result_search_start = 0
-    
-    # ========== 解析 success ==========
-    success_match = re.search(r"^success:\s*(.+?)\s*$", content, re.MULTILINE)
-    if success_match:
-        tool_success = success_match.group(1).strip().lower() == "true"
-    
-    # ========== 解析 tool_call_id ==========
-    id_match = re.search(r"^tool_call_id:\s*(.+?)\s*$", content, re.MULTILINE)
-    if id_match:
-        tool_call_id = id_match.group(1).strip()
-    
-    # ========== 解析 result（在 args 结束之后，到 success/tool_call_id/</tool> 之前）==========
-    # 找 result: 行
-    result_line_match = re.search(r"^result:\s*(.*)$", content[result_search_start:], re.MULTILINE)
-    if result_line_match:
-        # result 可能跨多行，需要找到下一个字段或 </tool>
-        result_content = result_line_match.group(1)
-        remaining = content[result_search_start + result_line_match.end():]
-        
-        # 查找下一个字段的起始位置
-        next_field_match = re.search(r"\n\w+:", remaining)
-        if next_field_match:
-            # 多行 result：截取到下一个字段之前
-            tool_result = (result_content + remaining[:next_field_match.start()]).strip()
-        else:
-            # 单行或最后一段
-            tool_result = result_content.strip()
-    
-    # ========== 解析 args JSON 为字典 ==========
-    args_dict = {}
-    if tool_args_str:
-        try:
-            args_dict = json.loads(tool_args_str)
-            if not isinstance(args_dict, dict):
-                args_dict = {}
-        except json.JSONDecodeError:
-            # 如果解析失败，保留原始字符串（会显示为错误但不崩溃）
-            args_dict = {}
-
-    return render_tool_block(
-        tool_name, args_dict, tool_result, tool_success, collapsed=True,
-        tool_call_id=tool_call_id
-    )
-
-
-def _inject_tool_blocks(md_text: str, completed: bool = True) -> str:
-    """注入工具块HTML，类似think块"""
-    if not md_text:
-        return md_text
-
-    parts = []
-    i = 0
-    while i < len(md_text):
-        start_idx = md_text.find("<tool>", i)
-        if start_idx == -1:
-            parts.append(md_text[i:])
-            break
-        parts.append(md_text[i:start_idx])
-        end_idx = md_text.find("</tool>", start_idx + len("<tool>"))
-        if end_idx != -1:
-            content = md_text[start_idx + len("<tool>") : end_idx]
-            parts.append(_render_tool_block_content(content))
-            i = end_idx + len("</tool>")
-        else:
-            # 工具块未完成（</tool>未出现），保留原始标记，不渲染
-            # 避免流式输出时部分内容被错误渲染到折叠框外
-            parts.append(md_text[start_idx:])
-            break
     return "".join(parts)
 
 
