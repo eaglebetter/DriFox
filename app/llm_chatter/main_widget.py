@@ -127,6 +127,8 @@ from app.llm_chatter.widgets.ui_helpers import (
     get_default_timestamp,
     get_action_color,
     cleanup_stale_card_cache,
+    filter_alive_cards,
+    is_widget_alive,
 )
 from app.tool_window import (
     ToolWindow,
@@ -1687,8 +1689,8 @@ class OpenAIChatToolWindow(ToolWindow):
         if not cached_cards:
             return False
 
-        alive_cards = [card for card in cached_cards if self._is_widget_alive(card)]
-        if len(alive_cards) != len(cached_cards):
+        alive_cards, removed = filter_alive_cards(cached_cards)
+        if removed:
             self._session_card_cache.pop(session.session_id, None)
         if not alive_cards:
             return False
