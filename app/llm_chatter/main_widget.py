@@ -203,12 +203,9 @@ class OpenAIChatToolWindow(ToolWindow):
     _current_session_id: Optional[str] = None
     _settings_popup = None
     _is_welcome = False
-    _first_show = False
-    _is_searching = False
+    _is_searching: bool = False
     _search_results: List[int] = []
     _current_search_index: int = -1
-    _loaded_skill_doc: str = ""
-    _skill_enabled: bool = True
     _chat_engine: Optional[ChatEngine] = None
     _tool_executor: Optional[ToolExecutor] = None
     _memory_manager: Optional[MemoryManagerCore] = None
