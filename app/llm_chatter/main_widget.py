@@ -2473,15 +2473,12 @@ class OpenAIChatToolWindow(ToolWindow):
                 )
                 return
 
-            # 收集所有工具的文件操作
-            all_operations = []
-            for call_id in all_call_ids:
-                operations = self._tool_executor.file_recorder.get_operations_for_preview(
-                    session_id=session_id,
-                    call_id=call_id
-                )
-                if operations:
-                    all_operations.extend(operations)
+            # 使用辅助函数收集所有工具的文件操作
+            all_operations = collect_operations_for_round(
+                self._tool_executor.file_recorder,
+                session_id,
+                all_call_ids
+            )
 
             if not all_operations:
                 InfoBar.warning(
