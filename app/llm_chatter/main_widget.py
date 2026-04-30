@@ -155,6 +155,7 @@ from app.llm_chatter.widgets.ui_helpers import (
     get_session_compaction_info,
     save_or_archive_session,
     truncate_and_remove_round,
+    show_diff_viewer,
 )
 from app.tool_window import (
     ToolWindow,
@@ -2393,10 +2394,7 @@ class OpenAIChatToolWindow(ToolWindow):
             html = generate_diff_html(old_content, new_content, backup_file)
             
             # 显示差异
-            from app.llm_chatter.utils.diff_viewer import DiffViewerWindow
-            viewer = DiffViewerWindow(parent=self)
-            viewer.load_html(html)
-            viewer.show()
+            show_diff_viewer(self, html)
             
         except Exception as e:
             logger.error(f"[LLMChatter] 显示工具差异失败: {e}")
@@ -2463,10 +2461,8 @@ class OpenAIChatToolWindow(ToolWindow):
             # 使用辅助函数生成合并的 diff HTML
             html = generate_multi_file_diff_html(all_operations)
             
-            from app.llm_chatter.utils.diff_viewer import DiffViewerWindow
-            viewer = DiffViewerWindow(parent=self)
-            viewer.load_html(html)
-            viewer.show()
+            # 显示差异
+            show_diff_viewer(self, html)
 
         except Exception as e:
             logger.error(f"[LLMChatter] 显示卡片差异失败: {e}")

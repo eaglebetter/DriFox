@@ -832,6 +832,25 @@ def truncate_and_remove_round(
     return True, old_count, new_count
 
 
+def show_diff_viewer(parent, html) -> Any:
+    """
+    显示差异查看器
+    
+    Args:
+        parent: 父控件
+        html: HTML 内容
+        
+    Returns:
+        DiffViewerWindow 实例
+    """
+    from app.llm_chatter.utils.diff_viewer import DiffViewerWindow
+    
+    viewer = DiffViewerWindow(parent=parent)
+    viewer.load_html(html)
+    viewer.show()
+    return viewer
+
+
 def refresh_history_card_if_visible(history_card, refresh_func=None) -> None:
     """
     如果历史卡片可见则刷新
