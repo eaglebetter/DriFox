@@ -495,6 +495,27 @@ def deduplicate_operations(operations: list) -> list:
     return unique_ops
 
 
+def count_user_cards_in_layout(chat_layout) -> int:
+    """
+    计算布局中的用户消息卡片数量
+    
+    Args:
+        chat_layout: 聊天布局
+        
+    Returns:
+        用户消息卡片数量
+    """
+    count = 0
+    for i in range(chat_layout.count()):
+        item = chat_layout.itemAt(i)
+        if not item or not item.widget():
+            continue
+        widget = item.widget()
+        if isinstance(widget, MessageCard) and widget.role == "user":
+            count += 1
+    return count
+
+
 def collect_message_cards_from_layout(
     chat_layout,
     filter_func=None,

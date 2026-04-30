@@ -143,6 +143,7 @@ from app.llm_chatter.widgets.ui_helpers import (
     delete_widgets_from_layout,
     refresh_history_card_if_visible,
     collect_message_cards_from_layout,
+    count_user_cards_in_layout,
 )
 from app.tool_window import (
     ToolWindow,
@@ -1778,15 +1779,7 @@ class OpenAIChatToolWindow(ToolWindow):
 
     def _get_current_user_round_index(self) -> int:
         """获取当前 user message 应该是第几个 user（从 0 开始）"""
-        count = 0
-        for i in range(self.chat_layout.count()):
-            item = self.chat_layout.itemAt(i)
-            if not item or not item.widget():
-                continue
-            widget = item.widget()
-            if isinstance(widget, MessageCard) and widget.role == "user":
-                count += 1
-        return count
+        return count_user_cards_in_layout(self.chat_layout)
 
     def _find_user_round_index_for_card(self, card: MessageCard) -> Optional[int]:
         round_index = 0
