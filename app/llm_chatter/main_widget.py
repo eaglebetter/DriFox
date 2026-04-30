@@ -3,7 +3,6 @@ import os
 import re
 from pathlib import Path
 
-import sip
 import ctypes
 from datetime import datetime
 from typing import Optional, Dict, Any, List
