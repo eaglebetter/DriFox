@@ -269,3 +269,109 @@ DEFAULT_ACTION_COLOR = "#888888"
 def get_action_color(action: str) -> str:
     """获取动作对应的颜色"""
     return ACTION_COLORS.get(action.lower(), DEFAULT_ACTION_COLOR)
+
+
+# ==================== Diff 辅助 ====================
+
+def read_backup_files(backup_path: str) -> tuple:
+    """
+    读取编辑前后的备份文件
+    
+    Args:
+        backup_path: 编辑前备份文件路径
+        
+    Returns:
+        (old_content, new_content, backup_file) 或抛出异常
+    """
+    import difflib
+    from pathlib import Path
+    
+    backup_file = Path(backup_path)
+    after_backup_path = str(backup_file.with_suffix('.after.bak'))
+    
+    # 检查编辑后备份是否存在
+    after_backup_file = Path(after_backup_path)
+    if not after_backup_file.exists():
+        raise FileNotFoundError("编辑后备份文件不存在")
+    
+    # 读取文件
+    with open(backup_path, 'r', encoding='utf-8', errors='replace') as f:
+        old_content = f.read()
+    with open(after_backup_path, 'r', encoding='utf-8', errors='replace') as f:
+        new_content = f.read()
+    
+    return old_content, new_content, backup_file
+
+
+def generate_diff_html(old_content: str, new_content: str, backup_file) -> str:
+    """
+    生成 diff HTML 报告
+    
+    Args:
+        old_content: 原始内容
+        new_content: 新内容
+        backup_file: 文件路径对象
+        
+    Returns:
+        HTML 报告字符串
+    """
+    import difflib
+    from app.llm_chatter.utils.diff_viewer import DiffHtmlGenerator
+    
+    old_lines = normalize_lines(old_content)
+    new_lines = normalize_lines(new_content)
+    
+    diff = difflib.unified_diff(
+        old_lines,
+        new_lines,
+        fromfile=backup_file.name,
+        tofile=backup_file.name,
+        lineterm='\n'
+    )
+    
+    diff_output = ''.join(diff)
+    return DiffHtmlGenerator.generate_html_report(diff_output, "")
+
+
+def generate_multi_file_diff_html(operations: list) -> str:
+    """
+    为多个文件生成合并的 diff HTML 报告
+    
+    Args:
+        operations: 文件操作列表，每个元素包含 backup_path
+        
+    Returns:
+        HTML 报告字符串
+    """
+    import difflib
+    from pathlib import Path
+    from app.llm_chatter.utils.diff_viewer import DiffHtmlGenerator
+    
+    diff_parts = []
+    
+    for op in operations:
+        backup_path = op.get("backup_path", "")
+        if not backup_path:
+            continue
+        
+        try:
+            old_content, new_content, backup_file = read_backup_files(backup_path)
+        except Exception:
+            continue
+        
+        old_lines = normalize_lines(old_content)
+        new_lines = normalize_lines(new_content)
+        
+        diff = difflib.unified_diff(
+            old_lines,
+            new_lines,
+            fromfile=f"a/{backup_file.name}",
+            tofile=f"b/{backup_file.name}",
+            lineterm='\n'
+        )
+        diff_output = ''.join(diff)
+        if diff_output:
+            diff_parts.append(diff_output)
+    
+    combined_diff = ''.join(diff_parts)
+    return DiffHtmlGenerator.generate_html_report(combined_diff, "")

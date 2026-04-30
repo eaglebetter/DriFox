@@ -131,6 +131,9 @@ from app.llm_chatter.widgets.ui_helpers import (
     is_widget_alive,
     collect_tool_call_ids,
     format_file_list,
+    read_backup_files,
+    generate_diff_html,
+    generate_multi_file_diff_html,
 )
 from app.tool_window import (
     ToolWindow,
@@ -2554,7 +2557,7 @@ class OpenAIChatToolWindow(ToolWindow):
                 )
                 return
             
-            # 只取该工具产生的第一个文件操作（通常每个工具只修改一个文件）
+            # 只取该工具产生的第一个文件操作
             op = operations[0]
             backup_path = op.get("backup_path", "")
 
@@ -2568,78 +2571,12 @@ class OpenAIChatToolWindow(ToolWindow):
                 )
                 return
 
-            # 编辑前备份路径 -> 编辑后备份路径（固定后缀 .after.bak）
-            from pathlib import Path
-            import difflib
-
-            backup_file = Path(backup_path)
-            after_backup_path = str(backup_file.with_suffix('.after.bak'))
-            after_backup_file = Path(after_backup_path)
-
-            # 检查编辑后备份是否存在
-            if not after_backup_file.exists():
-                InfoBar.warning(
-                    "无差异信息",
-                    "编辑后备份文件不存在，可能该工具执行于早期版本",
-                    duration=3000,
-                    parent=self,
-                    position=InfoBarPosition.TOP_RIGHT,
-                )
-                return
-
-            try:
-                # 读取编辑前和编辑后的备份文件进行对比
-                with open(backup_path, 'r', encoding='utf-8', errors='replace') as f:
-                    old_content = f.read()
-                with open(after_backup_path, 'r', encoding='utf-8', errors='replace') as f:
-                    new_content = f.read()
-            except FileNotFoundError as e:
-                InfoBar.error(
-                    "文件不存在",
-                    f"无法读取备份文件: {e}",
-                    duration=3000,
-                    parent=self,
-                    position=InfoBarPosition.TOP_RIGHT,
-                )
-                return
-            except Exception as e:
-                InfoBar.error(
-                    "读取失败",
-                    f"无法读取备份文件: {e}",
-                    duration=3000,
-                    parent=self,
-                    position=InfoBarPosition.TOP_RIGHT,
-                )
-                return
-
-            # 生成 unified diff（确保每行都有换行符，处理单行文件无末尾换行符的情况）
-            def normalize_lines(content):
-                lines = content.splitlines(keepends=True)
-                if lines and not lines[-1].endswith('\n'):
-                    lines[-1] += '\n'
-                return lines
-
-            old_lines = normalize_lines(old_content)
-            new_lines = normalize_lines(new_content)
-
-            diff = difflib.unified_diff(
-                old_lines,
-                new_lines,
-                fromfile=backup_file.name,
-                tofile=backup_file.name,
-                lineterm='\n'
-            )
+            # 使用辅助函数读取备份文件和生成 diff
+            old_content, new_content, backup_file = read_backup_files(backup_path)
+            html = generate_diff_html(old_content, new_content, backup_file)
             
-            diff_output = ''.join(diff)
-            
-            # 生成并显示差异对比
-            from app.llm_chatter.utils.diff_viewer import (
-                DiffHtmlGenerator,
-                DiffViewerWindow,
-            )
-            
-            html = DiffHtmlGenerator.generate_html_report(diff_output, "")
-            
+            # 显示差异
+            from app.llm_chatter.utils.diff_viewer import DiffViewerWindow
             viewer = DiffViewerWindow(parent=self)
             viewer.load_html(html)
             viewer.show()
@@ -2709,71 +2646,10 @@ class OpenAIChatToolWindow(ToolWindow):
                 )
                 return
 
-            # 为每个文件生成差异
-            from pathlib import Path
-            import difflib
-
-            def normalize_lines(content):
-                lines = content.splitlines(keepends=True)
-                if lines and not lines[-1].endswith('\n'):
-                    lines[-1] += '\n'
-                return lines
-
-            diff_parts = []
-            for op in all_operations:
-                backup_path = op.get("backup_path", "")
-                if not backup_path:
-                    continue
-
-                backup_file = Path(backup_path)
-                after_backup_path = str(backup_file.with_suffix('.after.bak'))
-                after_backup_file = Path(after_backup_path)
-
-                if not after_backup_file.exists():
-                    continue
-
-                try:
-                    with open(backup_path, 'r', encoding='utf-8', errors='replace') as f:
-                        old_content = f.read()
-                    with open(after_backup_path, 'r', encoding='utf-8', errors='replace') as f:
-                        new_content = f.read()
-                except Exception:
-                    continue
-
-                old_lines = normalize_lines(old_content)
-                new_lines = normalize_lines(new_content)
-
-                diff = difflib.unified_diff(
-                    old_lines,
-                    new_lines,
-                    fromfile=f"a/{backup_file.name}",
-                    tofile=f"b/{backup_file.name}",
-                    lineterm='\n'
-                )
-                diff_output = ''.join(diff)
-                if diff_output:
-                    diff_parts.append(diff_output)
-
-            if not diff_parts:
-                InfoBar.warning(
-                    "无差异信息",
-                    "无法生成任何差异信息",
-                    duration=3000,
-                    parent=self,
-                    position=InfoBarPosition.TOP_RIGHT,
-                )
-                return
-
-            # 合并所有差异
-            combined_diff = '\n'.join(diff_parts)
-
-            # 生成并显示差异对比
-            from app.llm_chatter.utils.diff_viewer import (
-                DiffHtmlGenerator,
-                DiffViewerWindow,
-            )
-
-            html = DiffHtmlGenerator.generate_html_report(combined_diff, "")
+            # 使用辅助函数生成合并的 diff HTML
+            html = generate_multi_file_diff_html(all_operations)
+            
+            from app.llm_chatter.utils.diff_viewer import DiffViewerWindow
             viewer = DiffViewerWindow(parent=self)
             viewer.load_html(html)
             viewer.show()
