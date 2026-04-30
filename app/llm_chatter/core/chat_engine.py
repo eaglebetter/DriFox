@@ -13,11 +13,8 @@ from app.llm_chatter.core.provider_profile import (
     get_provider_profile,
     supports_vision as provider_supports_vision,
 )
-from app.llm_chatter.core.task_state import (
-    CODING_STAGES,
-    get_stage_prompt as resolve_stage_prompt,
-)
 from app.llm_chatter.tools import get_builtin_tools_schema
+
 from app.llm_chatter.utils.chat_session import (
     ChatSession,
     SessionManager,
@@ -67,6 +64,9 @@ class ChatEngine:
         get_memory_context: Optional[Callable[[], str]] = None,
         worker_callbacks: Optional[Dict[str, Callable]] = None,
         api_mode: bool = False,
+        # 新增参数
+        event_bus: Any = None,
+        context_manager: Any = None,
     ):
         self._session_manager = session_manager
         self._get_model_config = get_model_config
@@ -86,6 +86,17 @@ class ChatEngine:
         # API 模式专用：直接回调（绕过 Qt 信号-槽，避免跨线程事件循环问题）
         self._worker_callbacks = worker_callbacks or {}
         self._api_mode = api_mode
+        
+        # 新增：EventBus 和 ContextManager
+        self._event_bus = event_bus
+        self._context_manager = context_manager
+        
+        # 如果提供了 ContextManager，使用它初始化压缩状态
+        if self._context_manager:
+            self._compaction_state = self._make_compaction_state(
+                active=False,
+                source="context_manager"
+            )
 
     def _make_compaction_state(
         self,
@@ -148,6 +159,27 @@ class ChatEngine:
     def set_session_manager(self, session_manager):
         """Update the session manager reference (used when session is archived)."""
         self._session_manager = session_manager
+
+    def set_event_bus(self, event_bus):
+        """设置事件总线"""
+        self._event_bus = event_bus
+        
+    def set_context_manager(self, context_manager):
+        """设置上下文管理器"""
+        self._context_manager = context_manager
+        if self._context_manager:
+            self._compaction_state = self._make_compaction_state(
+                active=False,
+                source="context_manager"
+            )
+            
+    def get_event_bus(self):
+        """获取事件总线"""
+        return self._event_bus
+        
+    def get_context_manager(self):
+        """获取上下文管理器"""
+        return self._context_manager
 
     def _get_canvas_tools(self):
         context_provider = self._get_context_provider()
@@ -219,13 +251,7 @@ class ChatEngine:
     def _smart_trim_messages(self, cards: List[Any], max_tokens: int) -> List[Any]:
         if not cards:
             return []
-        system_tokens = 0
-        for part in [
-            self._session_manager.get_current_session().task_state.build_context_block(),
-            self._session_manager.get_current_session().task_state.build_event_digest(),
-        ]:
-            system_tokens += estimate_tokens(part) if part else 0
-        available_tokens = max_tokens - system_tokens - 200
+        available_tokens = max_tokens - 200
         if available_tokens <= 0:
             return []
         selected = []
@@ -700,11 +726,8 @@ class ChatEngine:
 
         if agent_name is None or agent_name.lower() in ("default", "通用"):
             self._current_agent = "plan"
-            if session:
-                session.task_state.switch_agent("plan")
             logger.info("[ChatEngine] Switched to default agent: plan")
             self._emit("agent_switched", "plan")
-            self._emit("task_state_changed", session.task_state if session else None)
             return
 
         agent = agent_manager.get_agent(agent_name)
@@ -713,11 +736,8 @@ class ChatEngine:
             return
 
         self._current_agent = agent_name
-        if session:
-            session.task_state.switch_agent(agent_name)
         logger.info(f"[ChatEngine] Switched to agent: {agent_name}")
         self._emit("agent_switched", agent_name)
-        self._emit("task_state_changed", session.task_state if session else None)
 
     def send_message(
         self,
@@ -741,13 +761,8 @@ class ChatEngine:
 
         self._is_streaming = True
         session.add_user_message(content=user_text, params=context_params or {})
-        session.task_state.switch_agent(self._current_agent or "plan")
-        session.task_state.infer_stage_from_turn(user_text)
-        if session.task_state.stage == "verify":
-            session.task_state.update_verification("running", "Verification requested")
 
         self._emit("user_message_added", user_text)
-        self._emit("task_state_changed", session.task_state)
 
         messages = self._build_messages(session, llm_config)
         if self._current_agent:
@@ -756,27 +771,6 @@ class ChatEngine:
             )
         else:
             available_tools = get_builtin_tools_schema()
-
-        canvas_tools = self._get_canvas_tools()
-        if self._current_agent == "canvas":
-            context_provider = self._get_context_provider()
-            if (
-                context_provider
-                and hasattr(context_provider, "parent")
-                and hasattr(context_provider.parent, "homepage")
-                and hasattr(context_provider.parent.homepage, "llm_context_provider")
-            ):
-                llm_ctx = context_provider.parent.homepage.llm_context_provider
-                if not hasattr(llm_ctx, "get_canvas_tools_schema"):
-                    self._current_agent = "build"
-                    canvas_tools = []
-                    available_tools = self._get_agent_manager().get_agent_tools_schema(
-                        "build"
-                    )
-                else:
-                    canvas_tools = llm_ctx.get_canvas_tools_schema()
-        if canvas_tools:
-            available_tools = available_tools + canvas_tools
 
         self._start_worker(messages, llm_config, available_tools)
         return True
@@ -788,7 +782,6 @@ class ChatEngine:
         allow_llm_summary: bool = False,
     ) -> List[Dict]:
         messages: List[Dict[str, Any]] = []
-        task_state = session.task_state
 
         if self._current_agent:
             full_system_prompt = self._get_agent_manager().get_agent_system_prompt(
@@ -799,8 +792,6 @@ class ChatEngine:
 
         prompt_parts = [
             full_system_prompt,
-            # task_state.build_context_block(),
-            # task_state.build_event_digest(),
         ]
 
         enabled_skills = Settings.get_instance().llm_enabled_skills.value
@@ -844,13 +835,8 @@ class ChatEngine:
             history_messages = history_messages[:-1]
 
         if self._get_memory_context:
-            memory_query = "\n".join(
-                part
-                for part in [task_state.current_goal or "", latest_user_message]
-                if part.strip()
-            ).strip()
             try:
-                memory_context = self._get_memory_context(memory_query)
+                memory_context = self._get_memory_context(latest_user_message)
             except TypeError:
                 memory_context = self._get_memory_context()
             if memory_context:
@@ -971,21 +957,6 @@ class ChatEngine:
         llm_config: Dict,
         tools: List[Dict],
     ):
-        def build_stage_prompt():
-            session = self._session_manager.get_current_session()
-            if session:
-                return resolve_stage_prompt(session.task_state.stage)
-            return resolve_stage_prompt("discover")
-
-        def on_stage_changed(new_stage: str):
-            session = self._session_manager.get_current_session()
-            if session and new_stage in CODING_STAGES:
-                session.task_state.set_stage(new_stage, "model-requested")
-                self._emit("task_state_changed", session.task_state)
-
-        if self._tool_executor:
-            self._tool_executor.set_stage_callback(on_stage_changed)
-
         compaction_prompt = ""
         compaction_config = {}
         if self._agent_manager and self._agent_manager.get_agent("compaction"):
@@ -1002,8 +973,6 @@ class ChatEngine:
             tools=tools,
             tool_executor=self._tool_executor,
             tool_start_callback=self._callbacks.get("tool_call_sync_requested"),
-            get_stage_prompt=build_stage_prompt,
-            stage_changed_callback=on_stage_changed,
             permission_check_callback=self._check_tool_permission,
             compaction_prompt=compaction_prompt,
             compaction_config=compaction_config,
@@ -1052,31 +1021,6 @@ class ChatEngine:
     def _on_tool_result_received(
         self, tool_call_id: str, tool_name: str, arguments: dict, result: Any
     ):
-        session = self._session_manager.get_current_session()
-        if session:
-            success = result.success if hasattr(result, "success") else True
-            session.task_state.update_tool_result(
-                tool_name, arguments or {}, str(result), success
-            )
-
-            if tool_name == "run_verify":
-                session.task_state.update_verification(
-                    "passed" if success else "failed", str(result)
-                )
-            elif tool_name == "bash":
-                command = (arguments or {}).get("command", "")
-                if any(
-                    token in command.lower() for token in ["pytest", "test", "compile"]
-                ):
-                    session.task_state.update_verification(
-                        "passed" if success else "failed", str(result)
-                    )
-            if tool_name in ("todowrite", "todoread") and self._tool_executor:
-                session.task_state.update_todos(self._tool_executor.todo_list)
-            if tool_name == "task":
-                session.task_state.set_stage("summarize", "sub-agent-result")
-            self._emit("task_state_changed", session.task_state)
-
         self._emit("tool_result_received", tool_call_id, tool_name, arguments, result)
 
     def _on_worker_finished(self, response: str):
@@ -1091,10 +1035,6 @@ class ChatEngine:
 
     def _on_error(self, error: str):
         self._is_streaming = False
-        session = self._session_manager.get_current_session()
-        if session:
-            session.task_state.record_error(error)
-            self._emit("task_state_changed", session.task_state)
         self._emit("error", error)
 
     def stop(self) -> List[Dict]:

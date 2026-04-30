@@ -1,24 +1,16 @@
 # -*- coding: utf-8 -*-
+import ctypes
 import os
-import re
 from pathlib import Path
 
-import sip
-import ctypes
-from datetime import datetime
-from typing import Optional, Dict, Any, List
-
 from PyQt5.QtCore import (
-    Qt,
     QTimer,
     pyqtSignal,
     QThreadPool,
 )
-from PyQt5.QtGui import QFont, QTextCursor, QPixmap
 from PyQt5.QtWidgets import (
     QVBoxLayout,
     QHBoxLayout,
-    QLabel,
     QApplication,
     QWidget,
     QFileDialog, QGraphicsOpacityEffect,
@@ -32,15 +24,12 @@ except NameError:
     # PyQt5 中 qRegisterMetaType 是内置函数，不需要导入
     pass
 
-from loguru import logger
 from qfluentwidgets import (
     setFont,
-    ComboBox,
     FluentIcon,
     SingleDirectionScrollArea,
     InfoBar,
     InfoBarPosition,
-    CardWidget,
     TransparentToolButton,
 )
 
@@ -66,7 +55,6 @@ from app.llm_chatter.utils.history_manager import (
 )
 from app.llm_chatter.utils.worker import (
     TopicSummaryTask,
-    ShellExecutionTask,
 )
 from app.llm_chatter.widgets.bottom_input_area import (
     SendableTextEdit,
@@ -76,12 +64,6 @@ from app.llm_chatter.widgets.context_usage_ring import (
 )
 from app.llm_chatter.widgets.conversation_node_preview import (
     ConversationNodePreview,
-)
-from app.llm_chatter.widgets.llm_config_popup import (
-    LLMConfigPopup,
-)
-from app.llm_chatter.widgets.history_popup import (
-    HistoryPopup,
 )
 from app.llm_chatter.widgets.memory_manager import (
     MemoryManagerDialog,
@@ -111,12 +93,10 @@ from app.llm_chatter.widgets.base_settings_card import (
 from app.llm_chatter.widgets.model_config_card import (
     ModelConfigCard,
 )
-from app.llm_chatter.widgets.model_selector_popup import (
-    ModelSelectorPopup,
-)
 from app.llm_chatter.widgets.history_card import (
     HistoryCard,
 )
+from app.llm_chatter.widgets.ui_helpers import *
 from app.tool_window import (
     ToolWindow,
     DockPosition,
@@ -149,17 +129,12 @@ class OpenAIChatToolWindow(ToolWindow):
     history_manager = None
     _agent_manager: Optional[AgentManager] = None
     _current_agent: str = "plan"
-    _in_history_mode = False
     _current_session_id: Optional[str] = None
     _settings_popup = None
     _is_welcome = False
-    _first_show = False
-    _is_searching = False
+    _is_searching: bool = False
     _search_results: List[int] = []
     _current_search_index: int = -1
-    _loaded_skill_doc: str = ""
-    _skill_enabled: bool = True
-    _is_shell_mode: bool = False
     _chat_engine: Optional[ChatEngine] = None
     _tool_executor: Optional[ToolExecutor] = None
     _memory_manager: Optional[MemoryManagerCore] = None
@@ -174,9 +149,6 @@ class OpenAIChatToolWindow(ToolWindow):
     _todo_floating_widget = None
     _question_floating_widget = None
     _question_tool_call_id = None
-    _history_preview_session_data: Optional[dict] = None
-    _history_preview_history_index: Optional[int] = None
-    _history_preview_opening: bool = False
     _window_active: bool = True
     _history_preview_messages: Optional[List[dict]] = None
     _history_preview_title: str = ""
@@ -193,7 +165,6 @@ class OpenAIChatToolWindow(ToolWindow):
         self._session_card_cache: Dict[str, List[MessageCard]] = {}
         self._welcome_card_cache: Dict[str, MessageCard] = {}
         self._displayed_session_id: Optional[str] = None
-        self._history_popup = None
         self._gen_thread_pool = QThreadPool()
         self._gen_thread_pool.setMaxThreadCount(2)
         self._pending_scroll_to_bottom = False
@@ -244,7 +215,6 @@ class OpenAIChatToolWindow(ToolWindow):
     def _initialize_managers(self):
         """初始化核心管理器"""
         canvas_name = getattr(self.homepage, "workflow_name", "default") or "default"
-
         self._memory_manager = MemoryManagerCore(canvas_name)
         self._tool_executor = ToolExecutor(self.homepage, workdir=Path(__file__).parent.parent.parent)
         self._tool_executor.set_memory_manager(self._memory_manager)
@@ -297,9 +267,6 @@ class OpenAIChatToolWindow(ToolWindow):
         )
         self._chat_engine.set_callback("question_asked", self._on_question_asked)
         self._chat_engine.set_callback("agent_switched", self._on_agent_switched)
-        self._chat_engine.set_callback(
-            "task_state_changed", self._on_task_state_changed
-        )
         self._chat_engine.set_callback(
             "permission_approval_requested", self._on_permission_approval_requested
         )
@@ -489,9 +456,6 @@ class OpenAIChatToolWindow(ToolWindow):
         self._session_initialized = True
 
         workflow_name = getattr(self.homepage, "workflow_name", None)
-        is_canvas = workflow_name is not None
-        if is_canvas and self._current_agent != "canvas":
-            self._on_agent_changed("canvas")
         QTimer.singleShot(0, self._load_agent_list)
         QTimer.singleShot(0, self._restore_latest_or_create_session)
         QTimer.singleShot(100, self._load_model_configs)
@@ -542,16 +506,6 @@ class OpenAIChatToolWindow(ToolWindow):
         if self._question_floating_widget:
             self._question_floating_widget.set_opacity(opacity)
 
-    def _is_on_canvas(self):
-        """检查当前是否在画布界面"""
-        if not hasattr(self.homepage, "ui_manager") or not self.homepage.ui_manager:
-            return False
-        side_dock = getattr(self.homepage.ui_manager, "side_dock_area", None)
-        if not side_dock:
-            return False
-        is_canvas = side_dock.context_id == DockCategory.CANVAS
-        return is_canvas
-
     def _restore_latest_or_create_session(self):
         # 如果是新复制的窗口，跳过历史会话恢复
         if getattr(self, "_skip_restore_history", False):
@@ -578,8 +532,6 @@ class OpenAIChatToolWindow(ToolWindow):
         session = self.session_manager.create_new_session()
         self._current_session_id = session.session_id
         self._history_preview_messages = None
-        self._history_preview_session_data = None
-        self._history_preview_opening = False
         self._clear_chat_area()
         self.title_edit.setText("新对话")
         self.node_preview.clear_nodes()
@@ -592,12 +544,6 @@ class OpenAIChatToolWindow(ToolWindow):
             self._question_floating_widget.clear()
         self._question_tool_call_id = None
         self._load_agent_list()
-        self._on_task_state_changed(session.task_state)
-
-        is_canvas = getattr(self.homepage, "workflow_name", None) is not None
-        if is_canvas and self._current_agent != "canvas":
-            self._on_agent_changed("canvas")
-
         QTimer.singleShot(0, self._show_initial_welcome)
         self._refresh_context_usage_indicator()
 
@@ -606,13 +552,7 @@ class OpenAIChatToolWindow(ToolWindow):
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(4)
 
-        self.setStyleSheet("""
-            OpenAIChatToolWindow {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 rgba(10, 14, 22, 255),
-                    stop:1 rgba(15, 20, 30, 255));
-            }
-        """)
+        self.setStyleSheet(WINDOW_STYLE)
 
         session_bar_layout = QHBoxLayout()
         session_bar_layout.setContentsMargins(0, 0, 0, 0)
@@ -624,20 +564,9 @@ class OpenAIChatToolWindow(ToolWindow):
 
         self.title_edit = QLabel("新对话", self)
         font_css = get_font_family_css()
-        self.title_edit.setStyleSheet(f"""
-            QLabel {{
-                {font_css}
-                color: #f3f6fc;
-                font-size: 15px;
-                font-weight: bold;
-                padding: 6px 10px;
-                border-radius: 10px;
-                background-color: rgba(255, 255, 255, 0.03);
-            }}
-            QLabel:hover {{
-                background-color: rgba(255, 255, 255, 0.06);
-            }}
-        """)
+        # 标题样式使用 TITLE_STYLE + font_css
+        title_style = TITLE_STYLE.replace("    QLabel {", f"    QLabel {{\n        {font_css}")
+        self.title_edit.setStyleSheet(title_style)
         self.title_edit.setCursor(Qt.PointingHandCursor)
         self.title_edit.mouseDoubleClickEvent = self._on_title_double_click
         left_layout.addWidget(self.title_edit)
@@ -682,15 +611,7 @@ class OpenAIChatToolWindow(ToolWindow):
         self.chat_scroll_area = SingleDirectionScrollArea(self)
         self.chat_scroll_area.setMinimumHeight(10)
         self.chat_scroll_area.setMinimumWidth(400)
-        self.chat_scroll_area.setStyleSheet(
-            """
-            SingleDirectionScrollArea {
-                background-color: rgba(255, 255, 255, 0.02);
-                border: 1px solid rgba(255, 255, 255, 0.04);
-                border-radius: 18px;
-            }
-            """
-        )
+        self.chat_scroll_area.setStyleSheet(CHAT_SCROLL_STYLE)
         self.chat_scroll_area.setWidgetResizable(True)
         self.chat_scroll_area.setViewportMargins(2, 2, 10, 2)
         self.chat_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -764,16 +685,7 @@ class OpenAIChatToolWindow(ToolWindow):
         # 模型选择 - 扁平式上拉选择器（类似 OpenCode 风格）
         self.current_model_btn = QWidget(self)
         self.current_model_btn.setCursor(Qt.PointingHandCursor)
-        self.current_model_btn.setStyleSheet("""
-            QWidget {
-                background-color: rgba(255, 255, 255, 0.06);
-                border-radius: 8px;
-                padding: 0px;
-            }
-            QWidget:hover {
-                background-color: rgba(255, 255, 255, 0.10);
-            }
-        """)
+        self.current_model_btn.setStyleSheet(MODEL_BTN_STYLE)
         self.current_model_btn.mousePressEvent = lambda e: self._show_model_selector_popup()
         btn_layout = QHBoxLayout(self.current_model_btn)
         btn_layout.setContentsMargins(8, 4, 12, 4)
@@ -782,7 +694,7 @@ class OpenAIChatToolWindow(ToolWindow):
         self._model_btn_icon.setFixedSize(18, 18)
         btn_layout.addWidget(self._model_btn_icon)
         self._model_btn_text = QLabel("正在加载...", self.current_model_btn)
-        self._model_btn_text.setStyleSheet("color: #f3f6fc; font-size: 13px; font-weight: bold; background: transparent;")
+        self._model_btn_text.setStyleSheet(MODEL_BTN_TEXT_STYLE)
         btn_layout.addWidget(self._model_btn_text)
         btn_layout.addStretch()
         self.current_model_btn.setFixedHeight(30)
@@ -1027,26 +939,6 @@ class OpenAIChatToolWindow(ToolWindow):
         # 关闭历史会话卡片
         self._history_card.hide()
 
-    def _open_history_popup(self):
-        if self._history_popup is None:
-            self._history_popup = HistoryPopup(parent=self)
-            self._history_popup.sessionSelected.connect(
-                self._load_history_session_from_popup
-            )
-            self._history_popup.sessionArchived.connect(self._archive_history_session)
-            self._history_popup.sessionRenamed.connect(self._rename_history_session)
-
-        history_list = (
-            self.history_manager.get_history_list() if self.history_manager else []
-        )
-        current_idx = (
-            self.history_manager.find_index_by_session_id(self._current_session_id)
-            if self._current_session_id
-            else None
-        )
-        self._history_popup.set_history(history_list, current_idx)
-        self._history_popup.show_at(self.history_btn)
-
     def resizeEvent(self, event):
         super().resizeEvent(event)
         # 使用防抖避免频繁同步，只有在需要时才同步
@@ -1280,11 +1172,6 @@ class OpenAIChatToolWindow(ToolWindow):
                 f"{agent.name}: {agent.description}\nMode: {mode}, {hidden}"
             )
 
-    def _on_task_state_changed(self, task_state):
-        if not task_state:
-            return
-        self._latest_task_state = task_state
-
     def _create_new_session(self):
         if self._chat_engine:
             self._chat_engine.stop()
@@ -1311,8 +1198,6 @@ class OpenAIChatToolWindow(ToolWindow):
         session = self.session_manager.create_new_session()
         self._current_session_id = session.session_id
         self._history_preview_messages = None
-        self._history_preview_session_data = None
-        self._history_preview_opening = False
         self._clear_chat_area()
         self.title_edit.setText("新对话")
         self.node_preview.clear_nodes()
@@ -1325,12 +1210,6 @@ class OpenAIChatToolWindow(ToolWindow):
             self._question_floating_widget.clear()
         self._question_tool_call_id = None
         self._load_agent_list()
-        self._on_task_state_changed(session.task_state)
-
-        is_canvas = self._is_on_canvas()
-        logger.info(f"[DEBUG] _create_new_session: is_on_canvas={is_canvas}")
-        if is_canvas:
-            self._on_agent_changed("canvas")
 
         QTimer.singleShot(0, self._show_initial_welcome)
         self._refresh_context_usage_indicator()
@@ -1341,7 +1220,6 @@ class OpenAIChatToolWindow(ToolWindow):
             self._clear_chat_area()
             return
 
-        self._on_task_state_changed(session.task_state)
         self.title_edit.setText(session.topic_summary or session.name or "新对话")
 
         # 关键修复：同步 _current_session_id 与实际显示的会话
@@ -1440,75 +1318,9 @@ class OpenAIChatToolWindow(ToolWindow):
         self._load_agent_list()
         if self._tool_executor:
             self._tool_executor.set_session_context(self._current_session_id)
-        is_canvas = getattr(self.homepage, "workflow_name", None) is not None
-        logger.info(f"[DEBUG] _restore_latest_session: is_on_canvas={is_canvas}")
-        if is_canvas and self._current_agent != "canvas":
-            self._on_agent_changed("canvas")
         self._display_current_session()
         self._refresh_context_usage_indicator()
         return True
-
-    def _toggle_history_mode(self, enabled: bool):
-        if enabled:
-            self._cache_current_session_cards()
-            if self._current_session_id is None:
-                curr_session = self.session_manager.get_current_session()
-                if curr_session and curr_session.messages:
-                    self._history_preview_session_data = curr_session.to_dict()
-                else:
-                    self._history_preview_session_data = None
-
-            self._in_history_mode = True
-            self.chat_layout.setAlignment(Qt.AlignTop)
-            self._display_history_sessions()
-        else:
-            self._in_history_mode = False
-            self.chat_layout.setAlignment(Qt.AlignBottom)
-
-            if self._history_preview_opening:
-                self._history_preview_opening = False
-                self._history_preview_messages = None
-                self._display_current_session()
-            else:
-                if self._history_preview_session_data:
-                    from app.llm_chatter.utils.chat_session import (
-                        ChatSession,
-                    )
-
-                    restored = ChatSession.from_dict(self._history_preview_session_data)
-                    self.session_manager.set_current_session(restored)
-                    self._current_session_id = restored.session_id
-                    self._history_preview_session_data = None
-
-                self._history_preview_messages = None
-                self._display_current_session()
-
-    def _toggle_shell_mode(self, enabled: bool):
-        self._is_shell_mode = enabled
-        if enabled:
-            self.input_area.setPlaceholderText("输入Shell命令，按Enter执行")
-            self.title_edit.setText("Shell执行")
-        else:
-            self.input_area.setPlaceholderText("enter 发送信息, shift+enter 换行")
-            self.title_edit.setText("新对话")
-
-    def _execute_shell_command(self, cmd: str):
-        self._append_user_message(
-            cmd, timestamp=datetime.now().strftime("%Y-%m-%d %H:%M")
-        )
-        self._is_streaming = True
-        self._toggle_send_stop(True)
-
-        def on_result(result_text: str):
-            self._is_streaming = False
-            self._toggle_send_stop(False)
-            card = self._append_assistant_message()
-            card.update_content(f"```\n{result_text}\n```")
-            card.finish_streaming()
-            self._scroll_to_bottom()
-
-        task = ShellExecutionTask(cmd, on_result)
-        self._gen_thread_pool.start(task)
 
     def _open_diff_viewer(self):
         """打开差异查看窗口，显示当前会话修改文件的 git diff"""
@@ -1569,80 +1381,6 @@ class OpenAIChatToolWindow(ToolWindow):
             logger.exception(f"[DiffViewer] 打开差异查看器失败: {e}")
             InfoBar.error("错误", f"打开差异查看器失败: {str(e)}", parent=self)
 
-    def _display_history_sessions(self):
-        self._clear_chat_area()
-
-        history_list = self.history_manager.get_history_list()
-        if not history_list:
-            placeholder = QLabel("暂无历史对话记录", self)
-            placeholder.setAlignment(Qt.AlignCenter)
-            placeholder.setStyleSheet("color: #999;")
-            self.chat_layout.addWidget(placeholder)
-            return
-
-        current_idx = (
-            self.history_manager.find_index_by_session_id(self._current_session_id)
-            if self._current_session_id
-            else None
-        )
-
-        reversed_history = list(enumerate(history_list[::-1]))
-        for display_idx, session in reversed_history:
-            title = session["title"]
-            last_time = session["last_time"]
-            original_index = len(history_list) - 1 - display_idx
-
-            is_current = current_idx is not None and current_idx == original_index
-
-            card = self._create_history_card(
-                title, last_time, original_index, is_current=is_current
-            )
-            self.chat_layout.addWidget(card)
-
-        self._scroll_to_bottom()
-
-    def _create_history_card(
-        self, title: str, last_time: str, index: int, is_current: bool = False
-    ) -> QWidget:
-        card = CardWidget(self)
-
-        base_style = "background-color: transparent; border-radius: 6px; padding: 8px; color: white;"
-        if is_current:
-            card.setStyleSheet(
-                "background-color: #ff6f00; border-radius: 6px; padding: 8px; color: white;"
-            )
-        else:
-            card.setStyleSheet(base_style)
-
-        card.setCursor(Qt.PointingHandCursor)
-
-        layout = QHBoxLayout(card)
-        layout.setContentsMargins(8, 4, 8, 4)
-
-        title_label = QLabel(title[:200], card)
-        title_label.setWordWrap(True)
-        time_label = QLabel(last_time, card)
-        if is_current:
-            title_label.setStyleSheet(
-                "color: white; font-weight: bold; background-color: transparent;"
-            )
-            time_label.setStyleSheet("color: rgba(255,255,255,0.8);")
-        else:
-            time_label.setStyleSheet("color: #aaa;")
-
-        delete_btn = TransparentToolButton(FluentIcon.DELETE, card)
-        delete_btn.setFixedSize(24, 24)
-        delete_btn.clicked.connect(lambda _, i=index: self._delete_history_session(i))
-
-        layout.addWidget(title_label, 1)
-        layout.addStretch()
-        layout.addWidget(time_label)
-        layout.addWidget(delete_btn)
-
-        card.mousePressEvent = lambda e, i=index: self._load_history_session(i)
-
-        return card
-
     def _clear_chat_area(self, delete_widgets: bool = True):
         self._current_assistant_card = None
         self._displayed_session_id = None
@@ -1685,38 +1423,18 @@ class OpenAIChatToolWindow(ToolWindow):
         from app.llm_chatter.constants import (
             MAX_SESSION_CARD_CACHE_SIZE,
         )
-
-        if len(self._session_card_cache) <= MAX_SESSION_CARD_CACHE_SIZE:
-            all_session_ids = {
-                s.session_id for s in self.session_manager.get_all_sessions()
-            }
-            stale_ids = set(self._session_card_cache.keys()) - all_session_ids
-            for sid in stale_ids:
-                self._session_card_cache.pop(sid, None)
-            return
-
         all_session_ids = {
             s.session_id for s in self.session_manager.get_all_sessions()
         }
-        stale_ids = set(self._session_card_cache.keys()) - all_session_ids
-        for sid in stale_ids:
-            self._session_card_cache.pop(sid, None)
-
-        if len(self._session_card_cache) > MAX_SESSION_CARD_CACHE_SIZE:
-            current_ids = all_session_ids & set(self._session_card_cache.keys())
-            for sid in list(self._session_card_cache.keys()):
-                if sid not in current_ids:
-                    self._session_card_cache.pop(sid, None)
-                    if len(self._session_card_cache) <= MAX_SESSION_CARD_CACHE_SIZE:
-                        break
+        cleanup_stale_card_cache(
+            self._session_card_cache,
+            all_session_ids,
+            MAX_SESSION_CARD_CACHE_SIZE
+        )
 
     def _is_widget_alive(self, widget: Optional[QWidget]) -> bool:
-        if widget is None:
-            return False
-        try:
-            return not sip.isdeleted(widget)
-        except Exception:
-            return False
+        """检查 widget 是否存活（保留向后兼容）"""
+        return is_widget_alive(widget)
 
     def _restore_cached_session_cards(self, session: ChatSession) -> bool:
         if not session.messages:
@@ -1726,8 +1444,8 @@ class OpenAIChatToolWindow(ToolWindow):
         if not cached_cards:
             return False
 
-        alive_cards = [card for card in cached_cards if self._is_widget_alive(card)]
-        if len(alive_cards) != len(cached_cards):
+        alive_cards, removed = filter_alive_cards(cached_cards)
+        if removed:
             self._session_card_cache.pop(session.session_id, None)
         if not alive_cards:
             return False
@@ -1765,21 +1483,13 @@ class OpenAIChatToolWindow(ToolWindow):
         return welcome_card
 
     def _sanitize_user_message_for_display(self, content: str) -> str:
-        if not isinstance(content, str):
-            return content
-
-        pattern = re.compile(
-            r"^\[Task Stage:.*?\]\n\[Current Goal:.*?\]\n\[Verification:.*?\]\n\n",
-            re.DOTALL,
-        )
-        return pattern.sub("", content, count=1)
+        """清理用户消息用于显示（保留向后兼容）"""
+        return sanitize_user_message_for_display(content)
 
     def _render_message_to_card(self, batches: List[List[Dict[str, Any]]]):
         for batch in batches:
             role = batch[0].get("role")
-            timestamp = batch[0].get(
-                "timestamp", datetime.now().strftime("%Y-%m-%d %H:%M")
-            )
+            timestamp = batch[0].get("timestamp") or get_default_timestamp()
 
             if role == "user":
                 content = self._sanitize_user_message_for_display(
@@ -1793,46 +1503,17 @@ class OpenAIChatToolWindow(ToolWindow):
 
             if role == "assistant" or role == "tool":
                 assistant_card = self._append_assistant_message(timestamp=timestamp)
-                for msg in batch:
-                    if msg.get("role") == "assistant" and msg.get("content", ""):
-                        assistant_card.append_text(msg.get("content", {}))
-                    elif msg.get("role") == "tool" and msg.get("content", ""):
-                        assistant_card.append_tool_result(
-                            tool_name=msg.get("name", ""),
-                            arguments=msg.get("arguments", {}),
-                            result=msg.get("content", ""),
-                            success=bool(msg.get("success", True)),
-                            tool_call_id=msg.get("tool_call_id", ""),
-                        )
-                assistant_card.finish_streaming()
+                # 使用辅助函数渲染消息
+                render_batch_to_assistant_card(assistant_card, batch)
 
     def _get_rendered_message_cards(self) -> List[MessageCard]:
-        cards: List[MessageCard] = []
-        for i in range(self.chat_layout.count()):
-            item = self.chat_layout.itemAt(i)
-            if not item or not item.widget():
-                continue
-            widget = item.widget()
-            if not isinstance(widget, MessageCard):
-                continue
-            if getattr(widget, "_is_welcome", False):
-                continue
-            if widget.role not in ("user", "assistant"):
-                continue
-            cards.append(widget)
-        return cards
+        def is_user_or_assistant(widget):
+            return widget.role in ("user", "assistant")
+        return collect_message_cards_from_layout(self.chat_layout, is_user_or_assistant)
 
     def _get_current_user_round_index(self) -> int:
         """获取当前 user message 应该是第几个 user（从 0 开始）"""
-        count = 0
-        for i in range(self.chat_layout.count()):
-            item = self.chat_layout.itemAt(i)
-            if not item or not item.widget():
-                continue
-            widget = item.widget()
-            if isinstance(widget, MessageCard) and widget.role == "user":
-                count += 1
-        return count
+        return count_user_cards_in_layout(self.chat_layout)
 
     def _find_user_round_index_for_card(self, card: MessageCard) -> Optional[int]:
         round_index = 0
@@ -1917,32 +1598,8 @@ class OpenAIChatToolWindow(ToolWindow):
             f"[DELETE] Cards to remove: {len(widgets_to_remove)}, cards_to_remove: {cards_to_remove}"
         )
 
-        # 实际执行删除
-        for widget in widgets_to_remove:
-            try:
-                if not self._is_widget_alive(widget):
-                    logger.warning(f"[DELETE] Widget already deleted: {widget}")
-                    continue
-
-                # 先从 layout 移除
-                layout_removed = False
-                for i in range(self.chat_layout.count()):
-                    item = self.chat_layout.itemAt(i)
-                    if item and item.widget() is widget:
-                        self.chat_layout.removeItem(item)
-                        layout_removed = True
-                        break
-
-                if layout_removed:
-                    widget.deleteLater()
-                    logger.info(f"[DELETE] Widget deleted: role={widget.role}")
-                else:
-                    logger.warning(
-                        f"[DELETE] Widget not found in layout: role={widget.role}"
-                    )
-            except Exception as e:
-                logger.error(f"[DELETE] Error deleting widget: {e}")
-
+        # 使用辅助函数执行删除
+        delete_widgets_from_layout(widgets_to_remove, self.chat_layout)
         return removed > 0
 
     def _remove_cards_from_round(self, round_index: int) -> bool:
@@ -1951,45 +1608,18 @@ class OpenAIChatToolWindow(ToolWindow):
         if round_index >= user_card_count:
             return False
 
-        user_card_idx = 0
-        removing = False
-        widgets_to_remove = []
-        for i in range(self.chat_layout.count()):
-            item = self.chat_layout.itemAt(i)
-            if not item or not item.widget():
-                continue
-            widget = item.widget()
-            if not isinstance(widget, MessageCard):
-                continue
-            if getattr(widget, "_is_welcome", False):
-                continue
-            if widget.role not in ("user", "assistant"):
-                continue
-
-            if widget.role == "user":
-                if user_card_idx >= round_index:
-                    widgets_to_remove.append(widget)
-                    removing = True
-                else:
-                    user_card_idx += 1
-            elif widget.role == "assistant" and removing:
-                widgets_to_remove.append(widget)
-
-        for widget in widgets_to_remove:
-            for i in range(self.chat_layout.count()):
-                item = self.chat_layout.itemAt(i)
-                if item and item.widget() is widget:
-                    self.chat_layout.removeItem(item)
-                    break
-            widget.deleteLater()
-
+        # 使用辅助函数找出并删除需要删除的卡片
+        widgets_to_remove = find_widgets_to_remove_for_round(
+            self.chat_layout, round_index, user_card_count
+        )
+        delete_widgets_from_layout(widgets_to_remove, self.chat_layout)
         return True
 
     def _invalidate_current_session_card_cache(self):
-        session = self.session_manager.get_current_session()
-        if not session:
-            return
-        self._session_card_cache.pop(session.session_id, None)
+        invalidate_session_card_cache(
+            self.session_manager.get_current_session(),
+            self._session_card_cache
+        )
 
     def _persist_session_after_mutation(self):
         session = self.session_manager.get_current_session()
@@ -1998,7 +1628,7 @@ class OpenAIChatToolWindow(ToolWindow):
 
         session.set_messages(session.messages, preserve_compaction=False)
 
-        if not session.messages:
+        if is_session_empty(session):
             if self._current_session_id is not None and self.history_manager:
                 idx = self.history_manager.find_index_by_session_id(
                     self._current_session_id
@@ -2009,60 +1639,31 @@ class OpenAIChatToolWindow(ToolWindow):
             return
 
         if self.history_manager:
-            if self._current_session_id is not None:
-                idx = self.history_manager.find_index_by_session_id(
-                    self._current_session_id
-                )
-                if idx is not None:
-                    self.history_manager.update_session(
-                        idx,
-                        session.messages,
-                        compaction_state=getattr(session, "compaction_state", {}),
-                        compaction_cache=getattr(session, "compaction_cache", {}),
-                    )
-                else:
-                    self.history_manager.save_session(
-                        session.messages,
-                        session_id=session.session_id,
-                        compaction_state=getattr(session, "compaction_state", {}),
-                        compaction_cache=getattr(session, "compaction_cache", {}),
-                    )
-                    self._current_session_id = session.session_id
-            else:
-                self.history_manager.save_session(
-                    session.messages,
-                    session_id=session.session_id,
-                    compaction_state=getattr(session, "compaction_state", {}),
-                    compaction_cache=getattr(session, "compaction_cache", {}),
-                )
-                self._current_session_id = session.session_id
+            # 使用辅助函数保存会话
+            self._current_session_id = save_or_archive_session(
+                self.history_manager,
+                session,
+                self._current_session_id
+            )
 
     def _refresh_session_view_after_mutation(self):
-        self._invalidate_current_session_card_cache()
-        self._history_preview_messages = None
-        self._display_current_session()
-        self._refresh_context_usage_indicator()
+        # 使用辅助函数刷新视图
+        refresh_session_view(
+            self,
+            self._invalidate_current_session_card_cache,
+            self._display_current_session,
+            self._refresh_context_usage_indicator
+        )
 
     def _sync_current_assistant_card_ref(self):
-        self._current_assistant_card = None
-        for i in range(self.chat_layout.count() - 1, -1, -1):
-            item = self.chat_layout.itemAt(i)
-            if not item or not item.widget():
-                continue
-            widget = item.widget()
-            if not isinstance(widget, MessageCard):
-                continue
-            if getattr(widget, "_is_welcome", False):
-                continue
-            if widget.role == "assistant":
-                self._current_assistant_card = widget
-                return
+        self._current_assistant_card = find_last_assistant_card(self.chat_layout)
 
     def _finalize_local_session_mutation(self):
         self._invalidate_current_session_card_cache()
         self._history_preview_messages = None
         session = self.session_manager.get_current_session()
-        if not session or not session.messages:
+        
+        if is_session_empty(session):
             self._clear_chat_area()
             self.node_preview.clear_nodes()
             self._current_assistant_card = None
@@ -2076,30 +1677,21 @@ class OpenAIChatToolWindow(ToolWindow):
         self._sync_node_preview_to_scroll()
 
     def _on_clear_shortcut(self):
-        session = self.session_manager.get_current_session()
-        if session:
-            self._session_card_cache.pop(session.session_id, None)
-        self._clear_chat_area()
-        self.node_preview.clear_nodes()
-        if session:
-            session.clear()
-            self._on_task_state_changed(session.task_state)
-        welcome_card = self._get_or_create_welcome_card()
-        QTimer.singleShot(0, lambda: self._add_chat_widget(welcome_card))
+        # 使用辅助函数清空并显示欢迎
+        clear_and_show_welcome(
+            session=self.session_manager.get_current_session(),
+            session_card_cache=self._session_card_cache,
+            clear_chat_func=self._clear_chat_area,
+            clear_preview_func=self.node_preview.clear_nodes,
+            get_welcome_func=self._get_or_create_welcome_card,
+            add_widget_func=lambda w: QTimer.singleShot(0, lambda: self._add_chat_widget(w))
+        )
         self.title_edit.setText("新对话")
 
     def _add_chat_widget(self, widget: QWidget):
-        if not self._is_widget_alive(widget):
-            return
-        widget.show()
+        add_message_to_layout(widget, self.chat_layout, is_widget_alive)
         if isinstance(widget, MessageCard):
             widget.sync_width()
-            if widget.role == "user":
-                self.chat_layout.addWidget(widget, 0, Qt.AlignRight)
-            else:
-                self.chat_layout.addWidget(widget, 0, Qt.AlignLeft)
-        else:
-            self.chat_layout.addWidget(widget)
 
     def _archive_history_session(self, index: int):
         history_list = self.history_manager.get_history_list()
@@ -2123,32 +1715,22 @@ class OpenAIChatToolWindow(ToolWindow):
         archived = self.history_manager.archive_history(index)
 
         if archived_current and archived:
-            self.session_manager = SessionManager()
-            self.session_manager.create_new_session()
-            new_session = self.session_manager.get_current_session()
-            self._current_session_id = new_session.session_id
-
-            if old_chat_engine and hasattr(old_chat_engine, "set_session_manager"):
-                old_chat_engine.set_session_manager(self.session_manager)
-
-            if self._tool_executor:
-                self._tool_executor.set_session_context(self._current_session_id)
-
-            self._clear_chat_area()
-            self._show_initial_welcome()
-            self.title_edit.setText("新对话")
+            # 使用辅助函数创建新会话状态
+            new_state = create_new_session_state(old_session_manager, old_chat_engine)
+            init_new_session_after_archive(
+                self, new_state, self._tool_executor,
+                self._clear_chat_area, self._show_initial_welcome
+            )
 
         # 刷新历史会话卡片
-        if self._history_card.isVisible():
-            self._refresh_history_toggle_panel()
+        refresh_history_card_if_visible(self._history_card, self._refresh_history_toggle_panel)
 
     def _rename_history_session(self, index: int, new_title: str):
         if not self.history_manager:
             return
         self.history_manager.update_session_title(index, new_title)
         # 刷新历史会话卡片
-        if self._history_card.isVisible():
-            self._refresh_history_toggle_panel()
+        refresh_history_card_if_visible(self._history_card, self._refresh_history_toggle_panel)
 
     def _load_history_session(self, index: int):
         self._load_history_session_from_popup(index)
@@ -2177,26 +1759,15 @@ class OpenAIChatToolWindow(ToolWindow):
             return
 
         title = self.history_manager.get_current_title(index)
-        restored = ChatSession.from_dict(
-            {
-                "session_id": session_id,
-                "name": title or "历史对话",
-                "messages": messages,
-                "topic_summary": title or "",
-                "compaction_state": session_record.get("compaction_state", {}),
-                "compaction_cache": session_record.get("compaction_cache", {}),
-            }
+        
+        # 使用辅助函数创建会话
+        restored = create_session_from_record(session_record, messages, title)
+        
+        # 使用辅助函数初始化
+        init_after_loading_session(
+            self, restored, session_id, title,
+            self._tool_executor
         )
-        self.session_manager.set_current_session(restored)
-        self._history_preview_messages = None
-        self._current_session_id = session_id
-        self.title_edit.setText(title or "历史对话")
-        if self._history_popup:
-            self._history_popup.close()
-
-        # 更新工具执行器的会话上下文
-        if self._tool_executor:
-            self._tool_executor.set_session_context(self._current_session_id)
 
         self._display_current_session()
 
@@ -2224,65 +1795,56 @@ class OpenAIChatToolWindow(ToolWindow):
         card._round_index = user_round_index
         card.update_content(content)
         card.finish_streaming()
-        card.deleteRequested.connect(lambda: self._delete_message(card))
-        card.undoRequested.connect(lambda: self._undo_from_message(card))
-        card.actionRequested.connect(self._on_code_action)
+        
+        # 设置卡片信号
+        setup_user_card_signals(card, self._delete_message, self._undo_from_message, self._on_code_action)
+        
         self._add_chat_widget(card)
         self._scroll_to_bottom()
 
-        # 更新当前 assistant 的 round_index 为这个 user message 的索引
-        self._current_assistant_round_index = user_round_index
-
-        self._update_node_preview()
+        # 使用辅助函数后处理
+        post_append_user_message(self, user_round_index, self._update_node_preview)
         return card
 
     def _append_assistant_message(self, timestamp: str = None) -> MessageCard:
         session = self.session_manager.get_current_session()
         if session:
             self._displayed_session_id = session.session_id
-        card = MessageCard(parent=self, role="assistant", timestamp=timestamp)
-        # 设置卡片对应的 round_index（来自之前 user message 分配的）
-        card._round_index = self._current_assistant_round_index
-        card.viewer._install_dialog_filter()
-        card.actionRequested.connect(self._on_code_action)
-        card.contextActionRequested.connect(self.handle_recommended_question)
-        card.toolDiffRequested.connect(self._on_tool_diff_requested)
-        card.cardDiffRequested.connect(self._on_card_diff_requested)
-        card.saveFileRequested.connect(self._on_save_file_requested)
-        if hasattr(self.homepage, "on_context_action"):
-            card.contextActionRequested.connect(self.homepage.on_context_action)
-        else:
-            card.contextActionRequested.connect(self.contextActionRequested.emit)
+            
+        # 使用辅助函数创建卡片
+        def on_context_action(action, context):
+            self.handle_recommended_question(action, context)
+            if hasattr(self.homepage, "on_context_action"):
+                self.homepage.on_context_action(action, context)
+            else:
+                self.contextActionRequested.emit(action, context)
+        
+        card = create_assistant_card_widget(
+            parent=self,
+            timestamp=timestamp,
+            round_index=self._current_assistant_round_index,
+            on_action=self._on_code_action,
+            on_context_action=on_context_action,
+            on_tool_diff=self._on_tool_diff_requested,
+            on_card_diff=self._on_card_diff_requested,
+            on_save_file=self._on_save_file_requested,
+        )
+        
         self._add_chat_widget(card)
         self._scroll_to_bottom()
         return card
 
     def _update_assistant_message(self, card: MessageCard, new_content: str):
         card.update_content(new_content)
-        if self._is_streaming:
-            self._scroll_to_bottom()
+        scroll_to_bottom_if_streaming(self.chat_scroll_area, self._is_streaming)
 
     def _update_node_preview(self):
         session = self.session_manager.get_current_session()
         if not session:
             return
-        messages = consolidate_messages(session.messages)
-
-        node_data = []
-        current_user_msg = None
-
-        for msg in messages:
-            if msg["role"] == "user":
-                current_user_msg = content_to_text(msg.get("content", ""))[:30]
-            elif msg["role"] == "assistant" and current_user_msg:
-                timestamp = (
-                    msg.get("timestamp", "")[-5:] if msg.get("timestamp") else ""
-                )
-                node_data.append((current_user_msg, timestamp))
-                current_user_msg = None
-
-        if current_user_msg:
-            node_data.append((current_user_msg, ""))
+        
+        # 使用辅助函数构建 node preview 数据
+        node_data = build_node_preview_from_session(session, content_to_text, max_len=30)
 
         self.node_preview.update_nodes(node_data)
         self._sync_node_preview_to_scroll()
@@ -2291,14 +1853,8 @@ class OpenAIChatToolWindow(ToolWindow):
         if not hasattr(self, "chat_scroll_area") or not hasattr(self, "node_preview"):
             return
 
-        user_widgets = []
-        for i in range(self.chat_layout.count()):
-            item = self.chat_layout.itemAt(i)
-            if not item or not item.widget():
-                continue
-            widget = item.widget()
-            if isinstance(widget, MessageCard) and widget.role == "user":
-                user_widgets.append(widget)
+        # 使用辅助函数收集用户卡片
+        user_widgets = collect_user_card_widgets(self.chat_layout)
 
         if not user_widgets:
             self._last_visible_user_pair_index = -1
@@ -2309,50 +1865,21 @@ class OpenAIChatToolWindow(ToolWindow):
         scroll_bar = self.chat_scroll_area.verticalScrollBar()
         viewport_height = self.chat_scroll_area.viewport().height()
         visible_top = scroll_bar.value()
-        anchor_y = visible_top + max(viewport_height / 2, 1)
         user_tops = [widget.y() for widget in user_widgets]
 
-        if len(user_tops) == 1:
-            progress = 0.0
-        elif anchor_y <= user_tops[0]:
-            progress = 0.0
-        elif anchor_y >= user_tops[-1]:
-            progress = float(len(user_tops) - 1)
-        else:
-            progress = 0.0
-            for idx in range(len(user_tops) - 1):
-                start_top = user_tops[idx]
-                end_top = user_tops[idx + 1]
-                if start_top <= anchor_y <= end_top:
-                    span = max(end_top - start_top, 1)
-                    ratio = (anchor_y - start_top) / span
-                    progress = idx + ratio
-                    break
-
-        visible_index = min(
-            max(int(round(progress)), 0),
-            len(user_tops) - 1,
+        # 使用辅助函数计算滚动进度
+        progress, visible_index = calculate_scroll_progress(
+            visible_top, viewport_height, user_tops
         )
+
         self.node_preview.set_progress_position(progress)
         if visible_index != self._last_visible_user_pair_index:
             self._last_visible_user_pair_index = visible_index
             self.node_preview.set_visible_node(visible_index)
 
     def _on_node_preview_clicked(self, index: int):
-        pair_index = 0
-        target_widget = None
-        for i in range(self.chat_layout.count()):
-            item = self.chat_layout.itemAt(i)
-            if not item or not item.widget():
-                continue
-            widget = item.widget()
-            if not isinstance(widget, MessageCard):
-                continue
-            if widget.role == "user":
-                if pair_index == index:
-                    target_widget = widget
-                    break
-                pair_index += 1
+        # 使用辅助函数找到目标卡片
+        target_widget = find_user_card_at_index(self.chat_layout, index)
 
         if target_widget:
             self.node_preview.set_progress_position(index)
@@ -2370,13 +1897,11 @@ class OpenAIChatToolWindow(ToolWindow):
 
         canonical_messages = consolidate_messages(session.messages)
         round_ranges = get_user_round_ranges(canonical_messages)
-        if round_index < 0 or round_index >= len(round_ranges):
+        
+        # 使用辅助函数截断消息
+        if not truncate_messages_at_round(session, round_index, round_ranges):
             return False
-
-        cutoff_index = round_ranges[round_index][0]
-        session.set_messages(
-            canonical_messages[:cutoff_index], preserve_compaction=False
-        )
+            
         self._persist_session_after_mutation()
         self._remove_cards_from_round(round_index)
         self._finalize_local_session_mutation()
@@ -2395,26 +1920,22 @@ class OpenAIChatToolWindow(ToolWindow):
         if not session:
             return
 
-        logger.info(f"[DELETE] Starting deletion: round_index={round_index}")
-
         # Step 1: 先删除UI卡片，确保用户立即看到效果
         ui_deleted = self._remove_cards_for_round(round_index)
-        logger.info(f"[DELETE] UI cards deleted: {ui_deleted}")
 
         # Step 2: 更新 session 数据
         canonical_messages = consolidate_messages(session.messages)
         round_ranges = get_user_round_ranges(canonical_messages)
-        if round_index < 0 or round_index >= len(round_ranges):
+        
+        success, old_count, new_count = truncate_and_remove_round(
+            session, round_index, round_ranges
+        )
+        if not success:
             logger.warning(f"[DELETE] Invalid round_index: {round_index}")
             return
 
-        start_idx, end_idx = round_ranges[round_index]
-        new_messages = canonical_messages[:start_idx] + canonical_messages[end_idx:]
-        session.set_messages(new_messages, preserve_compaction=False)
-
-        logger.info(
-            f"[DELETE] Session messages updated: {len(canonical_messages)} -> {len(new_messages)}"
-        )
+        # 记录统计信息
+        log_deletion_stats(round_index, ui_deleted, old_count, new_count)
 
         # Step 3: 保存session数据
         try:
@@ -2442,23 +1963,12 @@ class OpenAIChatToolWindow(ToolWindow):
 
         # 如果有文件操作，显示预览对话框
         if all_call_ids and self._tool_executor and self._tool_executor.file_recorder:
-            # 获取所有 call_id 对应的操作
-            operations = []
-            for call_id in all_call_ids:
-                ops = self._tool_executor.file_recorder.get_operations_for_preview(
-                    self._current_session_id, call_id
-                )
-                operations.extend(ops)
-            # 去重（基于 id 或 file_path+call_id 组合）
-            seen = set()
-            unique_ops = []
-            for op in operations:
-                key = (op.get("id"), op.get("file_path"), op.get("call_id"))
-                if key not in seen:
-                    seen.add(key)
-                    unique_ops.append(op)
-            operations = unique_ops
-            
+            # 使用辅助函数收集操作
+            operations = collect_operations_for_round(
+                self._tool_executor.file_recorder,
+                self._current_session_id,
+                all_call_ids
+            )
             
             if operations:
                 dialog = FileUndoPreviewDialog(operations, self)
@@ -2478,10 +1988,8 @@ class OpenAIChatToolWindow(ToolWindow):
         if not self._truncate_session_from_user_round(round_index):
             return
 
-        self.input_area.setPlainText(user_input)
-        self.input_area.moveCursor(QTextCursor.End)
-        self.input_area._on_text_changed()
-        self.input_area.setFocus()
+        # 恢复输入框内容
+        restore_input_from_card(self.input_area, card)
 
     def _get_last_tool_call_id_after_round(self, round_index: int) -> Optional[str]:
         """获取指定 round_index 之后最后一个 tool_call_id"""
@@ -2491,23 +1999,8 @@ class OpenAIChatToolWindow(ToolWindow):
 
         canonical_messages = consolidate_messages(session.messages)
         round_ranges = get_user_round_ranges(canonical_messages)
-
-        if round_index < 0 or round_index >= len(round_ranges):
-            return None
-
-        # 获取该 round 之后的所有消息的 start index
-        _, end_idx = round_ranges[round_index]
-
-        # 查找 end_idx 之后的所有 tool_call_id
-        last_call_id = None
-        for i in range(end_idx, len(canonical_messages)):
-            msg = canonical_messages[i]
-            if msg.get("role") == "tool":
-                call_id = msg.get("tool_call_id")
-                if call_id:
-                    last_call_id = call_id
-
-        return last_call_id
+        
+        return find_last_tool_call_id_after_round(canonical_messages, round_ranges, round_index)
 
     def _get_all_tool_call_ids_from_round(self, round_index: int) -> List[str]:
         """获取从指定 round 到最后的所有 tool_call_id"""
@@ -2515,73 +2008,34 @@ class OpenAIChatToolWindow(ToolWindow):
         if not session:
             return []
 
-        canonical_messages = consolidate_messages(session.messages)
-        round_ranges = get_user_round_ranges(canonical_messages)
-
-        if round_index < 0 or round_index >= len(round_ranges):
+        start_idx, _ = get_round_message_indices(session, round_index)
+        if start_idx is None:
             return []
 
-        # 获取该 round 的起始位置，之后的所有消息都需要统计
-        start_idx, _ = round_ranges[round_index]
+        canonical_messages = consolidate_messages(session.messages)
         
-        # 从该 round 的 user 消息开始，遍历到消息列表末尾
-        call_ids = []
-        for i in range(start_idx, len(canonical_messages)):
-            msg = canonical_messages[i]
-            role = msg.get("role")
-            if role == "assistant":
-                tool_calls = msg.get("tool_calls", [])
-                for tc in tool_calls:
-                    if isinstance(tc, dict):
-                        tid = tc.get("id")
-                        if tid and tid not in call_ids:
-                            call_ids.append(tid)
-            elif role == "tool":
-                # 也从 tool 消息中提取 tool_call_id
-                tid = msg.get("tool_call_id")
-                if tid and tid not in call_ids:
-                    call_ids.append(tid)
-
-        return call_ids
+        # 使用辅助函数收集剩余的 tool_call_id
+        return collect_tool_call_ids(canonical_messages, start_idx, len(canonical_messages))
 
     def _get_tool_call_ids_in_round(self, round_index: int) -> List[str]:
-        """获取指定 round 范围内的所有 tool_call_id（不包括后续 round）"""
+        """获取指定 round 范围内的所有 tool_call_id"""
         session = self.session_manager.get_current_session()
         if not session:
             return []
 
-        canonical_messages = consolidate_messages(session.messages)
-        round_ranges = get_user_round_ranges(canonical_messages)
-
-        if round_index < 0 or round_index >= len(round_ranges):
+        start_idx, end_idx = get_round_message_indices(session, round_index)
+        if start_idx is None:
             return []
 
-        # 获取该 round 的范围
-        start_idx, end_idx = round_ranges[round_index]
+        canonical_messages = consolidate_messages(session.messages)
         
-        # 只遍历该 round 范围内的消息
-        call_ids = []
-        for i in range(start_idx, end_idx):
-            msg = canonical_messages[i]
-            role = msg.get("role")
-            if role == "assistant":
-                tool_calls = msg.get("tool_calls", [])
-                for tc in tool_calls:
-                    if isinstance(tc, dict):
-                        tid = tc.get("id")
-                        if tid and tid not in call_ids:
-                            call_ids.append(tid)
-            elif role == "tool":
-                tid = msg.get("tool_call_id")
-                if tid and tid not in call_ids:
-                    call_ids.append(tid)
-
-        return call_ids
+        # 使用辅助函数收集 tool_call_id
+        return collect_tool_call_ids(canonical_messages, start_idx, end_idx)
 
     def _show_undo_result(self, result):
         """显示撤销结果"""
         if result.failed_count > 0:
-            failed_list = "\n".join(f"  - {f}" for f in result.failed_files[:5])
+            failed_list = format_file_list(result.failed_files, max_count=5)
             InfoBar.warning(
                 "部分文件回滚失败",
                 f"成功: {result.success_count}, 失败: {result.failed_count}\n{failed_list}",
@@ -2624,7 +2078,9 @@ class OpenAIChatToolWindow(ToolWindow):
                 call_id=tool_call_id
             )
             
-            if not operations:
+            # 使用辅助函数获取第一个文件操作
+            success, backup_path, _ = get_first_file_operation(operations)
+            if not success:
                 InfoBar.warning(
                     "无差异信息",
                     "此工具没有修改任何文件，或备份信息已丢失",
@@ -2633,96 +2089,13 @@ class OpenAIChatToolWindow(ToolWindow):
                     position=InfoBarPosition.TOP_RIGHT,
                 )
                 return
+
+            # 使用辅助函数读取备份文件和生成 diff
+            old_content, new_content, backup_file = read_backup_files(backup_path)
+            html = generate_diff_html(old_content, new_content, backup_file)
             
-            # 只取该工具产生的第一个文件操作（通常每个工具只修改一个文件）
-            op = operations[0]
-            backup_path = op.get("backup_path", "")
-
-            if not backup_path:
-                InfoBar.warning(
-                    "无差异信息",
-                    "备份路径无效",
-                    duration=3000,
-                    parent=self,
-                    position=InfoBarPosition.TOP_RIGHT,
-                )
-                return
-
-            # 编辑前备份路径 -> 编辑后备份路径（固定后缀 .after.bak）
-            from pathlib import Path
-            import difflib
-
-            backup_file = Path(backup_path)
-            after_backup_path = str(backup_file.with_suffix('.after.bak'))
-            after_backup_file = Path(after_backup_path)
-
-            # 检查编辑后备份是否存在
-            if not after_backup_file.exists():
-                InfoBar.warning(
-                    "无差异信息",
-                    "编辑后备份文件不存在，可能该工具执行于早期版本",
-                    duration=3000,
-                    parent=self,
-                    position=InfoBarPosition.TOP_RIGHT,
-                )
-                return
-
-            try:
-                # 读取编辑前和编辑后的备份文件进行对比
-                with open(backup_path, 'r', encoding='utf-8', errors='replace') as f:
-                    old_content = f.read()
-                with open(after_backup_path, 'r', encoding='utf-8', errors='replace') as f:
-                    new_content = f.read()
-            except FileNotFoundError as e:
-                InfoBar.error(
-                    "文件不存在",
-                    f"无法读取备份文件: {e}",
-                    duration=3000,
-                    parent=self,
-                    position=InfoBarPosition.TOP_RIGHT,
-                )
-                return
-            except Exception as e:
-                InfoBar.error(
-                    "读取失败",
-                    f"无法读取备份文件: {e}",
-                    duration=3000,
-                    parent=self,
-                    position=InfoBarPosition.TOP_RIGHT,
-                )
-                return
-
-            # 生成 unified diff（确保每行都有换行符，处理单行文件无末尾换行符的情况）
-            def normalize_lines(content):
-                lines = content.splitlines(keepends=True)
-                if lines and not lines[-1].endswith('\n'):
-                    lines[-1] += '\n'
-                return lines
-
-            old_lines = normalize_lines(old_content)
-            new_lines = normalize_lines(new_content)
-
-            diff = difflib.unified_diff(
-                old_lines,
-                new_lines,
-                fromfile=backup_file.name,
-                tofile=backup_file.name,
-                lineterm='\n'
-            )
-            
-            diff_output = ''.join(diff)
-            
-            # 生成并显示差异对比
-            from app.llm_chatter.utils.diff_viewer import (
-                DiffHtmlGenerator,
-                DiffViewerWindow,
-            )
-            
-            html = DiffHtmlGenerator.generate_html_report(diff_output, "")
-            
-            viewer = DiffViewerWindow(parent=self)
-            viewer.load_html(html)
-            viewer.show()
+            # 显示差异
+            show_diff_viewer(self, html)
             
         except Exception as e:
             logger.error(f"[LLMChatter] 显示工具差异失败: {e}")
@@ -2769,15 +2142,12 @@ class OpenAIChatToolWindow(ToolWindow):
                 )
                 return
 
-            # 收集所有工具的文件操作
-            all_operations = []
-            for call_id in all_call_ids:
-                operations = self._tool_executor.file_recorder.get_operations_for_preview(
-                    session_id=session_id,
-                    call_id=call_id
-                )
-                if operations:
-                    all_operations.extend(operations)
+            # 使用辅助函数收集所有工具的文件操作
+            all_operations = collect_operations_for_round(
+                self._tool_executor.file_recorder,
+                session_id,
+                all_call_ids
+            )
 
             if not all_operations:
                 InfoBar.warning(
@@ -2789,74 +2159,11 @@ class OpenAIChatToolWindow(ToolWindow):
                 )
                 return
 
-            # 为每个文件生成差异
-            from pathlib import Path
-            import difflib
-
-            def normalize_lines(content):
-                lines = content.splitlines(keepends=True)
-                if lines and not lines[-1].endswith('\n'):
-                    lines[-1] += '\n'
-                return lines
-
-            diff_parts = []
-            for op in all_operations:
-                backup_path = op.get("backup_path", "")
-                if not backup_path:
-                    continue
-
-                backup_file = Path(backup_path)
-                after_backup_path = str(backup_file.with_suffix('.after.bak'))
-                after_backup_file = Path(after_backup_path)
-
-                if not after_backup_file.exists():
-                    continue
-
-                try:
-                    with open(backup_path, 'r', encoding='utf-8', errors='replace') as f:
-                        old_content = f.read()
-                    with open(after_backup_path, 'r', encoding='utf-8', errors='replace') as f:
-                        new_content = f.read()
-                except Exception:
-                    continue
-
-                old_lines = normalize_lines(old_content)
-                new_lines = normalize_lines(new_content)
-
-                diff = difflib.unified_diff(
-                    old_lines,
-                    new_lines,
-                    fromfile=f"a/{backup_file.name}",
-                    tofile=f"b/{backup_file.name}",
-                    lineterm='\n'
-                )
-                diff_output = ''.join(diff)
-                if diff_output:
-                    diff_parts.append(diff_output)
-
-            if not diff_parts:
-                InfoBar.warning(
-                    "无差异信息",
-                    "无法生成任何差异信息",
-                    duration=3000,
-                    parent=self,
-                    position=InfoBarPosition.TOP_RIGHT,
-                )
-                return
-
-            # 合并所有差异
-            combined_diff = '\n'.join(diff_parts)
-
-            # 生成并显示差异对比
-            from app.llm_chatter.utils.diff_viewer import (
-                DiffHtmlGenerator,
-                DiffViewerWindow,
-            )
-
-            html = DiffHtmlGenerator.generate_html_report(combined_diff, "")
-            viewer = DiffViewerWindow(parent=self)
-            viewer.load_html(html)
-            viewer.show()
+            # 使用辅助函数生成合并的 diff HTML
+            html = generate_multi_file_diff_html(all_operations)
+            
+            # 显示差异
+            show_diff_viewer(self, html)
 
         except Exception as e:
             logger.error(f"[LLMChatter] 显示卡片差异失败: {e}")
@@ -2876,82 +2183,9 @@ class OpenAIChatToolWindow(ToolWindow):
             code: 代码内容
             lang: 代码语言
         """
-        # 语言到文件后缀的映射
-        LANG_EXT_MAP = {
-            "python": ".py",
-            "py": ".py",
-            "javascript": ".js",
-            "js": ".js",
-            "typescript": ".ts",
-            "ts": ".ts",
-            "html": ".html",
-            "htm": ".html",
-            "css": ".css",
-            "scss": ".scss",
-            "sass": ".sass",
-            "less": ".less",
-            "json": ".json",
-            "yaml": ".yaml",
-            "yml": ".yaml",
-            "xml": ".xml",
-            "markdown": ".md",
-            "md": ".md",
-            "shell": ".sh",
-            "bash": ".sh",
-            "sh": ".sh",
-            "sql": ".sql",
-            "go": ".go",
-            "java": ".java",
-            "c": ".c",
-            "cpp": ".cpp",
-            "c++": ".cpp",
-            "csharp": ".cs",
-            "cs": ".cs",
-            "rust": ".rs",
-            "ruby": ".rb",
-            "php": ".php",
-            "swift": ".swift",
-            "kotlin": ".kt",
-            "scala": ".scala",
-            "r": ".r",
-            "lua": ".lua",
-            "perl": ".pl",
-            "powershell": ".ps1",
-            "dockerfile": "Dockerfile",
-            "makefile": "Makefile",
-            "toml": ".toml",
-            "ini": ".ini",
-            "cfg": ".cfg",
-            "conf": ".conf",
-            "txt": ".txt",
-            "csv": ".csv",
-            "vue": ".vue",
-            "jsx": ".jsx",
-            "tsx": ".tsx",
-            "graphql": ".graphql",
-            "proto": ".proto",
-            "docker": "Dockerfile",
-        }
-
-        # 获取文件后缀
-        lang_lower = lang.lower() if lang else ""
-        ext = LANG_EXT_MAP.get(lang_lower, ".txt")
-
-        # 如果是 Dockerfile 或 Makefile 等特殊文件名，直接使用
-        if lang_lower in ("dockerfile", "makefile"):
-            default_name = lang_lower
-        else:
-            # 尝试从代码中提取类名/函数名作为建议文件名
-            import re
-            class_match = re.search(r'class\s+(\w+)', code)
-            func_match = re.search(r'def\s+(\w+)|function\s+(\w+)', code)
-            if class_match:
-                default_name = class_match.group(1)
-            elif func_match:
-                default_name = func_match.group(1) or func_match.group(2)
-            else:
-                default_name = "code"
-            default_name += ext
+        # 使用辅助函数获取默认文件名和扩展名
+        ext = get_language_extension(lang)
+        default_name = get_default_save_filename(lang, code)
 
         # 弹出文件保存对话框
         from PyQt5.QtWidgets import QFileDialog
@@ -3025,9 +2259,6 @@ class OpenAIChatToolWindow(ToolWindow):
     def send_preset_question(self, question: str):
         if not isinstance(question, str) or not question.strip():
             return
-
-        if self._history_popup and self._history_popup.isVisible():
-            self._history_popup.close()
         self._on_send_clicked(user_text=question.strip())
 
     def _on_send_clicked(self, user_text: str = ""):
@@ -3036,13 +2267,6 @@ class OpenAIChatToolWindow(ToolWindow):
 
         if not user_text:
             user_text = self.input_area.toPlainText().strip()
-
-        if self._is_shell_mode:
-            if not user_text:
-                return
-            self.input_area.clear()
-            self._execute_shell_command(user_text)
-            return
 
         if not user_text:
             return
@@ -3826,21 +3050,10 @@ class OpenAIChatToolWindow(ToolWindow):
         if not file_path:
             return
         try:
+            # 使用辅助函数导出对话
+            content = export_messages_to_markdown(session.messages)
             with open(file_path, "w", encoding="utf-8") as f:
-                f.write(f"# 对话记录\n\n")
-                f.write(f"导出时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
-                for msg in session.messages:
-                    role = "用户" if msg.get("role") == "user" else "助手"
-                    content = msg.get("content", "")
-                    if isinstance(content, list):
-                        content = "\n".join(
-                            [
-                                item.get("text", "")
-                                for item in content
-                                if item.get("type") == "text"
-                            ]
-                        )
-                    f.write(f"## {role}\n\n{content}\n\n")
+                f.write(content)
             InfoBar.success("导出成功", f"已保存到: {file_path}", parent=self)
         except Exception as e:
             InfoBar.error("导出失败", str(e), parent=self)

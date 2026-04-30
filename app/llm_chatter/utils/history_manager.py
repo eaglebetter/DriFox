@@ -99,30 +99,6 @@ class HistoryManager:
         if self._session_store.get_session_count(self.canvas_name) > 0:
             return
 
-        # 检查 JSON 文件是否存在
-        if not self.history_file.exists():
-            return
-
-        # 迁移数据
-        try:
-            migrated = self._session_store.migrate_from_json(str(self.history_file))
-            if migrated > 0:
-                logger.info(f"[HistoryManager] 已迁移 {migrated} 条会话到 SQLite")
-
-                # 删除 JSON 文件（迁移后不再使用）
-                try:
-                    self.history_file.unlink()
-                    logger.info(f"[HistoryManager] 已删除 JSON 文件: {self.history_file}")
-                except Exception as e:
-                    logger.warning(f"[HistoryManager] 删除 JSON 文件失败: {e}")
-
-                # 重新加载
-                self._history_sessions = self._session_store.load_sessions(
-                    self.canvas_name, self._history_limit
-                )
-        except Exception as e:
-            logger.error(f"[HistoryManager] 迁移失败: {e}")
-
     def _normalize_sessions(self, data: List) -> List[Dict]:
         """规范化会话数据"""
         normalized = []
@@ -495,15 +471,6 @@ class HistoryManager:
             db_path = os.path.join(".drifox", "sessions.db")
             if os.path.exists(db_path):
                 return os.path.getsize(db_path)
-
-        # JSON 模式
-        total_size = 0
-        if self.history_file.exists():
-            try:
-                total_size += self.history_file.stat().st_size
-            except Exception:
-                pass
-        return total_size
 
     def get_memory_stats(self) -> Dict:
         total_messages = sum(s.get("message_count", 0) for s in self._history_sessions)

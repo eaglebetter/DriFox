@@ -3,9 +3,6 @@ from datetime import datetime
 from typing import Dict, List, Optional
 from PyQt5.QtCore import QObject
 
-from app.llm_chatter.core.task_state import (
-    TaskSessionState,
-)
 from app.llm_chatter.utils.message_content import (
     consolidate_messages,
 )
@@ -20,7 +17,6 @@ class ChatSession:
         self.created_at: str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         self.last_updated: str = self.created_at
         self.message_count: int = len(self.messages)
-        self.task_state = TaskSessionState()
         self.compaction_state: Dict = self._default_compaction_state()
         self.compaction_cache: Dict = self._default_compaction_cache()
         self.system_prompt: str = ""
@@ -145,20 +141,6 @@ class ChatSession:
             "message_count": self.message_count,
             "compaction_state": self.compaction_state,
             "compaction_cache": self.compaction_cache,
-            "task_state": {
-                "current_agent": self.task_state.current_agent,
-                "current_goal": self.task_state.current_goal,
-                "stage": self.task_state.stage,
-                "related_files": self.task_state.related_files,
-                "todo_items": self.task_state.todo_items,
-                "last_tool_name": self.task_state.last_tool_name,
-                "last_tool_args": self.task_state.last_tool_args,
-                "last_tool_result": self.task_state.last_tool_result,
-                "last_tool_success": self.task_state.last_tool_success,
-                "last_error": self.task_state.last_error,
-                "verification_status": self.task_state.verification_status,
-                "verification_summary": self.task_state.verification_summary,
-            },
         }
 
     @classmethod
@@ -174,10 +156,6 @@ class ChatSession:
         session.set_compaction_state(data.get("compaction_state"))
         session.set_compaction_cache(data.get("compaction_cache"))
         session.system_prompt = data.get("system_prompt", "") or ""
-        task_state_data = data.get("task_state", {})
-        for field_name, value in task_state_data.items():
-            if hasattr(session.task_state, field_name):
-                setattr(session.task_state, field_name, value)
         return session
 
 

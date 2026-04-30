@@ -58,9 +58,6 @@ from app.llm_chatter.utils.message_content import (
     content_to_text,
     ensure_content_blocks, make_tool_result_block,
 )
-from app.llm_chatter.widgets.context_selector import (
-    ContextRegistry,
-)
 from app.llm_chatter.widgets.render_helpers import (
     render_tool_block,
 )
@@ -263,15 +260,6 @@ def _render_think_block(content: str, completed: bool = True) -> str:
 </div>"""
 
 
-def _render_tool_block(
-    tool_name: str, tool_args: dict, result: str, success: bool = True,
-    tool_call_id: str = None,
-) -> str:
-    """渲染工具执行折叠框（默认折叠）- 委托给 render_helpers"""
-    from app.llm_chatter.widgets.render_helpers import render_tool_block as render_block
-    return render_block(tool_name, tool_args, result, success, collapsed=True, tool_call_id=tool_call_id)
-
-
 def _inject_think_cards(md_text: str, completed: bool = True) -> str:
     """注入思考框HTML。
     
@@ -335,12 +323,10 @@ def _render_tool_block_content(content: str) -> str:
         tool_name = name_match.group(1).strip()
     
     # ========== 解析 args（需要正确处理嵌套 JSON）==========
-    # 找到 "args: " 后面第一个 { 的位置
     args_start = content.find("args:")
     if args_start != -1:
         brace_start = content.find("{", args_start)
         if brace_start != -1:
-            # 使用栈匹配找到对应的 }
             depth = 0
             i = brace_start
             while i < len(content):
@@ -350,15 +336,11 @@ def _render_tool_block_content(content: str) -> str:
                 elif c == "}":
                     depth -= 1
                     if depth == 0:
-                        # 找到匹配的 }
                         tool_args_str = content[brace_start:i + 1]
                         break
                 i += 1
-            
-            # 继续找 result 起始位置（在 args 结束之后）
             result_search_start = i + 1
         else:
-            # 没有找到 {，尝试单行解析
             line = content[args_start:].split("\n")[0]
             tool_args_str = line[args_start + 5:].strip()
             result_search_start = args_start + len(line)
@@ -375,21 +357,15 @@ def _render_tool_block_content(content: str) -> str:
     if id_match:
         tool_call_id = id_match.group(1).strip()
     
-    # ========== 解析 result（在 args 结束之后，到 success/tool_call_id/</tool> 之前）==========
-    # 找 result: 行
+    # ========== 解析 result ==========
     result_line_match = re.search(r"^result:\s*(.*)$", content[result_search_start:], re.MULTILINE)
     if result_line_match:
-        # result 可能跨多行，需要找到下一个字段或 </tool>
         result_content = result_line_match.group(1)
         remaining = content[result_search_start + result_line_match.end():]
-        
-        # 查找下一个字段的起始位置
         next_field_match = re.search(r"\n\w+:", remaining)
         if next_field_match:
-            # 多行 result：截取到下一个字段之前
             tool_result = (result_content + remaining[:next_field_match.start()]).strip()
         else:
-            # 单行或最后一段
             tool_result = result_content.strip()
     
     # ========== 解析 args JSON 为字典 ==========
@@ -400,7 +376,6 @@ def _render_tool_block_content(content: str) -> str:
             if not isinstance(args_dict, dict):
                 args_dict = {}
         except json.JSONDecodeError:
-            # 如果解析失败，保留原始字符串（会显示为错误但不崩溃）
             args_dict = {}
 
     return render_tool_block(
@@ -428,24 +403,14 @@ def _inject_tool_blocks(md_text: str, completed: bool = True) -> str:
             parts.append(_render_tool_block_content(content))
             i = end_idx + len("</tool>")
         else:
-            # 工具块未完成（</tool>未出现），保留原始标记，不渲染
-            # 避免流式输出时部分内容被错误渲染到折叠框外
             parts.append(md_text[start_idx:])
             break
     return "".join(parts)
 
 
 def _inject_context_links(md_text: str) -> str:
-    def replacer(match):
-        content, action = match.group(1), match.group(2)
-        if action.startswith("http://") or action.startswith("https://"):
-            return match.group(0)
-
-        encoded_c = urllib.parse.quote(content, safe="")
-        encoded_a = urllib.parse.quote(action, safe="")
-        return f'<span class="context-tag" data-type="{action}" data-content="{encoded_c}" data-action="{encoded_a}">{escape(content)}</span>'
-
-    return _CONTEXT_LINK_PATTERN.sub(replacer, md_text)
+    """Context links 功能已移除，返回原始文本"""
+    return md_text
 
 
 # ======== WebViewer ========
@@ -1313,10 +1278,14 @@ class PlainTextViewer(QWidget):
     def append_chunk(self, text: str):
         self._text += text
         self.text_edit.setPlainText(self._text)
-        QTimer.singleShot(0, self._update_height)
+        # 设置文档宽度以确保正确计算换行
+        vp_width = self.text_edit.viewport().width()
+        if vp_width > 0:
+            self.text_edit.document().setTextWidth(vp_width)
+        QTimer.singleShot(100, self._update_height)
 
     def finish_streaming(self):
-        QTimer.singleShot(0, self._update_height)
+        QTimer.singleShot(100, self._update_height)
 
     def get_plain_text(self) -> str:
         return self._text
@@ -1324,22 +1293,25 @@ class PlainTextViewer(QWidget):
     def set_text(self, text: str):
         self._text = text
         self.text_edit.setPlainText(text)
-        QTimer.singleShot(0, self._update_height)
+        # 设置文档宽度以确保正确计算换行
+        vp_width = self.text_edit.viewport().width()
+        if vp_width > 0:
+            self.text_edit.document().setTextWidth(vp_width)
+        QTimer.singleShot(100, self._update_height)
 
     def _update_height(self):
-        """避免初始时 document().size() 返回虚高值的问题"""
+        """强制 QTextEdit 重新布局后再计算高度"""
+        # 先让 QTextEdit 重新布局
+        self.text_edit.update()
+        self.text_edit.document().markContentsDirty(0, self.text_edit.document().characterCount())
+        
+        # 强制更新几何信息
+        self.text_edit.ensurePolished()
+        
         doc = self.text_edit.document()
-        doc_height = int(doc.size().height())
+        h = int(doc.size().height()) + 16  # padding
         
-        # 获取视口宽度，用于判断是否已布局完成
-        viewport_width = self.text_edit.viewport().width()
-        
-        # 如果视口宽度为0，说明布局未完成，使用保守高度
-        if viewport_width < 10:
-            h = 40  # 最小高度，等resize时再更新
-        else:
-            # 布局完成后，使用文档实际高度 + padding
-            h = max(40, doc_height + 16)
+        h = max(40, h)
         
         if abs(self.height() - h) > 2:
             self.setFixedHeight(h)
@@ -1573,19 +1545,6 @@ class MessageCard(SimpleCardWidget):
         main.addLayout(top)
         main.addWidget(CardSeparator(self))
 
-        if self.role == "user" and self.context_tags:
-            tg_c = QWidget(self)
-            tl = QHBoxLayout(tg_c)
-            tl.setContentsMargins(0, 0, 0, 0)
-            tl.setSpacing(4)
-            for k, (n, _, _, _) in self.context_tags.items():
-                t = TagWidget(k, n)
-                t.doubleClicked.connect(lambda k=k, t=t: self._on_link_click(k, t))
-                tl.addWidget(t)
-            tl.addStretch()
-            main.addWidget(tg_c)
-            main.addWidget(CardSeparator(self))
-
         if self.role == "user":
             self.viewer = PlainTextViewer(self)
             self.viewer.contentHeightChanged.connect(self._update_height)
@@ -1733,15 +1692,6 @@ class MessageCard(SimpleCardWidget):
         else:
             bd, bg = self._base_border, self._base_bg
         self._apply_card_style(border=bd, bg=bg)
-
-    def _on_link_click(self, k, t):
-        if ContextRegistry and k in self.context_tags:
-            try:
-                exe = self.parent.homepage.context_register.get_executor(k)
-                if exe:
-                    exe(self.context_tags[k][2], t)
-            except:
-                pass
 
     def _emit_card_diff_requested(self):
         """发射卡片差异请求信号"""
