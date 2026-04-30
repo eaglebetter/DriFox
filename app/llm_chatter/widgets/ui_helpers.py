@@ -1079,6 +1079,26 @@ def init_after_loading_session(
         tool_executor.set_session_context(session_id)
 
 
+def post_append_user_message(
+    self_widget,
+    user_round_index,
+    update_preview_func=None,
+    sync_preview_func=None
+) -> None:
+    """
+    添加用户消息后的后处理
+    
+    Args:
+        self_widget: 自身 widget
+        user_round_index: 用户消息 round 索引
+        update_preview_func: 更新预览函数
+        sync_preview_func: 同步预览函数
+    """
+    self_widget._current_assistant_round_index = user_round_index
+    if update_preview_func:
+        update_preview_func()
+
+
 def refresh_history_card_if_visible(history_card, refresh_func=None) -> None:
     """
     如果历史卡片可见则刷新

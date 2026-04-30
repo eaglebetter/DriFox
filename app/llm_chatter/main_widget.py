@@ -166,6 +166,7 @@ from app.llm_chatter.widgets.ui_helpers import (
     add_message_to_layout,
     init_new_session_after_archive,
     init_after_loading_session,
+    post_append_user_message,
 )
 from app.tool_window import (
     ToolWindow,
@@ -2050,10 +2051,8 @@ class OpenAIChatToolWindow(ToolWindow):
         self._add_chat_widget(card)
         self._scroll_to_bottom()
 
-        # 更新当前 assistant 的 round_index 为这个 user message 的索引
-        self._current_assistant_round_index = user_round_index
-
-        self._update_node_preview()
+        # 使用辅助函数后处理
+        post_append_user_message(self, user_round_index, self._update_node_preview)
         return card
 
     def _append_assistant_message(self, timestamp: str = None) -> MessageCard:
