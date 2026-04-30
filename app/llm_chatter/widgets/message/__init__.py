@@ -13,14 +13,8 @@ from app.llm_chatter.widgets.message.renderer import (
     wrap_html_with_css,
     StreamingRenderer,
 )
-from app.llm_chatter.widgets.message.viewer import (
-    CodeWebViewer,
-    PlainTextViewer,
-    ConsoleMonitorPage,
-)
 from app.llm_chatter.widgets.message.card import (
     MessageCard,
-    TagWidget,
     create_welcome_card,
 )
 
@@ -36,12 +30,7 @@ __all__ = [
     "get_action_color",
     "wrap_html_with_css",
     "StreamingRenderer",
-    # 查看器
-    "CodeWebViewer",
-    "PlainTextViewer",
-    "ConsoleMonitorPage",
     # 卡片
     "MessageCard",
-    "TagWidget",
     "create_welcome_card",
 ]
