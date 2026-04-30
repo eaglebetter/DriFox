@@ -67,6 +67,9 @@ class ChatEngine:
         get_memory_context: Optional[Callable[[], str]] = None,
         worker_callbacks: Optional[Dict[str, Callable]] = None,
         api_mode: bool = False,
+        # 新增参数
+        event_bus: Any = None,
+        context_manager: Any = None,
     ):
         self._session_manager = session_manager
         self._get_model_config = get_model_config
@@ -86,6 +89,17 @@ class ChatEngine:
         # API 模式专用：直接回调（绕过 Qt 信号-槽，避免跨线程事件循环问题）
         self._worker_callbacks = worker_callbacks or {}
         self._api_mode = api_mode
+        
+        # 新增：EventBus 和 ContextManager
+        self._event_bus = event_bus
+        self._context_manager = context_manager
+        
+        # 如果提供了 ContextManager，使用它初始化压缩状态
+        if self._context_manager:
+            self._compaction_state = self._make_compaction_state(
+                active=False,
+                source="context_manager"
+            )
 
     def _make_compaction_state(
         self,
@@ -148,6 +162,27 @@ class ChatEngine:
     def set_session_manager(self, session_manager):
         """Update the session manager reference (used when session is archived)."""
         self._session_manager = session_manager
+
+    def set_event_bus(self, event_bus):
+        """设置事件总线"""
+        self._event_bus = event_bus
+        
+    def set_context_manager(self, context_manager):
+        """设置上下文管理器"""
+        self._context_manager = context_manager
+        if self._context_manager:
+            self._compaction_state = self._make_compaction_state(
+                active=False,
+                source="context_manager"
+            )
+            
+    def get_event_bus(self):
+        """获取事件总线"""
+        return self._event_bus
+        
+    def get_context_manager(self):
+        """获取上下文管理器"""
+        return self._context_manager
 
     def _get_canvas_tools(self):
         context_provider = self._get_context_provider()
