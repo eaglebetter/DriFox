@@ -257,7 +257,7 @@ class MessageCard(CardWidget):
             main.addWidget(tg_c)
             main.addWidget(CardSeparator(self))
 
-        if self.role == "user":
+        if self.role in ("user", "welcome"):
             self.viewer = PlainTextViewer(self)
             self.viewer.contentHeightChanged.connect(self._update_height)
         else:
