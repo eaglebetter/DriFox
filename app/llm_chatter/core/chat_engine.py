@@ -15,20 +15,6 @@ from app.llm_chatter.core.provider_profile import (
 )
 from app.llm_chatter.tools import get_builtin_tools_schema
 
-# task_state 相关常量 - 从 task_state.py 提取
-CODING_STAGES = ["discover", "plan", "edit", "verify", "review", "summarize"]
-STAGE_PROMPTS = {
-    "discover": "## Active Stage: Discover\n正在分析任务...",
-    "plan": "## Active Stage: Plan\n正在制定计划...",
-    "edit": "## Active Stage: Edit\n正在编写代码...",
-    "verify": "## Active Stage: Verify\n正在验证...",
-    "review": "## Active Stage: Review\n正在审查...",
-    "summarize": "## Active Stage: Summarize\n正在总结...",
-}
-
-def resolve_stage_prompt(stage: str) -> str:
-    """获取阶段的提示文本"""
-    return STAGE_PROMPTS.get(stage, STAGE_PROMPTS.get("discover"))
 from app.llm_chatter.utils.chat_session import (
     ChatSession,
     SessionManager,
@@ -265,13 +251,7 @@ class ChatEngine:
     def _smart_trim_messages(self, cards: List[Any], max_tokens: int) -> List[Any]:
         if not cards:
             return []
-        system_tokens = 0
-        for part in [
-            self._session_manager.get_current_session().task_state.build_context_block(),
-            self._session_manager.get_current_session().task_state.build_event_digest(),
-        ]:
-            system_tokens += estimate_tokens(part) if part else 0
-        available_tokens = max_tokens - system_tokens - 200
+        available_tokens = max_tokens - 200
         if available_tokens <= 0:
             return []
         selected = []
@@ -746,11 +726,8 @@ class ChatEngine:
 
         if agent_name is None or agent_name.lower() in ("default", "通用"):
             self._current_agent = "plan"
-            if session:
-                session.task_state.switch_agent("plan")
             logger.info("[ChatEngine] Switched to default agent: plan")
             self._emit("agent_switched", "plan")
-            self._emit("task_state_changed", session.task_state if session else None)
             return
 
         agent = agent_manager.get_agent(agent_name)
@@ -759,11 +736,8 @@ class ChatEngine:
             return
 
         self._current_agent = agent_name
-        if session:
-            session.task_state.switch_agent(agent_name)
         logger.info(f"[ChatEngine] Switched to agent: {agent_name}")
         self._emit("agent_switched", agent_name)
-        self._emit("task_state_changed", session.task_state if session else None)
 
     def send_message(
         self,
@@ -787,13 +761,8 @@ class ChatEngine:
 
         self._is_streaming = True
         session.add_user_message(content=user_text, params=context_params or {})
-        session.task_state.switch_agent(self._current_agent or "plan")
-        session.task_state.infer_stage_from_turn(user_text)
-        if session.task_state.stage == "verify":
-            session.task_state.update_verification("running", "Verification requested")
 
         self._emit("user_message_added", user_text)
-        self._emit("task_state_changed", session.task_state)
 
         messages = self._build_messages(session, llm_config)
         if self._current_agent:
@@ -813,7 +782,6 @@ class ChatEngine:
         allow_llm_summary: bool = False,
     ) -> List[Dict]:
         messages: List[Dict[str, Any]] = []
-        task_state = session.task_state
 
         if self._current_agent:
             full_system_prompt = self._get_agent_manager().get_agent_system_prompt(
@@ -824,8 +792,6 @@ class ChatEngine:
 
         prompt_parts = [
             full_system_prompt,
-            # task_state.build_context_block(),
-            # task_state.build_event_digest(),
         ]
 
         enabled_skills = Settings.get_instance().llm_enabled_skills.value
@@ -869,13 +835,8 @@ class ChatEngine:
             history_messages = history_messages[:-1]
 
         if self._get_memory_context:
-            memory_query = "\n".join(
-                part
-                for part in [task_state.current_goal or "", latest_user_message]
-                if part.strip()
-            ).strip()
             try:
-                memory_context = self._get_memory_context(memory_query)
+                memory_context = self._get_memory_context(latest_user_message)
             except TypeError:
                 memory_context = self._get_memory_context()
             if memory_context:
@@ -996,21 +957,6 @@ class ChatEngine:
         llm_config: Dict,
         tools: List[Dict],
     ):
-        def build_stage_prompt():
-            session = self._session_manager.get_current_session()
-            if session:
-                return resolve_stage_prompt(session.task_state.stage)
-            return resolve_stage_prompt("discover")
-
-        def on_stage_changed(new_stage: str):
-            session = self._session_manager.get_current_session()
-            if session and new_stage in CODING_STAGES:
-                session.task_state.set_stage(new_stage, "model-requested")
-                self._emit("task_state_changed", session.task_state)
-
-        if self._tool_executor:
-            self._tool_executor.set_stage_callback(on_stage_changed)
-
         compaction_prompt = ""
         compaction_config = {}
         if self._agent_manager and self._agent_manager.get_agent("compaction"):
@@ -1027,8 +973,6 @@ class ChatEngine:
             tools=tools,
             tool_executor=self._tool_executor,
             tool_start_callback=self._callbacks.get("tool_call_sync_requested"),
-            get_stage_prompt=build_stage_prompt,
-            stage_changed_callback=on_stage_changed,
             permission_check_callback=self._check_tool_permission,
             compaction_prompt=compaction_prompt,
             compaction_config=compaction_config,
@@ -1077,31 +1021,6 @@ class ChatEngine:
     def _on_tool_result_received(
         self, tool_call_id: str, tool_name: str, arguments: dict, result: Any
     ):
-        session = self._session_manager.get_current_session()
-        if session:
-            success = result.success if hasattr(result, "success") else True
-            session.task_state.update_tool_result(
-                tool_name, arguments or {}, str(result), success
-            )
-
-            if tool_name == "run_verify":
-                session.task_state.update_verification(
-                    "passed" if success else "failed", str(result)
-                )
-            elif tool_name == "bash":
-                command = (arguments or {}).get("command", "")
-                if any(
-                    token in command.lower() for token in ["pytest", "test", "compile"]
-                ):
-                    session.task_state.update_verification(
-                        "passed" if success else "failed", str(result)
-                    )
-            if tool_name in ("todowrite", "todoread") and self._tool_executor:
-                session.task_state.update_todos(self._tool_executor.todo_list)
-            if tool_name == "task":
-                session.task_state.set_stage("summarize", "sub-agent-result")
-            self._emit("task_state_changed", session.task_state)
-
         self._emit("tool_result_received", tool_call_id, tool_name, arguments, result)
 
     def _on_worker_finished(self, response: str):
@@ -1116,10 +1035,6 @@ class ChatEngine:
 
     def _on_error(self, error: str):
         self._is_streaming = False
-        session = self._session_manager.get_current_session()
-        if session:
-            session.task_state.record_error(error)
-            self._emit("task_state_changed", session.task_state)
         self._emit("error", error)
 
     def stop(self) -> List[Dict]:
