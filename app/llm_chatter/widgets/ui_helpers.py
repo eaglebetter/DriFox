@@ -495,6 +495,36 @@ def deduplicate_operations(operations: list) -> list:
     return unique_ops
 
 
+def find_last_tool_call_id_after_round(messages: list, round_ranges: list, round_index: int) -> Optional[str]:
+    """
+    查找指定 round 之后最后一个 tool_call_id
+    
+    Args:
+        messages: 消息列表
+        round_ranges: round 范围列表
+        round_index: 目标 round 索引
+        
+    Returns:
+        最后一个 tool_call_id 或 None
+    """
+    if round_index < 0 or round_index >= len(round_ranges):
+        return None
+    
+    # 获取该 round 之后的所有消息的 start index
+    _, end_idx = round_ranges[round_index]
+    
+    # 查找 end_idx 之后的所有 tool_call_id
+    last_call_id = None
+    for i in range(end_idx, len(messages)):
+        msg = messages[i]
+        if msg.get("role") == "tool":
+            call_id = msg.get("tool_call_id")
+            if call_id:
+                last_call_id = call_id
+    
+    return last_call_id
+
+
 def create_assistant_card_widget(
     parent,
     timestamp: str,

@@ -139,6 +139,7 @@ from app.llm_chatter.widgets.ui_helpers import (
     find_widgets_to_remove_for_round,
     deduplicate_operations,
     create_assistant_card_widget,
+    find_last_tool_call_id_after_round,
 )
 from app.tool_window import (
     ToolWindow,
@@ -2402,23 +2403,8 @@ class OpenAIChatToolWindow(ToolWindow):
 
         canonical_messages = consolidate_messages(session.messages)
         round_ranges = get_user_round_ranges(canonical_messages)
-
-        if round_index < 0 or round_index >= len(round_ranges):
-            return None
-
-        # 获取该 round 之后的所有消息的 start index
-        _, end_idx = round_ranges[round_index]
-
-        # 查找 end_idx 之后的所有 tool_call_id
-        last_call_id = None
-        for i in range(end_idx, len(canonical_messages)):
-            msg = canonical_messages[i]
-            if msg.get("role") == "tool":
-                call_id = msg.get("tool_call_id")
-                if call_id:
-                    last_call_id = call_id
-
-        return last_call_id
+        
+        return find_last_tool_call_id_after_round(canonical_messages, round_ranges, round_index)
 
     def _get_all_tool_call_ids_from_round(self, round_index: int) -> List[str]:
         """获取从指定 round 到最后的所有 tool_call_id"""
