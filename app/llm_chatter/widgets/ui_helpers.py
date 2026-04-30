@@ -933,6 +933,35 @@ def restore_input_from_card(input_area, card) -> None:
     input_area.setFocus()
 
 
+def find_user_card_at_index(chat_layout, target_index: int) -> Any:
+    """
+    找到指定索引的 user 卡片
+    
+    Args:
+        chat_layout: 聊天布局
+        target_index: 目标索引
+        
+    Returns:
+        找到的卡片或 None
+    """
+    # 延迟导入避免循环依赖
+    from app.llm_chatter.widgets.message_card import MessageCard
+    
+    pair_index = 0
+    for i in range(chat_layout.count()):
+        item = chat_layout.itemAt(i)
+        if not item or not item.widget():
+            continue
+        widget = item.widget()
+        if not isinstance(widget, MessageCard):
+            continue
+        if widget.role == "user":
+            if pair_index == target_index:
+                return widget
+            pair_index += 1
+    return None
+
+
 def refresh_history_card_if_visible(history_card, refresh_func=None) -> None:
     """
     如果历史卡片可见则刷新

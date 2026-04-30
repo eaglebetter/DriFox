@@ -161,6 +161,7 @@ from app.llm_chatter.widgets.ui_helpers import (
     log_deletion_stats,
     setup_user_card_signals,
     restore_input_from_card,
+    find_user_card_at_index,
 )
 from app.tool_window import (
     ToolWindow,
@@ -2142,20 +2143,8 @@ class OpenAIChatToolWindow(ToolWindow):
             self.node_preview.set_visible_node(visible_index)
 
     def _on_node_preview_clicked(self, index: int):
-        pair_index = 0
-        target_widget = None
-        for i in range(self.chat_layout.count()):
-            item = self.chat_layout.itemAt(i)
-            if not item or not item.widget():
-                continue
-            widget = item.widget()
-            if not isinstance(widget, MessageCard):
-                continue
-            if widget.role == "user":
-                if pair_index == index:
-                    target_widget = widget
-                    break
-                pair_index += 1
+        # 使用辅助函数找到目标卡片
+        target_widget = find_user_card_at_index(self.chat_layout, index)
 
         if target_widget:
             self.node_preview.set_progress_position(index)
