@@ -160,6 +160,7 @@ from app.llm_chatter.widgets.ui_helpers import (
     scroll_to_bottom_if_streaming,
     log_deletion_stats,
     setup_user_card_signals,
+    restore_input_from_card,
 )
 from app.tool_window import (
     ToolWindow,
@@ -2263,10 +2264,8 @@ class OpenAIChatToolWindow(ToolWindow):
         if not self._truncate_session_from_user_round(round_index):
             return
 
-        self.input_area.setPlainText(user_input)
-        self.input_area.moveCursor(QTextCursor.End)
-        self.input_area._on_text_changed()
-        self.input_area.setFocus()
+        # 恢复输入框内容
+        restore_input_from_card(self.input_area, card)
 
     def _get_last_tool_call_id_after_round(self, round_index: int) -> Optional[str]:
         """获取指定 round_index 之后最后一个 tool_call_id"""

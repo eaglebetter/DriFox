@@ -916,6 +916,23 @@ def setup_user_card_signals(card, delete_callback, undo_callback, action_callbac
     card.actionRequested.connect(action_callback)
 
 
+def restore_input_from_card(input_area, card) -> None:
+    """
+    从卡片恢复输入框内容
+    
+    Args:
+        input_area: 输入区域控件
+        card: 消息卡片
+    """
+    from PyQt5.QtGui import QTextCursor
+    
+    user_input = card.get_plain_text()
+    input_area.setPlainText(user_input)
+    input_area.moveCursor(QTextCursor.End)
+    input_area._on_text_changed()
+    input_area.setFocus()
+
+
 def refresh_history_card_if_visible(history_card, refresh_func=None) -> None:
     """
     如果历史卡片可见则刷新
