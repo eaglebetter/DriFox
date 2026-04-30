@@ -1099,6 +1099,28 @@ def post_append_user_message(
         update_preview_func()
 
 
+def build_node_preview_from_session(
+    session,
+    content_to_text_func,
+    max_len: int = 30
+) -> list:
+    """
+    从会话构建节点预览数据
+    
+    Args:
+        session: ChatSession 对象
+        content_to_text_func: 内容转文本函数
+        max_len: 最大长度
+        
+    Returns:
+        节点预览数据列表
+    """
+    from app.llm_chatter.utils.message_content import consolidate_messages
+    
+    messages = consolidate_messages(session.messages)
+    return build_node_preview_data(messages, content_to_text_func, max_len)
+
+
 def refresh_history_card_if_visible(history_card, refresh_func=None) -> None:
     """
     如果历史卡片可见则刷新

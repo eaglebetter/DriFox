@@ -136,6 +136,7 @@ from app.llm_chatter.widgets.ui_helpers import (
     generate_multi_file_diff_html,
     calculate_scroll_progress,
     build_node_preview_data,
+    build_node_preview_from_session,
     find_widgets_to_remove_for_round,
     deduplicate_operations,
     create_assistant_card_widget,
@@ -2091,10 +2092,9 @@ class OpenAIChatToolWindow(ToolWindow):
         session = self.session_manager.get_current_session()
         if not session:
             return
-        messages = consolidate_messages(session.messages)
         
         # 使用辅助函数构建 node preview 数据
-        node_data = build_node_preview_data(messages, content_to_text, max_len=30)
+        node_data = build_node_preview_from_session(session, content_to_text, max_len=30)
 
         self.node_preview.update_nodes(node_data)
         self._sync_node_preview_to_scroll()
