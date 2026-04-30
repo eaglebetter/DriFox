@@ -1,23 +1,16 @@
 # -*- coding: utf-8 -*-
+import ctypes
 import os
-import re
 from pathlib import Path
 
-import ctypes
-from datetime import datetime
-from typing import Optional, Dict, Any, List
-
 from PyQt5.QtCore import (
-    Qt,
     QTimer,
     pyqtSignal,
     QThreadPool,
 )
-from PyQt5.QtGui import QTextCursor, QPixmap
 from PyQt5.QtWidgets import (
     QVBoxLayout,
     QHBoxLayout,
-    QLabel,
     QApplication,
     QWidget,
     QFileDialog, QGraphicsOpacityEffect,
@@ -31,15 +24,12 @@ except NameError:
     # PyQt5 中 qRegisterMetaType 是内置函数，不需要导入
     pass
 
-from loguru import logger
 from qfluentwidgets import (
     setFont,
-    ComboBox,
     FluentIcon,
     SingleDirectionScrollArea,
     InfoBar,
     InfoBarPosition,
-    CardWidget,
     TransparentToolButton,
 )
 
@@ -103,69 +93,10 @@ from app.llm_chatter.widgets.base_settings_card import (
 from app.llm_chatter.widgets.model_config_card import (
     ModelConfigCard,
 )
-from app.llm_chatter.widgets.model_selector_popup import (
-    ModelSelectorPopup,
-)
 from app.llm_chatter.widgets.history_card import (
     HistoryCard,
 )
-from app.llm_chatter.widgets.ui_helpers import (
-    WINDOW_STYLE,
-    CHAT_SCROLL_STYLE,
-    TITLE_STYLE,
-    MODEL_BTN_STYLE,
-    MODEL_BTN_TEXT_STYLE,
-    sanitize_user_message_for_display,
-    get_default_timestamp,
-    get_action_color,
-    cleanup_stale_card_cache,
-    filter_alive_cards,
-    is_widget_alive,
-    collect_tool_call_ids,
-    format_file_list,
-    read_backup_files,
-    generate_diff_html,
-    generate_multi_file_diff_html,
-    calculate_scroll_progress,
-    build_node_preview_data,
-    build_node_preview_from_session,
-    find_widgets_to_remove_for_round,
-    deduplicate_operations,
-    create_assistant_card_widget,
-    find_last_tool_call_id_after_round,
-    delete_widgets_from_layout,
-    refresh_history_card_if_visible,
-    collect_message_cards_from_layout,
-    count_user_cards_in_layout,
-    find_last_assistant_card,
-    collect_user_card_widgets,
-    create_session_from_record,
-    collect_operations_for_round,
-    get_round_message_indices,
-    create_new_session_state,
-    is_session_empty,
-    truncate_messages_at_round,
-    get_session_compaction_info,
-    save_or_archive_session,
-    truncate_and_remove_round,
-    show_diff_viewer,
-    render_batch_to_assistant_card,
-    scroll_to_bottom_if_streaming,
-    log_deletion_stats,
-    setup_user_card_signals,
-    restore_input_from_card,
-    find_user_card_at_index,
-    clear_and_show_welcome,
-    add_message_to_layout,
-    init_new_session_after_archive,
-    init_after_loading_session,
-    post_append_user_message,
-    get_first_file_operation,
-    invalidate_session_card_cache,
-    refresh_session_view,
-    get_default_save_filename,
-    export_messages_to_markdown,
-)
+from app.llm_chatter.widgets.ui_helpers import *
 from app.tool_window import (
     ToolWindow,
     DockPosition,

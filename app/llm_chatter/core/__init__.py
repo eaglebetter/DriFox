@@ -16,9 +16,6 @@ from app.llm_chatter.core.agent import (
     AgentManager,
     create_agent_manager,
 )
-from app.llm_chatter.core.task_state import (
-    TaskSessionState,
-)
 from app.llm_chatter.core.context_manager import ContextManager
 
 __all__ = [
@@ -28,6 +25,5 @@ __all__ = [
     "Agent",
     "AgentManager",
     "create_agent_manager",
-    "TaskSessionState",
     "ContextManager",
 ]
