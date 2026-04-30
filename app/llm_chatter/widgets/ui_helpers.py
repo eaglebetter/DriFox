@@ -203,6 +203,58 @@ def truncate_text(text: str, max_length: int = 300) -> str:
     return text[:max_length] + "..."
 
 
+def collect_tool_call_ids(messages: list, start_idx: int, end_idx: int) -> list:
+    """
+    收集指定范围内的 tool_call_id
+    
+    Args:
+        messages: 消息列表
+        start_idx: 起始索引
+        end_idx: 结束索引
+        
+    Returns:
+        tool_call_id 列表
+    """
+    call_ids = []
+    for i in range(start_idx, end_idx):
+        if i >= len(messages):
+            break
+        msg = messages[i]
+        role = msg.get("role")
+        if role == "assistant":
+            tool_calls = msg.get("tool_calls", [])
+            for tc in tool_calls:
+                if isinstance(tc, dict):
+                    tid = tc.get("id")
+                    if tid and tid not in call_ids:
+                        call_ids.append(tid)
+        elif role == "tool":
+            tid = msg.get("tool_call_id")
+            if tid and tid not in call_ids:
+                call_ids.append(tid)
+    return call_ids
+
+
+def format_file_list(files: list, max_count: int = 5) -> str:
+    """
+    格式化文件列表用于显示
+    
+    Args:
+        files: 文件列表
+        max_count: 最大显示数量
+        
+    Returns:
+        格式化后的字符串
+    """
+    if not files:
+        return ""
+    display = files[:max_count]
+    result = "\n".join(f"  - {f}" for f in display)
+    if len(files) > max_count:
+        result += f"\n  ... 还有 {len(files) - max_count} 个文件"
+    return result
+
+
 # ==================== 动作颜色辅助 ====================
 
 ACTION_COLORS = {
