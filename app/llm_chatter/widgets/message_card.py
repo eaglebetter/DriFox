@@ -1037,7 +1037,6 @@ class CodeWebViewer(QWebEngineView):
         safe_md = _unwrap_code_blocks_with_context_links(safe_md)
         safe_md = _inject_context_links(safe_md)
         processed_md = _inject_think_cards(safe_md, self._streaming is False)
-        processed_md = _inject_tool_blocks(processed_md, self._streaming is False)
 
         try:
             md = get_markdown_instance()
