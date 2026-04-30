@@ -42,7 +42,8 @@ params = [
     "--windowed",
     "--name=Drifox",  # 直接指定名称，省去后期改名麻烦
     # 数据文件包含
-    f"--add-data=app/llm_chatter/agents{os.pathsep}app/llm_chatter",
+    f"--add-data=app/llm_chatter/agents{os.pathsep}app/llm_chatter/agents",
+    f"--add-data=app/llm_chatter/skills{os.pathsep}app/llm_chatter/skills",
 ]
 
 if icon_arg:
