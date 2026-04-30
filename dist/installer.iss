@@ -27,7 +27,7 @@ DefaultDirName={autopf}\{#MyAppName}
 OutputBaseFilename=Drifox_installer
 Compression=lzma2
 SolidCompression=yes
-SetupIconFile=logoico.ico
+SetupIconFile=drifox.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 ; "ArchitecturesAllowed=x64compatible" specifies that Setup cannot run
 ; on anything but x64 and Windows 11 on Arm.
