@@ -124,27 +124,6 @@ def append_text_block(content: Any, text: Any) -> List[Dict[str, Any]]:
     return blocks
 
 
-def append_tool_result_block(
-    content: Any,
-    tool_name: str,
-    arguments: Optional[Dict[str, Any]] = None,
-    result: Any = None,
-    success: bool = True,
-    tool_call_id: Optional[str] = None,
-) -> List[Dict[str, Any]]:
-    blocks = ensure_content_blocks(content)
-    blocks.append(
-        make_tool_result_block(
-            tool_name=tool_name,
-            arguments=arguments,
-            result=result,
-            success=success,
-            tool_call_id=tool_call_id,
-        )
-    )
-    return blocks
-
-
 def content_to_text(content: Any, include_tool_results: bool = False) -> str:
     if isinstance(content, str):
         return content
@@ -184,7 +163,7 @@ def content_to_markdown(content: Any) -> str:
                 "<tool>",
                 f"name: {block.get('name', 'tool')}",
                 f"args: {args_json}",
-                f"result: {result}",
+                f"result: {result[:300]}",
                 f"success: {success}",
             ]
             # 保留 tool_call_id 用于差异对比功能

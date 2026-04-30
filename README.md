@@ -29,55 +29,167 @@
 ## 🌟 核心特性
 
 ### 🤖 多 Provider 支持
-- **OpenAI** / **DeepSeek** / **Anthropic (Claude)** / **硅基流动** / **Groq** / **Ollama** / **MiniMax** 等
+
+| Provider | 模型示例 | API 地址 |
+|----------|----------|----------|
+| **OpenAI** | gpt-4o, gpt-4o-mini, gpt-4-turbo | api.openai.com |
+| **Anthropic (Claude)** | claude-sonnet-4, claude-3-5-sonnet | api.anthropic.com |
+| **DeepSeek** | deepseek-chat, deepseek-coder | api.deepseek.com |
+| **Google Gemini** | gemini-2.0-flash, gemini-1.5-pro | generativelanguage.googleapis.com |
+| **阿里通义 (DashScope)** | qwen3-max, qwen3-plus | dashscope.aliyuncs.com |
+| **智谱AI** | glm-4-flash, glm-4-plus | open.bigmodel.cn |
+| **硅基流动** | Qwen2.5-7B, glm4-9b-chat | api.siliconflow.cn |
+| **MiniMax** | MiniMax-M2.7, MiniMax-M2.5 | api.minimax.chat |
+| **Groq** | llama-3.3-70b, qwen3-32b | api.groq.com |
+| **百度千帆** | ernie-3.5-8k, ernie-speed-128k | qianfan.baidubce.com |
+| **Ollama** | llama3, qwen2.5, mistral | localhost:11434 |
+| **LMStudio** | 本地模型 | localhost:1234 |
+
 - 支持 **Azure OpenAI** 和 **自定义 API Endpoint**
 - 模型配置持久化，支持 per-session 切换
 - 流式输出 + 非流式输出自适应
+- 自动识别 Provider 类型和上下文窗口限制
 
 ### 🧠 OpenCode 风格 Agent 系统
-- **多 Agent 架构**：Primary / Subagent / Hidden 三种模式
-- **灵活配置**：支持 Markdown (YAML frontmatter) 或 YAML 文件定义 Agent
-- **Permission 系统**：细粒度工具权限控制（allow / deny / ask）
-- **Agent Profiles**：自定义 temperature、top_p、max_steps、模型选择
-- **内置 Agents**：plan、build、explore、skillful、general、summary、compaction、title
 
-| Agent | 用途 |
-|-------|------|
-| `plan` | 任务规划与分解 |
-| `build` | 代码编写与修改 |
-| `explore` | 项目探索与分析 |
-| `skillful` | 技能调用专家 |
-| `general` | 通用对话 |
-| `summary` | 会话总结 |
-| `compaction` | 内容压缩 |
+采用 **Primary / Subagent / Hidden** 三层架构：
 
-### 🛠️ 全面的工具系统 (30+)
-| 类别 | 工具 |
+#### Primary Agents（主智能体，面向用户）
+| Agent | 用途 | 特点 |
+|-------|------|------|
+| `plan` | 任务规划与分解 | **只读**，不直接修改文件，专注规划 |
+| `build` | 代码编写与修改 | 全工具权限，专注实现 |
+
+#### Subagent（子智能体，并行执行）
+| Agent | 用途 | 特点 |
+|-------|------|------|
+| `explore` | 代码库探索 | 只读，深入分析项目结构 |
+| `general` | 通用任务执行 | 并行处理复杂任务 |
+
+#### Hidden（隐藏智能体，自动调用）
+| Agent | 用途 | 触发条件 |
+|-------|------|----------|
+| `summary` | 会话摘要生成 | 新会话创建时 |
+| `compaction` | 上下文压缩 | Token 接近限制时 |
+| `title` | 会话标题生成 | 新会话创建时 |
+
+#### Permission 权限系统
+```yaml
+permission:
+  "*": "allow"          # 默认规则
+  read: "allow"        # 允许读取
+  write: "allow"       # 允许写入
+  bash: "ask"          # 执行前询问
+  task:
+    "build": "allow"   # 允许调用 build
+    "*": "deny"        # 拒绝其他子智能体
+```
+
+| 权限值 | 行为 |
+|--------|------|
+| `allow` | 自动执行，无需确认 |
+| `ask` | 执行前询问用户 |
+| `deny` | 禁止执行 |
+
+### 🛠️ 完整的工具系统（30+ 工具）
+
+#### 文件操作
+| 工具 | 功能 |
 |------|------|
-| **文件操作** | `read`, `write`, `edit`, `multiedit`, `patch`, `grep`, `glob`, `list`, `diff_files` |
-| **终端** | `bash`, `run_verify` |
-| **Web** | `webfetch`, `websearch` |
-| **代码分析** | `get_diagnostics` (Python/JS/TS/Shell) |
-| **任务管理** | `todowrite`, `todoread`, `ask_question` |
-| **Skills** | `skill`, `list_skills`, `scan_repo`, `stage_files` |
-| **记忆** | `memory_list`, `memory_search`, `memory_save`, `memory_consolidate` |
-| **子智能体** | `task` (分发任务到 build/plan/skillful/explore) |
+| `read` | 读取文件内容，支持行号和偏移 |
+| `write` | 创建或覆盖文件 |
+| `edit` | 精确字符串替换 |
+| `multiedit` | 批量编辑同一文件 |
+| `patch` | unified diff 格式修改 |
+| `grep` | 正则表达式搜索 |
+| `glob` | 通配符模式查找文件 |
+| `list` | 列出目录内容 |
+| `diff_files` | 文件差异对比 |
+
+#### 终端与执行
+| 工具 | 功能 |
+|------|------|
+| `bash` | 执行 Shell 命令 |
+| `run_verify` | 运行验证/测试命令 |
+
+#### 网络工具
+| 工具 | 功能 |
+|------|------|
+| `webfetch` | 获取网页内容 |
+| `websearch` | 网络搜索 |
+
+#### 代码分析
+| 工具 | 功能 |
+|------|------|
+| `get_diagnostics` | Python/JS/TS/Shell 语法检查 |
+
+#### 任务管理
+| 工具 | 功能 |
+|------|------|
+| `todowrite` / `todoread` | 待办事项管理 |
+| `ask_question` | 向用户提问 |
+
+#### Skills 与子智能体
+| 工具 | 功能 |
+|------|------|
+| `skill` | 加载技能模块 |
+| `list_skills` | 列出可用技能 |
+| `scan_repo` | 项目结构扫描 |
+| `stage_files` | 文件标记 |
+| `task` | 分发任务给子智能体 |
+
+#### 长期记忆
+| 工具 | 功能 |
+|------|------|
+| `memory_list` | 列出记忆 |
+| `memory_search` | 搜索记忆 |
+| `memory_save` | 保存记忆 |
+| `memory_consolidate` | 从会话提炼记忆 |
 
 ### 💾 长期记忆系统
-- **会话持久化**：SQLite 数据库存储历史会话
-- **跨会话记忆**：置信度评分 + 冲突管理
-- **分类组织**：任务偏好、项目约束、用户习惯
-- **自动汇总**：从对话中自动提取关键事实
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    记忆存储层                           │
+├─────────────────────────────────────────────────────────┤
+│  SQLite (.drifox/sessions.db)                          │
+│  ├── 会话历史 (messages)                                │
+│  └── 长期记忆 (user_memories)                           │
+├─────────────────────────────────────────────────────────┤
+│                    记忆管理层                           │
+├─────────────────────────────────────────────────────────┤
+│  置信度评分 │ 冲突管理 │ 分类组织 (偏好/约束/习惯)      │
+├─────────────────────────────────────────────────────────┤
+│                    自动提炼                            │
+├─────────────────────────────────────────────────────────┤
+│  session → compact → summarize → memory_save           │
+└─────────────────────────────────────────────────────────┘
+```
 
 ### 🎨 Skills 技能系统
-- **brainstorming** – 头脑风暴与创意激发
-- **gk-optimizer** – 工况寻优范围调整（工业专家规则）
-- **writing-plans** – 计划文档编写
 
-### 🌐 API 服务
-- **FastAPI** 后端，支持独立 API 服务
+内置技能可通过 `list_skills` 查看，`skill <name>` 加载使用：
+
+| Skill | 用途 |
+|-------|------|
+| `brainstorming` | 头脑风暴与创意激发 |
+| `caveman` | 简单直白的需求分析 |
+| `find-skills` | 技能查找专家 |
+| `git-commit` | Git 提交信息生成 |
+| `skill-creator` | 自定义技能创建 |
+| `writing-plans` | 计划文档编写 |
+
+技能搜索路径（优先级递减）：
+1. `.drifox/skills/`
+2. `app/llm_chatter/skills/`
+3. `~/.agents/skills/`
+
+### 🌐 API 服务（可选）
+
+- **FastAPI** 后端，支持独立 API 服务运行
 - 会话管理 + 隔离上下文支持
-- Swagger 文档自动生成
+- Swagger 文档自动生成 (`http://localhost:<port>/docs`)
+- 可通过配置启用/禁用
 
 ---
 
@@ -127,39 +239,15 @@ temperature: 0.3
 steps: 30
 model: gpt-4o
 permission:
-  write: allow
-  edit: allow
-  bash: allow
+  "*": allow
 ---
-# Build Agent
 
+# Role
 你是一个经验丰富的工程师，专注于代码实现...
 
 ## 偏好技能
-以下是部分用户偏好的智能体技能，如果以下技能不能满足用户需求，可以使用 `list_skills` 技能加载完整技能列表：
+以下是部分用户偏好的智能体技能...
 ```
-
-### Permission 规则
-```yaml
-permission:
-  "*": "allow"          # 默认允许
-  read: "allow"
-  write: "allow"
-  bash: "deny"          # 禁用 bash
-  task:
-    "build": "allow"    # 允许调用 build 子智能体
-    "*": "deny"         # 拒绝其他子智能体
-```
-
----
-
-## 🛠️ 工具权限说明
-
-| 权限值 | 行为 |
-|--------|------|
-| `allow` | 自动执行，无需确认 |
-| `ask` | 执行前询问用户 |
-| `deny` | 禁止执行 |
 
 ---
 
@@ -172,16 +260,20 @@ permission:
 4. **查看结果** – 消息卡片实时渲染，支持代码高亮
 
 ### 高级功能
-- **切换 Agent** – 工具栏切换不同 Agent 模式
-- **工具调用** – 侧边栏显示工具执行状态
+- **切换 Agent** – 工具栏切换不同 Agent 模式（plan/build）
+- **工具调用** – 浮窗显示工具执行状态
 - **文件预览** – 工具调用结果支持差异对比
 - **历史记录** – 侧边栏查看历史会话
 - **记忆管理** – 管理长期记忆内容
+- **复制窗口** – 将当前窗口复制为独立弹窗
+- **上下文用量** – 显示当前上下文窗口使用率
 
 ### 快捷键
-- `Enter` – 发送消息
-- `Shift+Enter` – 换行
-- `Ctrl+L` – 清除当前会话
+| 快捷键 | 功能 |
+|--------|------|
+| `Enter` | 发送消息 |
+| `Shift+Enter` | 换行 |
+| `Ctrl+L` | 清除当前会话 |
 
 ---
 
@@ -192,25 +284,46 @@ DriFox/
 ├── main.py                    # 独立运行入口
 ├── requirements.txt          # 依赖列表
 ├── build.py                   # PyInstaller 打包脚本
+├── generate_icon_qrc.py       # 图标资源生成
+├── app.config                 # 应用配置
+│
 ├── app/
-│   ├── llm_chatter/          # 核心 LLM 模块
+│   ├── llm_chatter/          # 核心 LLM 对话模块
 │   │   ├── core/             # 核心引擎
-│   │   │   ├── agent.py      # Agent 管理器
-│   │   │   ├── chat_engine.py    # 聊天引擎
-│   │   │   ├── tool_executor.py  # 工具执行器
-│   │   │   └── memory_manager.py # 记忆管理器
+│   │   │   ├── agent.py          # Agent 管理器 + Permission 解析
+│   │   │   ├── chat_engine.py     # 聊天引擎（流式/非流式）
+│   │   │   ├── tool_executor.py   # 工具执行器
+│   │   │   ├── memory_manager.py # 长期记忆管理
+│   │   │   ├── sub_agent_executor.py  # 子智能体执行器
+│   │   │   ├── provider_profile.py    # Provider 能力配置
+│   │   │   └── task_state.py     # 任务状态管理
 │   │   ├── agents/           # Agent 定义 (Markdown/YAML)
-│   │   ├── skills/           # 技能定义
+│   │   ├── skills/           # Skills 技能定义
 │   │   ├── tools/            # 工具实现
 │   │   ├── widgets/          # UI 组件
+│   │   ├── api/              # API 服务
 │   │   └── utils/            # 工具函数
+│   │
 │   ├── sqlite_database/      # SQLite 数据库模块
 │   ├── utils/                # 通用工具
+│   │   ├── config.py             # 配置管理
+│   │   ├── utils.py              # 工具函数
+│   │   └── icons_rc.py           # 图标资源
+│   │
 │   └── widgets/              # 通用 UI 组件
-├── canvas_files/            # 画布文件目录
+│       ├── basic_widget/         # 基础组件
+│       ├── card_widget/          # 卡片组件
+│       └── dialog_widget/        # 弹窗组件
+│
+├── .drifox/                  # 应用数据目录
 │   ├── sessions.db           # 会话数据库
-│   └── workflows/            # 工作流存储
-└── icons/                    # 图标资源
+│   ├── backups/              # 自动备份
+│   └── archived/             # 归档文件
+│
+├── canvas_files/            # 画布文件目录
+├── icons/                   # SVG 图标
+├── images/                  # 图片资源
+└── logs/                    # 日志文件
 ```
 
 ---
@@ -219,6 +332,7 @@ DriFox/
 
 ### 添加自定义 Agent
 在 `app/llm_chatter/agents/` 目录下创建 `.md` 文件：
+
 ```markdown
 ---
 name: my_agent
@@ -234,24 +348,28 @@ permission:
 你的 Agent 描述...
 ```
 
-### 添加自定义 Tool
-在 `app/llm_chatter/tools/` 目录下的对应模块中添加：
-```python
-from app.llm_chatter.tools import register_tool
+### 添加自定义 Skill
+创建目录 `app/llm_chatter/skills/<skill_name>/`，添加 `SKILL.md` 文件：
 
-@register_tool
-def my_custom_tool(arg1: str) -> str:
-    """我的自定义工具"""
-    return f"处理: {arg1}"
+```markdown
+---
+name: my-skill
+description: 我的自定义技能
+---
+
+# My Skill
+
+技能描述...
 ```
+
+### 添加新 Provider
+在 `app/llm_chatter/constants.py` 的 `PROVIDER_MODELS` 和 `FREE_PROVIDERS` 中添加配置。
 
 ---
 
 ## 🤝 贡献指南
 
 欢迎提交 Issue 和 Pull Request！
-
-### 开发环境搭建
 
 ```bash
 # 1. Fork 并克隆仓库
@@ -268,16 +386,7 @@ pip install -r requirements.txt
 
 # 4. 运行开发版本
 python main.py
-
-# 5. 运行测试（如有）
-pytest
 ```
-
----
-
-## 📖 文档
-
-更多文档正在编写中...
 
 ---
 
@@ -290,7 +399,7 @@ pytest
 
 ## 📄 许可证
 
-本项目基于 [GPLv3 License](LICENSE) 开源。
+本项目基于 MIT License 开源。
 
 ---
 

@@ -9,18 +9,6 @@ from datetime import datetime
 from html import escape
 from typing import List, Dict, Any, Optional
 
-from app.utils.utils import get_font_family_css, get_icon
-from app.llm_chatter.widgets.render_helpers import (
-    render_tool_block,
-)
-from app.llm_chatter.utils.message_content import (
-    append_text_block,
-    append_tool_result_block,
-    content_to_markdown,
-    content_to_text,
-    ensure_content_blocks,
-)
-
 from PyQt5.QtCore import (
     Qt,
     QTimer,
@@ -39,7 +27,6 @@ from PyQt5.QtGui import (
     QLinearGradient,
     QPainterPath,
 )
-from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEnginePage
 from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEnginePage
 from PyQt5.QtWidgets import (
     QWidget,
@@ -65,9 +52,19 @@ from qfluentwidgets.components.widgets.card_widget import (
     SimpleCardWidget,
 )
 
+from app.llm_chatter.utils.message_content import (
+    append_text_block,
+    content_to_markdown,
+    content_to_text,
+    ensure_content_blocks, make_tool_result_block,
+)
 from app.llm_chatter.widgets.context_selector import (
     ContextRegistry,
 )
+from app.llm_chatter.widgets.render_helpers import (
+    render_tool_block,
+)
+from app.utils.utils import get_font_family_css, get_icon
 
 # ======== Markdown 实例 ========
 _md_instance = None
@@ -302,47 +299,74 @@ def _inject_think_cards(md_text: str, completed: bool = True) -> str:
 
 def _render_tool_block_content(content: str) -> str:
     """渲染工具块内容为HTML"""
-    lines = content.strip().split("\n")
     tool_name = ""
     tool_args = ""
     tool_result = ""
     tool_success = True
     tool_call_id = None
 
+    # 解析每一行 - 改进：按行解析各字段
+    lines = content.strip().split("\n")
     for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        # name: xxx
         if line.startswith("name: "):
             tool_name = line[6:].strip()
+        # args: xxx - args 可能包含 JSON 对象，需要保留整行内容
         elif line.startswith("args: "):
             tool_args = line[6:].strip()
+        # success: true/false
         elif line.startswith("success: "):
-            tool_success = line[9:].strip().lower() == "true"
+            tool_success = stripped[9:].lower() == "true"
+        # tool_call_id: xxx
         elif line.startswith("tool_call_id: "):
-            tool_call_id = line[14:].strip()
+            tool_call_id = stripped[14:].strip()
 
-    result_match = content.find("result: ")
-    if result_match != -1:
-        result_start = result_match + len("result: ")
-        # 查找 success 或 tool_call_id 的位置来确定 result 的结束
-        success_match = content.find("\nsuccess: ", result_start)
-        tool_call_match = content.find("\ntool_call_id: ", result_start)
-        
-        # 取最近的标记位置
+    # 解析 result：查找 "\nresult: " 或行首 "result: "
+    # result 可能跨越多行，需要找结束位置
+    result_start = -1
+    for pattern in ["\nresult: ", "result: "]:
+        idx = content.find(pattern)
+        if idx != -1:
+            result_start = idx + len(pattern)
+            break
+
+    if result_start != -1:
+        # 查找 result 的结束位置
         end_markers = []
-        if success_match != -1:
-            end_markers.append(success_match)
-        if tool_call_match != -1:
-            end_markers.append(tool_call_match)
-        
+        for marker in ["\nsuccess: ", "\ntool_call_id: ", "\n</tool>"]:
+            marker_idx = content.find(marker, result_start)
+            if marker_idx != -1:
+                end_markers.append(marker_idx)
+
         if end_markers:
             end_pos = min(end_markers)
             tool_result = content[result_start:end_pos].strip()
         else:
             tool_result = content[result_start:].strip()
 
-    try:
-        args_dict = json.loads(tool_args) if tool_args else {}
-    except:
-        args_dict = {}
+    # 解析 args 为字典 - 改进：更健壮的 JSON 解析
+    args_dict = {}
+    if tool_args:
+        try:
+            args_dict = json.loads(tool_args)
+            if not isinstance(args_dict, dict):
+                args_dict = {}
+        except json.JSONDecodeError:
+            # 尝试去除可能的空白字符
+            try:
+                args_dict = json.loads(tool_args.strip())
+            except json.JSONDecodeError:
+                # 最后尝试：查找第一个 { 和最后一个 }
+                first_brace = tool_args.find('{')
+                last_brace = tool_args.rfind('}')
+                if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+                    try:
+                        args_dict = json.loads(tool_args[first_brace:last_brace + 1])
+                    except json.JSONDecodeError:
+                        pass
 
     return render_tool_block(
         tool_name, args_dict, tool_result, tool_success, collapsed=True,
@@ -1810,13 +1834,14 @@ class MessageCard(SimpleCardWidget):
         success: bool = True,
         tool_call_id: str = None,
     ):
-        self._content_data = append_tool_result_block(
-            self._content_data,
-            tool_name=tool_name,
-            arguments=arguments,
-            result=result,
-            success=success,
-            tool_call_id=tool_call_id,
+        self._content_dat.append(
+            make_tool_result_block(
+                tool_name=tool_name,
+                arguments=arguments,
+                result=result,
+                success=success,
+                tool_call_id=tool_call_id,
+            )
         )
         self.viewer._markdown_text = content_to_markdown(self._content_data)
         self.viewer._schedule_render(immediate=True)
