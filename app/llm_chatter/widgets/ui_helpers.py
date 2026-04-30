@@ -118,6 +118,12 @@ def get_default_save_filename(lang: str, code: str) -> str:
         return lang_lower
         
     return extract_code_suggested_filename(code, ext)
+
+
+# ==================== 样式常量 ====================
+
+WINDOW_STYLE = """
+    OpenAIChatToolWindow {
         background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
             stop:0 rgba(10, 14, 22, 255),
             stop:1 rgba(15, 20, 30, 255));
