@@ -146,6 +146,7 @@ from app.llm_chatter.widgets.ui_helpers import (
     count_user_cards_in_layout,
     find_last_assistant_card,
     collect_user_card_widgets,
+    create_session_from_record,
 )
 from app.tool_window import (
     ToolWindow,
@@ -2042,16 +2043,10 @@ class OpenAIChatToolWindow(ToolWindow):
             return
 
         title = self.history_manager.get_current_title(index)
-        restored = ChatSession.from_dict(
-            {
-                "session_id": session_id,
-                "name": title or "历史对话",
-                "messages": messages,
-                "topic_summary": title or "",
-                "compaction_state": session_record.get("compaction_state", {}),
-                "compaction_cache": session_record.get("compaction_cache", {}),
-            }
-        )
+        
+        # 使用辅助函数创建会话
+        restored = create_session_from_record(session_record, messages, title)
+        
         self.session_manager.set_current_session(restored)
         self._history_preview_messages = None
         self._current_session_id = session_id

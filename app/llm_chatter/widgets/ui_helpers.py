@@ -603,6 +603,33 @@ def collect_user_card_widgets(chat_layout) -> list:
     return widgets
 
 
+def create_session_from_record(session_record: dict, messages: list, title: str = None) -> Any:
+    """
+    从历史记录创建 ChatSession
+    
+    Args:
+        session_record: 会话记录字典
+        messages: 消息列表
+        title: 会话标题
+        
+    Returns:
+        ChatSession 实例
+    """
+    from app.llm_chatter.utils.chat_session import ChatSession
+    
+    session_id = session_record.get("session_id")
+    title = title or session_record.get("name") or "历史对话"
+    
+    return ChatSession.from_dict({
+        "session_id": session_id,
+        "name": title,
+        "messages": messages,
+        "topic_summary": title,
+        "compaction_state": session_record.get("compaction_state", {}),
+        "compaction_cache": session_record.get("compaction_cache", {}),
+    })
+
+
 def refresh_history_card_if_visible(history_card, refresh_func=None) -> None:
     """
     如果历史卡片可见则刷新
