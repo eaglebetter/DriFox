@@ -2474,28 +2474,11 @@ class OpenAIChatToolWindow(ToolWindow):
         if round_index < 0 or round_index >= len(round_ranges):
             return []
 
-        # 获取该 round 的起始位置，之后的所有消息都需要统计
+        # 获取该 round 的起始位置
         start_idx, _ = round_ranges[round_index]
         
-        # 从该 round 的 user 消息开始，遍历到消息列表末尾
-        call_ids = []
-        for i in range(start_idx, len(canonical_messages)):
-            msg = canonical_messages[i]
-            role = msg.get("role")
-            if role == "assistant":
-                tool_calls = msg.get("tool_calls", [])
-                for tc in tool_calls:
-                    if isinstance(tc, dict):
-                        tid = tc.get("id")
-                        if tid and tid not in call_ids:
-                            call_ids.append(tid)
-            elif role == "tool":
-                # 也从 tool 消息中提取 tool_call_id
-                tid = msg.get("tool_call_id")
-                if tid and tid not in call_ids:
-                    call_ids.append(tid)
-
-        return call_ids
+        # 使用辅助函数收集剩余的 tool_call_id
+        return collect_tool_call_ids(canonical_messages, start_idx, len(canonical_messages))
 
     def _get_tool_call_ids_in_round(self, round_index: int) -> List[str]:
         """获取指定 round 范围内的所有 tool_call_id"""
