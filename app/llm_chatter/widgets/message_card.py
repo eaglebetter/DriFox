@@ -1327,30 +1327,19 @@ class PlainTextViewer(QWidget):
         QTimer.singleShot(0, self._update_height)
 
     def _update_height(self):
-        """根据行数计算高度，比 document().size() 更可靠"""
+        """避免初始时 document().size() 返回虚高值的问题"""
         doc = self.text_edit.document()
+        doc_height = int(doc.size().height())
         
-        # 获取视口宽度
+        # 获取视口宽度，用于判断是否已布局完成
         viewport_width = self.text_edit.viewport().width()
         
-        # 如果视口宽度无效，使用保守高度
+        # 如果视口宽度为0，说明布局未完成，使用保守高度
         if viewport_width < 10:
-            h = 40
+            h = 40  # 最小高度，等resize时再更新
         else:
-            # 设置文档宽度，确保正确换行
-            doc.setTextWidth(viewport_width - 24)  # 减去 padding
-            doc_height = doc.size().height()
-            
-            # 根据内容类型选择计算方式
-            line_count = doc.blockCount()
-            line_height = 21  # 14px font + 1.5 line-height
-            
-            # 使用行数计算高度更可靠
-            h = max(40, line_count * line_height + 16)
-            
-            # 如果文档高度明显不同，用文档高度（但限制最大值）
-            if doc_height > 0:
-                h = min(h, max(40, doc_height + 16))
+            # 布局完成后，使用文档实际高度 + padding
+            h = max(40, doc_height + 16)
         
         if abs(self.height() - h) > 2:
             self.setFixedHeight(h)
