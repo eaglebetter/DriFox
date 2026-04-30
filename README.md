@@ -3,8 +3,10 @@
   <img width="50%" align="center" src="images/drifoxlogo.png" alt="logo">
 </p>
 
+<img src="images/drifoxtext.png" width="100%" height="100%"><br>
+
 <div align="center">
-  <h1>DriFox - 智能编程助手</h1>
+  <h1>飘狐</h1>
 
   [🇨🇳 中文](README.md)
 
@@ -21,10 +23,7 @@
 
 </div>
 
-DriFox（飘狐）是一个基于大语言模型的智能编程助手，采用 OpenCode 风格的 Agent 架构，提供全面的工具系统和长期记忆能力。支持多 Provider（OpenAI、DeepSeek、Claude 等）切换，可独立运行或集成到 CanvasMind 画布中，实现智能化编程工作流。
-
-<img src="images/drifoxtext.png" width="100%" height="100%"><br>
-
+飘狐是一个基于大语言模型的智能编程助手，采用 OpenCode 风格的 Agent 架构，提供全面的工具系统和长期记忆能力。支持多 Provider（OpenAI、DeepSeek、Claude 等）切换，可独立运行或集成到 CanvasMind 画布中，实现智能化编程工作流。
 ---
 
 ## 🌟 核心特性
