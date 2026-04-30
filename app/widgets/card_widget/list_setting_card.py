@@ -329,7 +329,7 @@ class SkillListSettingCard(ExpandSettingCard):
             / "llm_chatter"
             / "skills",
             Path.home() / ".agents" / "skills",
-            Path("canvas_files") / "skills",
+            Path(".drifox") / "skills",
         ]
 
         self.all_skills = []

@@ -351,7 +351,7 @@ Use the tools available to you based on your permissions.
         skills_dirs = [
             Path(__file__).parent.parent / "skills",
             Path.home() / ".agents" / "skills",
-            Path("canvas_files") / "skills",
+            Path(".drifox") / "skills",
         ]
         result_parts = [
             "\n\n## 偏好技能\n以下是部分用户偏好的智能体技能，如果以下技能不能满足用户需求，可以使用 `list_skills` 技能加载完整技能列表：\n"

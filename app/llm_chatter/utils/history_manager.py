@@ -48,10 +48,7 @@ class HistoryManager:
 
     def __init__(self, canvas_name: str):
         self.canvas_name = canvas_name
-        self.history_dir = Path("canvas_files") / "workflows" / canvas_name
-        self.history_file = self.history_dir / "llm_history.json"
-        self.archive_dir = Path("canvas_files") / "archived"
-        self.history_dir.mkdir(parents=True, exist_ok=True)
+        self.archive_dir = Path(".drifox") / "archived"
         self.archive_dir.mkdir(parents=True, exist_ok=True)
 
         self._history_limit = 100
@@ -74,7 +71,7 @@ class HistoryManager:
 
         if use_sqlite:
             try:
-                self._session_store = SessionStore(db_dir="canvas_files")
+                self._session_store = SessionStore(db_dir=".drifox")
                 if self._session_store.is_initialized:
                     self._use_sqlite = True
                     logger.info(f"[HistoryManager] SQLite 存储已启用: {self.canvas_name}")
@@ -92,12 +89,6 @@ class HistoryManager:
                     logger.warning("[HistoryManager] SQLite 初始化失败，回退 JSON")
             except Exception as e:
                 logger.warning(f"[HistoryManager] SQLite 初始化异常: {e}")
-
-        # 回退到 JSON 模式
-        self._use_sqlite = False
-        self._session_store = None
-        self._history_sessions = self._load_history_from_json()
-        logger.info(f"[HistoryManager] JSON 存储模式: {self.canvas_name}")
 
     def _migrate_if_needed(self):
         """迁移旧 JSON 数据到 SQLite（如果 SQLite 为空），迁移后删除 JSON"""
@@ -131,19 +122,6 @@ class HistoryManager:
                 )
         except Exception as e:
             logger.error(f"[HistoryManager] 迁移失败: {e}")
-
-    def _load_history_from_json(self) -> List[Dict]:
-        """从 JSON 文件加载（回退模式）"""
-        if self.history_file.exists():
-            try:
-                with open(self.history_file, "r", encoding="utf-8") as f:
-                    data = deserialize_from_json(json.load(f))
-                    if not isinstance(data, list):
-                        return []
-                    return self._normalize_sessions(data)
-            except Exception as e:
-                logger.error(f"[HistoryManager] JSON 加载失败: {e}")
-        return []
 
     def _normalize_sessions(self, data: List) -> List[Dict]:
         """规范化会话数据"""
@@ -306,14 +284,8 @@ class HistoryManager:
         return count
 
     def _save_to_disk_json(self):
-        """保存到 JSON 文件（回退模式）"""
-        with open(self.history_file, "w", encoding="utf-8") as f:
-            json.dump(
-                serialize_for_json(self._history_sessions),
-                f,
-                ensure_ascii=False,
-                indent=2,
-            )
+        """保存到 JSON 文件（回退模式）- 不再使用"""
+        pass
 
     def load_latest_session(self) -> Optional[Dict]:
         if not self._history_sessions:
@@ -520,7 +492,7 @@ class HistoryManager:
         """获取总存储大小"""
         if self._use_sqlite and self._session_store:
             # 估算 SQLite 数据库大小
-            db_path = os.path.join("canvas_files", "sessions.db")
+            db_path = os.path.join(".drifox", "sessions.db")
             if os.path.exists(db_path):
                 return os.path.getsize(db_path)
 

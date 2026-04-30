@@ -36,11 +36,11 @@ class SendableTextEdit(QTextEdit):
                 border: 1px solid #2B3850;
                 border-radius: 18px;
                 padding: 14px 128px 18px 16px;
-                selection-background-color: rgba(103, 197, 255, 0.28);
+                selection-background-color: rgba(201, 168, 92, 0.28);
                 {get_font_family_css()} font-size: 14px;
             }}
             QTextEdit:focus {{
-                border: 1px solid #4E93FF;
+                border: 1px solid #C9A85C;
                 background: rgba(22, 29, 41, 200);
             }}
             QTextEdit QScrollBar:vertical {{
@@ -80,7 +80,7 @@ class SendableTextEdit(QTextEdit):
             }}
             ComboBox:hover {{
                 background-color: rgba(255, 255, 255, 0.08);
-                border-color: rgba(103, 197, 255, 0.45);
+                border-color: rgba(201, 168, 92, 0.45);
             }}
             ComboBox::drop-down {{
                 border: none;
@@ -95,7 +95,7 @@ class SendableTextEdit(QTextEdit):
             ComboBox AbstractItemView {{
                 background-color: #192232;
                 color: #EAF2FF;
-                selection-background-color: #2B4C78;
+                selection-background-color: #8B7355;
                 border: 1px solid #2B3850;
                 border-radius: 10px;
                 padding: 4px;
@@ -113,14 +113,14 @@ class SendableTextEdit(QTextEdit):
         self.send_btn.setStyleSheet("""
             TransparentToolButton {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 #66C6FF, stop:1 #4E93FF);
+                    stop:0 #C9A85C, stop:1 #B8956A);
                 border: none;
                 border-radius: 17px;
                 color: white;
             }
             TransparentToolButton:hover {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 #78D0FF, stop:1 #6AA8FF);
+                    stop:0 #D4B878, stop:1 #C9A060);
             }
             TransparentToolButton:disabled {
                 background: rgba(255, 255, 255, 0.10);

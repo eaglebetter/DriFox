@@ -123,7 +123,7 @@ class TaskTools:
         try:
             search_paths = [
                 Path(__file__).parent.parent / "skills" / name / f"SKILL.md",
-                Path("canvas_files") / "skills" / name / f"SKILL.md",
+                Path(".drifox") / "skills" / name / f"SKILL.md",
                 Path.home() / ".agents" / "skills" / name / f"SKILL.md",
             ]
             found_path = None
@@ -155,7 +155,7 @@ class TaskTools:
 
             skills_dirs = [
                 Path(__file__).parent.parent / "skills",
-                Path("canvas_files") / "skills",
+                Path(".drifox") / "skills",
                 Path.home() / ".agents" / "skills",
             ]
             results = []

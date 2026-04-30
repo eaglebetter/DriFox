@@ -1240,15 +1240,17 @@ class PlainTextViewer(QWidget):
         self.text_edit.setReadOnly(True)
         self.text_edit.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self.text_edit.setFrameShape(QTextEdit.NoFrame)
-        self.text_edit.setStyleSheet("""
-            QTextEdit {
+        font_css = get_font_family_css()
+        self.text_edit.setStyleSheet(f"""
+            QTextEdit {{
                 background: transparent;
                 border: none;
+                {font_css}
                 color: #F5F7FB;
                 font-size: 14px;
                 line-height: 1.5;
                 selection-background-color: rgba(102, 198, 255, 0.28);
-            }
+            }}
         """)
         layout.addWidget(self.text_edit)
 
@@ -1448,13 +1450,14 @@ class MessageCard(SimpleCardWidget):
         title_layout.setContentsMargins(0, 0, 0, 0)
         title_layout.setSpacing(1)
 
+        font_css = get_font_family_css()
         nm_l = QLabel(self._theme["title"], self)
         nm_l.setStyleSheet(
-            f"font-size:14px;color:{self._theme['text']};font-weight:700;"
+            f"{font_css} font-size:14px;color:{self._theme['text']};font-weight:700;"
         )
         sub_l = QLabel(self._theme["subtitle"], self)
         sub_l.setStyleSheet(
-            f"font-size:11px;color:{self._theme['muted']};font-weight:500;letter-spacing:0.02em;"
+            f"{font_css} font-size:11px;color:{self._theme['muted']};font-weight:500;letter-spacing:0.02em;"
         )
         title_layout.addWidget(nm_l)
         title_layout.addWidget(sub_l)

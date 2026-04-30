@@ -73,7 +73,7 @@ class MemoryManagerCore:
 
         if use_sqlite:
             try:
-                self._session_store = SessionStore(db_dir="canvas_files")
+                self._session_store = SessionStore(db_dir=".drifox")
                 if self._session_store.is_initialized:
                     self._use_sqlite = True
                     logger.info(f"[MemoryManager] SQLite 存储已启用: {self._canvas_name}")
@@ -92,13 +92,8 @@ class MemoryManagerCore:
         logger.info(f"[MemoryManager] JSON 存储模式: {self._canvas_name}")
 
     def _ensure_memory_file(self):
-        """确保记忆文件存在"""
-        try:
-            memory_dir = Path("canvas_files") / "workflows" / self._canvas_name
-            memory_dir.mkdir(parents=True, exist_ok=True)
-            self._memory_file = memory_dir / "soul.md"
-        except Exception as e:
-            logger.error(f"[MemoryManager] Failed to create memory file: {e}")
+        """确保记忆文件存在 - SQLite 模式下不再使用"""
+        self._memory_file = None
 
     def _migrate_if_needed(self):
         """迁移旧 JSON 数据到 SQLite"""

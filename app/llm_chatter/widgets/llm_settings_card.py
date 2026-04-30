@@ -3,7 +3,7 @@
 大模型设置卡片 - 垂直列表布局，高度不够滚动
 """
 from PyQt5.QtCore import Qt, pyqtSignal, QTimer
-from PyQt5.QtGui import QFont, QFontDatabase
+from PyQt5.QtGui import QFont, QFontDatabase, QColor
 from PyQt5.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -207,33 +207,9 @@ class LLMSettingsCard(CardWidget):
                 self._parent = parent
 
                 self.fontCombo = QFontComboBox()
-                self.fontCombo.setMinimumWidth(200)
-                self.fontCombo.setStyleSheet("""
-                    QFontComboBox {
-                        color: #e0e0e0;
-                        background-color: #3d3d3d;
-                        border: 1px solid #555555;
-                        border-radius: 4px;
-                        padding: 4px 10px;
-                        min-height: 26px;
-                        selection-background-color: #0078d4;
-                    }
-                    QFontComboBox:hover {
-                        border: 1px solid #0078d4;
-                    }
-                    QFontComboBox::drop-down {
-                        border: none;
-                        width: 24px;
-                    }
-                    QFontComboBox QAbstractItemView {
-                        color: #e0e0e0;
-                        background-color: #2d2d2d;
-                        border: 1px solid #555555;
-                        selection-background-color: #0078d4;
-                        selection-color: #ffffff;
-                        outline: none;
-                    }
-                """)
+                # 设置下拉框向左延伸，框右边对齐
+                self.fontCombo.setSizeAdjustPolicy(QFontComboBox.SizeAdjustPolicy.AdjustToContents)
+                self._apply_font_combo_style()
                 # 设置当前字体
                 current_font = cfg.llm_font_family.value
                 self.fontCombo.setCurrentFont(QFont(current_font))
@@ -241,6 +217,99 @@ class LLMSettingsCard(CardWidget):
 
                 self.hBoxLayout.addWidget(self.fontCombo)
                 self.hBoxLayout.addSpacing(16)
+
+            def _apply_font_combo_style(self):
+                """应用字体下拉框样式"""
+                view = self.fontCombo.view()
+                
+                self.fontCombo.setStyleSheet("""
+                    QFontComboBox {
+                        color: #e8e8e8;
+                        background-color: #2a2a2e;
+                        border: 1px solid #4a4a4e;
+                        border-radius: 5px;
+                        padding: 5px 12px 5px 10px;
+                        min-height: 28px;
+                    }
+                    QFontComboBox:hover {
+                        border: 1px solid #0078d4;
+                        background-color: #333338;
+                    }
+                    QFontComboBox:focus {
+                        border: 1px solid #0078d4;
+                    }
+                    QFontComboBox::drop-down {
+                        border: none;
+                        width: 20px;
+                    }
+                """)
+                
+                # 设置下拉视图样式（包含滚动条）
+                view.setStyleSheet("""
+                    QAbstractItemView {
+                        color: #e8e8e8;
+                        background-color: #2a2a2e;
+                        border: 1px solid #4a4a4e;
+                        border-radius: 6px;
+                        padding: 4px;
+                        outline: none;
+                        show-decoration-selected: 1;
+                    }
+                    QAbstractItemView::item {
+                        padding: 6px 14px 6px 12px;
+                        min-height: 36px;
+                        border-radius: 3px;
+                    }
+                    QAbstractItemView::item:hover {
+                        background-color: #3a3a3e;
+                    }
+                    QAbstractItemView::item:selected {
+                        background-color: #0078d4;
+                        color: white;
+                    }
+                    QScrollBar:vertical {
+                        background: transparent;
+                        border: none;
+                        width: 14px;
+                        margin: 4px 2px 4px 2px;
+                    }
+                    QScrollBar::handle:vertical {
+                        background: #555555;
+                        border-radius: 6px;
+                        min-height: 30px;
+                    }
+                    QScrollBar::handle:vertical:hover {
+                        background: #666666;
+                    }
+                    QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                        height: 0px;
+                    }
+                    QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+                        background: none;
+                    }
+                """)
+                
+                # 通过 palette 强制设置背景色
+                palette = view.palette()
+                palette.setColor(view.backgroundRole(), QColor(42, 42, 46))
+                view.setPalette(palette)
+                view.setAutoFillBackground(True)
+
+                # 下拉框右边与点击框右边对齐，向左延伸
+                self.fontCombo.view().setTextElideMode(Qt.ElideRight)
+                # 限制下拉框宽度不超过控件本身宽度（首次显示时设置）
+                self._font_combo_initialized = False
+
+            def showEvent(self, event):
+                super().showEvent(event)
+                if not self._font_combo_initialized:
+                    self._font_combo_initialized = True
+                    combo_width = self.fontCombo.width()
+                    if combo_width > 0:
+                        # 计算内容宽度（减去滚动条和padding）
+                        scrollbar_width = 14 + 2 + 2  # width + margins
+                        content_width = combo_width - scrollbar_width - 8  # 减去滚动条和padding
+                        self.fontCombo.view().setFixedWidth(max(content_width, 50))
 
             def _on_font_changed(self, font):
                 self.cfg.set(self.cfg.llm_font_family, font.family(), save=True)

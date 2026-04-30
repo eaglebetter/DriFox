@@ -156,7 +156,7 @@ class SQLiteDatabaseWindow(ToolWindow):
     def _auto_connect_default_db(self):
         import os
 
-        db_dir = "canvas_files"
+        db_dir = ".drifox"
         db_path = os.path.join(db_dir, "default.db")
         if not os.path.exists(db_dir):
             os.makedirs(db_dir, exist_ok=True)

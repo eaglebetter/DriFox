@@ -103,7 +103,7 @@ class APIHistoryManager:
             from app.llm_chatter.utils.session_store import (
                 SessionStore,
             )
-            self._session_store = SessionStore(db_dir="canvas_files")
+            self._session_store = SessionStore(db_dir=".drifox")
             if self._session_store.is_initialized:
                 logger.info("[APIHistoryManager] SQLite 存储已启用，canvas_id=api")
             else:

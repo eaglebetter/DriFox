@@ -27,7 +27,7 @@ class SessionStore:
     MEMORIES_TABLE = "memories"
     DB_FILENAME = "sessions.db"
 
-    def __init__(self, db_dir: str = "canvas_files"):
+    def __init__(self, db_dir: str = ".drifox"):
         self._db_dir = db_dir
         self._db_path = str(Path(db_dir) / self.DB_FILENAME)
         self._db: Optional[DatabaseManager] = None

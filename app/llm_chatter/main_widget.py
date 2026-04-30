@@ -45,7 +45,7 @@ from qfluentwidgets import (
 )
 
 from app.utils.config import Settings
-from app.utils.utils import get_icon
+from app.utils.utils import get_icon, get_font_family_css
 from app.llm_chatter.constants import (
     FREE_PROVIDERS,
     PROVIDER_ICONS,
@@ -577,18 +577,20 @@ class OpenAIChatToolWindow(ToolWindow):
         left_layout.setSpacing(4)
 
         self.title_edit = QLabel("新对话", self)
-        self.title_edit.setStyleSheet("""
-            QLabel {
+        font_css = get_font_family_css()
+        self.title_edit.setStyleSheet(f"""
+            QLabel {{
+                {font_css}
                 color: #f3f6fc;
                 font-size: 15px;
                 font-weight: bold;
                 padding: 6px 10px;
                 border-radius: 10px;
                 background-color: rgba(255, 255, 255, 0.03);
-            }
-            QLabel:hover {
+            }}
+            QLabel:hover {{
                 background-color: rgba(255, 255, 255, 0.06);
-            }
+            }}
         """)
         self.title_edit.setCursor(Qt.PointingHandCursor)
         self.title_edit.mouseDoubleClickEvent = self._on_title_double_click
@@ -607,6 +609,7 @@ class OpenAIChatToolWindow(ToolWindow):
 
         self.context_usage_ring = ContextUsageRing(self)
         right_layout.addWidget(self.context_usage_ring)
+        right_layout.addSpacing(10)
 
         session_bar_layout.addLayout(left_layout)
         session_bar_layout.addStretch()

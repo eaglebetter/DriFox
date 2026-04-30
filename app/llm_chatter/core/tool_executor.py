@@ -39,35 +39,16 @@ class ToolExecutor:
         from pathlib import Path
 
         workdir = self._workdir
-        if not workdir:
-            try:
-                from app.utils.utils import resource_path
-
-                workdir = resource_path("")
-            except Exception:
-                workdir = os.path.dirname(
-                    os.path.dirname(
-                        os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-                    )
-                )
-
         try:
-            if (
-                hasattr(self._homepage, "workflow_name")
-                and self._homepage.workflow_name
-            ):
-                canvas_name = self._homepage.workflow_name
-                workspace_path = (
-                    Path(workdir)
-                    / "canvas_files"
-                    / "workflows"
-                    / canvas_name
-                    / "workspace"
-                )
-                if workspace_path.exists():
-                    workdir = str(workspace_path)
+            from app.utils.utils import resource_path
+
+            workdir = resource_path("")
         except Exception:
-            pass
+            workdir = os.path.dirname(
+                os.path.dirname(
+                    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                )
+            )
 
         logger.info(f"[ToolExecutor] Initialized with workdir: {workdir}")
         self._builtin_tools = BuiltinTools(self._homepage, workdir)

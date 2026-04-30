@@ -128,12 +128,6 @@ def resource_path(relative_path) -> str:
     return os.path.join(base_path, relative_path)
 
 
-def canvas_file_dump_path(dump_location: str = "canvas_files") -> Path:
-    dump_path = Path(dump_location)
-    dump_path.mkdir(parents=True, exist_ok=True)
-    return dump_path
-
-
 def get_port_node(port):
     """安全获取端口所属节点，兼容 property 和 method"""
     node = port.node
