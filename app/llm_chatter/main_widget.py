@@ -123,6 +123,9 @@ from app.llm_chatter.widgets.ui_helpers import (
     TITLE_STYLE,
     MODEL_BTN_STYLE,
     MODEL_BTN_TEXT_STYLE,
+    sanitize_user_message_for_display,
+    get_default_timestamp,
+    get_action_color,
 )
 from app.tool_window import (
     ToolWindow,
@@ -1738,21 +1741,13 @@ class OpenAIChatToolWindow(ToolWindow):
         return welcome_card
 
     def _sanitize_user_message_for_display(self, content: str) -> str:
-        if not isinstance(content, str):
-            return content
-
-        pattern = re.compile(
-            r"^\[Task Stage:.*?\]\n\[Current Goal:.*?\]\n\[Verification:.*?\]\n\n",
-            re.DOTALL,
-        )
-        return pattern.sub("", content, count=1)
+        """清理用户消息用于显示（保留向后兼容）"""
+        return sanitize_user_message_for_display(content)
 
     def _render_message_to_card(self, batches: List[List[Dict[str, Any]]]):
         for batch in batches:
             role = batch[0].get("role")
-            timestamp = batch[0].get(
-                "timestamp", datetime.now().strftime("%Y-%m-%d %H:%M")
-            )
+            timestamp = batch[0].get("timestamp") or get_default_timestamp()
 
             if role == "user":
                 content = self._sanitize_user_message_for_display(
