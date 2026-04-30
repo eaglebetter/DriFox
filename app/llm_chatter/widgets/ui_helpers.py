@@ -579,6 +579,30 @@ def collect_message_cards_from_layout(
     return cards
 
 
+def collect_user_card_widgets(chat_layout) -> list:
+    """
+    收集布局中的用户消息卡片 widgets
+    
+    Args:
+        chat_layout: 聊天布局
+        
+    Returns:
+        用户卡片 widget 列表
+    """
+    # 延迟导入避免循环依赖
+    from app.llm_chatter.widgets.message_card import MessageCard
+    
+    widgets = []
+    for i in range(chat_layout.count()):
+        item = chat_layout.itemAt(i)
+        if not item or not item.widget():
+            continue
+        widget = item.widget()
+        if isinstance(widget, MessageCard) and widget.role == "user":
+            widgets.append(widget)
+    return widgets
+
+
 def refresh_history_card_if_visible(history_card, refresh_func=None) -> None:
     """
     如果历史卡片可见则刷新

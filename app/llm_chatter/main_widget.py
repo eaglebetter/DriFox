@@ -145,6 +145,7 @@ from app.llm_chatter.widgets.ui_helpers import (
     collect_message_cards_from_layout,
     count_user_cards_in_layout,
     find_last_assistant_card,
+    collect_user_card_widgets,
 )
 from app.tool_window import (
     ToolWindow,
@@ -273,7 +274,6 @@ class OpenAIChatToolWindow(ToolWindow):
     def _initialize_managers(self):
         """初始化核心管理器"""
         canvas_name = getattr(self.homepage, "workflow_name", "default") or "default"
-
         self._memory_manager = MemoryManagerCore(canvas_name)
         self._tool_executor = ToolExecutor(self.homepage, workdir=Path(__file__).parent.parent.parent)
         self._tool_executor.set_memory_manager(self._memory_manager)
@@ -518,9 +518,6 @@ class OpenAIChatToolWindow(ToolWindow):
         self._session_initialized = True
 
         workflow_name = getattr(self.homepage, "workflow_name", None)
-        is_canvas = workflow_name is not None
-        if is_canvas and self._current_agent != "canvas":
-            self._on_agent_changed("canvas")
         QTimer.singleShot(0, self._load_agent_list)
         QTimer.singleShot(0, self._restore_latest_or_create_session)
         QTimer.singleShot(100, self._load_model_configs)
@@ -571,16 +568,6 @@ class OpenAIChatToolWindow(ToolWindow):
         if self._question_floating_widget:
             self._question_floating_widget.set_opacity(opacity)
 
-    def _is_on_canvas(self):
-        """检查当前是否在画布界面"""
-        if not hasattr(self.homepage, "ui_manager") or not self.homepage.ui_manager:
-            return False
-        side_dock = getattr(self.homepage.ui_manager, "side_dock_area", None)
-        if not side_dock:
-            return False
-        is_canvas = side_dock.context_id == DockCategory.CANVAS
-        return is_canvas
-
     def _restore_latest_or_create_session(self):
         # 如果是新复制的窗口，跳过历史会话恢复
         if getattr(self, "_skip_restore_history", False):
@@ -622,11 +609,6 @@ class OpenAIChatToolWindow(ToolWindow):
         self._question_tool_call_id = None
         self._load_agent_list()
         self._on_task_state_changed(session.task_state)
-
-        is_canvas = getattr(self.homepage, "workflow_name", None) is not None
-        if is_canvas and self._current_agent != "canvas":
-            self._on_agent_changed("canvas")
-
         QTimer.singleShot(0, self._show_initial_welcome)
         self._refresh_context_usage_indicator()
 
@@ -1322,11 +1304,6 @@ class OpenAIChatToolWindow(ToolWindow):
         self._load_agent_list()
         self._on_task_state_changed(session.task_state)
 
-        is_canvas = self._is_on_canvas()
-        logger.info(f"[DEBUG] _create_new_session: is_on_canvas={is_canvas}")
-        if is_canvas:
-            self._on_agent_changed("canvas")
-
         QTimer.singleShot(0, self._show_initial_welcome)
         self._refresh_context_usage_indicator()
 
@@ -1435,10 +1412,6 @@ class OpenAIChatToolWindow(ToolWindow):
         self._load_agent_list()
         if self._tool_executor:
             self._tool_executor.set_session_context(self._current_session_id)
-        is_canvas = getattr(self.homepage, "workflow_name", None) is not None
-        logger.info(f"[DEBUG] _restore_latest_session: is_on_canvas={is_canvas}")
-        if is_canvas and self._current_agent != "canvas":
-            self._on_agent_changed("canvas")
         self._display_current_session()
         self._refresh_context_usage_indicator()
         return True
@@ -2177,14 +2150,8 @@ class OpenAIChatToolWindow(ToolWindow):
         if not hasattr(self, "chat_scroll_area") or not hasattr(self, "node_preview"):
             return
 
-        user_widgets = []
-        for i in range(self.chat_layout.count()):
-            item = self.chat_layout.itemAt(i)
-            if not item or not item.widget():
-                continue
-            widget = item.widget()
-            if isinstance(widget, MessageCard) and widget.role == "user":
-                user_widgets.append(widget)
+        # 使用辅助函数收集用户卡片
+        user_widgets = collect_user_card_widgets(self.chat_layout)
 
         if not user_widgets:
             self._last_visible_user_pair_index = -1
