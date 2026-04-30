@@ -153,6 +153,7 @@ from app.llm_chatter.widgets.ui_helpers import (
     is_session_empty,
     truncate_messages_at_round,
     get_session_compaction_info,
+    save_or_archive_session,
 )
 from app.tool_window import (
     ToolWindow,
@@ -1895,32 +1896,12 @@ class OpenAIChatToolWindow(ToolWindow):
             return
 
         if self.history_manager:
-            compaction_info = get_session_compaction_info(session)
-            
-            if self._current_session_id is not None:
-                idx = self.history_manager.find_index_by_session_id(
-                    self._current_session_id
-                )
-                if idx is not None:
-                    self.history_manager.update_session(
-                        idx,
-                        session.messages,
-                        **compaction_info
-                    )
-                else:
-                    self.history_manager.save_session(
-                        session.messages,
-                        session_id=session.session_id,
-                        **compaction_info
-                    )
-                    self._current_session_id = session.session_id
-            else:
-                self.history_manager.save_session(
-                    session.messages,
-                    session_id=session.session_id,
-                    **compaction_info
-                )
-                self._current_session_id = session.session_id
+            # 使用辅助函数保存会话
+            self._current_session_id = save_or_archive_session(
+                self.history_manager,
+                session,
+                self._current_session_id
+            )
 
     def _refresh_session_view_after_mutation(self):
         self._invalidate_current_session_card_cache()

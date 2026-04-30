@@ -755,6 +755,52 @@ def get_session_compaction_info(session) -> dict:
     }
 
 
+def save_or_archive_session(
+    history_manager,
+    session,
+    current_session_id,
+    compaction_info=None
+) -> str:
+    """
+    保存或归档会话
+    
+    Args:
+        history_manager: 历史管理器
+        session: ChatSession 对象
+        current_session_id: 当前会话 ID
+        compaction_info: 压缩信息字典
+        
+    Returns:
+        新的会话 ID
+    """
+    if compaction_info is None:
+        compaction_info = get_session_compaction_info(session)
+    
+    if current_session_id is not None:
+        idx = history_manager.find_index_by_session_id(current_session_id)
+        if idx is not None:
+            history_manager.update_session(
+                idx,
+                session.messages,
+                **compaction_info
+            )
+            return current_session_id
+        else:
+            history_manager.save_session(
+                session.messages,
+                session_id=session.session_id,
+                **compaction_info
+            )
+            return session.session_id
+    else:
+        history_manager.save_session(
+            session.messages,
+            session_id=session.session_id,
+            **compaction_info
+        )
+        return session.session_id
+
+
 def refresh_history_card_if_visible(history_card, refresh_func=None) -> None:
     """
     如果历史卡片可见则刷新
