@@ -1674,12 +1674,8 @@ class OpenAIChatToolWindow(ToolWindow):
         )
 
     def _is_widget_alive(self, widget: Optional[QWidget]) -> bool:
-        if widget is None:
-            return False
-        try:
-            return not sip.isdeleted(widget)
-        except Exception:
-            return False
+        """检查 widget 是否存活（保留向后兼容）"""
+        return is_widget_alive(widget)
 
     def _restore_cached_session_cards(self, session: ChatSession) -> bool:
         if not session.messages:
