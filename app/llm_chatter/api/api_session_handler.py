@@ -73,7 +73,8 @@ class StreamContext:
             return self.buffer.get("content", "")
 
 
-class ChatSession:
+class _APISessionStub:
+    """API 专用会话存根 - 用于 API 模式的会话标识"""
     pass
 
 

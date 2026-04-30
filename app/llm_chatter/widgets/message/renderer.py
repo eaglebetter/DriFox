@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """消息渲染器 - Markdown 解析、代码高亮、HTML 生成"""
 import base64
+import hashlib
 import re
 from html import escape
 from functools import lru_cache
@@ -26,8 +27,20 @@ def get_markdown_instance():
         )
     return _md_instance
 
-@lru_cache(maxsize=256)
-def _render_markdown_cached(content: str) -> str:
+# 内容哈希缓存
+_content_hash_cache = {}
+
+def _get_content_hash(content: str) -> str:
+    """获取内容的 MD5 哈希（带缓存）"""
+    if content in _content_hash_cache:
+        return _content_hash_cache[content]
+    h = hashlib.md5(content.encode('utf-8')).hexdigest()
+    if len(_content_hash_cache) < 1000:  # 限制缓存大小
+        _content_hash_cache[content] = h
+    return h
+
+@lru_cache(maxsize=512)
+def _render_markdown_cached(content_hash: str, content: str) -> str:
     """带缓存的 Markdown 渲染"""
     md = get_markdown_instance()
     md.reset()
@@ -37,7 +50,11 @@ def render_markdown(content: str) -> str:
     """渲染 Markdown 为 HTML"""
     if not content:
         return ""
-    return _render_markdown_cached(content)
+    return _render_markdown_cached(_get_content_hash(content), content)
+
+def render_markdown_batch(contents: list) -> list:
+    """批量渲染 Markdown（优化多内容渲染）"""
+    return [render_markdown(c) for c in contents]
 
 def unwrap_code_blocks_with_context_links(md_text: str) -> str:
     """处理带有上下文链接的代码块"""
@@ -139,3 +156,66 @@ def render_thinking_box(content: str, expanded: bool = False) -> str:
     </div>
 </div>
 '''
+
+
+class StreamingRenderer:
+    """
+    流式渲染器 - 用于流式响应的增量渲染
+    
+    优化点：
+    1. 增量更新，避免全量重渲染
+    2. 批量更新，减少 DOM 操作
+    3. 思考内容和正文分离渲染
+    """
+    
+    def __init__(self):
+        self._content_buffer = []
+        self._thinking_buffer = []
+        self._rendered_html = ""
+        self._thinking_html = ""
+        self._last_update_len = 0
+        
+    def append_content(self, chunk: str):
+        """追加内容块"""
+        self._content_buffer.append(chunk)
+        
+    def append_thinking(self, chunk: str):
+        """追加思考内容"""
+        self._thinking_buffer.append(chunk)
+        
+    def get_rendered_content(self) -> str:
+        """获取渲染后的正文内容"""
+        new_content = "".join(self._content_buffer)
+        if len(new_content) > self._last_update_len:
+            # 只渲染增量部分
+            incremental = new_content[self._last_update_len:]
+            self._rendered_html += render_markdown(incremental)
+            self._last_update_len = len(new_content)
+        return self._rendered_html
+        
+    def get_rendered_thinking(self) -> str:
+        """获取渲染后的思考内容"""
+        thinking = "".join(self._thinking_buffer)
+        self._thinking_html = render_markdown(thinking)
+        return self._thinking_html
+        
+    def get_combined_html(self) -> str:
+        """获取组合后的 HTML"""
+        thinking = self.get_rendered_thinking()
+        content = self.get_rendered_content()
+        if thinking:
+            return render_thinking_box(thinking, expanded=False) + content
+        return content
+        
+    def reset(self):
+        """重置渲染器"""
+        self._content_buffer.clear()
+        self._thinking_buffer.clear()
+        self._rendered_html = ""
+        self._thinking_html = ""
+        self._last_update_len = 0
+        
+    def flush(self):
+        """刷新缓冲区"""
+        self.get_rendered_content()
+        self.get_rendered_thinking()

@@ -1,4 +1,4 @@
-# -*- coding: utf- -*-
+# -*- coding: utf-8 -*-
 """消息模块 - 包含消息卡片、渲染器、样式定义"""
 from app.llm_chatter.widgets.message.style import (
     ACTION_COLOR_MAP,
@@ -11,6 +11,7 @@ from app.llm_chatter.widgets.message.renderer import (
     render_thinking_box,
     get_action_color,
     wrap_html_with_css,
+    StreamingRenderer,
 )
 from app.llm_chatter.widgets.message.card import (
     MessageCard,
@@ -28,6 +29,7 @@ __all__ = [
     "render_thinking_box",
     "get_action_color",
     "wrap_html_with_css",
+    "StreamingRenderer",
     # 卡片
     "MessageCard",
     "create_welcome_card",
