@@ -10,7 +10,7 @@ from typing import Optional
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QDesktopServices
 from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEnginePage
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QTextEdit
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QTextEdit, QSizePolicy
 from PyQt5.QtCore import QUrl
 
 from app.utils.utils import get_font_family_css
