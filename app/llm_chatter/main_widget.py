@@ -65,7 +65,6 @@ from app.llm_chatter.utils.history_manager import (
 )
 from app.llm_chatter.utils.worker import (
     TopicSummaryTask,
-    ShellExecutionTask,
 )
 from app.llm_chatter.widgets.bottom_input_area import (
     SendableTextEdit,
