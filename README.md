@@ -1,9 +1,10 @@
 <!-- README.md -->
 <p align="center">
-  <img width="50%" align="center" src="images/drifoxlogo.png" alt="logo">
+  <img width="16%" align="center" src="images/drifoxlogo.png" alt="logo">
 </p>
-
-<img src="images/drifoxtext.png" width="100%" height="100%"><br>
+<p align="center">
+  <img width="40%" align="center" src="images/drifoxtext.png" alt="logo">
+</p>
 
 <div align="center">
   <h1>飘狐</h1>

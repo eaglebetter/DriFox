@@ -413,3 +413,14 @@ class LLMSettingsCard(CardWidget):
 
     def hide(self):
         self.setVisible(False)
+
+    def set_opacity(self, opacity: float):
+        """设置透明度，用于响应全局透明度变化"""
+        alpha = int(250 * opacity)
+        self.setStyleSheet(f"""
+            CardWidget {{
+                background-color: rgba(33, 33, 38, {alpha});
+                border: 1px solid #3d3d3d;
+                border-radius: 8px;
+            }}
+        """)

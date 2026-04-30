@@ -4,7 +4,7 @@ import hashlib
 import json
 import math
 import re
-import urllib
+import urllib.parse
 from datetime import datetime
 from html import escape
 from typing import List, Dict, Any, Optional
@@ -77,6 +77,14 @@ ACTION_COLOR_MAP = {
 }
 DEFAULT_COLOR = "#888888"
 
+# ======== 预编译的正则表达式（提升到模块级别，避免重复编译）=======
+_CODE_BLOCK_PATTERN = re.compile(r"```(\w*)\n(.*?)```", re.DOTALL)
+_CODE_BLOCK_WITH_LANG_PATTERN = re.compile(r"<pre><code(?:\s+class=\"([^\"]*)\")?>(.*?)</code></pre>", re.DOTALL)
+_CONTEXT_LINK_PATTERN = re.compile(r"`*\[([^\[\]]+?)\]\(([^)\s]+)\)`*")
+_CODE_BLOCK_CODE_PATTERN = re.compile(r"```[\w]*\n")
+_CODE_BLOCK_END_PATTERN = re.compile(r"```\n")
+_CODE_BLOCK_FINAL_PATTERN = re.compile(r"```")
+
 
 def get_markdown_instance():
     global _md_instance
@@ -104,18 +112,18 @@ def _unwrap_code_blocks_with_context_links(md_text: str) -> str:
                 else f"```\n{code_content}```"
             )
 
-    pattern = re.compile(r"```(\w*)\n(.*?)```", re.DOTALL)
-    return pattern.sub(replacer, md_text)
+    return _CODE_BLOCK_PATTERN.sub(replacer, md_text)
 
 
 def _strip_code_blocks(text: str) -> str:
-    """移除 markdown 代码块标记，仅保留纯文本内容"""
-    # 处理 ```lang\ncode\n``` 格式
-    text = re.sub(r"```[\w]*\n", "", text)
-    # 处理 ```code\n``` 格式
-    text = re.sub(r"```\n", "", text)
-    # 处理 ``` 结尾
-    text = re.sub(r"```", "", text)
+    """
+    移除 markdown 代码块标记和代码内容。
+    思考框内不需要代码编辑框，直接显示纯文本。
+    """
+    # 匹配完整的代码块，包括内容
+    text = re.sub(r"```[\s\S]*?```", "", text)
+    # 移除剩余的反引号
+    text = text.replace("`", "")
     return text
 
 
@@ -153,9 +161,7 @@ def _wrap_code_blocks_with_copy_button_web(html: str) -> str:
             )
             highlighted = highlight(copy_text, lexer, formatter)
             # 提取 <pre> 内部内容
-            import re as preg
-
-            pre_match = preg.search(r"<pre[^>]*>(.*?)</pre>", highlighted, preg.DOTALL)
+            pre_match = re.search(r"<pre[^>]*>(.*?)</pre>", highlighted, re.DOTALL)
             if pre_match:
                 inner_code_html = pre_match.group(1)
             else:
@@ -213,17 +219,16 @@ def _wrap_code_blocks_with_copy_button_web(html: str) -> str:
         </div>
         '''
 
-    pattern = r'<pre><code(?:\s+class="([^"]*)")?>(.*?)</code></pre>'
-    return re.sub(pattern, replacer, html, flags=re.DOTALL)
+    return _CODE_BLOCK_WITH_LANG_PATTERN.sub(replacer, html)
 
 
 def _sanitize_incomplete_markdown(md_text: str) -> str:
     if not md_text:
         return ""
+    # 只处理 markdown 代码块的不完整情况
+    # 不再删除尾随的 <，因为它可能是 HTML/工具标签的一部分
     if md_text.count("```") % 2 == 1:
         md_text += "\n```"
-    if md_text.endswith("<"):
-        md_text = md_text[:-1]
     return md_text
 
 
@@ -258,25 +263,20 @@ def _render_think_block(content: str, completed: bool = True) -> str:
 
 
 def _render_tool_block(
-    tool_name: str, tool_args: dict, result: str, success: bool = True
+    tool_name: str, tool_args: dict, result: str, success: bool = True,
+    tool_call_id: str = None,
 ) -> str:
-    """渲染工具执行折叠框（默认折叠）"""
-    import re
-
-    result = re.sub(r"```[\w]*\n", "", result)
-    result = re.sub(r"```", "", result)
-
-    status_icon = "✅" if success else "❌"
-    args_str = json.dumps(tool_args, ensure_ascii=False, indent=2) if tool_args else ""
-    header = f"{status_icon} 🔧 工具调用: {tool_name}"
-    if args_str:
-        header += f"\n📝 参数: {args_str}"
-
-    result_html = result.replace("\n", "<br>")
-    return f'<details class="tool-block"><summary>{header}</summary><div class="tool-content"><pre>{result_html}</pre></div></details>'
+    """渲染工具执行折叠框（默认折叠）- 委托给 render_helpers"""
+    from app.llm_chatter.widgets.render_helpers import render_tool_block as render_block
+    return render_block(tool_name, tool_args, result, success, collapsed=True, tool_call_id=tool_call_id)
 
 
 def _inject_think_cards(md_text: str, completed: bool = True) -> str:
+    """注入思考框HTML。
+    
+    关键逻辑：<think> 匹配到下一个 <think> 之前的最后一个 </think>，
+    避免流式输出时多个 </think> 导致内容泄露。
+    """
     parts = []
     i = 0
     while i < len(md_text):
@@ -285,15 +285,25 @@ def _inject_think_cards(md_text: str, completed: bool = True) -> str:
             parts.append(md_text[i:])
             break
         parts.append(md_text[i:start_idx])
-        end_idx = md_text.find("</think>", start_idx + len("<think>"))
+
+        think_start = start_idx + len("<think>")
+
+        # 确定搜索边界：到下一个 <think> 或文本结尾
+        next_think = md_text.find("<think>", think_start)
+        search_end = next_think if next_think != -1 else len(md_text)
+
+        # 在边界内查找最后一个 </think>（处理多个 </think> 的情况）
+        end_idx = md_text.rfind("</think>", think_start, search_end)
+
         if end_idx != -1:
-            content = md_text[start_idx + len("<think>") : end_idx]
+            content = md_text[think_start:end_idx]
             parts.append(_render_think_block(content, completed=True))
             i = end_idx + len("</think>")
         else:
-            content = md_text[start_idx + len("<think>") :]
+            # 未闭合：内容截取到边界处，避免吞掉后续 <think>
+            content = md_text[think_start:search_end]
             parts.append(_render_think_block(content, completed=False))
-            i = len(md_text)
+            i = search_end
     return "".join(parts)
 
 
@@ -405,13 +415,12 @@ def _inject_context_links(md_text: str) -> str:
         content, action = match.group(1), match.group(2)
         if action.startswith("http://") or action.startswith("https://"):
             return match.group(0)
-        import urllib.parse
 
         encoded_c = urllib.parse.quote(content, safe="")
         encoded_a = urllib.parse.quote(action, safe="")
         return f'<span class="context-tag" data-type="{action}" data-content="{encoded_c}" data-action="{encoded_a}">{escape(content)}</span>'
 
-    return re.sub(r"`*\[([^\[\]]+?)\]\(([^)\s]+)\)`*", replacer, md_text)
+    return _CONTEXT_LINK_PATTERN.sub(replacer, md_text)
 
 
 # ======== WebViewer ========
@@ -697,18 +706,12 @@ class CodeWebViewer(QWebEngineView):
         font_family = "Segoe UI, sans-serif"
         try:
             from app.utils.config import Settings
-
-            font_family = Settings.get_instance().llm_font_family.value
+            settings = Settings.get_instance()
+            font_family = settings.llm_font_family.value
             if not font_family:
-                font_family = "Segoe UI, sans-serif"
+                font_family = settings.canvas_font_selected.value or "Segoe UI, sans-serif"
         except Exception:
-            try:
-                from app.utils.config import Settings
-                font_family = Settings.get_instance().canvas_font_selected.value
-                if not font_family:
-                    font_family = "Segoe UI, sans-serif"
-            except Exception:
-                pass
+            pass
 
         tag_css = []
         for act, col in ACTION_COLOR_MAP.items():
@@ -1834,7 +1837,7 @@ class MessageCard(SimpleCardWidget):
         success: bool = True,
         tool_call_id: str = None,
     ):
-        self._content_dat.append(
+        self._content_data.append(
             make_tool_result_block(
                 tool_name=tool_name,
                 arguments=arguments,

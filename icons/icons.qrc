@@ -1,8 +1,6 @@
 <!DOCTYPE RCC>
 <RCC version="1.0">
 <qresource prefix="/icons">
-    <file>AI绘画.svg</file>
-    <file>AI音乐.svg</file>
     <file>API测试.svg</file>
     <file>Anthropic.svg</file>
     <file>Global.svg</file>
@@ -14,9 +12,7 @@
     <file>Ollama.svg</file>
     <file>Picture.svg</file>
     <file>Sync.svg</file>
-    <file>ai模型.svg</file>
     <file>baidu.svg</file>
-    <file>banner.png</file>
     <file>bilibili.svg</file>
     <file>brush.svg</file>
     <file>collapse_all.svg</file>
@@ -27,6 +23,7 @@
     <file>eraser.svg</file>
     <file>expand_all.svg</file>
     <file>fill.svg</file>
+    <file>fox_bg.png</file>
     <file>gemini-ai.svg</file>
     <file>github.svg</file>
     <file>groq.svg</file>

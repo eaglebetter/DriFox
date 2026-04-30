@@ -183,3 +183,14 @@ class SubAgentFloatingWidget(CardWidget):
         self._task_start_time = None
         self.progress_text.clear()
         self.setVisible(False)
+
+    def set_opacity(self, opacity: float):
+        """设置透明度，用于响应全局透明度变化"""
+        alpha = int(240 * opacity)
+        self.setStyleSheet(f"""
+            CardWidget {{
+                background-color: rgba(30, 30, 30, {alpha});
+                border: 1px solid #9C27B0;
+                border-radius: 6px;
+            }}
+        """)

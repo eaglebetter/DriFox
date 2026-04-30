@@ -88,7 +88,7 @@ class _HistoryItemCard(CardWidget):
         self._is_current = is_current
         self._is_editing = False
         self.setCursor(Qt.PointingHandCursor)
-        
+
         # 当前会话使用特殊样式
         if is_current:
             self.setStyleSheet(
@@ -227,6 +227,45 @@ class _HistoryItemCard(CardWidget):
         if event.button() == Qt.LeftButton and not self._is_editing:
             self.sessionClicked.emit(self._index)
         super().mousePressEvent(event)
+
+    def set_opacity(self, opacity: float):
+        """设置透明度，用于响应全局透明度变化"""
+        if self._is_current:
+            bg_alpha = int(0.12 * 255 * opacity)
+            border_alpha = int(0.6 * 255 * opacity)
+            hover_bg_alpha = int(0.18 * 255 * opacity)
+            hover_border_alpha = int(0.8 * 255 * opacity)
+            self.setStyleSheet(
+                f"""
+                CardWidget {{
+                    background-color: rgba(102, 198, 255, {bg_alpha});
+                    border: 2px solid rgba(102, 198, 255, {border_alpha});
+                    border-radius: 10px;
+                }}
+                CardWidget:hover {{
+                    background-color: rgba(102, 198, 255, {hover_bg_alpha});
+                    border: 2px solid rgba(102, 198, 255, {hover_border_alpha});
+                }}
+                """
+            )
+        else:
+            bg_alpha = int(0.04 * 255 * opacity)
+            border_alpha = int(0.08 * 255 * opacity)
+            hover_bg_alpha = int(0.08 * 255 * opacity)
+            hover_border_alpha = int(0.45 * 255 * opacity)
+            self.setStyleSheet(
+                f"""
+                CardWidget {{
+                    background-color: rgba(255, 255, 255, {bg_alpha});
+                    border: 1px solid rgba(255, 255, 255, {border_alpha});
+                    border-radius: 10px;
+                }}
+                CardWidget:hover {{
+                    background-color: rgba(255, 255, 255, {hover_bg_alpha});
+                    border: 1px solid rgba(102, 198, 255, {hover_border_alpha});
+                }}
+                """
+            )
 
 
 class _SectionHeader(QLabel):
@@ -585,3 +624,16 @@ class HistoryPopup(QWidget):
         if event.key() == Qt.Key_Escape:
             self.hide()
         super().keyPressEvent(event)
+
+    def set_opacity(self, opacity: float):
+        """设置透明度，用于响应全局透明度变化"""
+        alpha = int(255 * opacity)
+        self.main_frame.setStyleSheet(
+            f"""
+            QFrame#historyPopupFrame {{
+                background-color: rgba(45, 45, 45, {alpha});
+                border: 1px solid #444;
+                border-radius: 10px;
+            }}
+            """
+        )

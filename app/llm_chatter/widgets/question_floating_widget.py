@@ -562,3 +562,14 @@ class QuestionFloatingWidget(CardWidget):
         self.text_input.clear()
         self._clear_options()
         self.setVisible(False)
+
+    def set_opacity(self, opacity: float):
+        """设置透明度，用于响应全局透明度变化"""
+        alpha = int(248 * opacity)
+        self.setStyleSheet(f"""
+            CardWidget {{
+                background-color: rgba(33, 33, 38, {alpha});
+                border: 1px solid #3b4758;
+                border-radius: 8px;
+            }}
+        """)

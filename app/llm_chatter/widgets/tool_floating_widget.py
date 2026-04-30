@@ -225,3 +225,14 @@ class ToolFloatingWidget(CardWidget):
         """根据耗时决定是否显示"""
         if elapsed > 3:
             self.setVisible(True)
+
+    def set_opacity(self, opacity: float):
+        """设置透明度，用于响应全局透明度变化"""
+        alpha = int(250 * opacity)
+        self.setStyleSheet(f"""
+            CardWidget {{
+                background-color: rgba(33, 33, 38, {alpha});
+                border: 1px solid #f59e0b;
+                border-radius: 8px;
+            }}
+        """)

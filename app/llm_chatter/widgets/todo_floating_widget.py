@@ -148,3 +148,14 @@ class TodoFloatingWidget(CardWidget):
         """清空 TODO 显示"""
         self._todo_list = []
         self.setVisible(False)
+
+    def set_opacity(self, opacity: float):
+        """设置透明度，用于响应全局透明度变化"""
+        alpha = int(252 * opacity)
+        self.setStyleSheet(f"""
+            CardWidget {{
+                background-color: rgba(40, 40, 45, {alpha});
+                border: 1px solid #6366f1;
+                border-radius: 10px;
+            }}
+        """)

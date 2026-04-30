@@ -14,14 +14,14 @@ from PyQt5.QtCore import (
     pyqtSignal,
     QThreadPool,
 )
-from PyQt5.QtGui import QFont, QTextCursor
+from PyQt5.QtGui import QFont, QTextCursor, QPixmap
 from PyQt5.QtWidgets import (
     QVBoxLayout,
     QHBoxLayout,
     QLabel,
     QApplication,
     QWidget,
-    QFileDialog,
+    QFileDialog, QGraphicsOpacityEffect,
 )
 
 # 注册 QProcess::ExitStatus 元类型，解决跨线程信号连接问题
@@ -484,6 +484,7 @@ class OpenAIChatToolWindow(ToolWindow):
     def showEvent(self, event):
         if getattr(self, "_session_initialized", False):
             super().showEvent(event)
+            self._connect_opacity_signal()
             return
         self._session_initialized = True
 
@@ -494,7 +495,52 @@ class OpenAIChatToolWindow(ToolWindow):
         QTimer.singleShot(0, self._load_agent_list)
         QTimer.singleShot(0, self._restore_latest_or_create_session)
         QTimer.singleShot(100, self._load_model_configs)
+        self._connect_opacity_signal()
         super().showEvent(event)
+
+    def eventFilter(self, obj, event):
+        """处理 viewport 大小变化，调整背景图片"""
+        if obj == self.chat_scroll_area.viewport() and event.type() == event.Type.Resize:
+            if hasattr(self, "_bg_label"):
+                self._bg_label.resize(self.chat_scroll_area.viewport().size())
+        return super().eventFilter(obj, event)
+
+    def _connect_opacity_signal(self):
+        """连接父窗口的透明度变化信号"""
+        if getattr(self, "_opacity_signal_connected", False):
+            return
+        parent = self.parent()
+        if parent and hasattr(parent, "globalOpacityChanged"):
+            parent.globalOpacityChanged.connect(self._on_global_opacity_changed)
+            self._opacity_signal_connected = True
+
+    def _on_global_opacity_changed(self, opacity: float):
+        """响应全局透明度变化，更新所有子组件的透明度"""
+        self._update_widgets_opacity(opacity)
+
+    def _update_widgets_opacity(self, opacity: float):
+        """更新所有需要响应透明度变化的组件"""
+        # 更新待办事项悬浮框
+        if self._todo_floating_widget:
+            self._todo_floating_widget.set_opacity(opacity)
+        # 更新模型配置卡片
+        if self._model_config_card:
+            self._model_config_card.set_opacity(opacity)
+        # 更新历史会话卡片
+        if self._history_card:
+            self._history_card.set_opacity(opacity)
+        # 更新设置卡片
+        if self._settings_popup:
+            self._settings_popup.set_opacity(opacity)
+        # 更新子智能体悬浮框
+        if hasattr(self, "_sub_agent_floating_widget") and self._sub_agent_floating_widget:
+            self._sub_agent_floating_widget.set_opacity(opacity)
+        # 更新工具悬浮框
+        if hasattr(self, "_tool_floating_widget") and self._tool_floating_widget:
+            self._tool_floating_widget.set_opacity(opacity)
+        # 更新问题悬浮框
+        if self._question_floating_widget:
+            self._question_floating_widget.set_opacity(opacity)
 
     def _is_on_canvas(self):
         """检查当前是否在画布界面"""
@@ -639,7 +685,7 @@ class OpenAIChatToolWindow(ToolWindow):
         self.chat_scroll_area.setStyleSheet(
             """
             SingleDirectionScrollArea {
-                background-color: rgba(255, 255, 255, 0.02);
+                background-color: rgba(0, 0, 0, 0.3);
                 border: 1px solid rgba(255, 255, 255, 0.04);
                 border-radius: 18px;
             }
@@ -648,6 +694,20 @@ class OpenAIChatToolWindow(ToolWindow):
         self.chat_scroll_area.setWidgetResizable(True)
         self.chat_scroll_area.setViewportMargins(2, 2, 10, 2)
         self.chat_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
+        # 背景图片层 - 半透明、随窗口缩放
+        viewport = self.chat_scroll_area.viewport()
+        self._bg_label = QLabel(viewport)
+        self._bg_label.setPixmap(QPixmap(":/icons/fox_bg.png"))
+        self._bg_label.setScaledContents(True)  # 允许缩放
+        self._bg_opacity = QGraphicsOpacityEffect(self._bg_label)
+        self._bg_opacity.setOpacity(0.05)  # 25% 透明度
+        self._bg_label.setGraphicsEffect(self._bg_opacity)
+        self._bg_label.lower()  # 放到底层
+        self._bg_label.setAttribute(Qt.WA_TransparentForMouseEvents)  # 鼠标事件穿透
+        self._bg_label.resize(viewport.size())
+        self._bg_label.show()
+        viewport.installEventFilter(self)
 
         self.chat_container = QWidget()
         self.chat_container.setStyleSheet("background: transparent;")

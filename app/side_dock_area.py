@@ -166,6 +166,7 @@ class ResizeEdge(QWidget):
 
 class ToolPopupDialog(QDialog):
     popupClosed = pyqtSignal(str, bool, object)
+    globalOpacityChanged = pyqtSignal(float)  # 透明度变化信号，参数为 0.0-1.0
 
     def __init__(self, tool_instance, parent=None, border_color: str = "none"):
         super().__init__(parent)
@@ -535,6 +536,7 @@ class ToolPopupDialog(QDialog):
 
     def _on_opacity_changed(self, value: int):
         self.setWindowOpacity(value / 100)
+        self.globalOpacityChanged.emit(value / 100)
 
     def _check_hide_slider(self):
         if not self._opacity_slider or self._opacity_slider._is_dragging:

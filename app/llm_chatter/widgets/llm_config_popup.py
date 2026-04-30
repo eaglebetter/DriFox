@@ -376,3 +376,17 @@ class LLMConfigPopup(QWidget):
         self.move(x, y)
         self.show()
         self.setFocus()
+
+    def set_opacity(self, opacity: float):
+        """设置透明度，用于响应全局透明度变化"""
+        alpha = int(255 * opacity)
+        self.main_frame.setStyleSheet(
+            f"""
+            QFrame#popupFrame {{
+                background-color: rgba(45, 45, 45, {alpha});
+                border: 1px solid #444;
+                border-radius: 8px;
+                padding: 12px;
+            }}
+        """
+        )
