@@ -169,6 +169,7 @@ from app.llm_chatter.widgets.ui_helpers import (
     init_after_loading_session,
     post_append_user_message,
     get_first_file_operation,
+    invalidate_session_card_cache,
 )
 from app.tool_window import (
     ToolWindow,
@@ -1869,10 +1870,10 @@ class OpenAIChatToolWindow(ToolWindow):
         return True
 
     def _invalidate_current_session_card_cache(self):
-        session = self.session_manager.get_current_session()
-        if not session:
-            return
-        self._session_card_cache.pop(session.session_id, None)
+        invalidate_session_card_cache(
+            self.session_manager.get_current_session(),
+            self._session_card_cache
+        )
 
     def _persist_session_after_mutation(self):
         session = self.session_manager.get_current_session()

@@ -1120,6 +1120,18 @@ def get_first_file_operation(operations: list) -> tuple:
     return True, backup_path, op
 
 
+def invalidate_session_card_cache(session, session_card_cache) -> None:
+    """
+    使会话卡片缓存失效
+    
+    Args:
+        session: ChatSession 对象
+        session_card_cache: 会话卡片缓存字典
+    """
+    if session:
+        session_card_cache.pop(session.session_id, None)
+
+
 def refresh_history_card_if_visible(history_card, refresh_func=None) -> None:
     """
     如果历史卡片可见则刷新
