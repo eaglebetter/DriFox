@@ -1770,15 +1770,12 @@ class MessageCard(SimpleCardWidget):
             return
         self._last_applied_viewer_height = height
         self.viewer.setFixedHeight(height)
-        # 关键修复：强制 MessageCard 重新计算布局和高度
-        self.viewer.invalidate()
-        self.invalidate()
-        self.update()
+        # 强制 MessageCard 重新计算布局和高度
         self.updateGeometry()
+        self.adjustSize()
         parent = self.parentWidget()
         if parent:
             parent.updateGeometry()
-            parent.invalidate()
 
     def sync_width(self, force: bool = False):
         """同步卡片宽度
