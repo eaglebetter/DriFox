@@ -150,6 +150,7 @@ from app.llm_chatter.widgets.ui_helpers import (
     collect_operations_for_round,
     get_round_message_indices,
     create_new_session_state,
+    is_session_empty,
 )
 from app.tool_window import (
     ToolWindow,
@@ -1933,7 +1934,8 @@ class OpenAIChatToolWindow(ToolWindow):
         self._invalidate_current_session_card_cache()
         self._history_preview_messages = None
         session = self.session_manager.get_current_session()
-        if not session or not session.messages:
+        
+        if is_session_empty(session):
             self._clear_chat_area()
             self.node_preview.clear_nodes()
             self._current_assistant_card = None

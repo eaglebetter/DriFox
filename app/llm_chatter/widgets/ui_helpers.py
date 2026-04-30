@@ -704,6 +704,19 @@ def create_new_session_state(old_session_manager=None, old_chat_engine=None) -> 
     }
 
 
+def is_session_empty(session) -> bool:
+    """
+    检查会话是否为空
+    
+    Args:
+        session: ChatSession 对象
+        
+    Returns:
+        是否为空
+    """
+    return not session or not session.messages
+
+
 def refresh_history_card_if_visible(history_card, refresh_func=None) -> None:
     """
     如果历史卡片可见则刷新
