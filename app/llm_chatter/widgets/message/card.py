@@ -257,7 +257,7 @@ class MessageCard(CardWidget):
             main.addWidget(tg_c)
             main.addWidget(CardSeparator(self))
 
-        if self.role in ("user", "welcome"):
+        if self.role == "user":
             self.viewer = PlainTextViewer(self)
             self.viewer.contentHeightChanged.connect(self._update_height)
         else:
@@ -505,7 +505,7 @@ class MessageCard(CardWidget):
     def append_text(self, text: str):
         from app.llm_chatter.utils.message_content import append_text_block, content_to_markdown
         
-        if self.role == "assistant":
+        if self.role in ("assistant", "welcome"):
             self._content_data = append_text_block(self._content_data, text)
             rendered = content_to_markdown(self._content_data)
             self.viewer._markdown_text = rendered
