@@ -495,6 +495,30 @@ def deduplicate_operations(operations: list) -> list:
     return unique_ops
 
 
+def find_last_assistant_card(chat_layout) -> Any:
+    """
+    找到布局中最后一个 assistant 卡片
+    
+    Args:
+        chat_layout: 聊天布局
+        
+    Returns:
+        最后一个 assistant 卡片，或 None
+    """
+    for i in range(chat_layout.count() - 1, -1, -1):
+        item = chat_layout.itemAt(i)
+        if not item or not item.widget():
+            continue
+        widget = item.widget()
+        if not isinstance(widget, MessageCard):
+            continue
+        if getattr(widget, "_is_welcome", False):
+            continue
+        if widget.role == "assistant":
+            return widget
+    return None
+
+
 def count_user_cards_in_layout(chat_layout) -> int:
     """
     计算布局中的用户消息卡片数量

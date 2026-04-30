@@ -144,6 +144,7 @@ from app.llm_chatter.widgets.ui_helpers import (
     refresh_history_card_if_visible,
     collect_message_cards_from_layout,
     count_user_cards_in_layout,
+    find_last_assistant_card,
 )
 from app.tool_window import (
     ToolWindow,
@@ -1949,19 +1950,7 @@ class OpenAIChatToolWindow(ToolWindow):
         self._refresh_context_usage_indicator()
 
     def _sync_current_assistant_card_ref(self):
-        self._current_assistant_card = None
-        for i in range(self.chat_layout.count() - 1, -1, -1):
-            item = self.chat_layout.itemAt(i)
-            if not item or not item.widget():
-                continue
-            widget = item.widget()
-            if not isinstance(widget, MessageCard):
-                continue
-            if getattr(widget, "_is_welcome", False):
-                continue
-            if widget.role == "assistant":
-                self._current_assistant_card = widget
-                return
+        self._current_assistant_card = find_last_assistant_card(self.chat_layout)
 
     def _finalize_local_session_mutation(self):
         self._invalidate_current_session_card_cache()
