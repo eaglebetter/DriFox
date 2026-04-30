@@ -117,6 +117,13 @@ from app.llm_chatter.widgets.model_selector_popup import (
 from app.llm_chatter.widgets.history_card import (
     HistoryCard,
 )
+from app.llm_chatter.widgets.ui_helpers import (
+    WINDOW_STYLE,
+    CHAT_SCROLL_STYLE,
+    TITLE_STYLE,
+    MODEL_BTN_STYLE,
+    MODEL_BTN_TEXT_STYLE,
+)
 from app.tool_window import (
     ToolWindow,
     DockPosition,
@@ -606,13 +613,7 @@ class OpenAIChatToolWindow(ToolWindow):
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(4)
 
-        self.setStyleSheet("""
-            OpenAIChatToolWindow {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 rgba(10, 14, 22, 255),
-                    stop:1 rgba(15, 20, 30, 255));
-            }
-        """)
+        self.setStyleSheet(WINDOW_STYLE)
 
         session_bar_layout = QHBoxLayout()
         session_bar_layout.setContentsMargins(0, 0, 0, 0)
@@ -624,20 +625,9 @@ class OpenAIChatToolWindow(ToolWindow):
 
         self.title_edit = QLabel("新对话", self)
         font_css = get_font_family_css()
-        self.title_edit.setStyleSheet(f"""
-            QLabel {{
-                {font_css}
-                color: #f3f6fc;
-                font-size: 15px;
-                font-weight: bold;
-                padding: 6px 10px;
-                border-radius: 10px;
-                background-color: rgba(255, 255, 255, 0.03);
-            }}
-            QLabel:hover {{
-                background-color: rgba(255, 255, 255, 0.06);
-            }}
-        """)
+        # 标题样式使用 TITLE_STYLE + font_css
+        title_style = TITLE_STYLE.replace("    QLabel {", f"    QLabel {{\n        {font_css}")
+        self.title_edit.setStyleSheet(title_style)
         self.title_edit.setCursor(Qt.PointingHandCursor)
         self.title_edit.mouseDoubleClickEvent = self._on_title_double_click
         left_layout.addWidget(self.title_edit)
@@ -682,15 +672,7 @@ class OpenAIChatToolWindow(ToolWindow):
         self.chat_scroll_area = SingleDirectionScrollArea(self)
         self.chat_scroll_area.setMinimumHeight(10)
         self.chat_scroll_area.setMinimumWidth(400)
-        self.chat_scroll_area.setStyleSheet(
-            """
-            SingleDirectionScrollArea {
-                background-color: rgba(255, 255, 255, 0.02);
-                border: 1px solid rgba(255, 255, 255, 0.04);
-                border-radius: 18px;
-            }
-            """
-        )
+        self.chat_scroll_area.setStyleSheet(CHAT_SCROLL_STYLE)
         self.chat_scroll_area.setWidgetResizable(True)
         self.chat_scroll_area.setViewportMargins(2, 2, 10, 2)
         self.chat_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -764,16 +746,7 @@ class OpenAIChatToolWindow(ToolWindow):
         # 模型选择 - 扁平式上拉选择器（类似 OpenCode 风格）
         self.current_model_btn = QWidget(self)
         self.current_model_btn.setCursor(Qt.PointingHandCursor)
-        self.current_model_btn.setStyleSheet("""
-            QWidget {
-                background-color: rgba(255, 255, 255, 0.06);
-                border-radius: 8px;
-                padding: 0px;
-            }
-            QWidget:hover {
-                background-color: rgba(255, 255, 255, 0.10);
-            }
-        """)
+        self.current_model_btn.setStyleSheet(MODEL_BTN_STYLE)
         self.current_model_btn.mousePressEvent = lambda e: self._show_model_selector_popup()
         btn_layout = QHBoxLayout(self.current_model_btn)
         btn_layout.setContentsMargins(8, 4, 12, 4)
@@ -782,7 +755,7 @@ class OpenAIChatToolWindow(ToolWindow):
         self._model_btn_icon.setFixedSize(18, 18)
         btn_layout.addWidget(self._model_btn_icon)
         self._model_btn_text = QLabel("正在加载...", self.current_model_btn)
-        self._model_btn_text.setStyleSheet("color: #f3f6fc; font-size: 13px; font-weight: bold; background: transparent;")
+        self._model_btn_text.setStyleSheet(MODEL_BTN_TEXT_STYLE)
         btn_layout.addWidget(self._model_btn_text)
         btn_layout.addStretch()
         self.current_model_btn.setFixedHeight(30)
