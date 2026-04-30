@@ -140,6 +140,7 @@ from app.llm_chatter.widgets.ui_helpers import (
     deduplicate_operations,
     create_assistant_card_widget,
     find_last_tool_call_id_after_round,
+    delete_widgets_from_layout,
 )
 from app.tool_window import (
     ToolWindow,
@@ -1879,32 +1880,8 @@ class OpenAIChatToolWindow(ToolWindow):
             f"[DELETE] Cards to remove: {len(widgets_to_remove)}, cards_to_remove: {cards_to_remove}"
         )
 
-        # 实际执行删除
-        for widget in widgets_to_remove:
-            try:
-                if not self._is_widget_alive(widget):
-                    logger.warning(f"[DELETE] Widget already deleted: {widget}")
-                    continue
-
-                # 先从 layout 移除
-                layout_removed = False
-                for i in range(self.chat_layout.count()):
-                    item = self.chat_layout.itemAt(i)
-                    if item and item.widget() is widget:
-                        self.chat_layout.removeItem(item)
-                        layout_removed = True
-                        break
-
-                if layout_removed:
-                    widget.deleteLater()
-                    logger.info(f"[DELETE] Widget deleted: role={widget.role}")
-                else:
-                    logger.warning(
-                        f"[DELETE] Widget not found in layout: role={widget.role}"
-                    )
-            except Exception as e:
-                logger.error(f"[DELETE] Error deleting widget: {e}")
-
+        # 使用辅助函数执行删除
+        delete_widgets_from_layout(widgets_to_remove, self.chat_layout)
         return removed > 0
 
     def _remove_cards_from_round(self, round_index: int) -> bool:

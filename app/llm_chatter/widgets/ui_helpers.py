@@ -495,6 +495,42 @@ def deduplicate_operations(operations: list) -> list:
     return unique_ops
 
 
+def delete_widgets_from_layout(widgets_to_remove: list, chat_layout) -> int:
+    """
+    从布局中删除指定的 widgets
+    
+    Args:
+        widgets_to_remove: 要删除的 widget 列表
+        chat_layout: 聊天布局
+        
+    Returns:
+        删除的数量
+    """
+    deleted = 0
+    for widget in widgets_to_remove:
+        if not is_widget_alive(widget):
+            logger.warning(f"[DELETE] Widget already deleted: {widget}")
+            continue
+        
+        # 从 layout 移除
+        layout_removed = False
+        for i in range(chat_layout.count()):
+            item = chat_layout.itemAt(i)
+            if item and item.widget() is widget:
+                chat_layout.removeItem(item)
+                layout_removed = True
+                break
+        
+        if layout_removed:
+            widget.deleteLater()
+            deleted += 1
+            logger.info(f"[DELETE] Widget deleted: role={widget.role}")
+        else:
+            logger.warning(f"[DELETE] Widget not found in layout: role={widget.role}")
+    
+    return deleted
+
+
 def find_last_tool_call_id_after_round(messages: list, round_ranges: list, round_index: int) -> Optional[str]:
     """
     查找指定 round 之后最后一个 tool_call_id
