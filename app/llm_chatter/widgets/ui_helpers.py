@@ -962,6 +962,39 @@ def find_user_card_at_index(chat_layout, target_index: int) -> Any:
     return None
 
 
+def clear_and_show_welcome(
+    session,
+    session_card_cache,
+    clear_chat_func,
+    clear_preview_func,
+    task_state_changed_func,
+    get_welcome_func,
+    add_widget_func
+) -> None:
+    """
+    清空聊天并显示欢迎卡片
+    
+    Args:
+        session: 当前会话
+        session_card_cache: 会话卡片缓存
+        clear_chat_func: 清空聊天区域的函数
+        clear_preview_func: 清空预览的函数
+        task_state_changed_func: 任务状态变更的函数
+        get_welcome_func: 获取欢迎卡片的函数
+        add_widget_func: 添加 widget 的函数
+    """
+    if session:
+        session_card_cache.pop(session.session_id, None)
+    clear_chat_func()
+    clear_preview_func()
+    if session:
+        session.clear()
+        if task_state_changed_func:
+            task_state_changed_func(session.task_state)
+    welcome_card = get_welcome_func()
+    add_widget_func(welcome_card)
+
+
 def refresh_history_card_if_visible(history_card, refresh_func=None) -> None:
     """
     如果历史卡片可见则刷新

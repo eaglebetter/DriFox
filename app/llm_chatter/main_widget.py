@@ -162,6 +162,7 @@ from app.llm_chatter.widgets.ui_helpers import (
     setup_user_card_signals,
     restore_input_from_card,
     find_user_card_at_index,
+    clear_and_show_welcome,
 )
 from app.tool_window import (
     ToolWindow,
@@ -1920,16 +1921,16 @@ class OpenAIChatToolWindow(ToolWindow):
         self._sync_node_preview_to_scroll()
 
     def _on_clear_shortcut(self):
-        session = self.session_manager.get_current_session()
-        if session:
-            self._session_card_cache.pop(session.session_id, None)
-        self._clear_chat_area()
-        self.node_preview.clear_nodes()
-        if session:
-            session.clear()
-            self._on_task_state_changed(session.task_state)
-        welcome_card = self._get_or_create_welcome_card()
-        QTimer.singleShot(0, lambda: self._add_chat_widget(welcome_card))
+        # 使用辅助函数清空并显示欢迎
+        clear_and_show_welcome(
+            session=self.session_manager.get_current_session(),
+            session_card_cache=self._session_card_cache,
+            clear_chat_func=self._clear_chat_area,
+            clear_preview_func=self.node_preview.clear_nodes,
+            task_state_changed_func=self._on_task_state_changed,
+            get_welcome_func=self._get_or_create_welcome_card,
+            add_widget_func=lambda w: QTimer.singleShot(0, lambda: self._add_chat_widget(w))
+        )
         self.title_edit.setText("新对话")
 
     def _add_chat_widget(self, widget: QWidget):
