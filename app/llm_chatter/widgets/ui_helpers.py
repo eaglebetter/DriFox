@@ -475,6 +475,26 @@ def find_widgets_to_remove_for_round(
     return widgets_to_remove
 
 
+def deduplicate_operations(operations: list) -> list:
+    """
+    对文件操作列表去重
+    
+    Args:
+        operations: 文件操作列表
+        
+    Returns:
+        去重后的列表
+    """
+    seen = set()
+    unique_ops = []
+    for op in operations:
+        key = (op.get("id"), op.get("file_path"), op.get("call_id"))
+        if key not in seen:
+            seen.add(key)
+            unique_ops.append(op)
+    return unique_ops
+
+
 # ==================== 滚动位置辅助 ====================
 
 def calculate_scroll_progress(

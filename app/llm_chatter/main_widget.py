@@ -137,6 +137,7 @@ from app.llm_chatter.widgets.ui_helpers import (
     calculate_scroll_progress,
     build_node_preview_data,
     find_widgets_to_remove_for_round,
+    deduplicate_operations,
 )
 from app.tool_window import (
     ToolWindow,
@@ -2353,23 +2354,14 @@ class OpenAIChatToolWindow(ToolWindow):
 
         # 如果有文件操作，显示预览对话框
         if all_call_ids and self._tool_executor and self._tool_executor.file_recorder:
-            # 获取所有 call_id 对应的操作
+            # 获取所有 call_id 对应的操作并去重
             operations = []
             for call_id in all_call_ids:
                 ops = self._tool_executor.file_recorder.get_operations_for_preview(
                     self._current_session_id, call_id
                 )
                 operations.extend(ops)
-            # 去重（基于 id 或 file_path+call_id 组合）
-            seen = set()
-            unique_ops = []
-            for op in operations:
-                key = (op.get("id"), op.get("file_path"), op.get("call_id"))
-                if key not in seen:
-                    seen.add(key)
-                    unique_ops.append(op)
-            operations = unique_ops
-            
+            operations = deduplicate_operations(operations)
             
             if operations:
                 dialog = FileUndoPreviewDialog(operations, self)
