@@ -159,6 +159,7 @@ from app.llm_chatter.widgets.ui_helpers import (
     render_batch_to_assistant_card,
     scroll_to_bottom_if_streaming,
     log_deletion_stats,
+    setup_user_card_signals,
 )
 from app.tool_window import (
     ToolWindow,
@@ -2054,9 +2055,10 @@ class OpenAIChatToolWindow(ToolWindow):
         card._round_index = user_round_index
         card.update_content(content)
         card.finish_streaming()
-        card.deleteRequested.connect(lambda: self._delete_message(card))
-        card.undoRequested.connect(lambda: self._undo_from_message(card))
-        card.actionRequested.connect(self._on_code_action)
+        
+        # 设置卡片信号
+        setup_user_card_signals(card, self._delete_message, self._undo_from_message, self._on_code_action)
+        
         self._add_chat_widget(card)
         self._scroll_to_bottom()
 

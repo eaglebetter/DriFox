@@ -901,6 +901,21 @@ def log_deletion_stats(round_index: int, ui_deleted: bool, old_count: int, new_c
     logger.info(f"[DELETE] Session messages updated: {old_count} -> {new_count}")
 
 
+def setup_user_card_signals(card, delete_callback, undo_callback, action_callback) -> None:
+    """
+    设置用户消息卡片的信号连接
+    
+    Args:
+        card: 消息卡片
+        delete_callback: 删除回调
+        undo_callback: 撤销回调
+        action_callback: 动作回调
+    """
+    card.deleteRequested.connect(lambda: delete_callback(card))
+    card.undoRequested.connect(lambda: undo_callback(card))
+    card.actionRequested.connect(action_callback)
+
+
 def refresh_history_card_if_visible(history_card, refresh_func=None) -> None:
     """
     如果历史卡片可见则刷新
