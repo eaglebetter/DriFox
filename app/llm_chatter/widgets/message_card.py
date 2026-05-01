@@ -414,11 +414,9 @@ WELCOME_TIPS = [
     "💡 使用 Ctrl+L 可快速清空输入框",
     "💡 使用 Ctrl+N 可快速新建对话",
     "💡 按 ↑/↓ 键可浏览历史输入",
-    "💡 选中代码后可直接在 AI 回复中追问",
     "💡 点击模型名称可快速切换大模型",
     "💡 历史会话自动保存，断开不怕丢",
-    "💡 工具调用失败？试试重试按钮",
-    "💡 长对话可用「上下文压缩」优化 Token",
+    "💡 长对话会自动使用「上下文压缩」优化 Token",
     "💡 模型参数会影响回复风格，多试试",
     "💡 不同的智能体擅长不同任务哦",
     "💡 记忆管理让 AI 更懂你的偏好",
@@ -454,7 +452,8 @@ _CONTEXT_LINK_PATTERN = re.compile(r"\[([^\]]+)\]\((ask|jump|create|generate|vie
 def _inject_context_links(md_text: str) -> str:
     """将 [文本](ask/jump/create/generate/view/session) 转换为胶囊样式的追问标签
     
-    session 类型格式：[文本](session|title|preview|index)
+    session 类型格式：[文本](session|session_id|last_time)
+    last_time 如果为空则不显示
     """
     def replacer(match):
         content = match.group(1)
@@ -462,9 +461,21 @@ def _inject_context_links(md_text: str) -> str:
         extra = match.group(3) or ""
         
         if action == "session":
-            # session 格式：session_id
-            session_id = extra.strip()
-            return f'<span class="context-tag session-tag" data-type="session" data-session-id="{escape(session_id)}" data-action="session">{content}</span>'
+            # session 格式：session_id|last_time
+            parts = extra.split("|")
+            session_id = parts[0].strip() if parts else ""
+            last_time = parts[1].strip() if len(parts) > 1 else ""
+            
+            # 如果有 last_time，追加显示
+            if last_time:
+                display_content = f'{content}<span class="session-time">{last_time}</span>'
+            else:
+                display_content = content
+            
+            attrs = f'data-type="session" data-session-id="{escape(session_id)}" data-action="session"'
+            if last_time:
+                attrs += f' data-last-time="{escape(last_time)}"'
+            return f'<span class="context-tag session-tag" {attrs}>{display_content}</span>'
         
         return f'<span class="context-tag" data-type="{action}" data-content="{escape(content)}" data-action="{action}">{content}</span>'
     
@@ -898,16 +909,14 @@ class CodeWebViewer(QWebEngineView):
                     background: rgba(100, 198, 255, 0.25);
                     border-color: rgba(100, 198, 255, 0.8);
                 }}
-                .session-tag[data-preview]::after {{
-                    content: attr(data-preview);
+                /* session 时间显示在标题下方 */
+                .session-tag .session-time {{
                     display: block;
                     font-size: 10px;
                     font-weight: normal;
                     opacity: 0.6;
-                    margin-top: 2px;
-                    overflow: hidden;
-                    text-overflow: ellipsis;
-                    white-space: nowrap;
+                    margin-top: 4px;
+                    color: #88d4ff;
                 }}
 
                 /* 代码块通用样式 */
@@ -2067,7 +2076,8 @@ def create_welcome_card(
         for session in history_sessions[:3]:  # 最多显示3个
             title = session.get("title", "未命名会话")
             session_id = session.get("session_id", "")
-            session_md = f"[{title}](session|{session_id})"
+            last_time = session.get("last_time", "")
+            session_md = f"[{title}](session|{session_id}|{last_time})"
             sessions_html += f"- {session_md}\n"
         
         if sessions_html:
