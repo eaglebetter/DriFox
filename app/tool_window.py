@@ -120,7 +120,7 @@ class ToolWindowTitleBar(QWidget):
         self._popup_btn.clicked.connect(self._on_popup_clicked)
 
         # 锁定按钮 - 用于穿透模式
-        self._lock_btn = TransparentToolButton(get_icon("锁定"), self)
+        self._lock_btn = TransparentToolButton(get_icon("解锁"), self)
         self._lock_btn.setFixedSize(24, 24)
         self._lock_btn.setToolTip("锁定窗口（鼠标穿透）")
         self._lock_btn.clicked.connect(self._on_lock_clicked)
@@ -243,7 +243,7 @@ class ToolWindowTitleBar(QWidget):
     def _update_lock_state(self):
         """更新锁定按钮的图标和样式"""
         if self._is_locked:
-            self._lock_btn.setIcon(get_icon("解锁"))
+            self._lock_btn.setIcon(get_icon("锁定"))
             self._lock_btn.setToolTip("取消锁定（恢复交互）")
             self._lock_btn.setStyleSheet("""
                 QToolButton {
@@ -255,7 +255,7 @@ class ToolWindowTitleBar(QWidget):
                 }
             """)
         else:
-            self._lock_btn.setIcon(get_icon("锁定"))
+            self._lock_btn.setIcon(get_icon("解锁"))
             self._lock_btn.setToolTip("锁定窗口（鼠标穿透）")
             self._lock_btn.setStyleSheet("")
 

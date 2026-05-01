@@ -410,22 +410,6 @@ class ToolPopupDialog(QDialog):
         self.deleteLater()
         super().closeEvent(event)
 
-    def _restore_title_bar(self):
-        title_bar = self.tool_instance.get_title_bar()
-        if not title_bar:
-            return
-        try:
-            title_bar.popupRequested.disconnect()
-        except:
-            pass
-        tool_name = self.tool_instance.name
-        homepage = self.tool_instance.homepage
-        title_bar.popupRequested.connect(lambda: homepage._handle_tool_popup(tool_name))
-        self._popup_btn.setIcon(get_icon("弹出窗"))
-        self._popup_btn.setToolTip("弹出窗口")
-        self._switch_btn.show()
-        title_bar.clear_popup_buttons()
-
     def eventFilter(self, obj, event):
         if obj == self._popup_btn and event.type() == QEvent.Enter:
             self._popup_btn.setStyleSheet(
