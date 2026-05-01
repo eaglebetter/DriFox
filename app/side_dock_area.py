@@ -226,7 +226,12 @@ class ToolPopupDialog(QDialog):
         self._min_btn.clicked.connect(self.showMinimized)
         title_bar.add_popup_button(self._min_btn)
 
-        # 最大化按钮已移除
+        # 把锁定按钮移到最小化按钮右边
+        title_layout = title_bar.layout()
+        lock_btn = title_bar._lock_btn
+        lock_index = title_layout.indexOf(lock_btn)
+        title_layout.removeWidget(lock_btn)
+        title_layout.insertWidget(title_layout.indexOf(self._min_btn) + 1, lock_btn)
 
         main_layout.addWidget(title_bar)
         main_layout.addWidget(tool_instance, 1)
@@ -243,6 +248,55 @@ class ToolPopupDialog(QDialog):
 
         # 初始化系统托盘图标（用于 Windows 通知）
         self._init_tray_icon()
+
+        # 处理锁定按钮位置：移到最小化右边
+        title_layout = title_bar.layout()
+        lock_btn = title_bar._lock_btn
+        lock_index = title_layout.indexOf(lock_btn)
+        if lock_index >= 0:
+            title_layout.removeWidget(lock_btn)
+            min_index = title_layout.indexOf(self._min_btn)
+            title_layout.insertWidget(min_index + 1, lock_btn)
+
+        # 连接锁定信号
+        title_bar.lockRequested.connect(self._on_lock_changed)
+
+    def _on_lock_changed(self, locked: bool):
+        """处理窗口锁定状态变化"""
+        # 使用 Qt 属性实现穿透，而非 Windows API
+        # 标题栏保持可交互，内容区域穿透
+        self._set_content_passthrough(locked)
+
+    def _set_content_passthrough(self, enabled: bool):
+        """设置内容区域的鼠标穿透"""
+        content_widget = self.tool_instance
+        title_bar = self.tool_instance.get_title_bar()
+
+        def set_passthrough(widget):
+            # 对每个子控件设置穿透，但标题栏除外
+            for child in widget.children():
+                if not isinstance(child, QWidget):
+                    continue
+                if child is title_bar:
+                    continue
+                child.setAttribute(Qt.WA_TransparentForMouseEvents, enabled)
+                set_passthrough(child)
+
+        if enabled:
+            set_passthrough(content_widget)
+            # 标题栏显式保持可交互
+            title_bar.setAttribute(Qt.WA_TransparentForMouseEvents, False)
+            for child in title_bar.children():
+                if isinstance(child, QWidget):
+                    child.setAttribute(Qt.WA_TransparentForMouseEvents, False)
+        else:
+            # 恢复所有控件
+            def clear_passthrough(widget):
+                for child in widget.children():
+                    if isinstance(child, QWidget):
+                        child.setAttribute(Qt.WA_TransparentForMouseEvents, False)
+                        clear_passthrough(child)
+            set_passthrough(content_widget)
 
     def _init_tray_icon(self):
         """初始化系统托盘图标，用于显示 Windows 通知"""

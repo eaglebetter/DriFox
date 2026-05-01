@@ -208,6 +208,7 @@ class ModelSelectorPopup(QWidget):
         self.scroll_area = QScrollArea(self)
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.scroll_area.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.MinimumExpanding)
         self.scroll_area.setStyleSheet("""
             QScrollArea {
                 border: none;
@@ -244,6 +245,7 @@ class ModelSelectorPopup(QWidget):
         self.content_layout.addStretch(1)
 
         self.scroll_area.setWidget(self.content_widget)
+        self.scroll_area.setMinimumHeight(50)
         layout.addWidget(self.scroll_area, 1)
 
         # 整体窗口布局
@@ -308,8 +310,11 @@ class ModelSelectorPopup(QWidget):
         # 底部弹性空间
         self.content_layout.addStretch(1)
 
-        self.main_frame.adjustSize()
-        self.adjustSize()
+        # 隐藏时 adjustSize 不生效，改用显式 resize
+        self.main_frame.layout().activate()
+        QApplication.processEvents()
+        content_size = self.main_frame.sizeHint()
+        self.resize(content_size.width(), content_size.height())
 
     def _clear_layout(self, layout):
         while layout.count():
@@ -341,21 +346,34 @@ class ModelSelectorPopup(QWidget):
 
     def show_at(self, reference_widget: QWidget):
         """在参考控件上方显示弹窗（向上展开）"""
-        self.adjustSize()
+        # 先显示以激活布局计算
+        self.show()
+        QApplication.processEvents()
 
-        # 设置最大尺寸
+        # 获取内容实际需要的尺寸
+        content_size = self.content_widget.sizeHint()
+        content_width = max(content_size.width(), 350)  # 最小宽度确保能显示完整名称
+        scroll_area_height = content_size.height() + 20  # 搜索框+边距
+
+        # 设置合理的最大尺寸
         screen = QApplication.primaryScreen()
         if screen:
             screen_geom = screen.availableGeometry()
-            max_width = min(450, screen_geom.width() - 40)
+            max_width = max(min(450, screen_geom.width() - 40), content_width)
             max_height = min(500, screen_geom.height() - 120)
-            self.setMaximumSize(max_width, max_height)
         else:
-            self.setMaximumSize(450, 500)
+            max_width = max(450, content_width)
+            max_height = 500
+
+        self.setMaximumSize(max_width, max_height)
+
+        # 使用内容尺寸 resize（宽高各缩小1/3）
+        new_width = max_width * 2 // 3
+        new_height = min(scroll_area_height, 500) * 2 // 3
+        self.resize(new_width, new_height)
 
         btn_rect = reference_widget.rect()
         btn_global_pos = reference_widget.mapToGlobal(btn_rect.topLeft())
-        btn_width = btn_rect.width()
 
         popup_width = min(self.width(), self.maximumWidth())
         popup_height = min(self.height(), self.maximumHeight())

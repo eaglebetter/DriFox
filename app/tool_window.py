@@ -5,8 +5,11 @@ from enum import Enum
 from typing import Optional, List, Any
 import psutil
 
-from PyQt5.QtCore import pyqtSignal, QTimer
+from PyQt5.QtCore import pyqtSignal, QTimer, Qt
 from PyQt5.QtWidgets import QWidget, QHBoxLayout, QLabel
+
+from app.utils.utils import get_icon
+
 from qfluentwidgets import TransparentToolButton
 
 from app.utils.config import Settings
@@ -51,12 +54,14 @@ class PluginProtocol(ABC):
 class ToolWindowTitleBar(QWidget):
     switchLayoutRequested = pyqtSignal()
     popupRequested = pyqtSignal()
+    lockRequested = pyqtSignal(bool)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._custom_buttons = []
         self._popup_mode_buttons = []
         self._is_compact = False
+        self._is_locked = False
         self._setup_ui()
 
     def _setup_ui(self):
@@ -114,8 +119,15 @@ class ToolWindowTitleBar(QWidget):
         self._popup_btn.setToolTip("弹出窗口")
         self._popup_btn.clicked.connect(self._on_popup_clicked)
 
+        # 锁定按钮 - 用于穿透模式
+        self._lock_btn = TransparentToolButton(get_icon("锁定"), self)
+        self._lock_btn.setFixedSize(24, 24)
+        self._lock_btn.setToolTip("锁定窗口（鼠标穿透）")
+        self._lock_btn.clicked.connect(self._on_lock_clicked)
+
         layout.addWidget(self._switch_layout_btn)
         layout.addWidget(self._popup_btn)
+        layout.addWidget(self._lock_btn)
 
         try:
             font_name = Settings.get_instance().llm_font_family.value
@@ -223,6 +235,38 @@ class ToolWindowTitleBar(QWidget):
     def _on_popup_clicked(self):
         self.popupRequested.emit()
 
+    def _on_lock_clicked(self):
+        self._is_locked = not self._is_locked
+        self._update_lock_state()
+        self.lockRequested.emit(self._is_locked)
+
+    def _update_lock_state(self):
+        """更新锁定按钮的图标和样式"""
+        if self._is_locked:
+            self._lock_btn.setIcon(get_icon("解锁"))
+            self._lock_btn.setToolTip("取消锁定（恢复交互）")
+            self._lock_btn.setStyleSheet("""
+                QToolButton {
+                    background-color: rgba(0, 120, 212, 180);
+                    border-radius: 4px;
+                }
+                QToolButton:hover {
+                    background-color: rgba(0, 120, 212, 220);
+                }
+            """)
+        else:
+            self._lock_btn.setIcon(get_icon("锁定"))
+            self._lock_btn.setToolTip("锁定窗口（鼠标穿透）")
+            self._lock_btn.setStyleSheet("")
+
+    def set_locked(self, locked: bool):
+        """外部设置锁定状态"""
+        self._is_locked = locked
+        self._update_lock_state()
+
+    def is_locked(self) -> bool:
+        return self._is_locked
+
     def show_memory_label(self):
         """显示内存标签并开始刷新"""
         self._memory_label.show()
@@ -274,6 +318,7 @@ class ToolWindow(QWidget):
         self._title_bar.set_title(self.name)
         self._title_bar.switchLayoutRequested.connect(self._handle_switch_layout)
         self._title_bar.popupRequested.connect(self._request_popup)
+        self._title_bar.lockRequested.connect(self._on_window_lock_changed)
         self._title_bar.hide()
         self._setup_title_bar()
 
@@ -302,6 +347,28 @@ class ToolWindow(QWidget):
     def _request_popup(self):
         if hasattr(self.homepage, "_handle_tool_popup"):
             self.homepage._handle_tool_popup(self.name)
+
+    def _on_window_lock_changed(self, locked: bool):
+        """处理窗口锁定状态变化"""
+        # ToolWindow 本身不处理穿透，
+        # 穿透由容器（如弹窗）处理
+        pass
+
+    def _set_passthrough_mode(self, enabled: bool):
+        """
+        设置鼠标穿透模式 - 仅影响子控件层级
+        不对窗口本身设置穿透，保持窗口可移动
+        """
+        def set_passthrough(widget, enable):
+            # 只对子控件设置穿透，不对自身设置
+            for child in widget.children():
+                if isinstance(child, QWidget):
+                    if child is self._title_bar:
+                        continue
+                    child.setAttribute(Qt.WA_TransparentForMouseEvents, enable)
+                    set_passthrough(child, enable)
+
+        set_passthrough(self, enabled)
 
     def register_action_button(self, widget):
         if self._title_bar:
