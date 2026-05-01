@@ -130,6 +130,82 @@ class OpacitySlider(QWidget):
         self.setOpacity(self._opacity + (delta // 120) * 5)
 
 
+class LockButtonWidget(QWidget):
+    """独立的锁定按钮小部件，在穿透模式下可独立显示和交互"""
+    lockClicked = pyqtSignal(bool)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._is_locked = False
+        self.setFixedSize(26, 26)
+        self.setWindowFlags(Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self._setup_ui()
+        self._update_icon()
+
+    def _setup_ui(self):
+        from qfluentwidgets import ToolButton
+        self._btn = ToolButton(self)
+        self._btn.setFixedSize(26, 26)
+        self._btn.clicked.connect(self._on_click)
+        self._btn.setIconSize(QSize(16, 16))
+        self._btn.move(0, 0)
+
+    def _on_click(self):
+        self._is_locked = not self._is_locked
+        self._update_icon()
+        self.lockClicked.emit(self._is_locked)
+
+    def _update_icon(self):
+        if self._is_locked:
+            self._btn.setIcon(get_icon("锁定"))
+            self._btn.setToolTip("取消锁定（恢复交互）")
+            self._btn.setStyleSheet("""
+                QToolButton {
+                    background-color: rgba(0, 120, 212, 200);
+                    border-radius: 4px;
+                    color: #e0e0e0;
+                }
+                QToolButton:hover {
+                    background-color: rgba(0, 120, 212, 240);
+                }
+                QToolButton:pressed {
+                    background-color: rgba(0, 120, 212, 180);
+                }
+            """)
+        else:
+            self._btn.setIcon(get_icon("解锁"))
+            self._btn.setToolTip("锁定窗口（鼠标穿透）")
+            self._btn.setStyleSheet("""
+                QToolButton {
+                    background-color: transparent;
+                    border-radius: 4px;
+                    color: #c0c0c0;
+                }
+                QToolButton:hover {
+                    background-color: rgba(255, 255, 255, 15);
+                    color: #ffffff;
+                }
+            """)
+
+    def setLocked(self, locked: bool):
+        if self._is_locked != locked:
+            self._is_locked = locked
+            self._update_icon()
+
+    def isLocked(self) -> bool:
+        return self._is_locked
+
+    def paintEvent(self, e):
+        # 深色背景，和标题栏风格一致
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(Qt.NoPen)
+        bg_color = QColor(45, 45, 45)  # 深色背景
+        painter.setBrush(bg_color)
+        painter.drawRoundedRect(self.rect(), 4, 4)
+
+
 class AdaptiveStackedWidget(QStackedWidget):
     def sizeHint(self) -> QSize:
         current = self.currentWidget()
@@ -234,12 +310,9 @@ class ToolPopupDialog(QDialog):
         self._min_btn.clicked.connect(self.showMinimized)
         title_bar.add_popup_button(self._min_btn)
 
-        # 把锁定按钮移到最小化按钮右边
-        title_layout = title_bar.layout()
+        # 隐藏标题栏的锁定按钮，改用独立的 LockButtonWidget
         lock_btn = title_bar._lock_btn
-        lock_index = title_layout.indexOf(lock_btn)
-        title_layout.removeWidget(lock_btn)
-        title_layout.insertWidget(title_layout.indexOf(self._min_btn) + 1, lock_btn)
+        lock_btn.hide()
 
         main_layout.addWidget(title_bar)
         main_layout.addWidget(tool_instance, 1)
@@ -260,39 +333,55 @@ class ToolPopupDialog(QDialog):
         # 初始化系统托盘图标（用于 Windows 通知）
         self._init_tray_icon()
 
-        # 处理锁定按钮位置：移到最小化右边
-        title_layout = title_bar.layout()
-        lock_btn = title_bar._lock_btn
-        lock_index = title_layout.indexOf(lock_btn)
-        if lock_index >= 0:
-            title_layout.removeWidget(lock_btn)
-            min_index = title_layout.indexOf(self._min_btn)
-            title_layout.insertWidget(min_index + 1, lock_btn)
+        # 创建独立的锁定按钮（在穿透模式下仍可交互）
+        self._lock_btn_widget = LockButtonWidget()
+        self._lock_btn_widget.lockClicked.connect(self._on_lock_changed)
 
-        # 连接锁定信号
-        title_bar.lockRequested.connect(self._on_lock_changed)
+        # 连接标题栏锁定信号（用于同步状态）
+        title_bar.lockRequested.connect(self._on_title_bar_lock_changed)
+
+    def _on_title_bar_lock_changed(self, locked: bool):
+        """响应标题栏锁定信号，同步到独立锁定按钮"""
+        self._lock_btn_widget.setLocked(locked)
 
     def _on_lock_changed(self, locked: bool):
         """处理窗口锁定状态变化"""
         self._lock_mode = locked
         if locked:
-            self._reparent_slider_to_desktop()
+            self._reparent_lock_btn_to_desktop()
         self._set_window_passthrough(locked)
         if not locked:
-            self._reparent_slider_to_dialog()
-        self._sync_slider_position()
+            self._reparent_lock_btn_to_dialog()
+        self._sync_lock_btn_position()
 
-    def _reparent_slider_to_desktop(self):
-        """重新设置 opacity slider 的父对象为桌面，使其在穿透模式下仍可交互"""
-        if self._opacity_slider:
-            desktop = QApplication.desktop()
-            screen_geo = desktop.screenGeometry(self._get_current_screen())
-            pos = self._opacity_slider.pos()
-            self._slider_desktop_pos = pos
-            self._opacity_slider.setParent(None)
-            self._opacity_slider.move(screen_geo.topLeft() + pos)
-            self._opacity_slider.show()
-            self._opacity_slider.raise_()
+    def _reparent_lock_btn_to_desktop(self):
+        """重新设置 lock button widget 的父对象为桌面，使其在穿透模式下仍可交互"""
+        if self._lock_btn_widget:
+            # 在透明度条上方，透明度条右边再往左一个按钮宽度
+            pos = self.mapToGlobal(QPoint(self.width(), 3))
+            self._lock_btn_widget.setParent(None)
+            self._lock_btn_widget.move(pos)
+            self._lock_btn_widget.show()
+            self._lock_btn_widget.raise_()
+
+    def _reparent_lock_btn_to_dialog(self):
+        """恢复 lock button widget 的父对象为对话框"""
+        if self._lock_btn_widget:
+            # 保持为独立窗口，只是改变父对象
+            self._sync_lock_btn_position()
+            self._lock_btn_widget.show()
+
+    def _sync_lock_btn_position(self):
+        """同步 lock button 位置到透明度条上方"""
+        if self._lock_btn_widget:
+            # 透明度条宽度36，位置在 (width, 10)
+            # 锁定按钮在透明度条上方，位置 (width, 10 - 26 - 8) = (width, -24)
+            # 但这样会超出屏幕，所以放在透明度条左边，y坐标在透明度条上方
+            # 改到窗口右侧，y = 10 - 26 - 4 = -20，这样超出标题栏
+            # 放在窗口右上角内，标题栏高度32，按钮26，位置 y=3
+            # 在透明度条上方
+            pos = self.mapToGlobal(QPoint(self.width() + 36 - 26 - 4, 3))
+            self._lock_btn_widget.move(pos)
 
     def _reparent_slider_to_dialog(self):
         """恢复 opacity slider 的父对象为对话框"""
@@ -306,9 +395,9 @@ class ToolPopupDialog(QDialog):
         return desktop.screenNumber(self)
 
     def _sync_slider_position(self):
-        """同步 slider 位置到对话框右侧"""
+        """同步 slider 位置到对话框右侧（锁定按钮下方）"""
         if self._opacity_slider and not self._lock_mode:
-            pos = self.mapToGlobal(QPoint(self.width(), 10))
+            pos = self.mapToGlobal(QPoint(self.width(), 10 + 30))  # 往下移30px，避开锁定按钮
             self._opacity_slider.move(pos)
 
     def _set_window_passthrough(self, enabled: bool):
@@ -390,6 +479,9 @@ class ToolPopupDialog(QDialog):
         super().showEvent(event)
         self._restore_geometry()
         self.tool_instance.show()
+        # 显示锁定按钮在窗口右侧
+        self._sync_lock_btn_position()
+        self._lock_btn_widget.show()
 
     def _restore_geometry(self):
         from PyQt5.QtCore import QSettings
@@ -617,6 +709,11 @@ class ToolPopupDialog(QDialog):
         if self._is_maximized or self._is_closing:
             return
         self._geometry_save_timer.start()
+        # 同步 lock button 位置
+        if self._lock_mode:
+            self._reparent_lock_btn_to_desktop()
+        else:
+            self._sync_lock_btn_position()
 
     def _on_destroyed(self):
         if hasattr(self.tool_instance, "set_allowed_update"):
@@ -631,7 +728,7 @@ class ToolPopupDialog(QDialog):
             self._reparent_slider_to_desktop()
         else:
             self._opacity_slider.setParent(self)
-            pos = self.mapToGlobal(QPoint(self.width(), 10))
+            pos = self.mapToGlobal(QPoint(self.width(), 10 + 30))  # 往下移30px
             self._opacity_slider.move(pos)
             self._opacity_slider.show()
             self._opacity_slider.raise_()
