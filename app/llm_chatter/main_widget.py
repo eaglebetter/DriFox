@@ -323,7 +323,7 @@ class OpenAIChatToolWindow(ToolWindow):
         # self._minimal_mode = False
         # self._minimal_status_widget = None
         # 创建复制窗口按钮
-        self._copy_btn = TransparentToolButton(FluentIcon.COPY, self)
+        self._copy_btn = TransparentToolButton(get_icon("新建窗口"), self)
         self._copy_btn.setToolTip("复制窗口")
         self._copy_btn.clicked.connect(self._duplicate_window)
         title_bar.add_button(self._copy_btn)

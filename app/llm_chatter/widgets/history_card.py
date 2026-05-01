@@ -160,7 +160,7 @@ class _HistoryItemCard(CardWidget):
         btn_container = QHBoxLayout()
         btn_container.setSpacing(2)
 
-        self.edit_btn = TransparentToolButton(FluentIcon.EDIT, self)
+        self.edit_btn = TransparentToolButton(get_icon("重命名"), self)
         self.edit_btn.setToolTip("重命名")
         self.edit_btn.setFixedSize(24, 24)
         self.edit_btn.clicked.connect(self._start_edit)
@@ -180,7 +180,7 @@ class _HistoryItemCard(CardWidget):
         bottom_row.setSpacing(8)
 
         rel_time = format_relative_time(last_time)
-        meta_text = f"{rel_time} · {message_count} 轮对话"
+        meta_text = f"{rel_time} · {message_count} 轮对话 · "
         self.meta_label = CaptionLabel(meta_text, self)
         self.meta_label.setStyleSheet(
             "color: #ffb65c;" if is_current else "color: rgba(255, 255, 255, 0.5);"
@@ -195,7 +195,7 @@ class _HistoryItemCard(CardWidget):
                 "color: rgba(255, 255, 255, 0.4); font-style: italic;"
             )
             self.preview_label.setWordWrap(True)
-            bottom_row.addSpacing(15)
+            bottom_row.addSpacing(25)
             bottom_row.addWidget(self.preview_label, 1)
 
         layout.addLayout(bottom_row)

@@ -1,175 +1,42 @@
 <!DOCTYPE RCC>
 <RCC version="1.0">
 <qresource prefix="/icons">
-    <file>API测试.svg</file>
     <file>Anthropic.svg</file>
-    <file>Global.svg</file>
-    <file>HTTP请求.svg</file>
-    <file>KMeans.svg</file>
     <file>MCP.svg</file>
     <file>MiniMax.svg</file>
-    <file>Miniconda.svg</file>
     <file>Ollama.svg</file>
-    <file>Picture.svg</file>
-    <file>Sync.svg</file>
     <file>baidu.svg</file>
-    <file>bilibili.svg</file>
-    <file>brush.svg</file>
-    <file>collapse_all.svg</file>
-    <file>console.svg</file>
-    <file>dataframe.svg</file>
     <file>deepseek.svg</file>
     <file>drifox.ico</file>
-    <file>eraser.svg</file>
-    <file>expand_all.svg</file>
-    <file>fill.svg</file>
     <file>fox_bg.png</file>
     <file>gemini-ai.svg</file>
-    <file>github.svg</file>
     <file>groq.svg</file>
-    <file>ipython.svg</file>
-    <file>list.svg</file>
-    <file>location.svg</file>
-    <file>logo.png</file>
-    <file>logo2.png</file>
-    <file>logo3.png</file>
-    <file>logoico.ico</file>
-    <file>ls.svg</file>
-    <file>node_base.png</file>
-    <file>number.svg</file>
-    <file>python.svg</file>
     <file>qwen.svg</file>
-    <file>readme.svg</file>
-    <file>shell.svg</file>
     <file>siliconflow.png</file>
-    <file>spyder.ico</file>
-    <file>string.svg</file>
-    <file>upload.svg</file>
-    <file>三图居中.svg</file>
-    <file>上下切换.svg</file>
-    <file>从模板创建.svg</file>
-    <file>从此处运行.svg</file>
-    <file>代码执行.svg</file>
-    <file>任务队列.svg</file>
-    <file>依赖包.svg</file>
-    <file>停止.svg</file>
-    <file>全选.svg</file>
-    <file>关联规则.svg</file>
-    <file>分类决策树.svg</file>
-    <file>列表.svg</file>
-    <file>创建节点.svg</file>
-    <file>删除变量.svg</file>
-    <file>升序.svg</file>
-    <file>参数提取器-F.svg</file>
-    <file>取消选择.svg</file>
-    <file>变量.svg</file>
-    <file>合并.svg</file>
-    <file>同心圆.svg</file>
-    <file>向下拆分.svg</file>
-    <file>向右拆分.svg</file>
-    <file>回归决策树.svg</file>
-    <file>回形针.svg</file>
-    <file>固定.svg</file>
-    <file>图表.svg</file>
     <file>复制.svg</file>
-    <file>多媒体.svg</file>
-    <file>多轮对话.svg</file>
     <file>大模型.svg</file>
-    <file>失败.svg</file>
     <file>字体.svg</file>
-    <file>安装包.svg</file>
     <file>导入.svg</file>
-    <file>导入文件.svg</file>
-    <file>层次聚类.svg</file>
     <file>展开.svg</file>
-    <file>属性面板.svg</file>
-    <file>工作流.png</file>
     <file>工具.svg</file>
-    <file>工具包.png</file>
-    <file>左收起.svg</file>
     <file>差异对比.svg</file>
-    <file>广义回归.svg</file>
-    <file>异常检测.svg</file>
-    <file>弹出窗.svg</file>
     <file>归档.svg</file>
     <file>快捷键.svg</file>
     <file>惊叹号.svg</file>
     <file>成功.svg</file>
     <file>折叠.svg</file>
     <file>提示.svg</file>
-    <file>插件市场.svg</file>
-    <file>插入.svg</file>
     <file>撤销.svg</file>
-    <file>收起侧边栏.svg</file>
-    <file>收集.svg</file>
     <file>放大.svg</file>
-    <file>数据分析-流量分析.svg</file>
-    <file>数据库操作.svg</file>
-    <file>数组.svg</file>
-    <file>文件选择.svg</file>
-    <file>文本注释.svg</file>
-    <file>文档.svg</file>
-    <file>文档提取器.svg</file>
     <file>新建.svg</file>
-    <file>无限.png</file>
-    <file>日志.svg</file>
+    <file>新建窗口.svg</file>
     <file>智能体.svg</file>
-    <file>智能视频.svg</file>
     <file>智谱.svg</file>
-    <file>暂停.svg</file>
     <file>更多.svg</file>
-    <file>更新.svg</file>
     <file>最大化.svg</file>
     <file>最小化.svg</file>
-    <file>条件分支.png</file>
-    <file>框选.svg</file>
-    <file>模型.png</file>
     <file>模型选择.svg</file>
-    <file>消息推送.svg</file>
-    <file>清空参数.svg</file>
-    <file>环境变量.svg</file>
-    <file>用户名.svg</file>
-    <file>画布.svg</file>
-    <file>画布2.svg</file>
-    <file>画布管理.svg</file>
-    <file>知识检索.svg</file>
-    <file>知识问答.svg</file>
-    <file>系统运行日志.png</file>
-    <file>系统通知.svg</file>
-    <file>线性回归.svg</file>
-    <file>组件.png</file>
-    <file>组节点.svg</file>
-    <file>结束.svg</file>
-    <file>绿色运行.svg</file>
-    <file>缩小.svg</file>
-    <file>缩放.svg</file>
-    <file>网格.svg</file>
-    <file>网络爬虫.svg</file>
-    <file>自动保存.svg</file>
-    <file>自定义变量.svg</file>
-    <file>节点变量.svg</file>
-    <file>节点库.svg</file>
-    <file>表格.svg</file>
-    <file>触发器.svg</file>
-    <file>调试.svg</file>
-    <file>运行.svg</file>
-    <file>运行中.svg</file>
-    <file>运行到此处.svg</file>
-    <file>运行所在子图.svg</file>
-    <file>运行模式.svg</file>
-    <file>运行环境.svg</file>
-    <file>运行记录.svg</file>
-    <file>返回上级目录.svg</file>
-    <file>远程重启.svg</file>
-    <file>追踪.svg</file>
-    <file>适应屏幕.svg</file>
-    <file>逻辑回归A.svg</file>
-    <file>配置.svg</file>
     <file>重命名.svg</file>
-    <file>镜像源.svg</file>
     <file>长期记忆.svg</file>
-    <file>问题分类器.svg</file>
-    <file>降序.svg</file>
-    <file>项目.png</file>
   </qresource>
 </RCC>
