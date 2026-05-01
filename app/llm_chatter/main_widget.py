@@ -1477,19 +1477,33 @@ class OpenAIChatToolWindow(ToolWindow):
         agent_name = agent.name if agent else ""
         agent_desc = agent.description if agent else ""
         
-        # 获取最近会话用于欢迎卡片
-        history_sessions = []
+        # 获取最近会话和最多消息的会话用于欢迎卡片
         history_list = self.history_manager.get_history_list()
-        for i, session in enumerate(history_list[:3]):
-            history_sessions.append({
+        
+        # 最近会话（按时间排序，取前3）
+        recent_sessions = []
+        for session in history_list[:3]:
+            recent_sessions.append({
                 "title": session.get("title"),
                 "last_time": session.get("last_time"),
                 "session_id": session.get("session_id"),
+                "message_count": session.get("message_count", 0),
+            })
+        
+        # 最多消息的会话（按消息数量排序，取前3）
+        top_sessions = sorted(history_list, key=lambda x: x.get("message_count", 0), reverse=True)[:3]
+        top_by_count = []
+        for session in top_sessions:
+            top_by_count.append({
+                "title": session.get("title"),
+                "last_time": session.get("last_time"),
+                "session_id": session.get("session_id"),
+                "message_count": session.get("message_count", 0),
             })
         
         # 每次都重新创建，确保会话列表是最新的
         welcome_card = create_welcome_card(
-            self, agent_name, agent_desc, history_sessions
+            self, agent_name, agent_desc, recent_sessions, top_by_count
         )
         welcome_card._is_welcome = True
         welcome_card.contextActionRequested.connect(

@@ -411,7 +411,7 @@ def _inject_tool_blocks(md_text: str, completed: bool = True) -> str:
 # ======== 欢迎卡片随机 Tips ========
 WELCOME_TIPS = [
     "💡 拖拽文件到输入框即可快速分析",
-    "💡 使用 Ctrl+L 可快速清空输入框",
+    "💡 使用 Ctrl+L 可快速清空当前会话",
     "💡 使用 Ctrl+N 可快速新建对话",
     "💡 按 ↑/↓ 键可浏览历史输入",
     "💡 点击模型名称可快速切换大模型",
@@ -422,6 +422,8 @@ WELCOME_TIPS = [
     "💡 记忆管理让 AI 更懂你的偏好",
     "💡 代码块可直接保存到本地文件",
     "💡 点击差异对比可查看文件修改",
+    "💡 Shift+Enter 换行，Enter 发送",
+    "💡 点击智能体选择框可切换任务类型",
 ]
 
 
@@ -917,6 +919,30 @@ class CodeWebViewer(QWebEngineView):
                     opacity: 0.6;
                     margin-top: 4px;
                     color: #88d4ff;
+                }}
+
+                /* Markdown 表格样式 */
+                .session-table {{
+                    border-collapse: collapse;
+                    width: 100%;
+                    margin: 8px 0;
+                }}
+                .session-table th, .session-table td {{
+                    border: 1px solid rgba(100, 198, 255, 0.3);
+                    padding: 8px 12px;
+                    text-align: left;
+                }}
+                .session-table th {{
+                    background: rgba(100, 198, 255, 0.1);
+                    color: #66c6ff;
+                    font-weight: 600;
+                }}
+                .session-table td {{
+                    background: rgba(30, 40, 60, 0.5);
+                    vertical-align: middle;
+                }}
+                .session-table tr:hover td {{
+                    background: rgba(100, 198, 255, 0.08);
                 }}
 
                 /* 代码块通用样式 */
@@ -2044,7 +2070,7 @@ class MessageCard(SimpleCardWidget):
 
 def create_welcome_card(
     parent=None, agent_name: str = "", agent_description: str = "",
-    history_sessions: list = None
+    recent_sessions: list = None, top_by_count: list = None
 ) -> MessageCard:
     """创建欢迎卡片
     
@@ -2052,7 +2078,8 @@ def create_welcome_card(
         parent: 父控件
         agent_name: 当前智能体名称
         agent_description: 智能体描述
-        history_sessions: 最近的历史会话列表，每项包含 title, preview, index
+        recent_sessions: 最近的历史会话列表，每项包含 title, last_time, session_id, message_count
+        top_by_count: 消息最多的会话列表，每项包含 title, last_time, session_id, message_count
     """
     agent_tendency = ""
     if agent_name:
@@ -2069,30 +2096,50 @@ def create_welcome_card(
     greeting = get_random_greeting()
     tip = get_random_tip()
     
-    # 构建历史会话链接
-    history_links = ""
-    if history_sessions:
-        sessions_html = ""
-        for session in history_sessions[:3]:  # 最多显示3个
-            title = session.get("title", "未命名会话")
-            session_id = session.get("session_id", "")
-            last_time = session.get("last_time", "")
-            session_md = f"[{title}](session|{session_id}|{last_time})"
-            sessions_html += f"- {session_md}\n"
+    # 构建历史会话链接（两列表格：最近会话 | 最多消息）
+    history_section = ""
+    if recent_sessions or top_by_count:
+        # 生成表格 HTML（使用纯 HTML 确保胶囊样式正确显示）
+        table_rows = ""
+        for i in range(3):
+            # 左边：最近会话
+            recent = recent_sessions[i] if recent_sessions and i < len(recent_sessions) else None
+            # 右边：消息最多
+            top = top_by_count[i] if top_by_count and i < len(top_by_count) else None
+            
+            if recent:
+                title = escape(recent.get("title", "未命名会话"))
+                session_id = escape(recent.get("session_id", ""))
+                last_time = escape(recent.get("last_time", ""))
+                left_cell = f'<span class="context-tag session-tag" data-type="session" data-session-id="{session_id}" data-action="session">{title}<span class="session-time">{last_time}</span></span>'
+            else:
+                left_cell = "-"
+                
+            if top:
+                title = escape(top.get("title", "未命名会话"))
+                session_id = escape(top.get("session_id", ""))
+                msg_count = top.get("message_count", 0)
+                right_cell = f'<span class="context-tag session-tag" data-type="session" data-session-id="{session_id}" data-action="session">{title}<span class="session-time">{msg_count}条消息</span></span>'
+            else:
+                right_cell = "-"
+            
+            table_rows += f'<tr><td>{left_cell}</td><td>{right_cell}</td></tr>'
         
-        if sessions_html:
-            history_links = f"""
+        history_section = f"""
 ---
 
-### 📜 最近会话
+### 📜 历史会话
 
-{sessions_html}
+<table class="session-table">
+<tr><th>最近会话</th><th>消息最多</th></tr>
+{table_rows}
+</table>
 """
 
     welcome_md = f"""\
 ### 👋 {greeting}
 
-{history_links}
+{history_section}
 
 ---
 ### 小提示
