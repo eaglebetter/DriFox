@@ -1450,6 +1450,10 @@ class PlainTextViewer(QWidget):
         super().resizeEvent(event)
         self._update_height()
 
+    def update_height(self):
+        """公开方法，用于外部触发高度重算"""
+        self._update_height()
+
 
 # ======== MessageCard ========
 class TagWidget(CardWidget):
@@ -1883,6 +1887,10 @@ class MessageCard(SimpleCardWidget):
             self.setMinimumWidth(target_width)
             self.setMaximumWidth(target_width)
             self.blockSignals(False)
+        
+        # 宽度同步后触发 viewer 高度重算（用于 user 卡片的 PlainTextViewer）
+        if hasattr(self.viewer, 'update_height'):
+            self.viewer.update_height()
 
     def wheelEvent(self, event: QWheelEvent):
         try:
