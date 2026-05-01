@@ -408,9 +408,67 @@ def _inject_tool_blocks(md_text: str, completed: bool = True) -> str:
     return "".join(parts)
 
 
+# ======== 欢迎卡片随机 Tips ========
+WELCOME_TIPS = [
+    "💡 拖拽文件到输入框即可快速分析",
+    "💡 使用 Ctrl+L 可快速清空输入框",
+    "💡 使用 Ctrl+N 可快速新建对话",
+    "💡 按 ↑/↓ 键可浏览历史输入",
+    "💡 选中代码后可直接在 AI 回复中追问",
+    "💡 点击模型名称可快速切换大模型",
+    "💡 历史会话自动保存，断开不怕丢",
+    "💡 工具调用失败？试试重试按钮",
+    "💡 长对话可用「上下文压缩」优化 Token",
+    "💡 模型参数会影响回复风格，多试试",
+    "💡 不同的智能体擅长不同任务哦",
+    "💡 记忆管理让 AI 更懂你的偏好",
+    "💡 代码块可直接保存到本地文件",
+    "💡 点击差异对比可查看文件修改",
+]
+
+
+# ======== 欢迎卡片欢迎语 ========
+WELCOME_GREETINGS = [
+    "你好！我是 Drifox 飘狐",
+    "嗨！有什么我可以帮你的吗？",
+    "欢迎回来！今天想聊点什么？",
+    "你好！随时可以问我问题。",
+]
+
+
+def get_random_tip() -> str:
+    """获取随机 Tips"""
+    import random
+    return random.choice(WELCOME_TIPS)
+
+
+def get_random_greeting() -> str:
+    """获取随机欢迎语"""
+    import random
+    return random.choice(WELCOME_GREETINGS)
+
+
+_CONTEXT_LINK_PATTERN = re.compile(r"\[([^\]]+)\]\((ask|jump|create|generate|view|session)(?:\|([^)]*))?\)")
+
+
 def _inject_context_links(md_text: str) -> str:
-    """Context links 功能已移除，返回原始文本"""
-    return md_text
+    """将 [文本](ask/jump/create/generate/view/session) 转换为胶囊样式的追问标签
+    
+    session 类型格式：[文本](session|title|preview|index)
+    """
+    def replacer(match):
+        content = match.group(1)
+        action = match.group(2)
+        extra = match.group(3) or ""
+        
+        if action == "session":
+            # session 格式：session_id
+            session_id = extra.strip()
+            return f'<span class="context-tag session-tag" data-type="session" data-session-id="{escape(session_id)}" data-action="session">{content}</span>'
+        
+        return f'<span class="context-tag" data-type="{action}" data-content="{escape(content)}" data-action="{action}">{content}</span>'
+    
+    return _CONTEXT_LINK_PATTERN.sub(replacer, md_text)
 
 
 # ======== WebViewer ========
@@ -828,6 +886,30 @@ class CodeWebViewer(QWebEngineView):
                 }}
                 {"".join(tag_css)}
 
+                /* session 历史会话标签样式 */
+                .session-tag {{
+                    background: rgba(100, 198, 255, 0.12);
+                    border-color: rgba(100, 198, 255, 0.5);
+                    color: #66c6ff;
+                    margin: 4px 4px;
+                    min-width: 120px;
+                }}
+                .session-tag:hover {{
+                    background: rgba(100, 198, 255, 0.25);
+                    border-color: rgba(100, 198, 255, 0.8);
+                }}
+                .session-tag[data-preview]::after {{
+                    content: attr(data-preview);
+                    display: block;
+                    font-size: 10px;
+                    font-weight: normal;
+                    opacity: 0.6;
+                    margin-top: 2px;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    white-space: nowrap;
+                }}
+
                 /* 代码块通用样式 */
                 .code-table {{ width: 100%; border-collapse: collapse; }}
                 .code-table td {{ padding: 0; vertical-align: top; }}
@@ -1082,7 +1164,15 @@ class CodeWebViewer(QWebEngineView):
                         return;
                     }}
                     const tag = e.target.closest('.context-tag');
-                    if (tag) console.log('pywebview_action:context|||' + tag.getAttribute('data-content') + '|||' + tag.getAttribute('data-action'));
+                    if (tag) {{
+                        var tagType = tag.getAttribute('data-type') || tag.getAttribute('data-action') || '';
+                        var sessionId = tag.getAttribute('data-session-id') || '';
+                        var tagContent = sessionId || tag.getAttribute('data-content') || tag.getAttribute('data-title') || '';
+                        e.stopPropagation();
+                        e.preventDefault();
+                        console.log('pywebview_action:context|||' + tagContent + '|||' + tagType);
+                        return;
+                    }}
                     const link = e.target.closest('a');
                     if (link) {{
                         console.log('pywebview_action:link_found:' + link.href);
@@ -1944,8 +2034,17 @@ class MessageCard(SimpleCardWidget):
 
 
 def create_welcome_card(
-    parent=None, agent_name: str = "", agent_description: str = ""
+    parent=None, agent_name: str = "", agent_description: str = "",
+    history_sessions: list = None
 ) -> MessageCard:
+    """创建欢迎卡片
+    
+    Args:
+        parent: 父控件
+        agent_name: 当前智能体名称
+        agent_description: 智能体描述
+        history_sessions: 最近的历史会话列表，每项包含 title, preview, index
+    """
     agent_tendency = ""
     if agent_name:
         agent_tendency = f"""
@@ -1957,13 +2056,38 @@ def create_welcome_card(
 
 """
 
+    # 随机选择欢迎语和 Tips
+    greeting = get_random_greeting()
+    tip = get_random_tip()
+    
+    # 构建历史会话链接
+    history_links = ""
+    if history_sessions:
+        sessions_html = ""
+        for session in history_sessions[:3]:  # 最多显示3个
+            title = session.get("title", "未命名会话")
+            session_id = session.get("session_id", "")
+            session_md = f"[{title}](session|{session_id})"
+            sessions_html += f"- {session_md}\n"
+        
+        if sessions_html:
+            history_links = f"""
+---
+
+### 📜 最近会话
+
+{sessions_html}
+"""
+
     welcome_md = f"""\
-### 👋 你好！我是 Drifox 飘狐
+### 👋 {greeting}
+
+{history_links}
 
 ---
-*如需切换智能体，请在输入框右下角下拉菜单中选择。*
+### 小提示
 
-{agent_tendency}
+**{tip}**
 """
 
     card = MessageCard(role="welcome", timestamp="就绪", parent=parent)

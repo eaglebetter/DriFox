@@ -1,11 +1,15 @@
 # -*- coding: utf-8 -*-
 from PyQt5.QtCore import Qt, QSize, QTimer, QEvent, QPoint, pyqtSignal
-from PyQt5.QtGui import QPainter, QColor
+from PyQt5.QtGui import QPainter, QColor, QIcon
 from PyQt5.QtWidgets import (
     QWidget,
     QStackedWidget,
     QDialog,
     QVBoxLayout,
+    QSystemTrayIcon,
+    QMenu,
+    QAction,
+    QApplication,
 )
 from qfluentwidgets import isDarkTheme, FluentIcon as FIF, TransparentToolButton, FluentIcon
 
@@ -239,6 +243,55 @@ class ToolPopupDialog(QDialog):
         self._hide_timer.setInterval(200)
         self._hide_timer.timeout.connect(self._check_hide_slider)
         self.setMouseTracking(True)
+
+        # 初始化系统托盘图标（用于 Windows 通知）
+        self._init_tray_icon()
+
+    def _init_tray_icon(self):
+        """初始化系统托盘图标，用于显示 Windows 通知"""
+        import os
+
+        # 使用应用程序的图标
+        icon_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "images",
+            "drifox.ico"
+        )
+        if os.path.exists(icon_path):
+            tray_icon = QIcon(icon_path)
+        else:
+            # 如果找不到图标，使用默认图标
+            tray_icon = self.style().standardIcon(QWidget.style().SP_ComputerIcon)
+
+        self.tray_icon = QSystemTrayIcon(self)
+        self.tray_icon.setIcon(tray_icon)
+        self.tray_icon.setToolTip("Drifox")
+
+        # 创建上下文菜单
+        tray_menu = QMenu(self)
+        show_action = QAction("显示窗口", self)
+        show_action.triggered.connect(self._show_from_tray)
+        tray_menu.addAction(show_action)
+        tray_menu.addSeparator()
+        quit_action = QAction("退出", self)
+        quit_action.triggered.connect(self._quit_from_tray)
+        tray_menu.addAction(quit_action)
+
+        self.tray_icon.setContextMenu(tray_menu)
+        self.tray_icon.show()
+
+    def _show_from_tray(self):
+        """从托盘恢复窗口"""
+        self.show()
+        if self.isMinimized():
+            self.showNormal()
+        self.activateWindow()
+
+    def _quit_from_tray(self):
+        """从托盘退出应用"""
+        self._is_closing = True
+        self.close()
+        QApplication.instance().quit()
 
     def _show_settings(self):
         """显示设置弹窗 - 已被移除，按钮已移到主窗口"""

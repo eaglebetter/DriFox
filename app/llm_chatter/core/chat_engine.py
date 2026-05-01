@@ -759,8 +759,8 @@ class ChatEngine:
             self._emit("error", "配置无效，请检查模型设置")
             return False
 
-        self._is_streaming = True
         session.add_user_message(content=user_text, params=context_params or {})
+        self._is_streaming = True
 
         self._emit("user_message_added", user_text)
 

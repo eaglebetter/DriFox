@@ -856,6 +856,7 @@ class OpenAIChatToolWindow(ToolWindow):
 
     def _open_settings_popup(self):
         """打开设置卡片"""
+        self._hide_main_popups()
         self._settings_popup.show()
         self._settings_popup.raise_()
         self._settings_popup.activateWindow()
@@ -865,16 +866,23 @@ class OpenAIChatToolWindow(ToolWindow):
         # 可以在这里添加一些清理逻辑
         pass
 
-    def _toggle_model_config_card(self):
-        """切换模型配置卡片的显示"""
-        # 隐藏其他卡片
+    def _hide_main_popups(self):
+        """隐藏主要的悬浮面板（互斥显示）
+        
+        包括：系统设置、模型配置、历史会话
+        不包括：工具悬浮、Todo、子智能体等工具类浮窗
+        """
+        self._model_config_card.hide()
         self._history_card.hide()
         self._settings_popup.hide()
 
+    def _toggle_model_config_card(self):
+        """切换模型配置卡片的显示"""
         # 切换当前卡片
         if self._model_config_card.isVisible():
             self._model_config_card.hide()
         else:
+            self._hide_main_popups()  # 隐藏其他主面板
             # 每次打开都重新加载配置
             self._load_model_config_to_card()
             self._model_config_card.show()
@@ -907,14 +915,11 @@ class OpenAIChatToolWindow(ToolWindow):
 
     def _toggle_history_card(self):
         """切换历史会话卡片的显示"""
-        # 隐藏其他卡片
-        self._model_config_card.hide()
-        self._settings_popup.hide()
-
         # 切换当前卡片
         if self._history_card.isVisible():
             self._history_card.hide()
         else:
+            self._hide_main_popups()  # 隐藏其他主面板
             self._history_card.show()
             # 刷新数据
             self._refresh_history_toggle_panel()
@@ -1471,15 +1476,25 @@ class OpenAIChatToolWindow(ToolWindow):
         )
         agent_name = agent.name if agent else ""
         agent_desc = agent.description if agent else ""
-        cache_key = agent_name or "__default__"
-        welcome_card = self._welcome_card_cache.get(cache_key)
-        if not self._is_widget_alive(welcome_card):
-            welcome_card = create_welcome_card(self, agent_name, agent_desc)
-            welcome_card._is_welcome = True
-            welcome_card.contextActionRequested.connect(
-                self.handle_recommended_question
-            )
-            self._welcome_card_cache[cache_key] = welcome_card
+        
+        # 获取最近会话用于欢迎卡片
+        history_sessions = []
+        history_list = self.history_manager.get_history_list()
+        for i, session in enumerate(history_list[:3]):
+            history_sessions.append({
+                "title": session.get("title"),
+                "last_time": session.get("last_time"),
+                "session_id": session.get("session_id"),
+            })
+        
+        # 每次都重新创建，确保会话列表是最新的
+        welcome_card = create_welcome_card(
+            self, agent_name, agent_desc, history_sessions
+        )
+        welcome_card._is_welcome = True
+        welcome_card.contextActionRequested.connect(
+            self.handle_recommended_question
+        )
         return welcome_card
 
     def _sanitize_user_message_for_display(self, content: str) -> str:
@@ -1758,7 +1773,7 @@ class OpenAIChatToolWindow(ToolWindow):
         if not messages:
             return
 
-        title = self.history_manager.get_current_title(index)
+        title = session_record.get("title") or session_record.get("name") or "历史对话"
         
         # 使用辅助函数创建会话
         restored = create_session_from_record(session_record, messages, title)
@@ -2255,6 +2270,31 @@ class OpenAIChatToolWindow(ToolWindow):
         if action == "ask":
             self.input_area.clear()
             self.send_preset_question(content)
+        elif action == "session":
+            # session_id 直接就是 content
+            session_id = content.strip()
+            self._switch_to_session_by_id(session_id)
+
+    def _switch_to_session_by_id(self, session_id: str):
+        """根据 session_id 切换到对应会话"""
+        if not session_id:
+            return
+        
+        # 先在当前 session_manager 中查找
+        for i, session in enumerate(self.session_manager.get_all_sessions()):
+            if session.session_id == session_id:
+                self.session_manager.switch_to_session(i)
+                self._display_current_session()
+                self._hide_welcome_cards()
+                return
+        
+        # 再从 history_manager 查找并恢复
+        index = self.history_manager.find_index_by_session_id(session_id)
+        if index is not None:
+            self._load_history_session_from_popup(index)
+            self._hide_welcome_cards()
+        else:
+            logger.warning(f"未找到 session_id: {session_id}")
 
     def send_preset_question(self, question: str):
         if not isinstance(question, str) or not question.strip():
@@ -2269,6 +2309,17 @@ class OpenAIChatToolWindow(ToolWindow):
             user_text = self.input_area.toPlainText().strip()
 
         if not user_text:
+            return
+
+        # 检查模型配置
+        llm_config = self._get_current_model_config()
+        if not llm_config or not llm_config.get("API_KEY"):
+            InfoBar.warning(
+                "请先选择模型",
+                "请在设置中选择一个可用的模型后再发送消息",
+                parent=self,
+                duration=3000,
+            )
             return
 
         self._hide_welcome_cards()
@@ -2288,7 +2339,13 @@ class OpenAIChatToolWindow(ToolWindow):
         if session and self._tool_executor:
             self._tool_executor.set_session_context(session.session_id)
 
-        self._chat_engine.send_message(user_text, context_params)
+        # 如果 send_message 返回 False（通常是 LLM 配置无效），回滚 UI 状态
+        if not self._chat_engine.send_message(user_text, context_params):
+            self._is_streaming = False
+            self._toggle_send_stop(False)
+            assistant_card.deleteLater()
+            return
+
         self._current_assistant_card = assistant_card
         self._maybe_generate_topic_summary()
 
@@ -2503,9 +2560,10 @@ class OpenAIChatToolWindow(ToolWindow):
         if sound_type != "none":
             QApplication.beep()
 
-        if self.homepage and self.homepage.window():
-            win = self.homepage.window()
-            if hasattr(win, "tray_icon") and win.tray_icon:
+        # 从当前窗口的顶层窗口获取 tray_icon（self.window() 返回包含此 widget 的顶层窗口）
+        win = self.window()
+        if win and hasattr(win, "tray_icon") and win.tray_icon:
+            if win.tray_icon.isVisible():
                 win.tray_icon.showMessage(
                     title, message, win.tray_icon.MessageIcon(1), 4000
                 )
