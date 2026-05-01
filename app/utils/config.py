@@ -147,7 +147,7 @@ class Settings(QConfig):
     llm_selected_model = ConfigItem("LLM", "SelectedModel", "")
     # 启用的技能列表
     llm_enabled_skills = ConfigItem("LLM", "EnabledSkills", [
-        "brainstorming", "writing-plans", "find-skills", "skill-creator", "git-commit"])
+        "brainstorming", "writing-plans", "find-skills", "skill-creator", "git-commit", "minimax-image-understanding"])
     # 智能体完成通知
     llm_notify_enabled = ConfigItem("LLM", "NotifyEnabled", True, BoolValidator())
     # 通知提示音类型

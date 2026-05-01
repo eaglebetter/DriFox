@@ -10,6 +10,7 @@ from PyQt5.QtWidgets import (
     QMenu,
     QAction,
     QApplication,
+    QStyle,
 )
 from qfluentwidgets import isDarkTheme, FluentIcon as FIF, TransparentToolButton, FluentIcon
 
@@ -261,7 +262,7 @@ class ToolPopupDialog(QDialog):
             tray_icon = QIcon(icon_path)
         else:
             # 如果找不到图标，使用默认图标
-            tray_icon = self.style().standardIcon(QWidget.style().SP_ComputerIcon)
+            tray_icon = self.style().standardIcon(QStyle.SP_ComputerIcon)
 
         self.tray_icon = QSystemTrayIcon(self)
         self.tray_icon.setIcon(tray_icon)
