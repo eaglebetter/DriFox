@@ -358,7 +358,7 @@ class ToolPopupDialog(QDialog):
         """重新设置 lock button widget 的父对象为桌面，使其在穿透模式下仍可交互"""
         if self._lock_btn_widget:
             # 在透明度条上方，透明度条右边再往左一个按钮宽度
-            pos = self.mapToGlobal(QPoint(self.width(), 3))
+            pos = self.mapToGlobal(QPoint(self.width() + 3, 3))
             self._lock_btn_widget.setParent(None)
             self._lock_btn_widget.move(pos)
             self._lock_btn_widget.show()
@@ -374,13 +374,8 @@ class ToolPopupDialog(QDialog):
     def _sync_lock_btn_position(self):
         """同步 lock button 位置到透明度条上方"""
         if self._lock_btn_widget:
-            # 透明度条宽度36，位置在 (width, 10)
-            # 锁定按钮在透明度条上方，位置 (width, 10 - 26 - 8) = (width, -24)
-            # 但这样会超出屏幕，所以放在透明度条左边，y坐标在透明度条上方
-            # 改到窗口右侧，y = 10 - 26 - 4 = -20，这样超出标题栏
-            # 放在窗口右上角内，标题栏高度32，按钮26，位置 y=3
             # 在透明度条上方
-            pos = self.mapToGlobal(QPoint(self.width() + 36 - 26 - 4, 3))
+            pos = self.mapToGlobal(QPoint(self.width() + 3, 3))
             self._lock_btn_widget.move(pos)
 
     def _reparent_slider_to_dialog(self):
