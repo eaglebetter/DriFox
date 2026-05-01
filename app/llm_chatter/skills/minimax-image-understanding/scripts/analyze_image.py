@@ -6,6 +6,9 @@ MiniMax 图片分析脚本
     python analyze_image.py                    # 分析截图
     python analyze_image.py --file image.png   # 分析指定图片
     python analyze_image.py --prompt "你的问题" # 自定义提示词
+
+环境配置:
+    set MINIMAX_API_KEY=your_key  # 或在 ~/.minimax/api_key 配置
 """
 import json
 import os
@@ -15,6 +18,13 @@ import ssl
 import urllib.request
 import urllib.error
 import argparse
+from pathlib import Path
+
+# 添加 common 目录到路径
+SCRIPT_DIR = Path(__file__).parent
+sys.path.insert(0, str(SCRIPT_DIR))
+
+from common.utils import get_api_key, ConfigError
 
 
 def encode_image_to_base64(image_path):
@@ -49,10 +59,10 @@ def analyze_image(image_path, prompt=None, api_key=None):
     
     # 获取 API Key
     if api_key is None:
-        api_key = os.environ.get("MINIMAX_API_KEY", "")
-    
-    if not api_key:
-        raise ValueError("未设置 MINIMAX_API_KEY 环境变量")
+        try:
+            api_key = get_api_key()
+        except ConfigError as e:
+            raise ValueError(str(e))
     
     # API 配置
     api_host = "api.minimax.chat"
