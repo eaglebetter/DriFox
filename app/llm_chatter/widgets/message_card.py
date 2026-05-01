@@ -408,9 +408,80 @@ def _inject_tool_blocks(md_text: str, completed: bool = True) -> str:
     return "".join(parts)
 
 
+# ======== 欢迎卡片随机 Tips ========
+WELCOME_TIPS = [
+    "💡 拖拽文件到输入框即可快速分析",
+    "💡 使用 Ctrl+L 可快速清空当前会话",
+    "💡 使用 Ctrl+N 可快速新建对话",
+    "💡 按 ↑/↓ 键可浏览历史输入",
+    "💡 点击模型名称可快速切换大模型",
+    "💡 历史会话自动保存，断开不怕丢",
+    "💡 长对话会自动使用「上下文压缩」优化 Token",
+    "💡 模型参数会影响回复风格，多试试",
+    "💡 不同的智能体擅长不同任务哦",
+    "💡 记忆管理让 AI 更懂你的偏好",
+    "💡 代码块可直接保存到本地文件",
+    "💡 点击差异对比可查看文件修改",
+    "💡 Shift+Enter 换行，Enter 发送",
+    "💡 点击智能体选择框可切换任务类型",
+]
+
+
+# ======== 欢迎卡片欢迎语 ========
+WELCOME_GREETINGS = [
+    "你好！我是 Drifox 飘狐",
+    "嗨！有什么我可以帮你的吗？",
+    "欢迎回来！今天想聊点什么？",
+    "你好！随时可以问我问题。",
+]
+
+
+def get_random_tip() -> str:
+    """获取随机 Tips"""
+    import random
+    return random.choice(WELCOME_TIPS)
+
+
+def get_random_greeting() -> str:
+    """获取随机欢迎语"""
+    import random
+    return random.choice(WELCOME_GREETINGS)
+
+
+_CONTEXT_LINK_PATTERN = re.compile(r"\[([^\]]+)\]\((ask|jump|create|generate|view|session)(?:\|([^)]*))?\)")
+
+
 def _inject_context_links(md_text: str) -> str:
-    """Context links 功能已移除，返回原始文本"""
-    return md_text
+    """将 [文本](ask/jump/create/generate/view/session) 转换为胶囊样式的追问标签
+    
+    session 类型格式：[文本](session|session_id|last_time)
+    last_time 如果为空则不显示
+    """
+    def replacer(match):
+        content = match.group(1)
+        action = match.group(2)
+        extra = match.group(3) or ""
+        
+        if action == "session":
+            # session 格式：session_id|last_time
+            parts = extra.split("|")
+            session_id = parts[0].strip() if parts else ""
+            last_time = parts[1].strip() if len(parts) > 1 else ""
+            
+            # 如果有 last_time，追加显示
+            if last_time:
+                display_content = f'{content}<span class="session-time">{last_time}</span>'
+            else:
+                display_content = content
+            
+            attrs = f'data-type="session" data-session-id="{escape(session_id)}" data-action="session"'
+            if last_time:
+                attrs += f' data-last-time="{escape(last_time)}"'
+            return f'<span class="context-tag session-tag" {attrs}>{display_content}</span>'
+        
+        return f'<span class="context-tag" data-type="{action}" data-content="{escape(content)}" data-action="{action}">{content}</span>'
+    
+    return _CONTEXT_LINK_PATTERN.sub(replacer, md_text)
 
 
 # ======== WebViewer ========
@@ -828,6 +899,52 @@ class CodeWebViewer(QWebEngineView):
                 }}
                 {"".join(tag_css)}
 
+                /* session 历史会话标签样式 */
+                .session-tag {{
+                    background: rgba(100, 198, 255, 0.12);
+                    border-color: rgba(100, 198, 255, 0.5);
+                    color: #66c6ff;
+                    margin: 4px 4px;
+                    min-width: 120px;
+                }}
+                .session-tag:hover {{
+                    background: rgba(100, 198, 255, 0.25);
+                    border-color: rgba(100, 198, 255, 0.8);
+                }}
+                /* session 时间显示在标题下方 */
+                .session-tag .session-time {{
+                    display: block;
+                    font-size: 10px;
+                    font-weight: normal;
+                    opacity: 0.6;
+                    margin-top: 4px;
+                    color: #88d4ff;
+                }}
+
+                /* Markdown 表格样式 */
+                .session-table {{
+                    border-collapse: collapse;
+                    width: 100%;
+                    margin: 8px 0;
+                }}
+                .session-table th, .session-table td {{
+                    border: 1px solid rgba(100, 198, 255, 0.3);
+                    padding: 8px 12px;
+                    text-align: left;
+                }}
+                .session-table th {{
+                    background: rgba(100, 198, 255, 0.1);
+                    color: #66c6ff;
+                    font-weight: 600;
+                }}
+                .session-table td {{
+                    background: rgba(30, 40, 60, 0.5);
+                    vertical-align: middle;
+                }}
+                .session-table tr:hover td {{
+                    background: rgba(100, 198, 255, 0.08);
+                }}
+
                 /* 代码块通用样式 */
                 .code-table {{ width: 100%; border-collapse: collapse; }}
                 .code-table td {{ padding: 0; vertical-align: top; }}
@@ -1082,7 +1199,15 @@ class CodeWebViewer(QWebEngineView):
                         return;
                     }}
                     const tag = e.target.closest('.context-tag');
-                    if (tag) console.log('pywebview_action:context|||' + tag.getAttribute('data-content') + '|||' + tag.getAttribute('data-action'));
+                    if (tag) {{
+                        var tagType = tag.getAttribute('data-type') || tag.getAttribute('data-action') || '';
+                        var sessionId = tag.getAttribute('data-session-id') || '';
+                        var tagContent = sessionId || tag.getAttribute('data-content') || tag.getAttribute('data-title') || '';
+                        e.stopPropagation();
+                        e.preventDefault();
+                        console.log('pywebview_action:context|||' + tagContent + '|||' + tagType);
+                        return;
+                    }}
                     const link = e.target.closest('a');
                     if (link) {{
                         console.log('pywebview_action:link_found:' + link.href);
@@ -1944,8 +2069,18 @@ class MessageCard(SimpleCardWidget):
 
 
 def create_welcome_card(
-    parent=None, agent_name: str = "", agent_description: str = ""
+    parent=None, agent_name: str = "", agent_description: str = "",
+    recent_sessions: list = None, top_by_count: list = None
 ) -> MessageCard:
+    """创建欢迎卡片
+    
+    Args:
+        parent: 父控件
+        agent_name: 当前智能体名称
+        agent_description: 智能体描述
+        recent_sessions: 最近的历史会话列表，每项包含 title, last_time, session_id, message_count
+        top_by_count: 消息最多的会话列表，每项包含 title, last_time, session_id, message_count
+    """
     agent_tendency = ""
     if agent_name:
         agent_tendency = f"""
@@ -1957,13 +2092,59 @@ def create_welcome_card(
 
 """
 
+    # 随机选择欢迎语和 Tips
+    greeting = get_random_greeting()
+    tip = get_random_tip()
+    
+    # 构建历史会话链接（两列表格：最近会话 | 最多消息）
+    history_section = ""
+    if recent_sessions or top_by_count:
+        # 生成表格 HTML（使用纯 HTML 确保胶囊样式正确显示）
+        table_rows = ""
+        for i in range(3):
+            # 左边：最近会话
+            recent = recent_sessions[i] if recent_sessions and i < len(recent_sessions) else None
+            # 右边：消息最多
+            top = top_by_count[i] if top_by_count and i < len(top_by_count) else None
+            
+            if recent:
+                title = escape(recent.get("title", "未命名会话"))
+                session_id = escape(recent.get("session_id", ""))
+                last_time = escape(recent.get("last_time", ""))
+                left_cell = f'<span class="context-tag session-tag" data-type="session" data-session-id="{session_id}" data-action="session">{title}<span class="session-time">{last_time}</span></span>'
+            else:
+                left_cell = "-"
+                
+            if top:
+                title = escape(top.get("title", "未命名会话"))
+                session_id = escape(top.get("session_id", ""))
+                msg_count = top.get("message_count", 0)
+                right_cell = f'<span class="context-tag session-tag" data-type="session" data-session-id="{session_id}" data-action="session">{title}<span class="session-time">{msg_count}条消息</span></span>'
+            else:
+                right_cell = "-"
+            
+            table_rows += f'<tr><td>{left_cell}</td><td>{right_cell}</td></tr>'
+        
+        history_section = f"""
+---
+
+### 📜 历史会话
+
+<table class="session-table">
+<tr><th>最近会话</th><th>消息最多</th></tr>
+{table_rows}
+</table>
+"""
+
     welcome_md = f"""\
-### 👋 你好！我是 Drifox 飘狐
+### 👋 {greeting}
+
+{history_section}
 
 ---
-*如需切换智能体，请在输入框右下角下拉菜单中选择。*
+### 小提示
 
-{agent_tendency}
+**{tip}**
 """
 
     card = MessageCard(role="welcome", timestamp="就绪", parent=parent)

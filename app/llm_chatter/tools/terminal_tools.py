@@ -1,4 +1,6 @@
 import subprocess
+import threading
+import time
 from pathlib import Path
 
 from app.llm_chatter.tools.result import ToolResult
@@ -9,27 +11,64 @@ class TerminalTools:
         self.workdir = workdir
 
     def execute_bash(self, command: str, timeout: int = 120) -> ToolResult:
+        """执行 shell 命令，支持可靠的 timeout
+        
+        注意：使用 Popen + wait() 替代 run()，因为 run() 的 timeout
+        在 shell=True 时对后台进程无效。
+        """
         try:
-            res = subprocess.run(
+            process = subprocess.Popen(
                 command,
                 shell=True,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
                 encoding="utf-8",
                 errors="ignore",
-                timeout=timeout,
                 cwd=str(self.workdir),
             )
 
-            output = res.stdout.strip() if res.stdout else ""
-            error_out = res.stderr.strip() if res.stderr else ""
+            start_time = time.time()
+
+            def wait_for_process():
+                """在线程中等待进程完成"""
+                nonlocal process_finished
+                try:
+                    process.wait()
+                    process_finished = True
+                except Exception:
+                    pass
+
+            process_finished = False
+            wait_thread = threading.Thread(target=wait_for_process, daemon=True)
+            wait_thread.start()
+
+            # 等待进程完成或超时
+            wait_thread.join(timeout=timeout)
+
+            if not process_finished:
+                # 超时：杀死进程树
+                try:
+                    process.kill()
+                    # 等待进程真正退出
+                    process.wait(timeout=5)
+                except Exception:
+                    pass
+
+                elapsed = time.time() - start_time
+                return ToolResult(False, error=f"Command timeout after {elapsed:.1f}s (killed)")
+
+            # 进程正常完成
+            stdout, stderr = process.communicate()
+            output = stdout.strip() if stdout else ""
+            error_out = stderr.strip() if stderr else ""
             combined = "\n".join(filter(None, [output, error_out]))
+
             return ToolResult(
                 True,
                 content=combined if combined else "(command completed with no output)",
             )
-        except subprocess.TimeoutExpired:
-            return ToolResult(False, error="Command execution timeout")
+
         except Exception as e:
             return ToolResult(False, error=f"Execution error: {str(e)}")
 

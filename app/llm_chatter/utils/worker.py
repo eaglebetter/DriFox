@@ -59,15 +59,45 @@ class TopicSummaryTask(QRunnable):
         content = think_pattern.sub("", content)
         return content.strip()
 
+    def _build_conversation_context(self) -> str:
+        """构建包含更多历史的消息上下文"""
+        # 取最近12条消息，覆盖更多对话历史
+        user_only_msgs = [msg for msg in self.messages if msg.get("role") == "user"]
+        lines = []
+        for msg in user_only_msgs:
+            content = msg.get("content", "")
+            if isinstance(content, list):
+                texts = [item.get("text", "") for item in content if item.get("type") == "text"]
+                content = "\n".join(texts)
+            # 截取前300字，避免过长
+            truncated = content[:300] + ("..." if len(content) > 300 else "")
+            lines.append(truncated)
+        
+        return "\n".join(lines)
+
+    def _should_update_title(self, new_user_content: str) -> Dict[str, Any]:
+        """判断新消息是否应该触发标题更新"""
+        # 简单问候/确认类内容，不应该更新标题
+        greeting_patterns = [
+            r"^(你好|您好|hi|hello|hi\s|hey|嗨|哈喽|呀)$",
+            r"^(好的|好的吧|好|ok|okay|嗯|是的|对)$",
+            r"^(谢谢|感谢|多谢|谢了)$",
+            r"^(继续|接着说|请继续)$",
+            r"^(请问|问一下|想问一下)[。,]?$",
+            r"^\s*$",  # 空内容
+        ]
+        import re
+        content = new_user_content.strip().lower()
+        for pattern in greeting_patterns:
+            if re.match(pattern, content, re.IGNORECASE):
+                return {"should_update": False, "reason": "简单问候/确认类内容"}
+        
+        return {"should_update": True, "reason": ""}
+
     @pyqtSlot()
     def run(self):
         try:
-            summary_text = ""
-            recent_msgs = (
-                self.messages[-6:] if len(self.messages) > 6 else self.messages
-            )
-            user_only_msgs = [msg for msg in recent_msgs if msg.get("role") == "user"]
-            if not user_only_msgs:
+            if not self.messages:
                 self.callback(
                     {
                         "topic_summary": "",
@@ -76,9 +106,8 @@ class TopicSummaryTask(QRunnable):
                     }
                 )
                 return
-            for msg in user_only_msgs:
-                content = msg.get("content", "")
-                summary_text += f"用户：{content[:500]}\n"
+            # 构建包含更多历史的消息上下文
+            summary_text = self._build_conversation_context()
 
             existing_memories_text = ""
             if self.existing_memories:
@@ -105,10 +134,27 @@ class TopicSummaryTask(QRunnable):
             if self.previous_summary:
                 prompt = (
                     "你是一个对话标题和长期记忆助手。\n"
+                    "最近的用户对话历史：\n"
+                    f"{summary_text}\n\n"
                     "根据对话生成标题，判断是否需要保存长期记忆。\n\n"
                     "【标题要求】\n"
                     "- 不超过15字，体现用户意图\n"
                     "- 如：\"生成PPT\"、\"调试bug\"、\"咨询问题\"\n\n"
+                    "【标题更新原则】\n"
+                    "你不应该仅根据最新一条消息就生成新标题。而是应该：\n"
+                    "1. 如果已有标题反映的是本次对话的核心主题，即使最新消息是简单问候，也要保留原标题\n"
+                    "2. 只有当对话主题发生实质性转变时才更新标题\n"
+                    "3. 问候、寒暄、确认类消息不应该改变已有标题\n\n"
+                    "【标题更新规则】\n"
+                    "以下情况应该保留\"之前的标题\"：\n"
+                    "- 最新消息是简单问候（你好、hi、hello、嗨、哈喽等）\n"
+                    "- 最新消息是确认/同意（好的、嗯、是的、对、ok等）\n"
+                    "- 最新消息是简短的感谢（谢谢、感谢等）\n"
+                    "- 最新消息是要求继续（继续、接着说等）\n\n"
+                    "以下情况可以更新标题：\n"
+                    "- 对话主题发生实质性变化\n"
+                    "- 新主题与旧主题完全不同\n"
+                    "- 用户明确在讨论一个全新的问题\n\n"
                     "【记忆生成规则】\n"
                     "只有同时满足以下3个条件才生成记忆：\n"
                     "1. 跨任务复用：下次遇到类似场景时这条记忆能直接指导决策\n"
@@ -124,7 +170,8 @@ class TopicSummaryTask(QRunnable):
                     "【已有记忆】（避免重复）：\n"
                     f"{existing_memories_text}\n\n"
                     f"之前的标题：{self.previous_summary}\n\n"
-                    f"最新对话：\n{summary_text}\n\n"
+                    "完整对话历史（用于理解整体语境）：\n"
+                    f"{summary_text}\n\n"
                     "输出JSON：\n"
                     "```json\n"
                     "{\n"
@@ -139,7 +186,9 @@ class TopicSummaryTask(QRunnable):
             else:
                 prompt = (
                     "你是一个对话标题和长期记忆助手。\n"
-                    "根据对话生成标题，判断是否需要保存长期记忆。\n\n"
+                    "最近的用户对话历史：\n"
+                    f"{summary_text}\n\n"
+                    "根据用户对话生成标题，判断是否需要保存长期记忆。\n\n"
                     "【标题要求】\n"
                     "- 不超过15字，体现用户意图\n"
                     "- 如：\"生成PPT\"、\"调试bug\"、\"咨询问题\"\n\n"
@@ -157,7 +206,6 @@ class TopicSummaryTask(QRunnable):
                     "同主题多条记忆 → 合并为一条完整描述\n\n"
                     "【已有记忆】（避免重复）：\n"
                     f"{existing_memories_text}\n\n"
-                    f"对话内容：\n{summary_text}\n\n"
                     "输出JSON：\n"
                     "```json\n"
                     "{\n"
@@ -208,63 +256,7 @@ class TopicSummaryTask(QRunnable):
                     }
                 )
         except Exception as e:
-            self.callback(None, error=str(e))
-
-
-class TitleGenerationTask(QRunnable):
-    """异步生成标题任务"""
-
-    def __init__(
-        self, current_title: str, messages_for_summary: list, llm_config: dict, callback
-    ):
-        super().__init__()
-        self.current_title = current_title
-        self.messages_for_summary = messages_for_summary
-        self.llm_config = llm_config
-        self.callback = callback
-        self.setAutoDelete(True)
-
-    @pyqtSlot()
-    def run(self):
-        try:
-            summary_text = ""
-            for msg in self.messages_for_summary[-4:]:
-                content = msg["content"]
-                if isinstance(content, list):
-                    texts = [
-                        item.get("text", "")
-                        for item in content
-                        if item.get("type") == "text"
-                    ]
-                    content = "\n".join(texts)
-                role = "用户" if msg["role"] == "user" else "助手"
-                summary_text += f"{role}：{content}\n"
-
-            prompt = (
-                "你是一个对话标题生成器。请根据以下对话内容，生成一个不超过20个字的中文标题.\n"
-                f"对话内容：\n{summary_text}\n\n"
-                "请严格按以下格式输出：\n```title\n你的标题\n```"
-            )
-
-            client = OpenAI(
-                api_key=self.llm_config.get("API_KEY", ""),
-                base_url=self.llm_config.get("API_URL"),
-            )
-
-            from .retry_helper import create_api_call_with_retry
-
-            def create_task():
-                return client.chat.completions.create(
-                    model=self.llm_config.get("模型名称", "gpt-4o"),
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=0.3,
-                    max_tokens=100,
-                )
-
-            resp = create_api_call_with_retry(client, create_task)
-            raw_title = resp.choices[0].message.content.strip()
-            self.callback(raw_title)
-        except Exception as e:
+            logger.exception(f"[OpenAI] 获取标题失败: {e}")
             self.callback(None, error=str(e))
 
 
