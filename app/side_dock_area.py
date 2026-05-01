@@ -12,7 +12,12 @@ from PyQt5.QtWidgets import (
     QApplication,
     QStyle,
 )
-from qfluentwidgets import isDarkTheme, FluentIcon as FIF, TransparentToolButton, FluentIcon
+from qfluentwidgets import (
+    isDarkTheme,
+    FluentIcon as FIF,
+    TransparentToolButton,
+    FluentIcon,
+)
 
 from app.utils.config import Settings
 from app.utils.utils import get_icon
@@ -137,33 +142,36 @@ class AdaptiveStackedWidget(QStackedWidget):
 
 class ResizeEdge(QWidget):
     """边缘拖拽区域"""
+
     EDGE_NONE = 0
     EDGE_TOP = 1
     EDGE_BOTTOM = 2
     EDGE_LEFT = 4
     EDGE_RIGHT = 8
-    
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._edge = ResizeEdge.EDGE_NONE
         self.setAttribute(Qt.WA_TransparentForMouseEvents, False)
         self.setMouseTracking(True)
         self._update_cursor()
-    
+
     def set_edge(self, edge):
         self._edge = edge
         self._update_cursor()
-    
+
     def _update_cursor(self):
         if self._edge == ResizeEdge.EDGE_TOP or self._edge == ResizeEdge.EDGE_BOTTOM:
             self.setCursor(Qt.SizeVerCursor)
         elif self._edge == ResizeEdge.EDGE_LEFT or self._edge == ResizeEdge.EDGE_RIGHT:
             self.setCursor(Qt.SizeHorCursor)
-        elif self._edge == (ResizeEdge.EDGE_TOP | ResizeEdge.EDGE_LEFT) or \
-             self._edge == (ResizeEdge.EDGE_BOTTOM | ResizeEdge.EDGE_RIGHT):
+        elif self._edge == (
+            ResizeEdge.EDGE_TOP | ResizeEdge.EDGE_LEFT
+        ) or self._edge == (ResizeEdge.EDGE_BOTTOM | ResizeEdge.EDGE_RIGHT):
             self.setCursor(Qt.SizeFDiagCursor)
-        elif self._edge == (ResizeEdge.EDGE_TOP | ResizeEdge.EDGE_RIGHT) or \
-             self._edge == (ResizeEdge.EDGE_BOTTOM | ResizeEdge.EDGE_LEFT):
+        elif self._edge == (
+            ResizeEdge.EDGE_TOP | ResizeEdge.EDGE_RIGHT
+        ) or self._edge == (ResizeEdge.EDGE_BOTTOM | ResizeEdge.EDGE_LEFT):
             self.setCursor(Qt.SizeBDiagCursor)
         else:
             self.setCursor(Qt.ArrowCursor)
@@ -246,6 +254,9 @@ class ToolPopupDialog(QDialog):
         self._hide_timer.timeout.connect(self._check_hide_slider)
         self.setMouseTracking(True)
 
+        self._lock_mode = False
+        self._slider_desktop_pos = None
+
         # 初始化系统托盘图标（用于 Windows 通知）
         self._init_tray_icon()
 
@@ -263,40 +274,62 @@ class ToolPopupDialog(QDialog):
 
     def _on_lock_changed(self, locked: bool):
         """处理窗口锁定状态变化"""
-        # 使用 Qt 属性实现穿透，而非 Windows API
-        # 标题栏保持可交互，内容区域穿透
-        self._set_content_passthrough(locked)
+        self._lock_mode = locked
+        if locked:
+            self._reparent_slider_to_desktop()
+        self._set_window_passthrough(locked)
+        if not locked:
+            self._reparent_slider_to_dialog()
+        self._sync_slider_position()
 
-    def _set_content_passthrough(self, enabled: bool):
-        """设置内容区域的鼠标穿透"""
-        content_widget = self.tool_instance
-        title_bar = self.tool_instance.get_title_bar()
+    def _reparent_slider_to_desktop(self):
+        """重新设置 opacity slider 的父对象为桌面，使其在穿透模式下仍可交互"""
+        if self._opacity_slider:
+            desktop = QApplication.desktop()
+            screen_geo = desktop.screenGeometry(self._get_current_screen())
+            pos = self._opacity_slider.pos()
+            self._slider_desktop_pos = pos
+            self._opacity_slider.setParent(None)
+            self._opacity_slider.move(screen_geo.topLeft() + pos)
+            self._opacity_slider.show()
+            self._opacity_slider.raise_()
 
-        def set_passthrough(widget):
-            # 对每个子控件设置穿透，但标题栏除外
-            for child in widget.children():
-                if not isinstance(child, QWidget):
-                    continue
-                if child is title_bar:
-                    continue
-                child.setAttribute(Qt.WA_TransparentForMouseEvents, enabled)
-                set_passthrough(child)
+    def _reparent_slider_to_dialog(self):
+        """恢复 opacity slider 的父对象为对话框"""
+        if self._opacity_slider:
+            self._opacity_slider.setParent(self)
+            self._opacity_slider.hide()
+
+    def _get_current_screen(self):
+        """获取当前窗口所在的屏幕索引"""
+        desktop = QApplication.desktop()
+        return desktop.screenNumber(self)
+
+    def _sync_slider_position(self):
+        """同步 slider 位置到对话框右侧"""
+        if self._opacity_slider and not self._lock_mode:
+            pos = self.mapToGlobal(QPoint(self.width(), 10))
+            self._opacity_slider.move(pos)
+
+    def _set_window_passthrough(self, enabled: bool):
+        """使用 Windows API 实现真正的鼠标穿透到下层软件"""
+        import ctypes
+
+        GWL_EXSTYLE = -20
+        WS_EX_TRANSPARENT = 0x00000020
+
+        user32 = ctypes.windll.user32
+        GetWindowLongW = user32.GetWindowLongW
+        SetWindowLongW = user32.SetWindowLongW
+
+        hwnd = int(self.winId())
 
         if enabled:
-            set_passthrough(content_widget)
-            # 标题栏显式保持可交互
-            title_bar.setAttribute(Qt.WA_TransparentForMouseEvents, False)
-            for child in title_bar.children():
-                if isinstance(child, QWidget):
-                    child.setAttribute(Qt.WA_TransparentForMouseEvents, False)
+            ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE)
+            SetWindowLongW(hwnd, GWL_EXSTYLE, ex_style | WS_EX_TRANSPARENT)
         else:
-            # 恢复所有控件
-            def clear_passthrough(widget):
-                for child in widget.children():
-                    if isinstance(child, QWidget):
-                        child.setAttribute(Qt.WA_TransparentForMouseEvents, False)
-                        clear_passthrough(child)
-            set_passthrough(content_widget)
+            ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE)
+            SetWindowLongW(hwnd, GWL_EXSTYLE, ex_style & ~WS_EX_TRANSPARENT)
 
     def _init_tray_icon(self):
         """初始化系统托盘图标，用于显示 Windows 通知"""
@@ -306,7 +339,7 @@ class ToolPopupDialog(QDialog):
         icon_path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
             "images",
-            "drifox.ico"
+            "drifox.ico",
         )
         if os.path.exists(icon_path):
             tray_icon = QIcon(icon_path)
@@ -345,7 +378,7 @@ class ToolPopupDialog(QDialog):
         QApplication.instance().quit()
 
     def _show_settings(self):
-        """"显示设置弹窗 - 已被移除，按钮已移到主窗口"""
+        """ "显示设置弹窗 - 已被移除，按钮已移到主窗口"""
         pass
 
     def setRestoreInfo(self, tool_name, was_in_top, btn):
@@ -401,6 +434,7 @@ class ToolPopupDialog(QDialog):
             event.accept()
             return
         self._is_closing = True
+        Settings.get_instance().save()
         self.deleteLater()
         super().closeEvent(event)
 
@@ -455,7 +489,7 @@ class ToolPopupDialog(QDialog):
         x, y = pos.x(), pos.y()
         w, h = self.width(), self.height()
         edge = ResizeEdge.EDGE_NONE
-        
+
         # 检测顶部边缘
         if y < self._edge_size:
             edge |= ResizeEdge.EDGE_TOP
@@ -468,21 +502,21 @@ class ToolPopupDialog(QDialog):
         # 检测右边缘
         elif x > w - self._edge_size:
             edge |= ResizeEdge.EDGE_RIGHT
-        
+
         return edge
 
     def _perform_resize(self, global_pos):
         """执行边缘缩放"""
         if self._resize_edge == ResizeEdge.EDGE_NONE or not self._resize_start_geometry:
             return
-        
+
         delta = global_pos - self._resize_start_pos
         geom = self._resize_start_geometry
         x, y, w, h = geom.x(), geom.y(), geom.width(), geom.height()
         min_w, min_h = self.minimumSize().width(), self.minimumSize().height()
-        
+
         edge = self._resize_edge
-        
+
         # 处理左右边缘
         if edge & ResizeEdge.EDGE_LEFT:
             new_x = x + delta.x()
@@ -492,7 +526,7 @@ class ToolPopupDialog(QDialog):
                 w = new_w
         elif edge & ResizeEdge.EDGE_RIGHT:
             w = max(min_w, w + delta.x())
-        
+
         # 处理上下边缘
         if edge & ResizeEdge.EDGE_TOP:
             new_y = y + delta.y()
@@ -502,7 +536,7 @@ class ToolPopupDialog(QDialog):
                 h = new_h
         elif edge & ResizeEdge.EDGE_BOTTOM:
             h = max(min_h, h + delta.y())
-        
+
         self.setGeometry(x, y, w, h)
 
     def mousePressEvent(self, event):
@@ -513,7 +547,7 @@ class ToolPopupDialog(QDialog):
                 self._drag_pos = event.globalPos() - self.frameGeometry().topLeft()
                 event.accept()
                 return
-            
+
             # 检查是否在边缘区域开始拖拽
             edge = self._get_edge_at_pos(event.pos())
             if edge != ResizeEdge.EDGE_NONE:
@@ -538,11 +572,13 @@ class ToolPopupDialog(QDialog):
                 self.setCursor(Qt.SizeVerCursor)
             elif edge == ResizeEdge.EDGE_LEFT or edge == ResizeEdge.EDGE_RIGHT:
                 self.setCursor(Qt.SizeHorCursor)
-            elif edge == (ResizeEdge.EDGE_TOP | ResizeEdge.EDGE_LEFT) or \
-                 edge == (ResizeEdge.EDGE_BOTTOM | ResizeEdge.EDGE_RIGHT):
+            elif edge == (ResizeEdge.EDGE_TOP | ResizeEdge.EDGE_LEFT) or edge == (
+                ResizeEdge.EDGE_BOTTOM | ResizeEdge.EDGE_RIGHT
+            ):
                 self.setCursor(Qt.SizeFDiagCursor)
-            elif edge == (ResizeEdge.EDGE_TOP | ResizeEdge.EDGE_RIGHT) or \
-                 edge == (ResizeEdge.EDGE_BOTTOM | ResizeEdge.EDGE_LEFT):
+            elif edge == (ResizeEdge.EDGE_TOP | ResizeEdge.EDGE_RIGHT) or edge == (
+                ResizeEdge.EDGE_BOTTOM | ResizeEdge.EDGE_LEFT
+            ):
                 self.setCursor(Qt.SizeBDiagCursor)
             else:
                 self.setCursor(Qt.ArrowCursor)
@@ -553,7 +589,7 @@ class ToolPopupDialog(QDialog):
                 self._perform_resize(event.globalPos())
                 event.accept()
                 return
-            
+
             # 标题栏拖拽移动
             if self._drag_pos:
                 self.move(event.globalPos() - self._drag_pos)
@@ -591,10 +627,14 @@ class ToolPopupDialog(QDialog):
             self._opacity_slider = OpacitySlider(self)
             self._opacity_slider.opacityChanged.connect(self._on_opacity_changed)
         self._opacity_slider.setOpacity(int(self.windowOpacity() * 100))
-        pos = self.mapToGlobal(QPoint(self.width(), 10))
-        self._opacity_slider.move(pos)
-        self._opacity_slider.show()
-        self._opacity_slider.raise_()
+        if self._lock_mode:
+            self._reparent_slider_to_desktop()
+        else:
+            self._opacity_slider.setParent(self)
+            pos = self.mapToGlobal(QPoint(self.width(), 10))
+            self._opacity_slider.move(pos)
+            self._opacity_slider.show()
+            self._opacity_slider.raise_()
 
     def _hide_opacity_slider(self):
         if self._opacity_slider:
@@ -634,4 +674,3 @@ class ToolPopupDialog(QDialog):
     def leaveEvent(self, e):
         super().leaveEvent(e)
         self._hide_timer_start()
-
