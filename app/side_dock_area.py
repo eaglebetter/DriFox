@@ -698,6 +698,13 @@ class ToolPopupDialog(QDialog):
         super().resizeEvent(event)
         if not self._is_closing:
             self._geometry_save_timer.start()
+            # 同步 lock button 和 opacity slider 位置
+            if self._lock_mode:
+                self._reparent_lock_btn_to_desktop()
+            else:
+                self._sync_lock_btn_position()
+                if self._opacity_slider and self._opacity_slider.isVisible():
+                    self._sync_slider_position()
 
     def moveEvent(self, event):
         super().moveEvent(event)
