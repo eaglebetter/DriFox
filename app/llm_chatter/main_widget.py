@@ -313,15 +313,8 @@ class OpenAIChatToolWindow(ToolWindow):
     def _setup_title_bar(self):
         """设置标题栏按钮"""
         title_bar = self.get_title_bar()
-        # # 创建极简模式切换按钮
-        # self._minimal_btn = TransparentToolButton(get_icon("极简"), self)
-        # self._minimal_btn.setFixedSize(28, 28)
-        # self._minimal_btn.setToolTip("极简模式")
-        # self._minimal_btn.setCheckable(True)
-        # self._minimal_btn.toggled.connect(self._toggle_minimal_mode)
-        # title_bar.add_button(self._minimal_btn)
-        # self._minimal_mode = False
-        # self._minimal_status_widget = None
+        # 显示内存标签
+        title_bar.show_memory_label()
         # 创建复制窗口按钮
         self._copy_btn = TransparentToolButton(get_icon("新建窗口"), self)
         self._copy_btn.setToolTip("新建窗口")
@@ -339,11 +332,6 @@ class OpenAIChatToolWindow(ToolWindow):
         self._settings_btn.setToolTip("设置")
         self._settings_btn.clicked.connect(self._toggle_settings_card)
         title_bar.insert_button(2, self._settings_btn)
-        # # 创建 API 文档按钮
-        # self._api_btn = TransparentToolButton(get_icon("Global"), self)
-        # self._api_btn.setToolTip("API 文档 (http://localhost:8765/docs)")
-        # self._api_btn.clicked.connect(self._open_api_docs)
-        # title_bar.add_button(self._api_btn)
 
     def _toggle_settings_card(self):
         """切换设置卡片的显示"""
@@ -382,10 +370,6 @@ class OpenAIChatToolWindow(ToolWindow):
                 new_instance._skip_restore_history = True  # 跳过 _restore_latest_session
             else:
                 new_instance._skip_restore_history = True  # 跳过历史会话恢复，创建新会话
-
-            # 注意：不要在这里调用 _apply_branch_or_create_session
-            # showEvent 中会根据 _branch_session_data 自动处理
-            # 避免重复调用导致问题
 
             # 复制模型选择（确保两个实例都已初始化 UI）
             try:
@@ -2592,7 +2576,11 @@ class OpenAIChatToolWindow(ToolWindow):
             self._tool_cancelled_by_user
             and tool_call_id == self._cancelled_tool_call_id
         ):
-            error_msg = str(getattr(result, "error", "") or "")
+            # 支持 dict 和 ToolResult 两种格式
+            if isinstance(result, dict):
+                error_msg = result.get("error", "") or ""
+            else:
+                error_msg = str(getattr(result, "error", "") or "")
             if "用户中止" in error_msg:
                 self._tool_floating_widget.finish_tool("用户中止", success=False)
                 return
@@ -2604,18 +2592,24 @@ class OpenAIChatToolWindow(ToolWindow):
             else 0
         )
 
-        success = result.success if hasattr(result, "success") else True
+        # 支持 ToolResult 对象和 dict 格式的 result
+        if isinstance(result, dict):
+            success = result.get("success", True)
+            error_msg = result.get("error", "") or ""
+            content = error_msg if not success else (str(result.get("content", "")) if result.get("content") is not None else "")
+        else:
+            success = getattr(result, "success", True) if hasattr(result, "success") else True
+            error_msg = str(getattr(result, "error", "") or "")
+            content = str(result) if result else ""
 
         if tool_name not in ("question", "task", "todowrite", "todoread"):
             self._tool_floating_widget.show_if_needed(elapsed)
-            self._tool_floating_widget.finish_tool(str(result)[:200], success)
+            self._tool_floating_widget.finish_tool(content[:200], success)
 
         if tool_name in ("todowrite", "todoread"):
             todos = self._tool_executor.todo_list if self._tool_executor else []
             self._todo_floating_widget.update_todos(todos)
             self._todo_floating_widget.setVisible(True)
-
-        content = str(result)
 
         if self._current_assistant_card:
             self._current_assistant_card.append_tool_result(
