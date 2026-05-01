@@ -7,7 +7,7 @@
 </p>
 
 <div align="center">
-  <h1>飘狐</h1>
+  <h1>轻量化 AI 对话助手</h1>
 
   [🇨🇳 中文](README.md)
 
