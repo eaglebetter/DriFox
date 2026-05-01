@@ -2990,6 +2990,13 @@ class OpenAIChatToolWindow(ToolWindow):
             return
 
         clean_summary = summary.strip()
+
+        # 校验标题长度，超长说明解析异常或LLM输出异常，跳过更新
+        MAX_TITLE_LENGTH = 50
+        if len(clean_summary) > MAX_TITLE_LENGTH:
+            logger.warning(f"[Topic Summary] 标题过长({len(clean_summary)}字)，跳过更新")
+            return
+
         session = self.session_manager.get_current_session()
 
         # 先设置 session 的 topic_summary，避免 save_session 时 title 为空

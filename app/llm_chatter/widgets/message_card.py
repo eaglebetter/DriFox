@@ -424,6 +424,10 @@ WELCOME_TIPS = [
     "💡 点击差异对比可查看文件修改",
     "💡 Shift+Enter 换行，Enter 发送",
     "💡 点击智能体选择框可切换任务类型",
+    "💡 输入 @ 可快速选择技能，触发 AI 专项能力",
+    "💡 @brainstorming 集思广益，@writing-plans 制定计划",
+    "💡 @git-commit 自动生成规范的提交信息",
+    "💡 @skill-creator 创建新的自定义技能扩展",
 ]
 
 
@@ -1422,7 +1426,7 @@ class PlainTextViewer(QWidget):
         vp_width = self.text_edit.viewport().width()
         if vp_width > 0:
             self.text_edit.document().setTextWidth(vp_width)
-        QTimer.singleShot(100, self._update_height)
+        QTimer.singleShot(500, self._update_height)
 
     def _update_height(self):
         """强制 QTextEdit 重新布局后再计算高度"""
