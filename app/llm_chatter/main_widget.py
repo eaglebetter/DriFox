@@ -324,15 +324,21 @@ class OpenAIChatToolWindow(ToolWindow):
         # self._minimal_status_widget = None
         # 创建复制窗口按钮
         self._copy_btn = TransparentToolButton(get_icon("新建窗口"), self)
-        self._copy_btn.setToolTip("复制窗口")
-        self._copy_btn.clicked.connect(self._duplicate_window)
-        title_bar.add_button(self._copy_btn)
+        self._copy_btn.setToolTip("新建窗口")
+        self._copy_btn.clicked.connect(lambda: self._duplicate_window(branch=False))
+        title_bar.insert_button(0, self._copy_btn)
+
+        # 创建分支按钮
+        self._branch_btn = TransparentToolButton(get_icon("分支"), self)
+        self._branch_btn.setToolTip("分支当前对话")
+        self._branch_btn.clicked.connect(lambda: self._duplicate_window(branch=True))
+        title_bar.insert_button(1, self._branch_btn)
         # 创建设置按钮
         self._settings_btn = TransparentToolButton(FluentIcon.SETTING, self)
         self._settings_btn.setFixedSize(28, 28)
         self._settings_btn.setToolTip("设置")
         self._settings_btn.clicked.connect(self._toggle_settings_card)
-        title_bar.add_button(self._settings_btn)
+        title_bar.insert_button(2, self._settings_btn)
         # # 创建 API 文档按钮
         # self._api_btn = TransparentToolButton(get_icon("Global"), self)
         # self._api_btn.setToolTip("API 文档 (http://localhost:8765/docs)")
@@ -351,13 +357,35 @@ class OpenAIChatToolWindow(ToolWindow):
         from app.llm_chatter.api import open_docs
         open_docs()
 
-    def _duplicate_window(self):
-        """复制当前窗口并以弹窗方式显示"""
+    def _duplicate_window(self, branch: bool = False):
+        """复制当前窗口并以弹窗方式显示，或从当前会话分支创建新会话
+        
+        Args:
+            branch: 如果为 True，则复制当前会话的消息到新窗口
+        """
         try:
             # 创建新的窗口实例
             new_instance = OpenAIChatToolWindow(self.homepage, None)
-            # 延迟调用，确保 UI 初始化完成
-            QTimer.singleShot(100, lambda: new_instance._restore_latest_or_create_session())
+
+            # 如果是分支模式，传递当前会话的消息
+            if branch:
+                current_session = self.session_manager.get_current_session()
+                if current_session:
+                    branch_messages = list(current_session.messages)
+                    branch_name = current_session.name + " [分支]"
+                    # 设置分支会话数据，新窗口会使用这些消息创建会话
+                    new_instance._branch_session_data = {
+                        "messages": branch_messages,
+                        "name": branch_name,
+                    }
+                # 分支模式不跳过历史恢复，而是使用传入的分支数据
+                new_instance._skip_restore_history = True  # 跳过 _restore_latest_session
+            else:
+                new_instance._skip_restore_history = True  # 跳过历史会话恢复，创建新会话
+
+            # 注意：不要在这里调用 _apply_branch_or_create_session
+            # showEvent 中会根据 _branch_session_data 自动处理
+            # 避免重复调用导致问题
 
             # 复制模型选择（确保两个实例都已初始化 UI）
             try:
@@ -381,7 +409,10 @@ class OpenAIChatToolWindow(ToolWindow):
             from app.side_dock_area import ToolPopupDialog
 
             popup = ToolPopupDialog(new_instance, None)
-            popup.setWindowTitle(f"{self.name} - 副本")
+            if branch:
+                popup.setWindowTitle(f"{self.name} - 分支")
+            else:
+                popup.setWindowTitle(f"{self.name} - 副本")
             popup.resize(600, 900)
             # 保存引用防止被垃圾回收
             if not hasattr(self, '_popup_refs'):
@@ -457,7 +488,13 @@ class OpenAIChatToolWindow(ToolWindow):
 
         workflow_name = getattr(self.homepage, "workflow_name", None)
         QTimer.singleShot(0, self._load_agent_list)
-        QTimer.singleShot(0, self._restore_latest_or_create_session)
+        
+        # 如果有分支数据，延迟调用分支会话处理，避免与 _restore_latest_or_create_session 冲突
+        if getattr(self, "_branch_session_data", None):
+            QTimer.singleShot(50, self._apply_branch_or_create_session)
+        else:
+            QTimer.singleShot(0, self._restore_latest_or_create_session)
+        
         QTimer.singleShot(100, self._load_model_configs)
         self._connect_opacity_signal()
         super().showEvent(event)
@@ -514,6 +551,44 @@ class OpenAIChatToolWindow(ToolWindow):
         if self._restore_latest_session():
             return
         self._create_new_session()
+
+    def _apply_branch_or_create_session(self):
+        """处理分支会话或创建新会话"""
+        branch_data = getattr(self, "_branch_session_data", None)
+        if branch_data:
+            # 使用分支数据创建会话
+            self._create_branched_session(
+                branch_data.get("messages", []),
+                branch_data.get("name", "分支对话"),
+            )
+        else:
+            # 没有分支数据，创建新会话
+            self._create_new_session()
+
+    def _create_branched_session(self, messages: List[Dict], name: str):
+        """创建分支会话并渲染消息"""
+        if self._is_streaming and self._chat_engine:
+            self._chat_engine.stop()
+            self._is_streaming = False
+            self._toggle_send_stop(False)
+
+        self._cache_current_session_cards()
+        session = self.session_manager.create_new_session()
+        session.messages = messages
+        session.name = name
+        self._current_session_id = session.session_id
+
+        # 清空聊天区域
+        self._clear_chat_area()
+        self.title_edit.setText(name)
+        self.node_preview.clear_nodes()
+
+        # 复用现有的会话显示逻辑
+        self._display_current_session()
+
+        # 滚动到底部
+        QTimer.singleShot(50, self._scroll_to_bottom)
+        QTimer.singleShot(150, self._scroll_to_bottom)
 
     def _create_new_session(self):
         if self._is_streaming and self._chat_engine:
@@ -2911,6 +2986,11 @@ class OpenAIChatToolWindow(ToolWindow):
             memory_content = ""
             memory_category = "task_preference"
             hit_memories = []
+
+        if result.get("title_unchanged") and self._current_session_id is not None:
+            # 标题未更新，保持现有标题
+            logger.info("[Topic Summary] 标题未更新，保持现有标题")
+            return
 
         if not summary:
             return
