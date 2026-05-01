@@ -1377,6 +1377,11 @@ class PlainTextViewer(QWidget):
         super().__init__(parent)
         self._text = ""
         self._init_ui()
+        # 性能优化：添加 resize 防抖定时器
+        self._resize_debounce_timer = QTimer(self)
+        self._resize_debounce_timer.setSingleShot(True)
+        self._resize_debounce_timer.setInterval(50)  # 50ms 防抖
+        self._resize_debounce_timer.timeout.connect(self._do_resize_update)
 
     def _init_ui(self):
         layout = QVBoxLayout(self)
@@ -1448,10 +1453,17 @@ class PlainTextViewer(QWidget):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        # 性能优化：使用防抖定时器，避免每次 resize 都触发高度计算
+        self._resize_debounce_timer.stop()
+        self._resize_debounce_timer.start()
+
+    def _do_resize_update(self):
+        """防抖后执行高度更新"""
         self._update_height()
 
     def update_height(self):
-        """公开方法，用于外部触发高度重算"""
+        """公开方法，用于外部触发高度重算（跳过防抖，直接更新）"""
+        self._resize_debounce_timer.stop()  # 取消待执行的防抖
         self._update_height()
 
 
@@ -1853,10 +1865,12 @@ class MessageCard(SimpleCardWidget):
             return
         self._last_applied_viewer_height = height
         self.viewer.setFixedHeight(height)
-        self.updateGeometry()
-        parent = self.parentWidget()
-        if parent:
-            parent.updateGeometry()
+        # 性能优化：只在必要时触发布局更新，避免频繁向上传播
+        # 直接使用 layout().invalidate() 而非 updateGeometry()
+        layout = self.layout()
+        if layout:
+            layout.invalidate()
+            layout.activate()
 
     def sync_width(self, force: bool = False):
         """同步卡片宽度

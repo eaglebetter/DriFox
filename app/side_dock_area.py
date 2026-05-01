@@ -270,7 +270,7 @@ class ToolPopupDialog(QDialog):
         self._is_closing = False
         self._geometry_save_timer = QTimer(self)
         self._geometry_save_timer.setSingleShot(True)
-        self._geometry_save_timer.setInterval(160)
+        self._geometry_save_timer.setInterval(300)  # 增加防抖，减少频繁保存
         self._geometry_save_timer.timeout.connect(self._save_geometry)
         self._resize_edge = ResizeEdge.EDGE_NONE
         self._resize_start_geometry = None
@@ -521,6 +521,9 @@ class ToolPopupDialog(QDialog):
             event.accept()
             return
         self._is_closing = True
+        # 关闭时同时隐藏锁定按钮
+        if self._lock_btn_widget:
+            self._lock_btn_widget.hide()
         Settings.get_instance().save()
         self.deleteLater()
         super().closeEvent(event)
