@@ -1,6 +1,6 @@
 ---
 name: minimax-image-understanding
-description: 使用 MiniMax AI 分析图片内容，支持截图和本地图片解读
+description: 使用 MiniMax AI 分析图片内容，支持电脑屏幕截图和本地图片解读
 ---
 
 # MiniMax Image Understanding Skill

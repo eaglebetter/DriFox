@@ -11,6 +11,7 @@ import json
 import os
 import sys
 import base64
+import ssl
 import urllib.request
 import urllib.error
 import argparse
@@ -78,11 +79,12 @@ def analyze_image(image_path, prompt=None, api_key=None):
     print(f"提示词: {prompt[:50]}..." if len(prompt) > 50 else f"提示词: {prompt}")
     
     # 发送请求
-    data = json.dumps(payload).encode('utf-8')
+    data = json.dumps(payload, ensure_ascii=False).encode('utf-8')
     
     try:
         req = urllib.request.Request(url, data=data, headers=headers, method='POST')
-        with urllib.request.urlopen(req, timeout=120) as response:
+        context = ssl.create_default_context()
+        with urllib.request.urlopen(req, timeout=120, context=context) as response:
             result = json.loads(response.read().decode('utf-8'))
             
             # 解析响应
