@@ -401,12 +401,6 @@ class ToolPopupDialog(QDialog):
             event.accept()
             return
         self._is_closing = True
-        self._save_geometry()
-        self._restore_title_bar()
-        Settings.get_instance().save()
-        self.popupClosed.emit(
-            self._restore_tool_name, self._restore_was_in_top, self._restore_btn
-        )
         self.deleteLater()
         super().closeEvent(event)
 
@@ -531,6 +525,28 @@ class ToolPopupDialog(QDialog):
                 return
 
     def mouseMoveEvent(self, event):
+        # 始终更新光标（不受拖拽状态影响）
+        title_bar = self.tool_instance.get_title_bar()
+        title_height = title_bar.height() if title_bar else 0
+        if event.y() <= title_height:
+            # 标题栏区域：保持正常光标
+            self.setCursor(Qt.ArrowCursor)
+        else:
+            # 内容区域：根据边缘位置更新光标
+            edge = self._get_edge_at_pos(event.pos())
+            if edge == ResizeEdge.EDGE_TOP or edge == ResizeEdge.EDGE_BOTTOM:
+                self.setCursor(Qt.SizeVerCursor)
+            elif edge == ResizeEdge.EDGE_LEFT or edge == ResizeEdge.EDGE_RIGHT:
+                self.setCursor(Qt.SizeHorCursor)
+            elif edge == (ResizeEdge.EDGE_TOP | ResizeEdge.EDGE_LEFT) or \
+                 edge == (ResizeEdge.EDGE_BOTTOM | ResizeEdge.EDGE_RIGHT):
+                self.setCursor(Qt.SizeFDiagCursor)
+            elif edge == (ResizeEdge.EDGE_TOP | ResizeEdge.EDGE_RIGHT) or \
+                 edge == (ResizeEdge.EDGE_BOTTOM | ResizeEdge.EDGE_LEFT):
+                self.setCursor(Qt.SizeBDiagCursor)
+            else:
+                self.setCursor(Qt.ArrowCursor)
+
         if event.buttons() == Qt.LeftButton:
             # 正在边缘拖拽缩放
             if self._resize_edge != ResizeEdge.EDGE_NONE:
@@ -544,23 +560,6 @@ class ToolPopupDialog(QDialog):
                 event.accept()
                 return
         else:
-            # 更新鼠标光标形状（排除标题栏区域）
-            title_bar = self.tool_instance.get_title_bar()
-            title_height = title_bar.height() if title_bar else 0
-            if event.y() > title_height:
-                edge = self._get_edge_at_pos(event.pos())
-                if edge == ResizeEdge.EDGE_TOP or edge == ResizeEdge.EDGE_BOTTOM:
-                    self.setCursor(Qt.SizeVerCursor)
-                elif edge == ResizeEdge.EDGE_LEFT or edge == ResizeEdge.EDGE_RIGHT:
-                    self.setCursor(Qt.SizeHorCursor)
-                elif edge == (ResizeEdge.EDGE_TOP | ResizeEdge.EDGE_LEFT) or \
-                     edge == (ResizeEdge.EDGE_BOTTOM | ResizeEdge.EDGE_RIGHT):
-                    self.setCursor(Qt.SizeFDiagCursor)
-                elif edge == (ResizeEdge.EDGE_TOP | ResizeEdge.EDGE_RIGHT) or \
-                     edge == (ResizeEdge.EDGE_BOTTOM | ResizeEdge.EDGE_LEFT):
-                    self.setCursor(Qt.SizeBDiagCursor)
-                else:
-                    self.setCursor(Qt.ArrowCursor)
             self._show_opacity_slider()
             self._hide_timer_start()
 
