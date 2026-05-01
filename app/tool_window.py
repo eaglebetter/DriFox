@@ -3,8 +3,9 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional, List, Any
+import psutil
 
-from PyQt5.QtCore import pyqtSignal
+from PyQt5.QtCore import pyqtSignal, QTimer
 from PyQt5.QtWidgets import QWidget, QHBoxLayout, QLabel
 from qfluentwidgets import TransparentToolButton
 
@@ -89,6 +90,20 @@ class ToolWindowTitleBar(QWidget):
         self._action_layout.setSpacing(4)
         layout.addWidget(self._action_container)
 
+        # 内存显示标签
+        self._memory_label = QLabel(self)
+        self._memory_label.setObjectName("memoryLabel")
+        self._memory_label.setFixedHeight(22)
+        self._memory_label.setStyleSheet("color: #ffffff; font-size: 12px; padding: 2px 6px; background-color: rgba(0, 0, 0, 20); border-radius: 4px;")
+        self._memory_label.hide()  # 默认隐藏，子类可以控制显示
+        layout.insertWidget(layout.indexOf(self._action_container) - 1, self._memory_label)
+
+        # 内存刷新定时器
+        self._memory_timer = QTimer(self)
+        self._memory_timer.setInterval(5000)  # 5秒刷新
+        self._memory_timer.timeout.connect(self._update_memory_label)
+        self._memory_refreshing = False
+
         self._switch_layout_btn = TransparentToolButton(get_icon("上下切换"), self)
         self._switch_layout_btn.setFixedSize(24, 24)
         self._switch_layout_btn.setToolTip("切换到上/下半区")
@@ -133,6 +148,13 @@ class ToolWindowTitleBar(QWidget):
                 font-family: "{font_name}";
                 padding: 0 4px;
             }}
+            /* #memoryLabel {{
+                color: #ffffff;
+                font-size: 12px;
+                padding: 2px 6px;
+                background-color: rgba(0, 0, 0, 20);
+                border-radius: 4px;
+            }} */
             #actionContainer {{
                 background-color: transparent;
             }}
@@ -200,6 +222,25 @@ class ToolWindowTitleBar(QWidget):
 
     def _on_popup_clicked(self):
         self.popupRequested.emit()
+
+    def show_memory_label(self):
+        """显示内存标签并开始刷新"""
+        self._memory_label.show()
+        # 每次显示都重新启动定时器，确保新窗口独立刷新
+        self._memory_timer.stop()
+        self._memory_refreshing = True
+        self._update_memory_label()
+        self._memory_timer.start()
+
+    def _update_memory_label(self):
+        """更新内存显示"""
+        try:
+            process = psutil.Process()
+            mem_info = process.memory_info()
+            mem_mb = mem_info.rss / (1024 * 1024)
+            self._memory_label.setText(f" {mem_mb:.0f} MB ")
+        except Exception:
+            self._memory_label.setText(" N/A ")
 
 
 class ToolWindow(QWidget):

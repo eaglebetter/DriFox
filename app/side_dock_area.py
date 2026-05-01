@@ -226,11 +226,7 @@ class ToolPopupDialog(QDialog):
         self._min_btn.clicked.connect(self.showMinimized)
         title_bar.add_popup_button(self._min_btn)
 
-        self._max_btn = TransparentToolButton(get_icon("最大化"), self)
-        self._max_btn.setFixedSize(24, 24)
-        self._max_btn.setToolTip("最大化")
-        self._max_btn.clicked.connect(self._toggle_maximize)
-        title_bar.add_popup_button(self._max_btn)
+        # 最大化按钮已移除
 
         main_layout.addWidget(title_bar)
         main_layout.addWidget(tool_instance, 1)
@@ -295,19 +291,8 @@ class ToolPopupDialog(QDialog):
         QApplication.instance().quit()
 
     def _show_settings(self):
-        """显示设置弹窗 - 已被移除，按钮已移到主窗口"""
+        """"显示设置弹窗 - 已被移除，按钮已移到主窗口"""
         pass
-
-    def _toggle_maximize(self):
-        if self._is_maximized:
-            self.showNormal()
-            self._is_maximized = False
-            if self._normal_geometry:
-                self.restoreGeometry(self._normal_geometry)
-        else:
-            self._normal_geometry = self.saveGeometry()
-            self.showMaximized()
-            self._is_maximized = True
 
     def setRestoreInfo(self, tool_name, was_in_top, btn):
         self._restore_tool_name = tool_name
@@ -395,13 +380,6 @@ class ToolPopupDialog(QDialog):
         elif obj == self._popup_btn and event.type() == QEvent.Leave:
             self._popup_btn.setStyleSheet("")
         return super().eventFilter(obj, event)
-
-    def mouseDoubleClickEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            title_bar = self.tool_instance.get_title_bar()
-            if title_bar and event.y() < title_bar.height():
-                self._toggle_maximize()
-                event.accept()
 
     def paintEvent(self, event):
         painter = QPainter(self)

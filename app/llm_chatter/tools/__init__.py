@@ -791,11 +791,11 @@ def get_builtin_tools_schema() -> List[Dict]:
             "type": "function",
             "function": {
                 "name": "skill",
-                "description": "加载技能文档",
+                "description": "加载技能。当用户消息中包含 @技能名 时（如 @brainstorming），必须立即调用此工具加载对应技能。技能会提供特定领域的专业知识和工作流程。",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "name": {"type": "string", "description": "技能名称"},
+                        "name": {"type": "string", "description": "技能名称，如 brainstorming, writing-plans, find-skills, git-commit 等"},
                     },
                     "required": ["name"],
                 },
@@ -805,7 +805,7 @@ def get_builtin_tools_schema() -> List[Dict]:
             "type": "function",
             "function": {
                 "name": "list_skills",
-                "description": "列出所有可用技能",
+                "description": "列出所有可用的本地技能，包括内置技能和用户安装的技能。当需要了解有哪些技能可用时可调用此工具。",
                 "parameters": {"type": "object", "properties": {}},
             },
         },

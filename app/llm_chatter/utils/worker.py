@@ -1227,15 +1227,12 @@ class OpenAIChatWorker(QThread):
                 success = bool(getattr(result, "success", True)) if result else False
 
             if self._is_cancelled or self._tool_execution_cancelled:
-                cancelled_result = type(
-                    "ToolResult",
-                    (),
-                    {
-                        "success": False,
-                        "content": None,
-                        "error": "用户中止",
-                    },
-                )()
+                # 创建取消结果对象（直接使用 dict 简化，避免循环导入）
+                cancelled_result = {
+                    "success": False,
+                    "content": None,
+                    "error": "用户中止",
+                }
                 self._emit_with_callback(
                     "tool_result_received",
                     self.tool_result_received,
