@@ -12,7 +12,12 @@ from PyQt5.QtWidgets import (
     QApplication,
     QStyle,
 )
-from qfluentwidgets import isDarkTheme, FluentIcon as FIF, TransparentToolButton, FluentIcon
+from qfluentwidgets import (
+    isDarkTheme,
+    FluentIcon as FIF,
+    TransparentToolButton,
+    FluentIcon,
+)
 
 from app.utils.config import Settings
 from app.utils.utils import get_icon
@@ -125,6 +130,82 @@ class OpacitySlider(QWidget):
         self.setOpacity(self._opacity + (delta // 120) * 5)
 
 
+class LockButtonWidget(QWidget):
+    """独立的锁定按钮小部件，在穿透模式下可独立显示和交互"""
+    lockClicked = pyqtSignal(bool)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._is_locked = False
+        self.setFixedSize(26, 26)
+        self.setWindowFlags(Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self._setup_ui()
+        self._update_icon()
+
+    def _setup_ui(self):
+        from qfluentwidgets import ToolButton
+        self._btn = ToolButton(self)
+        self._btn.setFixedSize(26, 26)
+        self._btn.clicked.connect(self._on_click)
+        self._btn.setIconSize(QSize(16, 16))
+        self._btn.move(0, 0)
+
+    def _on_click(self):
+        self._is_locked = not self._is_locked
+        self._update_icon()
+        self.lockClicked.emit(self._is_locked)
+
+    def _update_icon(self):
+        if self._is_locked:
+            self._btn.setIcon(get_icon("锁定"))
+            self._btn.setToolTip("取消锁定（恢复交互）")
+            self._btn.setStyleSheet("""
+                QToolButton {
+                    background-color: rgba(0, 120, 212, 200);
+                    border-radius: 4px;
+                    color: #e0e0e0;
+                }
+                QToolButton:hover {
+                    background-color: rgba(0, 120, 212, 240);
+                }
+                QToolButton:pressed {
+                    background-color: rgba(0, 120, 212, 180);
+                }
+            """)
+        else:
+            self._btn.setIcon(get_icon("解锁"))
+            self._btn.setToolTip("锁定窗口（鼠标穿透）")
+            self._btn.setStyleSheet("""
+                QToolButton {
+                    background-color: transparent;
+                    border-radius: 4px;
+                    color: #c0c0c0;
+                }
+                QToolButton:hover {
+                    background-color: rgba(255, 255, 255, 15);
+                    color: #ffffff;
+                }
+            """)
+
+    def setLocked(self, locked: bool):
+        if self._is_locked != locked:
+            self._is_locked = locked
+            self._update_icon()
+
+    def isLocked(self) -> bool:
+        return self._is_locked
+
+    def paintEvent(self, e):
+        # 深色背景，和标题栏风格一致
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(Qt.NoPen)
+        bg_color = QColor(45, 45, 45)  # 深色背景
+        painter.setBrush(bg_color)
+        painter.drawRoundedRect(self.rect(), 4, 4)
+
+
 class AdaptiveStackedWidget(QStackedWidget):
     def sizeHint(self) -> QSize:
         current = self.currentWidget()
@@ -137,33 +218,36 @@ class AdaptiveStackedWidget(QStackedWidget):
 
 class ResizeEdge(QWidget):
     """边缘拖拽区域"""
+
     EDGE_NONE = 0
     EDGE_TOP = 1
     EDGE_BOTTOM = 2
     EDGE_LEFT = 4
     EDGE_RIGHT = 8
-    
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._edge = ResizeEdge.EDGE_NONE
         self.setAttribute(Qt.WA_TransparentForMouseEvents, False)
         self.setMouseTracking(True)
         self._update_cursor()
-    
+
     def set_edge(self, edge):
         self._edge = edge
         self._update_cursor()
-    
+
     def _update_cursor(self):
         if self._edge == ResizeEdge.EDGE_TOP or self._edge == ResizeEdge.EDGE_BOTTOM:
             self.setCursor(Qt.SizeVerCursor)
         elif self._edge == ResizeEdge.EDGE_LEFT or self._edge == ResizeEdge.EDGE_RIGHT:
             self.setCursor(Qt.SizeHorCursor)
-        elif self._edge == (ResizeEdge.EDGE_TOP | ResizeEdge.EDGE_LEFT) or \
-             self._edge == (ResizeEdge.EDGE_BOTTOM | ResizeEdge.EDGE_RIGHT):
+        elif self._edge == (
+            ResizeEdge.EDGE_TOP | ResizeEdge.EDGE_LEFT
+        ) or self._edge == (ResizeEdge.EDGE_BOTTOM | ResizeEdge.EDGE_RIGHT):
             self.setCursor(Qt.SizeFDiagCursor)
-        elif self._edge == (ResizeEdge.EDGE_TOP | ResizeEdge.EDGE_RIGHT) or \
-             self._edge == (ResizeEdge.EDGE_BOTTOM | ResizeEdge.EDGE_LEFT):
+        elif self._edge == (
+            ResizeEdge.EDGE_TOP | ResizeEdge.EDGE_RIGHT
+        ) or self._edge == (ResizeEdge.EDGE_BOTTOM | ResizeEdge.EDGE_LEFT):
             self.setCursor(Qt.SizeBDiagCursor)
         else:
             self.setCursor(Qt.ArrowCursor)
@@ -186,7 +270,7 @@ class ToolPopupDialog(QDialog):
         self._is_closing = False
         self._geometry_save_timer = QTimer(self)
         self._geometry_save_timer.setSingleShot(True)
-        self._geometry_save_timer.setInterval(160)
+        self._geometry_save_timer.setInterval(300)  # 增加防抖，减少频繁保存
         self._geometry_save_timer.timeout.connect(self._save_geometry)
         self._resize_edge = ResizeEdge.EDGE_NONE
         self._resize_start_geometry = None
@@ -226,7 +310,9 @@ class ToolPopupDialog(QDialog):
         self._min_btn.clicked.connect(self.showMinimized)
         title_bar.add_popup_button(self._min_btn)
 
-        # 最大化按钮已移除
+        # 隐藏标题栏的锁定按钮，改用独立的 LockButtonWidget
+        lock_btn = title_bar._lock_btn
+        lock_btn.hide()
 
         main_layout.addWidget(title_bar)
         main_layout.addWidget(tool_instance, 1)
@@ -241,8 +327,93 @@ class ToolPopupDialog(QDialog):
         self._hide_timer.timeout.connect(self._check_hide_slider)
         self.setMouseTracking(True)
 
+        self._lock_mode = False
+        self._slider_desktop_pos = None
+
         # 初始化系统托盘图标（用于 Windows 通知）
         self._init_tray_icon()
+
+        # 创建独立的锁定按钮（在穿透模式下仍可交互）
+        self._lock_btn_widget = LockButtonWidget()
+        self._lock_btn_widget.lockClicked.connect(self._on_lock_changed)
+
+        # 连接标题栏锁定信号（用于同步状态）
+        title_bar.lockRequested.connect(self._on_title_bar_lock_changed)
+
+    def _on_title_bar_lock_changed(self, locked: bool):
+        """响应标题栏锁定信号，同步到独立锁定按钮"""
+        self._lock_btn_widget.setLocked(locked)
+
+    def _on_lock_changed(self, locked: bool):
+        """处理窗口锁定状态变化"""
+        self._lock_mode = locked
+        if locked:
+            self._reparent_lock_btn_to_desktop()
+        self._set_window_passthrough(locked)
+        if not locked:
+            self._reparent_lock_btn_to_dialog()
+        self._sync_lock_btn_position()
+
+    def _reparent_lock_btn_to_desktop(self):
+        """重新设置 lock button widget 的父对象为桌面，使其在穿透模式下仍可交互"""
+        if self._lock_btn_widget:
+            # 在透明度条上方，透明度条右边再往左一个按钮宽度
+            pos = self.mapToGlobal(QPoint(self.width() + 3, 3))
+            self._lock_btn_widget.setParent(None)
+            self._lock_btn_widget.move(pos)
+            self._lock_btn_widget.show()
+            self._lock_btn_widget.raise_()
+
+    def _reparent_lock_btn_to_dialog(self):
+        """恢复 lock button widget 的父对象为对话框"""
+        if self._lock_btn_widget:
+            # 保持为独立窗口，只是改变父对象
+            self._sync_lock_btn_position()
+            self._lock_btn_widget.show()
+
+    def _sync_lock_btn_position(self):
+        """同步 lock button 位置到透明度条上方"""
+        if self._lock_btn_widget:
+            # 在透明度条上方
+            pos = self.mapToGlobal(QPoint(self.width() + 3, 3))
+            self._lock_btn_widget.move(pos)
+
+    def _reparent_slider_to_dialog(self):
+        """恢复 opacity slider 的父对象为对话框"""
+        if self._opacity_slider:
+            self._opacity_slider.setParent(self)
+            self._opacity_slider.hide()
+
+    def _get_current_screen(self):
+        """获取当前窗口所在的屏幕索引"""
+        desktop = QApplication.desktop()
+        return desktop.screenNumber(self)
+
+    def _sync_slider_position(self):
+        """同步 slider 位置到对话框右侧（锁定按钮下方）"""
+        if self._opacity_slider and not self._lock_mode:
+            pos = self.mapToGlobal(QPoint(self.width(), 10 + 30))  # 往下移30px，避开锁定按钮
+            self._opacity_slider.move(pos)
+
+    def _set_window_passthrough(self, enabled: bool):
+        """使用 Windows API 实现真正的鼠标穿透到下层软件"""
+        import ctypes
+
+        GWL_EXSTYLE = -20
+        WS_EX_TRANSPARENT = 0x00000020
+
+        user32 = ctypes.windll.user32
+        GetWindowLongW = user32.GetWindowLongW
+        SetWindowLongW = user32.SetWindowLongW
+
+        hwnd = int(self.winId())
+
+        if enabled:
+            ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE)
+            SetWindowLongW(hwnd, GWL_EXSTYLE, ex_style | WS_EX_TRANSPARENT)
+        else:
+            ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE)
+            SetWindowLongW(hwnd, GWL_EXSTYLE, ex_style & ~WS_EX_TRANSPARENT)
 
     def _init_tray_icon(self):
         """初始化系统托盘图标，用于显示 Windows 通知"""
@@ -252,7 +423,7 @@ class ToolPopupDialog(QDialog):
         icon_path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
             "images",
-            "drifox.ico"
+            "drifox.ico",
         )
         if os.path.exists(icon_path):
             tray_icon = QIcon(icon_path)
@@ -291,7 +462,7 @@ class ToolPopupDialog(QDialog):
         QApplication.instance().quit()
 
     def _show_settings(self):
-        """"显示设置弹窗 - 已被移除，按钮已移到主窗口"""
+        """ "显示设置弹窗 - 已被移除，按钮已移到主窗口"""
         pass
 
     def setRestoreInfo(self, tool_name, was_in_top, btn):
@@ -303,6 +474,9 @@ class ToolPopupDialog(QDialog):
         super().showEvent(event)
         self._restore_geometry()
         self.tool_instance.show()
+        # 显示锁定按钮在窗口右侧
+        self._sync_lock_btn_position()
+        self._lock_btn_widget.show()
 
     def _restore_geometry(self):
         from PyQt5.QtCore import QSettings
@@ -347,30 +521,12 @@ class ToolPopupDialog(QDialog):
             event.accept()
             return
         self._is_closing = True
-        self._save_geometry()
-        self._restore_title_bar()
+        # 关闭时同时隐藏锁定按钮
+        if self._lock_btn_widget:
+            self._lock_btn_widget.hide()
         Settings.get_instance().save()
-        self.popupClosed.emit(
-            self._restore_tool_name, self._restore_was_in_top, self._restore_btn
-        )
         self.deleteLater()
         super().closeEvent(event)
-
-    def _restore_title_bar(self):
-        title_bar = self.tool_instance.get_title_bar()
-        if not title_bar:
-            return
-        try:
-            title_bar.popupRequested.disconnect()
-        except:
-            pass
-        tool_name = self.tool_instance.name
-        homepage = self.tool_instance.homepage
-        title_bar.popupRequested.connect(lambda: homepage._handle_tool_popup(tool_name))
-        self._popup_btn.setIcon(get_icon("弹出窗"))
-        self._popup_btn.setToolTip("弹出窗口")
-        self._switch_btn.show()
-        title_bar.clear_popup_buttons()
 
     def eventFilter(self, obj, event):
         if obj == self._popup_btn and event.type() == QEvent.Enter:
@@ -423,7 +579,7 @@ class ToolPopupDialog(QDialog):
         x, y = pos.x(), pos.y()
         w, h = self.width(), self.height()
         edge = ResizeEdge.EDGE_NONE
-        
+
         # 检测顶部边缘
         if y < self._edge_size:
             edge |= ResizeEdge.EDGE_TOP
@@ -436,21 +592,21 @@ class ToolPopupDialog(QDialog):
         # 检测右边缘
         elif x > w - self._edge_size:
             edge |= ResizeEdge.EDGE_RIGHT
-        
+
         return edge
 
     def _perform_resize(self, global_pos):
         """执行边缘缩放"""
         if self._resize_edge == ResizeEdge.EDGE_NONE or not self._resize_start_geometry:
             return
-        
+
         delta = global_pos - self._resize_start_pos
         geom = self._resize_start_geometry
         x, y, w, h = geom.x(), geom.y(), geom.width(), geom.height()
         min_w, min_h = self.minimumSize().width(), self.minimumSize().height()
-        
+
         edge = self._resize_edge
-        
+
         # 处理左右边缘
         if edge & ResizeEdge.EDGE_LEFT:
             new_x = x + delta.x()
@@ -460,7 +616,7 @@ class ToolPopupDialog(QDialog):
                 w = new_w
         elif edge & ResizeEdge.EDGE_RIGHT:
             w = max(min_w, w + delta.x())
-        
+
         # 处理上下边缘
         if edge & ResizeEdge.EDGE_TOP:
             new_y = y + delta.y()
@@ -470,7 +626,7 @@ class ToolPopupDialog(QDialog):
                 h = new_h
         elif edge & ResizeEdge.EDGE_BOTTOM:
             h = max(min_h, h + delta.y())
-        
+
         self.setGeometry(x, y, w, h)
 
     def mousePressEvent(self, event):
@@ -481,7 +637,7 @@ class ToolPopupDialog(QDialog):
                 self._drag_pos = event.globalPos() - self.frameGeometry().topLeft()
                 event.accept()
                 return
-            
+
             # 检查是否在边缘区域开始拖拽
             edge = self._get_edge_at_pos(event.pos())
             if edge != ResizeEdge.EDGE_NONE:
@@ -493,36 +649,43 @@ class ToolPopupDialog(QDialog):
                 return
 
     def mouseMoveEvent(self, event):
+        # 始终更新光标（不受拖拽状态影响）
+        title_bar = self.tool_instance.get_title_bar()
+        title_height = title_bar.height() if title_bar else 0
+        if event.y() <= title_height:
+            # 标题栏区域：保持正常光标
+            self.setCursor(Qt.ArrowCursor)
+        else:
+            # 内容区域：根据边缘位置更新光标
+            edge = self._get_edge_at_pos(event.pos())
+            if edge == ResizeEdge.EDGE_TOP or edge == ResizeEdge.EDGE_BOTTOM:
+                self.setCursor(Qt.SizeVerCursor)
+            elif edge == ResizeEdge.EDGE_LEFT or edge == ResizeEdge.EDGE_RIGHT:
+                self.setCursor(Qt.SizeHorCursor)
+            elif edge == (ResizeEdge.EDGE_TOP | ResizeEdge.EDGE_LEFT) or edge == (
+                ResizeEdge.EDGE_BOTTOM | ResizeEdge.EDGE_RIGHT
+            ):
+                self.setCursor(Qt.SizeFDiagCursor)
+            elif edge == (ResizeEdge.EDGE_TOP | ResizeEdge.EDGE_RIGHT) or edge == (
+                ResizeEdge.EDGE_BOTTOM | ResizeEdge.EDGE_LEFT
+            ):
+                self.setCursor(Qt.SizeBDiagCursor)
+            else:
+                self.setCursor(Qt.ArrowCursor)
+
         if event.buttons() == Qt.LeftButton:
             # 正在边缘拖拽缩放
             if self._resize_edge != ResizeEdge.EDGE_NONE:
                 self._perform_resize(event.globalPos())
                 event.accept()
                 return
-            
+
             # 标题栏拖拽移动
             if self._drag_pos:
                 self.move(event.globalPos() - self._drag_pos)
                 event.accept()
                 return
         else:
-            # 更新鼠标光标形状（排除标题栏区域）
-            title_bar = self.tool_instance.get_title_bar()
-            title_height = title_bar.height() if title_bar else 0
-            if event.y() > title_height:
-                edge = self._get_edge_at_pos(event.pos())
-                if edge == ResizeEdge.EDGE_TOP or edge == ResizeEdge.EDGE_BOTTOM:
-                    self.setCursor(Qt.SizeVerCursor)
-                elif edge == ResizeEdge.EDGE_LEFT or edge == ResizeEdge.EDGE_RIGHT:
-                    self.setCursor(Qt.SizeHorCursor)
-                elif edge == (ResizeEdge.EDGE_TOP | ResizeEdge.EDGE_LEFT) or \
-                     edge == (ResizeEdge.EDGE_BOTTOM | ResizeEdge.EDGE_RIGHT):
-                    self.setCursor(Qt.SizeFDiagCursor)
-                elif edge == (ResizeEdge.EDGE_TOP | ResizeEdge.EDGE_RIGHT) or \
-                     edge == (ResizeEdge.EDGE_BOTTOM | ResizeEdge.EDGE_LEFT):
-                    self.setCursor(Qt.SizeBDiagCursor)
-                else:
-                    self.setCursor(Qt.ArrowCursor)
             self._show_opacity_slider()
             self._hide_timer_start()
 
@@ -538,12 +701,24 @@ class ToolPopupDialog(QDialog):
         super().resizeEvent(event)
         if not self._is_closing:
             self._geometry_save_timer.start()
+            # 同步 lock button 和 opacity slider 位置
+            if self._lock_mode:
+                self._reparent_lock_btn_to_desktop()
+            else:
+                self._sync_lock_btn_position()
+                if self._opacity_slider and self._opacity_slider.isVisible():
+                    self._sync_slider_position()
 
     def moveEvent(self, event):
         super().moveEvent(event)
         if self._is_maximized or self._is_closing:
             return
         self._geometry_save_timer.start()
+        # 同步 lock button 位置
+        if self._lock_mode:
+            self._reparent_lock_btn_to_desktop()
+        else:
+            self._sync_lock_btn_position()
 
     def _on_destroyed(self):
         if hasattr(self.tool_instance, "set_allowed_update"):
@@ -554,10 +729,14 @@ class ToolPopupDialog(QDialog):
             self._opacity_slider = OpacitySlider(self)
             self._opacity_slider.opacityChanged.connect(self._on_opacity_changed)
         self._opacity_slider.setOpacity(int(self.windowOpacity() * 100))
-        pos = self.mapToGlobal(QPoint(self.width(), 10))
-        self._opacity_slider.move(pos)
-        self._opacity_slider.show()
-        self._opacity_slider.raise_()
+        if self._lock_mode:
+            self._reparent_slider_to_desktop()
+        else:
+            self._opacity_slider.setParent(self)
+            pos = self.mapToGlobal(QPoint(self.width(), 10 + 30))  # 往下移30px
+            self._opacity_slider.move(pos)
+            self._opacity_slider.show()
+            self._opacity_slider.raise_()
 
     def _hide_opacity_slider(self):
         if self._opacity_slider:
@@ -597,4 +776,3 @@ class ToolPopupDialog(QDialog):
     def leaveEvent(self, e):
         super().leaveEvent(e)
         self._hide_timer_start()
-

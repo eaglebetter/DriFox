@@ -1,23 +1,32 @@
 # -*- coding: utf-8 -*-
 """
-历史会话卡片 - 直接使用 BaseSettingsCard 的 scroll_area
+历史会话卡片 - 包含当前会话列表和归档会话列表
 """
 import datetime
+import json
+import os
 from typing import List, Dict, Optional
-from PyQt5.QtCore import Qt, pyqtSignal
+from pathlib import Path
+
+from PyQt5.QtCore import Qt, pyqtSignal, QMimeData
 from PyQt5.QtWidgets import (
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QFileDialog,
 )
+from PyQt5.QtGui import QDragEnterEvent
 from qfluentwidgets import (
     BodyLabel,
     CaptionLabel,
     CardWidget,
     TransparentToolButton,
     FluentIcon,
+    SegmentedWidget,
+    InfoBar,
+    InfoBarPosition,
 )
 from app.utils.utils import get_icon, get_font_family_css
 
@@ -227,6 +236,154 @@ class _HistoryItemCard(CardWidget):
         super().mousePressEvent(event)
 
 
+class _ArchivedItemCard(CardWidget):
+    """归档会话项卡片 - 用于归档列表"""
+
+    restored = pyqtSignal(str)  # 文件路径
+    permanentlyDeleted = pyqtSignal(str)  # 文件路径
+    renameRequested = pyqtSignal(str, str)  # 旧路径, 新标题
+
+    def __init__(
+        self,
+        file_path: str,
+        title: str,
+        session_id: str,
+        last_time: str,
+        message_count: int = 0,
+        preview: str = "",
+        parent=None,
+    ):
+        super().__init__(parent)
+        self._file_path = file_path
+        self._title = title
+        self._session_id = session_id
+        self._is_editing = False
+        self._message_count = message_count
+        self.setCursor(Qt.PointingHandCursor)
+
+        # 归档卡片样式 - 使用不同的背景色区分
+        self.setStyleSheet(
+            """
+            CardWidget {
+                background-color: rgba(255, 180, 100, 0.08);
+                border: 1px solid rgba(255, 150, 80, 0.2);
+                border-radius: 10px;
+            }
+            CardWidget:hover {
+                background-color: rgba(255, 180, 100, 0.15);
+                border: 1px solid rgba(255, 150, 80, 0.4);
+            }
+            """
+        )
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 8, 8, 8)
+        layout.setSpacing(4)
+
+        top_row = QHBoxLayout()
+        top_row.setSpacing(8)
+
+        # 归档图标
+        archive_icon = QLabel("📦", self)
+        archive_icon.setStyleSheet("font-size: 14px;")
+        top_row.addWidget(archive_icon)
+
+        self.title_label = BodyLabel(title[:100], self)
+        self.title_label.setWordWrap(True)
+        self.title_label.setStyleSheet("color: white;")
+        top_row.addWidget(self.title_label, 1)
+
+        self.title_edit = QLineEdit(title[:100], self)
+        self.title_edit.setStyleSheet(
+            """
+            QLineEdit {
+                background-color: rgba(0, 0, 0, 0.3);
+                border: 1px solid rgba(255, 180, 100, 0.5);
+                border-radius: 4px;
+                color: white;
+                padding: 2px 6px;
+            }
+            """
+        )
+        self.title_edit.hide()
+        self.title_edit.setMaximumWidth(250)
+        self.title_edit.returnPressed.connect(self._finish_edit)
+        self.title_edit.editingFinished.connect(self._finish_edit)
+        top_row.addWidget(self.title_edit, 1, Qt.AlignLeft)
+
+        btn_container = QHBoxLayout()
+        btn_container.setSpacing(2)
+
+        # 重命名按钮
+        self.edit_btn = TransparentToolButton(get_icon("重命名"), self)
+        self.edit_btn.setToolTip("重命名")
+        self.edit_btn.setFixedSize(24, 24)
+        self.edit_btn.clicked.connect(self._start_edit)
+        btn_container.addWidget(self.edit_btn)
+
+        # 彻底删除按钮
+        self.delete_btn = TransparentToolButton(FluentIcon.DELETE, self)
+        self.delete_btn.setToolTip("彻底删除")
+        self.delete_btn.setFixedSize(24, 24)
+        self.delete_btn.clicked.connect(lambda: self.permanentlyDeleted.emit(self._file_path))
+        btn_container.addWidget(self.delete_btn)
+
+        top_row.addLayout(btn_container, 0)
+
+        layout.addLayout(top_row)
+
+        bottom_row = QHBoxLayout()
+        bottom_row.setSpacing(8)
+
+        rel_time = format_relative_time(last_time)
+        meta_text = f"{rel_time}"
+        if message_count > 0:
+            meta_text += f" · {message_count} 轮对话"
+        self.meta_label = CaptionLabel(meta_text, self)
+        self.meta_label.setStyleSheet("color: rgba(255, 255, 255, 0.5);")
+        bottom_row.addWidget(self.meta_label)
+
+        bottom_row.addStretch()
+
+        if preview:
+            self.preview_label = CaptionLabel(preview, self)
+            self.preview_label.setStyleSheet(
+                "color: rgba(255, 255, 255, 0.4); font-style: italic;"
+            )
+            self.preview_label.setWordWrap(True)
+            bottom_row.addSpacing(25)
+            bottom_row.addWidget(self.preview_label, 1)
+
+        layout.addLayout(bottom_row)
+
+    def _start_edit(self):
+        self._is_editing = True
+        self.title_label.hide()
+        self.title_edit.show()
+        self.title_edit.setText(self.title_label.text())
+        self.title_edit.setFocus()
+        self.title_edit.selectAll()
+
+    def _finish_edit(self):
+        if not self._is_editing:
+            return
+        new_title = self.title_edit.text().strip()
+        if new_title and new_title != self.title_label.text():
+            self.renameRequested.emit(self._file_path, new_title)
+        self._is_editing = False
+        self.title_edit.hide()
+        self.title_label.show()
+
+    def update_title(self, new_title: str):
+        self.title_label.setText(new_title[:100])
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton and not self._is_editing:
+            # 单击也可以恢复会话
+            self.restored.emit(self._file_path)
+        super().mousePressEvent(event)
+
+
 class _SectionHeader(QLabel):
     def __init__(self, text: str, count: int = 0, parent=None):
         super().__init__(parent)
@@ -243,19 +400,27 @@ class _SectionHeader(QLabel):
 
 
 class HistoryCard(QWidget):
-    """历史会话卡片内容 - 直接使用 BaseSettingsCard 的 scroll_area"""
+    """历史会话卡片内容 - 支持历史会话和归档会话切换"""
 
     sessionSelected = pyqtSignal(int)
     sessionArchived = pyqtSignal(int)
     sessionRenamed = pyqtSignal(int, str)
     refreshRequested = pyqtSignal()
+    sessionImported = pyqtSignal(dict)  # 导入会话时发出
+    sessionRestored = pyqtSignal(str)  # 恢复归档会话
+    sessionPermanentlyDeleted = pyqtSignal(str)  # 彻底删除归档会话
+    archivedSessionRenamed = pyqtSignal(str, str)  # 归档会话重命名
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._all_history: List[Dict] = []
         self._current_index: Optional[int] = None
+        self._archived_sessions: List[Dict] = []
         self._item_cards = []
+        self._current_tab = "history"  # "history" or "archived"
         self._setup_ui()
+        # 启用拖放支持
+        self.setAcceptDrops(True)
 
     def _setup_ui(self):
         """不需要创建自己的布局，直接使用父控件的 scroll_area"""
@@ -321,123 +486,218 @@ class HistoryCard(QWidget):
         """设置历史会话列表"""
         self._all_history = history_list
         self._current_index = current_index
-        self._update_display()
+        if self._current_tab == "history":
+            self._update_display()
+
+    def set_archived_sessions(self, archived_list: List[Dict]):
+        """设置归档会话列表"""
+        self._archived_sessions = archived_list
+        if self._current_tab == "archived":
+            self._update_display()
+
+    def switch_tab(self, tab: str):
+        """切换标签页"""
+        if self._current_tab != tab:
+            self._current_tab = tab
+            self._update_display()
 
     def _update_display(self):
         """更新显示内容"""
         layout = self.get_content_layout()
         self._clear_content()
 
+        if self._current_tab == "history":
+            self._update_history_display(layout)
+        else:
+            self._update_archived_display(layout)
+
+        layout.addStretch(1)
+
+    def _update_history_display(self, layout: QVBoxLayout):
+        """更新历史会话显示"""
         if not self._all_history:
             empty_label = QLabel("暂无历史对话记录")
             empty_label.setAlignment(Qt.AlignCenter)
             empty_label.setStyleSheet("color: rgba(255, 255, 255, 0.6); padding: 16px;")
             layout.addWidget(empty_label)
-        else:
-            # 先显示当前会话
-            current_session_widget = None
-            if self._current_index is not None and 0 <= self._current_index < len(self._all_history):
-                current_session = self._all_history[self._current_index]
-                current_preview = get_message_preview(current_session.get("messages", []))
-                current_session_widget = _HistoryItemCard(
-                    index=self._current_index,
-                    title=current_session.get("title", "当前对话"),
-                    last_time=current_session.get("last_time", "未知"),
-                    message_count=current_session.get("message_count", 0),
-                    is_current=True,
-                    preview=current_preview,
+            return
+
+        # 先显示当前会话
+        current_session_widget = None
+        if self._current_index is not None and 0 <= self._current_index < len(self._all_history):
+            current_session = self._all_history[self._current_index]
+            current_preview = get_message_preview(current_session.get("messages", []))
+            current_session_widget = _HistoryItemCard(
+                index=self._current_index,
+                title=current_session.get("title", "当前对话"),
+                last_time=current_session.get("last_time", "未知"),
+                message_count=current_session.get("message_count", 0),
+                is_current=True,
+                preview=current_preview,
+            )
+            current_session_widget.sessionClicked.connect(self._on_card_clicked)
+            current_session_widget.deleteRequested.connect(self._on_card_deleted)
+            current_session_widget.renameRequested.connect(self._on_card_renamed)
+
+        # 分离当前会话和其他会话
+        other_sessions = [s for i, s in enumerate(self._all_history) if i != self._current_index]
+        grouped = {}
+        for session in other_sessions:
+            category = self._get_date_category(session.get("last_time", ""))
+            if category not in grouped:
+                grouped[category] = []
+            grouped[category].append(session)
+
+        order = ["今天", "昨天", "本周", "上周", "本月"]
+        month_names = ["一月", "二月", "三月", "四月", "五月", "六月",
+                       "七月", "八月", "九月", "十月", "十一月", "十二月"]
+
+        extra_sections = []
+        for key in grouped.keys():
+            if key not in order and key != "更早":
+                extra_sections.append((key, grouped[key]))
+
+        year_groups = {}
+        month_groups = []
+        for key, sessions in extra_sections:
+            if key.endswith("年"):
+                year_groups[key] = sessions
+            else:
+                month_groups.append((key, sessions))
+
+        final_order = []
+        for section in order:
+            if section in grouped:
+                final_order.append((section, grouped[section]))
+        for section, sessions in month_groups:
+            final_order.append((section, sessions))
+        for year in sorted(year_groups.keys(), reverse=True):
+            final_order.append((year, year_groups[year]))
+
+        has_items = False
+
+        # 渲染当前会话
+        if current_session_widget:
+            has_items = True
+            current_header = _SectionHeader("当前会话", 0)
+            layout.addWidget(current_header)
+            layout.addWidget(current_session_widget)
+            self._item_cards.append(current_session_widget)
+
+            spacer = QWidget()
+            spacer.setFixedHeight(8)
+            layout.addWidget(spacer)
+
+        # 渲染其他历史会话
+        for section, sessions in final_order:
+            if not sessions:
+                continue
+            has_items = True
+
+            header = _SectionHeader(section, len(sessions))
+            layout.addWidget(header)
+
+            for session in sessions:
+                original_index = self._all_history.index(session)
+                messages = session.get("messages", [])
+                preview = get_message_preview(messages)
+                card = _HistoryItemCard(
+                    index=original_index,
+                    title=session.get("title", "新对话"),
+                    last_time=session.get("last_time", "未知"),
+                    message_count=session.get("message_count", 0),
+                    is_current=False,
+                    preview=preview,
                 )
-                current_session_widget.sessionClicked.connect(self._on_card_clicked)
-                current_session_widget.deleteRequested.connect(self._on_card_deleted)
-                current_session_widget.renameRequested.connect(self._on_card_renamed)
+                card.sessionClicked.connect(self._on_card_clicked)
+                card.deleteRequested.connect(self._on_card_deleted)
+                card.renameRequested.connect(self._on_card_renamed)
+                layout.addWidget(card)
+                self._item_cards.append(card)
 
-            # 分离当前会话和其他会话
-            other_sessions = [s for i, s in enumerate(self._all_history) if i != self._current_index]
-            grouped = {}
-            for session in other_sessions:
-                category = self._get_date_category(session.get("last_time", ""))
-                if category not in grouped:
-                    grouped[category] = []
-                grouped[category].append(session)
+            spacer = QWidget()
+            spacer.setFixedHeight(8)
+            layout.addWidget(spacer)
 
-            order = ["今天", "昨天", "本周", "上周", "本月"]
-            month_names = ["一月", "二月", "三月", "四月", "五月", "六月",
-                           "七月", "八月", "九月", "十月", "十一月", "十二月"]
+        if not has_items:
+            empty_label = QLabel("暂无历史对话记录")
+            empty_label.setAlignment(Qt.AlignCenter)
+            empty_label.setStyleSheet("color: rgba(255, 255, 255, 0.6); padding: 16px;")
+            layout.addWidget(empty_label)
 
-            extra_sections = []
-            for key in grouped.keys():
-                if key not in order and key != "更早":
-                    extra_sections.append((key, grouped[key]))
+    def _update_archived_display(self, layout: QVBoxLayout):
+        """更新归档会话显示"""
+        if not self._archived_sessions:
+            empty_label = QLabel("暂无归档会话")
+            empty_label.setAlignment(Qt.AlignCenter)
+            empty_label.setStyleSheet("color: rgba(255, 255, 255, 0.6); padding: 16px;")
+            layout.addWidget(empty_label)
+            return
 
-            year_groups = {}
-            month_groups = []
-            for key, sessions in extra_sections:
-                if key.endswith("年"):
-                    year_groups[key] = sessions
-                else:
-                    month_groups.append((key, sessions))
+        # 按日期分组
+        grouped = {}
+        for session in self._archived_sessions:
+            last_time = session.get("last_time", session.get("saved_at", ""))
+            category = self._get_date_category(last_time)
+            if category not in grouped:
+                grouped[category] = []
+            grouped[category].append(session)
 
-            final_order = []
-            for section in order:
-                if section in grouped:
-                    final_order.append((section, grouped[section]))
-            for section, sessions in month_groups:
-                final_order.append((section, sessions))
-            for year in sorted(year_groups.keys(), reverse=True):
-                final_order.append((year, year_groups[year]))
+        order = ["今天", "昨天", "本周", "上周", "本月"]
 
-            has_items = False
+        final_order = []
+        for section in order:
+            if section in grouped:
+                final_order.append((section, grouped[section]))
 
-            # 渲染当前会话
-            if current_session_widget:
-                has_items = True
-                current_header = _SectionHeader("当前会话", 0)
-                layout.addWidget(current_header)
-                layout.addWidget(current_session_widget)
-                self._item_cards.append(current_session_widget)
+        # 添加其他分组
+        for category, sessions in grouped.items():
+            if category not in order:
+                final_order.append((category, sessions))
 
-                spacer = QWidget()
-                spacer.setFixedHeight(8)
-                layout.addWidget(spacer)
+        has_items = False
 
-            # 渲染其他历史会话
-            for section, sessions in final_order:
-                if not sessions:
-                    continue
-                has_items = True
+        for section, sessions in final_order:
+            if not sessions:
+                continue
+            has_items = True
 
-                header = _SectionHeader(section, len(sessions))
-                layout.addWidget(header)
+            header = _SectionHeader(section, len(sessions))
+            layout.addWidget(header)
 
-                for session in sessions:
-                    original_index = self._all_history.index(session)
-                    messages = session.get("messages", [])
-                    preview = get_message_preview(messages)
-                    card = _HistoryItemCard(
-                        index=original_index,
-                        title=session.get("title", "新对话"),
-                        last_time=session.get("last_time", "未知"),
-                        message_count=session.get("message_count", 0),
-                        is_current=False,
-                        preview=preview,
-                    )
-                    card.sessionClicked.connect(self._on_card_clicked)
-                    card.deleteRequested.connect(self._on_card_deleted)
-                    card.renameRequested.connect(self._on_card_renamed)
-                    layout.addWidget(card)
-                    self._item_cards.append(card)
+            for session in sessions:
+                file_path = session.get("path", "")
+                title = session.get("title", "归档会话")
+                session_id = session.get("session_id", "")
+                last_time = session.get("last_time", session.get("saved_at", "未知"))
 
-                spacer = QWidget()
-                spacer.setFixedHeight(8)
-                layout.addWidget(spacer)
+                # 尝试从文件获取更多信息
+                message_count = session.get("message_count", 0)
+                preview = session.get("preview", "")
 
-            if not has_items:
-                empty_label = QLabel("暂无历史对话记录")
-                empty_label.setAlignment(Qt.AlignCenter)
-                empty_label.setStyleSheet("color: rgba(255, 255, 255, 0.6); padding: 16px;")
-                layout.addWidget(empty_label)
+                card = _ArchivedItemCard(
+                    file_path=file_path,
+                    title=title,
+                    session_id=session_id,
+                    last_time=last_time,
+                    message_count=message_count,
+                    preview=preview,
+                )
+                card.restored.connect(self._on_archived_restored)
+                card.permanentlyDeleted.connect(self._on_archived_deleted)
+                card.renameRequested.connect(self._on_archived_renamed)
+                layout.addWidget(card)
+                self._item_cards.append(card)
 
-        layout.addStretch(1)
+            spacer = QWidget()
+            spacer.setFixedHeight(8)
+            layout.addWidget(spacer)
+
+        if not has_items:
+            empty_label = QLabel("暂无归档会话")
+            empty_label.setAlignment(Qt.AlignCenter)
+            empty_label.setStyleSheet("color: rgba(255, 255, 255, 0.6); padding: 16px;")
+            layout.addWidget(empty_label)
 
     def _on_card_clicked(self, index: int):
         self.sessionSelected.emit(index)
@@ -447,3 +707,68 @@ class HistoryCard(QWidget):
 
     def _on_card_renamed(self, index: int, new_title: str):
         self.sessionRenamed.emit(index, new_title)
+
+    def _on_archived_restored(self, file_path: str):
+        """恢复归档会话"""
+        self.sessionRestored.emit(file_path)
+
+    def _on_archived_deleted(self, file_path: str):
+        """彻底删除归档会话"""
+        self.sessionPermanentlyDeleted.emit(file_path)
+
+    def _on_archived_renamed(self, file_path: str, new_title: str):
+        """重命名归档会话"""
+        self.archivedSessionRenamed.emit(file_path, new_title)
+
+    # ==================== 拖放和导入功能 ====================
+
+    def dragEnterEvent(self, event: QDragEnterEvent):
+        """处理拖入事件"""
+        if event.mimeData().hasUrls():
+            # 检查是否包含 JSON 文件
+            urls = event.mimeData().urls()
+            for url in urls:
+                if url.isLocalFile() and url.toLocalFile().endswith('.json'):
+                    event.acceptProposedAction()
+                    return
+        super().dragEnterEvent(event)
+
+    def dragLeaveEvent(self, event):
+        """处理拖离事件"""
+        super().dragLeaveEvent(event)
+
+    def dropEvent(self, event):
+        """处理文件放下事件"""
+        if event.mimeData().hasUrls():
+            json_files = []
+            for url in event.mimeData().urls():
+                if url.isLocalFile():
+                    file_path = url.toLocalFile()
+                    if file_path.endswith('.json'):
+                        json_files.append(file_path)
+
+            if json_files:
+                self._handle_import_files(json_files)
+                event.acceptProposedAction()
+                return
+
+        super().dropEvent(event)
+
+    def _handle_import_files(self, file_paths: List[str]):
+        """处理导入的文件列表"""
+        for file_path in file_paths:
+            self.sessionImported.emit({"file_path": file_path})
+
+    def get_import_button_handler(self):
+        """返回一个可调用的导入处理函数，供外部设置"""
+        def handle_import():
+            from PyQt5.QtWidgets import QFileDialog
+            files, _ = QFileDialog.getOpenFileNames(
+                self,
+                "导入会话",
+                "",
+                "JSON 文件 (*.json)"
+            )
+            if files:
+                self._handle_import_files(files)
+        return handle_import
