@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import ctypes
+import json
 import os
 import time
 from pathlib import Path
@@ -32,6 +33,7 @@ from qfluentwidgets import (
     InfoBar,
     InfoBarPosition,
     TransparentToolButton,
+    MessageBox,
 )
 
 from app.utils.config import Settings
@@ -96,6 +98,7 @@ from app.llm_chatter.widgets.model_config_card import (
 )
 from app.llm_chatter.widgets.history_card import (
     HistoryCard,
+    get_message_preview,
 )
 from app.llm_chatter.widgets.ui_helpers import *
 from app.tool_window import (
@@ -734,11 +737,27 @@ class OpenAIChatToolWindow(ToolWindow):
         # 历史会话卡片 - 在消息列表下方，和工具卡片同位置
         self._history_card = BaseSettingsCard("历史会话", "📜", self)
         self._history_card.setFixedHeight(350)
+        # 设置历史/归档标签
+        self._history_card.setup_tabs([
+            ("history", "历史会话"),
+            ("archived", "归档"),
+        ], "history")
+        self._history_card.tabChanged.connect(self._on_history_tab_changed)
+
         self._history_popup_card = HistoryCard()
         self._history_popup_card.sessionSelected.connect(self._on_history_session_selected)
         self._history_popup_card.sessionArchived.connect(self._archive_history_session)
         self._history_popup_card.sessionRenamed.connect(self._rename_history_session)
         self._history_popup_card.refreshRequested.connect(self._refresh_history_toggle_panel)
+        self._history_popup_card.sessionImported.connect(self._on_session_imported)
+        # 归档会话相关信号
+        self._history_popup_card.sessionRestored.connect(self._on_archived_session_restored)
+        self._history_popup_card.sessionPermanentlyDeleted.connect(self._on_archived_session_deleted)
+        self._history_popup_card.archivedSessionRenamed.connect(self._on_archived_session_renamed)
+        # 设置导入按钮的处理器
+        self._history_card.set_extra_button_handler(
+            self._history_popup_card.get_import_button_handler()
+        )
         self._history_card.content_layout.addWidget(self._history_popup_card)
         self._history_card.setVisible(False)
         layout.addWidget(self._history_card)
@@ -1005,13 +1024,48 @@ class OpenAIChatToolWindow(ToolWindow):
 
     def _refresh_history_toggle_panel(self):
         """刷新历史面板数据"""
-        current_idx = (
-            self.history_manager.find_index_by_session_id(self._current_session_id)
-            if self._current_session_id and self.history_manager
-            else None
-        )
-        history_list = self.history_manager.get_history_list() if self.history_manager else []
-        self._history_popup_card.set_history(history_list, current_idx)
+        current_tab = self._history_card._current_tab if hasattr(self._history_card, '_current_tab') else "history"
+        
+        if current_tab == "history":
+            # 刷新历史会话
+            current_idx = (
+                self.history_manager.find_index_by_session_id(self._current_session_id)
+                if self._current_session_id and self.history_manager
+                else None
+            )
+            history_list = self.history_manager.get_history_list() if self.history_manager else []
+            self._history_popup_card.set_history(history_list, current_idx)
+        else:
+            # 刷新归档会话
+            self._refresh_archived_sessions()
+
+    def _refresh_archived_sessions(self):
+        """刷新归档会话列表"""
+        if not self.history_manager:
+            return
+        
+        archived_list = self.history_manager.get_archived_sessions()
+        # 为每个归档会话添加预览信息
+        for session in archived_list:
+            try:
+                with open(session["path"], "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    messages = data.get("messages", [])
+                    session["message_count"] = data.get("message_count", len([m for m in messages if m.get("role") == "user"]))
+                    session["last_time"] = data.get("last_time", data.get("saved_at", ""))
+                    session["preview"] = get_message_preview(messages) if messages else ""
+            except Exception:
+                pass
+        
+        self._history_popup_card.set_archived_sessions(archived_list)
+
+    def _on_history_tab_changed(self, tab_id: str):
+        """处理历史/归档标签切换"""
+        self._history_popup_card.switch_tab(tab_id)
+        if tab_id == "archived":
+            self._refresh_archived_sessions()
+        else:
+            self._refresh_history_toggle_panel()
 
     def _on_history_session_selected(self, index: int):
         """从历史面板选择会话"""
@@ -1969,6 +2023,152 @@ class OpenAIChatToolWindow(ToolWindow):
         self.history_manager.update_session_title(index, new_title)
         # 刷新历史会话卡片
         refresh_history_card_if_visible(self._history_card, self._refresh_history_toggle_panel)
+
+    def _on_session_imported(self, data: dict):
+        """处理导入的会话文件"""
+        if not self.history_manager:
+            return
+
+        file_path = data.get("file_path")
+        if not file_path:
+            return
+
+        imported_session = self.history_manager.import_from_json(file_path)
+        if imported_session:
+            # 刷新历史会话卡片
+            self._refresh_history_toggle_panel()
+            # 显示提示信息
+            InfoBar.success(
+                title="导入成功",
+                content=f"已导入会话：{imported_session.get('title', '新对话')}",
+                position=InfoBarPosition.TOP,
+                duration=3000,
+                parent=self
+            )
+            logger.info(f"[导入会话] 成功: {file_path}")
+        else:
+            InfoBar.error(
+                title="导入失败",
+                content="无法解析会话文件，请确认文件格式正确",
+                position=InfoBarPosition.TOP,
+                duration=3000,
+                parent=self
+            )
+            logger.warning(f"[导入会话] 失败: {file_path}")
+
+    def _on_archived_session_restored(self, file_path: str):
+        """恢复归档会话到历史会话"""
+        if not self.history_manager:
+            return
+
+        # 导入归档的会话
+        imported_session = self.history_manager.import_from_json(file_path)
+        if imported_session:
+            # 删除归档文件
+            try:
+                import os
+                os.remove(file_path)
+                logger.info(f"[恢复会话] 已删除归档文件: {file_path}")
+            except Exception as e:
+                logger.warning(f"[恢复会话] 删除归档文件失败: {e}")
+
+            # 刷新归档列表
+            self._refresh_archived_sessions()
+            
+            InfoBar.success(
+                title="恢复成功",
+                content=f"已恢复会话：{imported_session.get('title', '新对话')}",
+                position=InfoBarPosition.TOP,
+                duration=3000,
+                parent=self
+            )
+            logger.info(f"[恢复会话] 成功: {file_path}")
+        else:
+            InfoBar.error(
+                title="恢复失败",
+                content="无法恢复该会话，文件可能已损坏",
+                position=InfoBarPosition.TOP,
+                duration=3000,
+                parent=self
+            )
+
+    def _on_archived_session_deleted(self, file_path: str):
+        """彻底删除归档会话"""
+        from qfluentwidgets import MessageBox
+        
+        # 确认对话框
+        msg_box = MessageBox(
+            "确认删除",
+            "确定要彻底删除这个归档会话吗？此操作不可恢复。",
+            self
+        )
+        msg_box.yesButton.setText("删除")
+        msg_box.cancelButton.setText("取消")
+        
+        if msg_box.exec() != MessageBox.Accepted:
+            return
+
+        try:
+            import os
+            os.remove(file_path)
+            logger.info(f"[彻底删除] 成功: {file_path}")
+            
+            # 刷新归档列表
+            self._refresh_archived_sessions()
+            
+            InfoBar.success(
+                title="删除成功",
+                content="归档会话已彻底删除",
+                position=InfoBarPosition.TOP,
+                duration=2000,
+                parent=self
+            )
+        except Exception as e:
+            logger.error(f"[彻底删除] 失败: {e}")
+            InfoBar.error(
+                title="删除失败",
+                content=f"无法删除文件：{str(e)}",
+                position=InfoBarPosition.TOP,
+                duration=3000,
+                parent=self
+            )
+
+    def _on_archived_session_renamed(self, file_path: str, new_title: str):
+        """重命名归档会话"""
+        try:
+            import json
+            # 读取文件
+            with open(file_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            
+            # 更新标题
+            data["title"] = new_title
+            
+            # 写回文件
+            with open(file_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            
+            logger.info(f"[归档会话重命名] 成功: {file_path} -> {new_title}")
+            
+            # 刷新归档列表
+            self._refresh_archived_sessions()
+            
+            InfoBar.success(
+                title="重命名成功",
+                content=f"已更名为：{new_title}",
+                position=InfoBarPosition.TOP,
+                duration=2000,
+                parent=self
+            )
+        except Exception as e:
+            logger.error(f"[归档会话重命名] 失败: {e}")
+            InfoBar.error(
+                title="重命名失败",
+                content=str(e),
+                position=InfoBarPosition.TOP,
+                duration=3000,
+                parent=self
+            )
 
     def _load_history_session(self, index: int):
         self._load_history_session_from_popup(index)
