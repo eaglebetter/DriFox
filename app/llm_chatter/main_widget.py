@@ -190,6 +190,7 @@ class OpenAIChatToolWindow(ToolWindow):
         self._bottom_anchor_timer.setSingleShot(True)
         self._bottom_anchor_timer.setInterval(80)
         self._bottom_anchor_timer.timeout.connect(self._maintain_bottom_anchor)
+        self._suppress_scroll_sync_count = 0  # 加载历史时抑制滚动同步的计数器
         # resize 防抖定时器 - 性能优化：增加防抖时间减少卡顿
         self._resize_debounce_timer = QTimer(self)
         self._resize_debounce_timer.setSingleShot(True)
@@ -1381,6 +1382,8 @@ class OpenAIChatToolWindow(ToolWindow):
             self._refresh_context_usage_indicator()
             # 恢复缓存卡片后，多次滚动确保在底部
             self._scroll_to_bottom(sticky_ms=900)
+            # 滚动完成后同步时间线节点到最后一个
+            QTimer.singleShot(100, self._sync_node_preview_to_last)
             return
 
         self._clear_chat_area()
@@ -1436,6 +1439,8 @@ class OpenAIChatToolWindow(ToolWindow):
         # 使用多次滚动确保卡片高度变化后仍能保持在底部
         self._scroll_to_bottom(sticky_ms=900)
         self._update_node_preview()
+        # 滚动完成后同步时间线节点到最后一个（延迟执行确保卡片渲染完成）
+        QTimer.singleShot(100, self._sync_node_preview_to_last)
         self._refresh_context_usage_indicator()
 
     def _has_more_history_batches(self) -> bool:
@@ -2312,6 +2317,11 @@ class OpenAIChatToolWindow(ToolWindow):
         self._sync_node_preview_to_scroll()
 
     def _sync_node_preview_to_scroll(self):
+        # 加载历史时抑制滚动同步，避免节点跑到渲染的卡片数量位置
+        if self._suppress_scroll_sync_count > 0:
+            self._suppress_scroll_sync_count -= 1
+            return
+        
         if not hasattr(self, "chat_scroll_area") or not hasattr(self, "node_preview"):
             return
 
@@ -2338,6 +2348,26 @@ class OpenAIChatToolWindow(ToolWindow):
         if visible_index != self._last_visible_user_pair_index:
             self._last_visible_user_pair_index = visible_index
             self.node_preview.set_visible_node(visible_index)
+
+    def _sync_node_preview_to_last(self):
+        """滚动完成后同步到最后一个节点"""
+        if not hasattr(self, "node_preview"):
+            return
+        
+        # 使用 message_batch 计算实际的最后一个 user message 索引
+        # 而不是依赖当前渲染的卡片数量（可能只渲染了部分）
+        session = self.session_manager.get_current_session()
+        if session:
+            # 从 session 消息计算所有 user 数量
+            user_count = sum(
+                1 for msg in session.messages 
+                if msg.get("role") == "user"
+            )
+            if user_count > 0:
+                last_index = user_count - 1
+                self.node_preview.set_visible_node(last_index)
+                self.node_preview.set_progress_position(last_index)
+                self._last_visible_user_pair_index = last_index
 
     def _on_node_preview_clicked(self, index: int):
         # 使用辅助函数找到目标卡片
@@ -2726,11 +2756,13 @@ class OpenAIChatToolWindow(ToolWindow):
         self._pending_scroll_to_bottom = False
         if self._bottom_anchor_deadline > time.monotonic():
             self._bottom_anchor_timer.start()
-        self._sync_node_preview_to_scroll()
+        # 加载完成后抑制滚动同步，避免节点跑到渲染的卡片数量位置
+        self._suppress_scroll_sync_count = 0
 
     def _maintain_bottom_anchor(self):
         if self._bottom_anchor_deadline <= time.monotonic():
             self._bottom_anchor_deadline = 0.0
+            self._suppress_scroll_sync_count = 0
             return
         scroll_bar = self.chat_scroll_area.verticalScrollBar()
         scroll_bar.setValue(scroll_bar.maximum())

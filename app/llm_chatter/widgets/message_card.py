@@ -1218,6 +1218,14 @@ class CodeWebViewer(QWebEngineView):
             <script>
                 const collapsibleState = new Map();
 
+                function debounceReportHeight() {{
+                    if (window._heightReportTimer) return;
+                    window._heightReportTimer = setTimeout(() => {{
+                        reportHeight();
+                        window._heightReportTimer = null;
+                    }}, 50);
+                }}
+
                 function syncExpandedAttrs(block, expanded) {{
                     block.dataset.expanded = expanded ? 'true' : 'false';
                     const summary = block.querySelector('.cm-collapsible__summary');
@@ -1230,37 +1238,37 @@ class CodeWebViewer(QWebEngineView):
                     const body = block.querySelector('.cm-collapsible__body');
                     if (!body) return;
 
+                    const wasExpanded = block.dataset.expanded === 'true';
+                    if (expand === wasExpanded) return;
+
                     body.style.transition = 'none';
-                    const startHeight = body.getBoundingClientRect().height;
-                    body.style.height = startHeight + 'px';
+                    const currentHeight = body.getBoundingClientRect().height;
+                    body.style.height = currentHeight + 'px';
                     body.offsetHeight;
                     body.style.transition = '';
 
+                    syncExpandedAttrs(block, expand);
                     if (expand) {{
-                        syncExpandedAttrs(block, true);
                         body.style.opacity = '1';
                         body.style.height = body.scrollHeight + 'px';
                     }} else {{
-                        body.style.height = body.scrollHeight + 'px';
-                        body.offsetHeight;
-                        syncExpandedAttrs(block, false);
                         body.style.opacity = '0';
                         body.style.height = '0px';
                     }}
 
                     const cleanup = () => {{
-                        if (block.dataset.expanded === 'true') {{
+                        body.removeEventListener('transitionend', cleanup);
+                        if (expand) {{
                             body.style.height = 'auto';
                             body.style.opacity = '1';
                         }} else {{
                             body.style.height = '0px';
                             body.style.opacity = '0';
                         }}
-                        reportHeight();
+                        debounceReportHeight();
                     }};
-
                     body.addEventListener('transitionend', cleanup, {{ once: true }});
-                    requestAnimationFrame(reportHeight);
+                    debounceReportHeight();
                 }}
 
                 function restoreCollapsibleStates(root) {{
@@ -1339,7 +1347,7 @@ class CodeWebViewer(QWebEngineView):
                 document.addEventListener('DOMContentLoaded', () => {{
                     console.log('pywebview_ready');
                     reportHeight();
-                    new ResizeObserver(() => requestAnimationFrame(reportHeight)).observe(document.body);
+                    new ResizeObserver(() => debounceReportHeight()).observe(document.body);
                 }});
                 window.addEventListener('load', () => {{
                     reportHeight();
@@ -1629,6 +1637,12 @@ class MessageCard(SimpleCardWidget):
         self._height_anim.valueChanged.connect(self._apply_viewer_height)
         self._target_viewer_height = 40
         self._last_applied_viewer_height = 40
+        # 防抖：延迟处理高度变化，避免折叠动画时频繁更新布局
+        self._height_update_timer = QTimer(self)
+        self._height_update_timer.setSingleShot(True)
+        self._height_update_timer.setInterval(50)
+        self._height_update_timer.timeout.connect(self._do_height_update)
+        self._pending_height = None
         self._theme = self._build_theme(role, error)
         self._base_bg = self._theme["bg"]
         self._base_border = self._theme["border"]
@@ -1962,8 +1976,34 @@ class MessageCard(SimpleCardWidget):
 
     def _update_height(self, h):
         target_height = max(40, h)
+        self._pending_height = target_height
+
+        # 如果已经有待处理的更新，跳过（防抖）
+        if self._height_update_timer.isActive():
+            return
+
+        self._height_update_timer.start()
+
+    def _apply_viewer_height(self, value):
+        height = max(40, int(value))
+        if height == self._last_applied_viewer_height:
+            return
+        self._last_applied_viewer_height = height
+        self.viewer.setFixedHeight(height)
+        # 性能优化：只在必要时触发布局更新，避免频繁向上传播
+        layout = self.layout()
+        if layout:
+            layout.invalidate()
+            layout.activate()
+
+    def _do_height_update(self):
+        """防抖后的实际高度更新"""
+        if self._pending_height is None:
+            return
+        target_height = self._pending_height
+        self._pending_height = None
+
         current_height = self.viewer.height() or self.viewer.minimumHeight() or 40
-        self._target_viewer_height = target_height
 
         if self._streaming or abs(target_height - current_height) < 10:
             if self._height_anim.state() == QVariantAnimation.Running:
@@ -1975,20 +2015,6 @@ class MessageCard(SimpleCardWidget):
         self._height_anim.setStartValue(current_height)
         self._height_anim.setEndValue(target_height)
         self._height_anim.start()
-
-    def _apply_viewer_height(self, value):
-        height = max(40, int(value))
-        if height == self._last_applied_viewer_height:
-            return
-        self._last_applied_viewer_height = height
-        self.viewer.setFixedHeight(height)
-        self.heightChanged.emit(height)
-        # 性能优化：只在必要时触发布局更新，避免频繁向上传播
-        # 直接使用 layout().invalidate() 而非 updateGeometry()
-        layout = self.layout()
-        if layout:
-            layout.invalidate()
-            layout.activate()
 
     def sync_width(self, force: bool = False):
         """同步卡片宽度
