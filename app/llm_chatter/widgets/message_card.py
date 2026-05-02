@@ -264,7 +264,7 @@ def _render_think_block(content: str, completed: bool = True) -> str:
 
 def _inject_think_cards(md_text: str, completed: bool = True) -> str:
     """注入思考框HTML。
-    
+
     关键逻辑：<think> 匹配到下一个 <think> 之前的最后一个 </think>，
     避免流式输出时多个 </think> 导致内容泄露。
     """
@@ -301,7 +301,7 @@ def _inject_think_cards(md_text: str, completed: bool = True) -> str:
 def _render_tool_block_content(content: str) -> str:
     """
     渲染工具块内容为HTML。
-    
+
     解析格式：
     <tool>
     name: xxx
@@ -318,12 +318,12 @@ def _render_tool_block_content(content: str) -> str:
     tool_call_id = None
 
     content = content.strip()
-    
+
     # ========== 解析 name ==========
     name_match = re.search(r"^name:\s*(.+?)\s*$", content, re.MULTILINE)
     if name_match:
         tool_name = name_match.group(1).strip()
-    
+
     # ========== 解析 args（需要正确处理嵌套 JSON）==========
     args_start = content.find("args:")
     if args_start != -1:
@@ -348,17 +348,17 @@ def _render_tool_block_content(content: str) -> str:
             result_search_start = args_start + len(line)
     else:
         result_search_start = 0
-    
+
     # ========== 解析 success ==========
     success_match = re.search(r"^success:\s*(.+?)\s*$", content, re.MULTILINE)
     if success_match:
         tool_success = success_match.group(1).strip().lower() == "true"
-    
+
     # ========== 解析 tool_call_id ==========
     id_match = re.search(r"^tool_call_id:\s*(.+?)\s*$", content, re.MULTILINE)
     if id_match:
         tool_call_id = id_match.group(1).strip()
-    
+
     # ========== 解析 result ==========
     result_line_match = re.search(r"^result:\s*(.*)$", content[result_search_start:], re.MULTILINE)
     if result_line_match:
@@ -369,7 +369,7 @@ def _render_tool_block_content(content: str) -> str:
             tool_result = (result_content + remaining[:next_field_match.start()]).strip()
         else:
             tool_result = result_content.strip()
-    
+
     # ========== 解析 args JSON 为字典 ==========
     args_dict = {}
     if tool_args_str:
@@ -436,34 +436,34 @@ WELCOME_TIPS = [
     "💡 拖拽文件到输入框即可快速分析",
     "💡 Shift+Enter 换行，Enter 发送消息",
     "💡 按 ↑/↓ 键可浏览历史输入记录",
-    
+
     # ===== 会话管理 =====
     "💡 Ctrl+N 快速新建对话，Ctrl+L 清空当前会话",
     "💡 历史会话自动保存，关闭窗口也不丢失",
     "💡 长对话会自动启用「上下文压缩」优化 Token",
-    
+
     # ===== 模型与参数 =====
     "💡 点击模型名称可快速切换大模型",
     "💡 模型参数影响回复风格（温度/最大Token），多试试找到你的风格",
     "💡 不同智能体擅长不同任务：Plan 规划、Build 构建、Explore 探索",
-    
+
     # ===== 技能系统 =====
     "💡 输入 @ 可快速选择技能，触发 AI 专项能力",
     "💡 @brainstorming 集思广益，@writing-plans 制定计划",
     "💡 @git-commit 自动分析改动生成规范提交信息",
     "💡 @skill-creator 创建新的自定义技能扩展",
     "💡 @minimax-image-understanding 分析图片内容",
-    
+
     # ===== 代码与文件 =====
     "💡 代码块右上角有复制和保存按钮，点击即可",
     "💡 工具执行结果可点击「查看差异」对比文件修改",
     "💡 工具悬浮框会显示正在执行的工具，点击可查看详情",
-    
+
     # ===== 窗口与布局 =====
     "💡 右上角「新建窗口」按钮可创建并发会话，多任务同时进行",
     "💡 右上角「分支」按钮可复制当前会话到新窗口",
     "💡 右下角可展开历史会话卡片，点击继续历史对话",
-    
+
     # ===== 高级功能 =====
     "💡 记忆管理让 AI 更懂你的偏好和习惯",
     "💡 点击上下文指示器可查看 Token 使用详情",
@@ -503,7 +503,7 @@ _CONTEXT_LINK_PATTERN = re.compile(r"\[([^\]]+)\]\((ask|jump|create|generate|vie
 
 def _inject_context_links(md_text: str) -> str:
     """将 [文本](ask/jump/create/generate/view/session) 转换为胶囊样式的追问标签
-    
+
     session 类型格式：[文本](session|session_id|last_time)
     last_time 如果为空则不显示
     """
@@ -511,26 +511,26 @@ def _inject_context_links(md_text: str) -> str:
         content = match.group(1)
         action = match.group(2)
         extra = match.group(3) or ""
-        
+
         if action == "session":
             # session 格式：session_id|last_time
             parts = extra.split("|")
             session_id = parts[0].strip() if parts else ""
             last_time = parts[1].strip() if len(parts) > 1 else ""
-            
+
             # 如果有 last_time，追加显示
             if last_time:
                 display_content = f'{content}<span class="session-time">{last_time}</span>'
             else:
                 display_content = content
-            
+
             attrs = f'data-type="session" data-session-id="{escape(session_id)}" data-action="session"'
             if last_time:
                 attrs += f' data-last-time="{escape(last_time)}"'
             return f'<span class="context-tag session-tag" {attrs}>{display_content}</span>'
-        
+
         return f'<span class="context-tag" data-type="{action}" data-content="{escape(content)}" data-action="{action}">{content}</span>'
-    
+
     return _CONTEXT_LINK_PATTERN.sub(replacer, md_text)
 
 
@@ -710,22 +710,22 @@ class CodeWebViewer(QWebEngineView):
         # 计算安全尺寸
         w = args[0] if len(args) > 0 else kwargs.get('width', self.MAX_WIDTH)
         h = args[1] if len(args) > 1 else kwargs.get('height', self.MAX_HEIGHT)
-        
+
         # 限制最大尺寸
         safe_w = min(w, self.MAX_WIDTH) if isinstance(w, int) else w
         safe_h = min(h, self.MAX_HEIGHT) if isinstance(h, int) else h
-        
+
         super().setFixedSize(safe_w, safe_h)
 
     def resize(self, *args, **kwargs):
         """限制 resize 尺寸，防止过大导致 GPU 内存溢出"""
         w = args[0] if len(args) > 0 else kwargs.get('width', self.MAX_WIDTH)
         h = args[1] if len(args) > 1 else kwargs.get('height', self.MAX_HEIGHT)
-        
+
         # 限制最大尺寸
         safe_w = min(w, self.MAX_WIDTH) if isinstance(w, int) else w
         safe_h = min(h, self.MAX_HEIGHT) if isinstance(h, int) else h
-        
+
         super().resize(safe_w, safe_h)
 
     def _install_dialog_filter(self):
@@ -795,7 +795,7 @@ class CodeWebViewer(QWebEngineView):
                 self.page().runJavaScript("reportHeight();")
         except RuntimeError:
             pass
-    
+
     def _on_resize_unlock(self):
         """resize 结束后触发高度报告"""
         self._resize_locked = False
@@ -1320,7 +1320,7 @@ class CodeWebViewer(QWebEngineView):
         if reasoning:
             think_html = _render_think_block(reasoning, completed=True)
             raw_md = think_html + raw_md
-        
+
         safe_md = _sanitize_incomplete_markdown(raw_md)
         safe_md = _unwrap_code_blocks_with_context_links(safe_md)
         safe_md = _inject_context_links(safe_md)
@@ -1387,7 +1387,7 @@ class CodeWebViewer(QWebEngineView):
         super().resizeEvent(event)
         if self._streaming:
             return
-        
+
         # 性能优化：使用 resize 锁，阻止 resize 期间频繁报告高度
         if not self._resize_locked:
             self._resize_locked = True
@@ -1428,7 +1428,6 @@ class PlainTextViewer(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._text = ""
-        self._last_document_width = -1
         self._init_ui()
         # 性能优化：添加 resize 防抖定时器
         self._resize_debounce_timer = QTimer(self)
@@ -1445,8 +1444,6 @@ class PlainTextViewer(QWidget):
         self.text_edit.setReadOnly(True)
         self.text_edit.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self.text_edit.setFrameShape(QTextEdit.NoFrame)
-        self.text_edit.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.text_edit.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         font_css = get_font_family_css()
         self.text_edit.setStyleSheet(f"""
             QTextEdit {{
@@ -1464,25 +1461,13 @@ class PlainTextViewer(QWidget):
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.setMinimumHeight(40)
 
-    def _sync_document_width(self) -> bool:
-        # 直接使用 PlainTextViewer 自身宽度减去布局边距，更准确地反映可用宽度
-        layout = self.layout()
-        if layout:
-            margins = layout.contentsMargins()
-            available_width = self.width() - margins.left() - margins.right()
-        else:
-            available_width = self.width()
-        
-        if available_width <= 0 or available_width == self._last_document_width:
-            return False
-        self._last_document_width = available_width
-        self.text_edit.document().setTextWidth(available_width)
-        return True
-
     def append_chunk(self, text: str):
         self._text += text
         self.text_edit.setPlainText(self._text)
-        self._sync_document_width()
+        # 设置文档宽度以确保正确计算换行
+        vp_width = self.text_edit.viewport().width()
+        if vp_width > 0:
+            self.text_edit.document().setTextWidth(vp_width)
         QTimer.singleShot(100, self._update_height)
 
     def finish_streaming(self):
@@ -1494,15 +1479,24 @@ class PlainTextViewer(QWidget):
     def set_text(self, text: str):
         self._text = text
         self.text_edit.setPlainText(text)
-        self._sync_document_width()
+        # 设置文档宽度以确保正确计算换行
+        vp_width = self.text_edit.viewport().width()
+        if vp_width > 0:
+            self.text_edit.document().setTextWidth(vp_width)
         QTimer.singleShot(500, self._update_height)
 
     def _update_height(self):
-        """在宽度稳定后按文档实际高度更新控件高度。"""
-        self._sync_document_width()
+        """强制 QTextEdit 重新布局后再计算高度"""
+        # 先让 QTextEdit 重新布局
+        self.text_edit.update()
+        self.text_edit.document().markContentsDirty(0, self.text_edit.document().characterCount())
+
+        # 强制更新几何信息
+        self.text_edit.ensurePolished()
+
         doc = self.text_edit.document()
-        doc.adjustSize()
-        h = int(doc.documentLayout().documentSize().height()) + 16  # padding
+        h = int(doc.size().height()) + 16  # padding
+
         h = max(40, h)
 
         if abs(self.height() - h) > 2:
@@ -1511,8 +1505,6 @@ class PlainTextViewer(QWidget):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        if event.size().width() == event.oldSize().width():
-            return
         # 性能优化：使用防抖定时器，避免每次 resize 都触发高度计算
         self._resize_debounce_timer.stop()
         self._resize_debounce_timer.start()
@@ -1525,27 +1517,6 @@ class PlainTextViewer(QWidget):
         """公开方法，用于外部触发高度重算（跳过防抖，直接更新）"""
         self._resize_debounce_timer.stop()  # 取消待执行的防抖
         self._update_height()
-
-
-# ======== MessageCard ========
-class TagWidget(CardWidget):
-    closed = pyqtSignal(str)
-    doubleClicked = pyqtSignal(str)
-
-    def __init__(self, key: str, text: str, parent=None):
-        super().__init__(parent)
-        self.key = key
-        self.setFixedHeight(24)
-        self.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
-        self.setCursor(Qt.PointingHandCursor)
-        l = QHBoxLayout(self)
-        l.setContentsMargins(6, 0, 6, 0)
-        l.addWidget(CaptionLabel(text, self))
-
-    def mouseDoubleClickEvent(self, e):
-        if e.button() == Qt.LeftButton:
-            self.doubleClicked.emit(self.key)
-        super().mouseDoubleClickEvent(e)
 
 
 class MessageCard(SimpleCardWidget):
@@ -1756,6 +1727,7 @@ class MessageCard(SimpleCardWidget):
         if self.role == "user":
             self.viewer = PlainTextViewer(self)
             self.viewer.contentHeightChanged.connect(self._update_height)
+            main.addWidget(self.viewer)
         else:
             self.viewer = CodeWebViewer(self)
             self.viewer.codeActionRequested.connect(self.actionRequested.emit)
@@ -1766,21 +1738,20 @@ class MessageCard(SimpleCardWidget):
             # WebEngine 上下文丢失处理
             self.viewer.contextLost.connect(self._on_webengine_context_lost)
             self.viewer.contextRestored.connect(self._on_webengine_context_restored)
-        main.addWidget(self.viewer)
-
-        self.resize_placeholder = QFrame(self)
-        self.resize_placeholder.setVisible(False)
-        self.resize_placeholder.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.resize_placeholder.setStyleSheet(
-            """
-            QFrame {
-                background: rgba(255,255,255,0.035);
-                border: 1px dashed rgba(255,255,255,0.08);
-                border-radius: 12px;
-            }
-            """
-        )
-        main.addWidget(self.resize_placeholder)
+            main.addWidget(self.viewer)
+            self.resize_placeholder = QFrame(self)
+            self.resize_placeholder.setVisible(False)
+            self.resize_placeholder.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            self.resize_placeholder.setStyleSheet(
+                """
+                QFrame {
+                    background: rgba(255,255,255,0.035);
+                    border: 1px dashed rgba(255,255,255,0.08);
+                    border-radius: 12px;
+                }
+                """
+            )
+            main.addWidget(self.resize_placeholder)
 
         self.options_widget = QWidget(self)
         self.options_layout = QVBoxLayout(self.options_widget)
@@ -1952,7 +1923,7 @@ class MessageCard(SimpleCardWidget):
 
     def sync_width(self, force: bool = False):
         """同步卡片宽度
-        
+
         Args:
             force: 是否强制更新，即使宽度没变化
         """
@@ -1968,11 +1939,11 @@ class MessageCard(SimpleCardWidget):
             horizontal_margin = 72
 
         target_width = max(320, parent_width - horizontal_margin)
-        
+
         # 性能优化：只有宽度真正变化时才更新
         if not force and target_width == self._last_synced_width:
             return
-        
+
         self._last_synced_width = target_width
         if self.minimumWidth() != target_width or self.maximumWidth() != target_width:
             self.blockSignals(True)
@@ -1985,11 +1956,20 @@ class MessageCard(SimpleCardWidget):
             self.viewer.update_height()
 
     def set_resize_preview_mode(self, enabled: bool):
-        """在窗口 resize 期间切换到轻量占位模式，减少复杂子控件重绘。"""
+        """在窗口 resize 期间切换到轻量占位模式，减少复杂子控件重绘。
+
+        只有使用 CodeWebViewer 的卡片需要 placeholder 优化，
+        PlainTextViewer（user 卡片）weight 很轻，不需要。
+        """
         if enabled == self._resize_preview_mode:
             return
 
         self._resize_preview_mode = enabled
+
+        # user 卡片使用 PlainTextViewer，weight 很轻，不需要 placeholder
+        if self.role == "user":
+            return
+
         if enabled:
             viewer_height = max(self.viewer.height(), self.viewer.minimumHeight(), 40)
             options_height = self.options_widget.sizeHint().height() if self.options_widget.isVisible() else 0
@@ -2013,6 +1993,7 @@ class MessageCard(SimpleCardWidget):
         self.resize_placeholder.setFixedHeight(0)
         self._resize_preview_height = 0
         self._options_were_visible_before_resize = False
+
         if hasattr(self.viewer, "update_height"):
             self.viewer.update_height()
 
@@ -2202,7 +2183,7 @@ def create_welcome_card(
     recent_sessions: list = None, top_by_count: list = None
 ) -> MessageCard:
     """创建欢迎卡片
-    
+
     Args:
         parent: 父控件
         agent_name: 当前智能体名称
@@ -2224,7 +2205,7 @@ def create_welcome_card(
     # 随机选择欢迎语和 Tips
     greeting = get_random_greeting()
     tip = get_random_tip()
-    
+
     # 构建历史会话链接（两列表格：最近会话 | 最多消息）
     history_section = ""
     if recent_sessions or top_by_count:
@@ -2235,7 +2216,7 @@ def create_welcome_card(
             recent = recent_sessions[i] if recent_sessions and i < len(recent_sessions) else None
             # 右边：消息最多
             top = top_by_count[i] if top_by_count and i < len(top_by_count) else None
-            
+
             if recent:
                 title = escape(recent.get("title", "未命名会话"))
                 session_id = escape(recent.get("session_id", ""))
@@ -2243,7 +2224,7 @@ def create_welcome_card(
                 left_cell = f'<span class="context-tag session-tag" data-type="session" data-session-id="{session_id}" data-action="session">{title}<span class="session-time">{last_time}</span></span>'
             else:
                 left_cell = "-"
-                
+
             if top:
                 title = escape(top.get("title", "未命名会话"))
                 session_id = escape(top.get("session_id", ""))
@@ -2251,9 +2232,9 @@ def create_welcome_card(
                 right_cell = f'<span class="context-tag session-tag" data-type="session" data-session-id="{session_id}" data-action="session">{title}<span class="session-time">{msg_count}条消息</span></span>'
             else:
                 right_cell = "-"
-            
+
             table_rows += f'<tr><td>{left_cell}</td><td>{right_cell}</td></tr>'
-        
+
         history_section = f"""
 <table class="session-table">
 <tr><th>最近会话</th><th>最活跃会话</th></tr>
