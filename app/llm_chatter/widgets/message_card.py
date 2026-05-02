@@ -5,6 +5,7 @@ import json
 import math
 import re
 import urllib.parse
+from functools import lru_cache
 from datetime import datetime
 from html import escape
 from typing import List, Dict, Any, Optional
@@ -33,6 +34,7 @@ from PyQt5.QtWidgets import (
     QVBoxLayout,
     QHBoxLayout,
     QLabel,
+    QFrame,
     QSizePolicy,
     QTextEdit,
 )
@@ -406,6 +408,26 @@ def _inject_tool_blocks(md_text: str, completed: bool = True) -> str:
             parts.append(md_text[start_idx:])
             break
     return "".join(parts)
+
+
+@lru_cache(maxsize=256)
+def _render_markdown_to_html_cached(raw_md: str, reasoning: str) -> str:
+    if reasoning:
+        raw_md = _render_think_block(reasoning, completed=True) + raw_md
+
+    safe_md = _sanitize_incomplete_markdown(raw_md)
+    safe_md = _unwrap_code_blocks_with_context_links(safe_md)
+    safe_md = _inject_context_links(safe_md)
+    processed_md = _inject_think_cards(safe_md, True)
+    processed_md = _inject_tool_blocks(processed_md, True)
+
+    try:
+        md = get_markdown_instance()
+        md.reset()
+        html_content = md.convert(processed_md)
+        return _wrap_code_blocks_with_copy_button_web(html_content)
+    except Exception:
+        return f"<pre>{escape(raw_md)}</pre>"
 
 
 # ======== 欢迎卡片随机 Tips ========
@@ -1263,6 +1285,12 @@ class CodeWebViewer(QWebEngineView):
             self._schedule_render()
 
     def _render_markdown_to_html(self, raw_md: str) -> str:
+        if not self._streaming:
+            return _render_markdown_to_html_cached(
+                raw_md,
+                getattr(self, "_reasoning_content", "") or "",
+            )
+
         # DeepSeek thinking mode: 注入 reasoning_content 作为思考块
         reasoning = getattr(self, '_reasoning_content', '') or ''
         if reasoning:
@@ -1376,6 +1404,7 @@ class PlainTextViewer(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._text = ""
+        self._last_document_width = -1
         self._init_ui()
         # 性能优化：添加 resize 防抖定时器
         self._resize_debounce_timer = QTimer(self)
@@ -1392,6 +1421,8 @@ class PlainTextViewer(QWidget):
         self.text_edit.setReadOnly(True)
         self.text_edit.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self.text_edit.setFrameShape(QTextEdit.NoFrame)
+        self.text_edit.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.text_edit.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         font_css = get_font_family_css()
         self.text_edit.setStyleSheet(f"""
             QTextEdit {{
@@ -1409,13 +1440,18 @@ class PlainTextViewer(QWidget):
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.setMinimumHeight(40)
 
+    def _sync_document_width(self) -> bool:
+        vp_width = self.text_edit.viewport().width()
+        if vp_width <= 0 or vp_width == self._last_document_width:
+            return False
+        self._last_document_width = vp_width
+        self.text_edit.document().setTextWidth(vp_width)
+        return True
+
     def append_chunk(self, text: str):
         self._text += text
         self.text_edit.setPlainText(self._text)
-        # 设置文档宽度以确保正确计算换行
-        vp_width = self.text_edit.viewport().width()
-        if vp_width > 0:
-            self.text_edit.document().setTextWidth(vp_width)
+        self._sync_document_width()
         QTimer.singleShot(100, self._update_height)
 
     def finish_streaming(self):
@@ -1427,32 +1463,25 @@ class PlainTextViewer(QWidget):
     def set_text(self, text: str):
         self._text = text
         self.text_edit.setPlainText(text)
-        # 设置文档宽度以确保正确计算换行
-        vp_width = self.text_edit.viewport().width()
-        if vp_width > 0:
-            self.text_edit.document().setTextWidth(vp_width)
+        self._sync_document_width()
         QTimer.singleShot(500, self._update_height)
 
     def _update_height(self):
-        """强制 QTextEdit 重新布局后再计算高度"""
-        # 先让 QTextEdit 重新布局
-        self.text_edit.update()
-        self.text_edit.document().markContentsDirty(0, self.text_edit.document().characterCount())
-        
-        # 强制更新几何信息
-        self.text_edit.ensurePolished()
-        
+        """在宽度稳定后按文档实际高度更新控件高度。"""
+        self._sync_document_width()
         doc = self.text_edit.document()
-        h = int(doc.size().height()) + 16  # padding
-        
+        doc.adjustSize()
+        h = int(doc.documentLayout().documentSize().height()) + 16  # padding
         h = max(40, h)
-        
+
         if abs(self.height() - h) > 2:
             self.setFixedHeight(h)
             self.contentHeightChanged.emit(h)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        if event.size().width() == event.oldSize().width():
+            return
         # 性能优化：使用防抖定时器，避免每次 resize 都触发高度计算
         self._resize_debounce_timer.stop()
         self._resize_debounce_timer.start()
@@ -1489,6 +1518,7 @@ class TagWidget(CardWidget):
 
 
 class MessageCard(SimpleCardWidget):
+    heightChanged = pyqtSignal(int)
     deleteRequested = pyqtSignal()
     undoRequested = pyqtSignal()
     actionRequested = pyqtSignal(str, str)
@@ -1533,7 +1563,9 @@ class MessageCard(SimpleCardWidget):
         self._base_border = self._theme["border"]
         # 性能优化：缓存上次宽度值，避免不必要的更新
         self._last_synced_width = 0
-        self._resize_anim_locked = False  # resize 动画锁，防止频繁触发
+        self._resize_preview_mode = False
+        self._resize_preview_height = 0
+        self._options_were_visible_before_resize = False
         # WebEngine 上下文恢复标志
         self._webengine_needs_restore = False
         self._setup_ui()
@@ -1705,6 +1737,20 @@ class MessageCard(SimpleCardWidget):
             self.viewer.contextRestored.connect(self._on_webengine_context_restored)
         main.addWidget(self.viewer)
 
+        self.resize_placeholder = QFrame(self)
+        self.resize_placeholder.setVisible(False)
+        self.resize_placeholder.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.resize_placeholder.setStyleSheet(
+            """
+            QFrame {
+                background: rgba(255,255,255,0.035);
+                border: 1px dashed rgba(255,255,255,0.08);
+                border-radius: 12px;
+            }
+            """
+        )
+        main.addWidget(self.resize_placeholder)
+
         self.options_widget = QWidget(self)
         self.options_layout = QVBoxLayout(self.options_widget)
         self.options_layout.setContentsMargins(0, 8, 0, 0)
@@ -1865,6 +1911,7 @@ class MessageCard(SimpleCardWidget):
             return
         self._last_applied_viewer_height = height
         self.viewer.setFixedHeight(height)
+        self.heightChanged.emit(height)
         # 性能优化：只在必要时触发布局更新，避免频繁向上传播
         # 直接使用 layout().invalidate() 而非 updateGeometry()
         layout = self.layout()
@@ -1901,9 +1948,41 @@ class MessageCard(SimpleCardWidget):
             self.setMinimumWidth(target_width)
             self.setMaximumWidth(target_width)
             self.blockSignals(False)
-        
+
         # 宽度同步后触发 viewer 高度重算（用于 user 卡片的 PlainTextViewer）
-        if hasattr(self.viewer, 'update_height'):
+        if not self._resize_preview_mode and hasattr(self.viewer, 'update_height'):
+            self.viewer.update_height()
+
+    def set_resize_preview_mode(self, enabled: bool):
+        """在窗口 resize 期间切换到轻量占位模式，减少复杂子控件重绘。"""
+        if enabled == self._resize_preview_mode:
+            return
+
+        self._resize_preview_mode = enabled
+        if enabled:
+            viewer_height = max(self.viewer.height(), self.viewer.minimumHeight(), 40)
+            options_height = self.options_widget.sizeHint().height() if self.options_widget.isVisible() else 0
+            self._resize_preview_height = max(40, viewer_height + options_height)
+            self.resize_placeholder.setFixedHeight(self._resize_preview_height)
+            self.resize_placeholder.show()
+            self.viewer.setUpdatesEnabled(False)
+            self.viewer.hide()
+            self._options_were_visible_before_resize = self.options_widget.isVisible()
+            if self._options_were_visible_before_resize:
+                self.options_widget.setUpdatesEnabled(False)
+                self.options_widget.hide()
+            return
+
+        self.viewer.show()
+        self.viewer.setUpdatesEnabled(True)
+        if self._options_were_visible_before_resize:
+            self.options_widget.show()
+            self.options_widget.setUpdatesEnabled(True)
+        self.resize_placeholder.hide()
+        self.resize_placeholder.setFixedHeight(0)
+        self._resize_preview_height = 0
+        self._options_were_visible_before_resize = False
+        if hasattr(self.viewer, "update_height"):
             self.viewer.update_height()
 
     def wheelEvent(self, event: QWheelEvent):
@@ -2068,14 +2147,7 @@ class MessageCard(SimpleCardWidget):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        # 性能优化：使用节流，避免每次 resize 都触发 sync_width
-        if not self._resize_anim_locked:
-            self._resize_anim_locked = True
-            QTimer.singleShot(50, self._unlock_resize_and_sync)
-    
-    def _unlock_resize_and_sync(self):
-        self._resize_anim_locked = False
-        self.sync_width(force=True)
+        # 宽度同步由外层聊天窗口统一调度，避免卡片自身 resize 再次触发全量重算
 
     def closeEvent(self, e):
         try:

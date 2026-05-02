@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import ctypes
 import os
+import time
 from pathlib import Path
 
 from PyQt5.QtCore import (
@@ -162,17 +163,30 @@ class OpenAIChatToolWindow(ToolWindow):
 
     def __init__(self, homepage, button):
         super().__init__(homepage, button)
-        self._session_card_cache: Dict[str, List[MessageCard]] = {}
+        self._session_card_cache: Dict[str, Dict[str, Any]] = {}
         self._welcome_card_cache: Dict[str, MessageCard] = {}
         self._displayed_session_id: Optional[str] = None
+        self._initial_visible_batch_count = 12
+        self._incremental_visible_batch_count = 8
+        self._history_load_threshold = 48
+        self._message_batch: List[List[Dict[str, Any]]] = []
+        self._visible_batch_start = 0
+        self._visible_batch_end = 0
+        self._is_loading_history_batches = False
+        self._suspend_auto_scroll = False
         self._gen_thread_pool = QThreadPool()
         self._gen_thread_pool.setMaxThreadCount(2)
         self._pending_scroll_to_bottom = False
+        self._bottom_anchor_deadline = 0.0
         self._last_visible_user_pair_index = -1
         self._scroll_bottom_timer = QTimer(self)
         self._scroll_bottom_timer.setSingleShot(True)
         self._scroll_bottom_timer.setInterval(24)
         self._scroll_bottom_timer.timeout.connect(self._do_scroll_to_bottom)
+        self._bottom_anchor_timer = QTimer(self)
+        self._bottom_anchor_timer.setSingleShot(True)
+        self._bottom_anchor_timer.setInterval(80)
+        self._bottom_anchor_timer.timeout.connect(self._maintain_bottom_anchor)
         # resize 防抖定时器 - 性能优化：增加防抖时间减少卡顿
         self._resize_debounce_timer = QTimer(self)
         self._resize_debounce_timer.setSingleShot(True)
@@ -181,9 +195,15 @@ class OpenAIChatToolWindow(ToolWindow):
         # resize 完成后更新所有卡片的定时器（延迟更新非可见区域卡片）
         self._resize_complete_timer = QTimer(self)
         self._resize_complete_timer.setSingleShot(True)
-        self._resize_complete_timer.setInterval(500)  # resize 结束后 500ms 再更新所有卡片
+        self._resize_complete_timer.setInterval(180)  # resize 结束后尽快恢复真实内容
         self._resize_complete_timer.timeout.connect(self._sync_all_cards_width)
         self._pending_resize_sync = False
+        self._resize_preview_active = False
+        self._last_chat_viewport_width = 0
+        self._scroll_sync_timer = QTimer(self)
+        self._scroll_sync_timer.setSingleShot(True)
+        self._scroll_sync_timer.setInterval(80)
+        self._scroll_sync_timer.timeout.connect(self._sync_visible_cards_on_scroll)
         self.toolStartUiSyncRequested.connect(
             self._handle_tool_start_ui_sync, type=Qt.BlockingQueuedConnection
         )
@@ -1005,21 +1025,36 @@ class OpenAIChatToolWindow(ToolWindow):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        # 使用防抖避免频繁同步，只有在需要时才同步
-        if not self._pending_resize_sync:
-            self._pending_resize_sync = True
-            self._resize_debounce_timer.start()
-            # 重置 resize 完成定时器，将在 resize 结束后更新所有卡片
-            self._resize_complete_timer.stop()
-            self._resize_complete_timer.start()
+        self._set_cards_resize_preview_mode(True)
+        # resize 期间持续重置防抖，避免在拖拽过程中提前批量重排
+        self._pending_resize_sync = True
+        self._resize_debounce_timer.stop()
+        self._resize_debounce_timer.start()
+        self._resize_complete_timer.stop()
+        self._resize_complete_timer.start()
+
+    def _set_cards_resize_preview_mode(self, enabled: bool):
+        if enabled == self._resize_preview_active:
+            return
+
+        self._resize_preview_active = enabled
+        for i in range(self.chat_layout.count()):
+            item = self.chat_layout.itemAt(i)
+            if not (item and item.widget() and isinstance(item.widget(), MessageCard)):
+                continue
+            item.widget().set_resize_preview_mode(enabled)
 
     def _do_debounced_resize(self):
         """防抖执行卡片宽度同步 - 性能优化：只更新可见区域的卡片"""
         self._pending_resize_sync = False
-        
+
         # 获取滚动区域视口
         scroll_area = getattr(self, 'chat_scroll_area', None)
         if scroll_area:
+            viewport_width = scroll_area.viewport().width()
+            if viewport_width <= 0 or viewport_width == self._last_chat_viewport_width:
+                return
+            self._last_chat_viewport_width = viewport_width
             viewport_rect = scroll_area.viewport().rect()
             viewport_top = scroll_area.verticalScrollBar().value()
             viewport_bottom = viewport_top + viewport_rect.height()
@@ -1045,10 +1080,16 @@ class OpenAIChatToolWindow(ToolWindow):
     
     def _sync_all_cards_width(self):
         """resize 完成后更新所有卡片的宽度（包括非可见区域的）"""
+        scroll_area = getattr(self, 'chat_scroll_area', None)
+        if scroll_area:
+            viewport_width = scroll_area.viewport().width()
+            if viewport_width > 0:
+                self._last_chat_viewport_width = viewport_width
         for i in range(self.chat_layout.count()):
             item = self.chat_layout.itemAt(i)
             if item and item.widget() and isinstance(item.widget(), MessageCard):
                 item.widget().sync_width(force=True)
+        self._set_cards_resize_preview_mode(False)
     
     def _sync_visible_cards_on_scroll(self):
         """滚动时更新新进入可见区域的卡片"""
@@ -1293,20 +1334,21 @@ class OpenAIChatToolWindow(ToolWindow):
             self._update_node_preview()
             self._refresh_context_usage_indicator()
             # 恢复缓存卡片后，多次滚动确保在底部
-            QTimer.singleShot(50, self._scroll_to_bottom)
-            QTimer.singleShot(150, self._scroll_to_bottom)
+            self._scroll_to_bottom(sticky_ms=900)
             return
 
         self._clear_chat_area()
         self._message_batch = group_messages_for_display(session.messages)
-        self._message_batch_index = 0
-        self._batch_size = 4
+        self._visible_batch_end = len(self._message_batch)
+        self._visible_batch_start = max(
+            0, self._visible_batch_end - self._initial_visible_batch_count
+        )
 
         if not self._message_batch:
             self._show_initial_welcome()
             return
 
-        self._load_message_batch()
+        self._load_message_batch(initial=True)
 
     def _show_initial_welcome(self):
         """仅在UI上显示欢迎卡片，不改动Session数据"""
@@ -1324,22 +1366,67 @@ class OpenAIChatToolWindow(ToolWindow):
                 if getattr(widget, "_is_welcome", False):
                     widget.hide()
 
-    def _load_message_batch(self):
-        """分批加载消息，避免卡顿"""
+    def _load_message_batch(self, initial: bool = False):
+        """按当前可见窗口加载消息。"""
         session = self.session_manager.get_current_session()
         if session:
             self._displayed_session_id = session.session_id
             # 关键修复：同步 _current_session_id 与实际显示的会话
             self._current_session_id = session.session_id
 
-        self._render_message_to_card(self._message_batch)
+        visible_batches = self._message_batch[
+            self._visible_batch_start:self._visible_batch_end
+        ]
+        self._suspend_auto_scroll = not initial
+        try:
+            self._render_message_to_card(
+                visible_batches,
+                batch_offset=self._visible_batch_start,
+            )
+        finally:
+            self._suspend_auto_scroll = False
 
         # 延迟滚动，确保卡片渲染完成后再滚动到底部
         # 使用多次滚动确保卡片高度变化后仍能保持在底部
-        QTimer.singleShot(50, self._scroll_to_bottom)
-        QTimer.singleShot(150, self._scroll_to_bottom)
+        self._scroll_to_bottom(sticky_ms=900)
         self._update_node_preview()
         self._refresh_context_usage_indicator()
+
+    def _has_more_history_batches(self) -> bool:
+        return self._visible_batch_start > 0
+
+    def _load_more_history_batches(self):
+        if self._is_loading_history_batches or not self._has_more_history_batches():
+            return
+
+        scroll_bar = self.chat_scroll_area.verticalScrollBar()
+        previous_value = scroll_bar.value()
+        previous_height = self.chat_container.sizeHint().height()
+
+        new_start = max(
+            0, self._visible_batch_start - self._incremental_visible_batch_count
+        )
+        prepend_batches = self._message_batch[new_start:self._visible_batch_start]
+        if not prepend_batches:
+            return
+
+        self._is_loading_history_batches = True
+        self._visible_batch_start = new_start
+        self._render_message_to_card(
+            prepend_batches,
+            insert_at_top=True,
+            batch_offset=new_start,
+        )
+        self._sync_node_preview_to_scroll()
+
+        def restore_anchor():
+            try:
+                new_height = self.chat_container.sizeHint().height()
+                scroll_bar.setValue(previous_value + max(0, new_height - previous_height))
+            finally:
+                self._is_loading_history_batches = False
+
+        QTimer.singleShot(0, restore_anchor)
 
     def _initialize_history_manager(self):
         canvas_name = getattr(self.homepage, "workflow_name", "default") or "default"
@@ -1448,6 +1535,9 @@ class OpenAIChatToolWindow(ToolWindow):
     def _clear_chat_area(self, delete_widgets: bool = True):
         self._current_assistant_card = None
         self._displayed_session_id = None
+        self._visible_batch_start = 0
+        self._visible_batch_end = 0
+        self._is_loading_history_batches = False
         while self.chat_layout.count():
             item = self.chat_layout.takeAt(0)
             if item.widget():
@@ -1479,7 +1569,12 @@ class OpenAIChatToolWindow(ToolWindow):
             if isinstance(w, MessageCard) and self._is_widget_alive(w)
         ]
         if message_cards:
-            self._session_card_cache[session.session_id] = message_cards
+            self._session_card_cache[session.session_id] = {
+                "cards": message_cards,
+                "visible_batch_start": self._visible_batch_start,
+                "visible_batch_end": self._visible_batch_end,
+                "batch_count": len(group_messages_for_display(session.messages)),
+            }
 
         self._cleanup_session_card_cache()
 
@@ -1504,8 +1599,15 @@ class OpenAIChatToolWindow(ToolWindow):
         if not session.messages:
             return False
 
-        cached_cards = self._session_card_cache.get(session.session_id)
+        cache_entry = self._session_card_cache.get(session.session_id)
+        if not cache_entry:
+            return False
+        cached_cards = cache_entry.get("cards") if isinstance(cache_entry, dict) else None
         if not cached_cards:
+            return False
+        batch_count = len(group_messages_for_display(session.messages))
+        if cache_entry.get("batch_count") != batch_count:
+            self._session_card_cache.pop(session.session_id, None)
             return False
 
         alive_cards, removed = filter_alive_cards(cached_cards)
@@ -1524,6 +1626,14 @@ class OpenAIChatToolWindow(ToolWindow):
             alive_cards[-1]
             if alive_cards and alive_cards[-1].role == "assistant"
             else None
+        )
+        self._message_batch = group_messages_for_display(session.messages)
+        self._visible_batch_start = max(
+            0, int(cache_entry.get("visible_batch_start", 0))
+        )
+        self._visible_batch_end = min(
+            len(self._message_batch),
+            int(cache_entry.get("visible_batch_end", len(self._message_batch))),
         )
         return True
 
@@ -1574,25 +1684,55 @@ class OpenAIChatToolWindow(ToolWindow):
         """清理用户消息用于显示（保留向后兼容）"""
         return sanitize_user_message_for_display(content)
 
-    def _render_message_to_card(self, batches: List[List[Dict[str, Any]]]):
-        for batch in batches:
+    def _get_user_round_index_for_batch_index(self, batch_index: int) -> int:
+        round_index = 0
+        for idx, batch in enumerate(self._message_batch):
+            if idx >= batch_index:
+                break
+            if batch and batch[0].get("role") == "user":
+                round_index += 1
+        return round_index
+
+    def _render_message_to_card(
+        self,
+        batches: List[List[Dict[str, Any]]],
+        insert_at_top: bool = False,
+        batch_offset: int = 0,
+    ):
+        insert_index = 0 if insert_at_top else None
+        for local_index, batch in enumerate(batches):
             role = batch[0].get("role")
             timestamp = batch[0].get("timestamp") or get_default_timestamp()
+            global_batch_index = batch_offset + local_index
+            round_index = self._get_user_round_index_for_batch_index(global_batch_index)
 
             if role == "user":
                 content = self._sanitize_user_message_for_display(
                     batch[0].get("content", "")
                 )
-                self._append_user_message(
+                user_card = self._append_user_message(
                     content,
                     timestamp=timestamp,
                     tag_params=batch[0].get("params", {}),
+                    scroll=False,
+                    insert_index=insert_index,
+                    user_round_index=round_index,
+                    update_preview=not insert_at_top,
                 )
+                if insert_index is not None and user_card:
+                    insert_index += 1
 
             if role == "assistant" or role == "tool":
-                assistant_card = self._append_assistant_message(timestamp=timestamp)
+                assistant_card = self._append_assistant_message(
+                    timestamp=timestamp,
+                    scroll=False,
+                    insert_index=insert_index,
+                    round_index=round_index,
+                )
                 # 使用辅助函数渲染消息
                 render_batch_to_assistant_card(assistant_card, batch)
+                if insert_index is not None and assistant_card:
+                    insert_index += 1
 
     def _get_rendered_message_cards(self) -> List[MessageCard]:
         def is_user_or_assistant(widget):
@@ -1776,9 +1916,27 @@ class OpenAIChatToolWindow(ToolWindow):
         )
         self.title_edit.setText("新对话")
 
-    def _add_chat_widget(self, widget: QWidget):
-        add_message_to_layout(widget, self.chat_layout, is_widget_alive)
+    def _add_chat_widget(self, widget: QWidget, insert_index: Optional[int] = None):
+        if insert_index is None:
+            add_message_to_layout(widget, self.chat_layout, is_widget_alive)
+        else:
+            if is_widget_alive(widget):
+                widget.setParent(self.chat_container)
+                if isinstance(widget, MessageCard) and widget.role == "user":
+                    self.chat_layout.insertWidget(insert_index, widget, 0, Qt.AlignRight)
+                elif isinstance(widget, MessageCard):
+                    self.chat_layout.insertWidget(insert_index, widget, 0, Qt.AlignLeft)
+                else:
+                    self.chat_layout.insertWidget(insert_index, widget)
+                widget.show()
         if isinstance(widget, MessageCard):
+            try:
+                widget.heightChanged.disconnect(self._on_message_card_height_changed)
+            except Exception:
+                pass
+            widget.heightChanged.connect(self._on_message_card_height_changed)
+            if self._resize_preview_active:
+                widget.set_resize_preview_mode(True)
             widget.sync_width()
 
     def _archive_history_session(self, index: int):
@@ -1864,14 +2022,22 @@ class OpenAIChatToolWindow(ToolWindow):
             self._refresh_history_toggle_panel()
 
     def _append_user_message(
-        self, content: str, timestamp: str = None, tag_params: dict = None
+        self,
+        content: str,
+        timestamp: str = None,
+        tag_params: dict = None,
+        scroll: bool = True,
+        insert_index: Optional[int] = None,
+        user_round_index: Optional[int] = None,
+        update_preview: bool = True,
     ):
         session = self.session_manager.get_current_session()
         if session:
             self._displayed_session_id = session.session_id
         
         # 计算当前 user message 的 round_index
-        user_round_index = self._get_current_user_round_index()
+        if user_round_index is None:
+            user_round_index = self._get_current_user_round_index()
         
         card = MessageCard(
             parent=self,
@@ -1887,14 +2053,25 @@ class OpenAIChatToolWindow(ToolWindow):
         # 设置卡片信号
         setup_user_card_signals(card, self._delete_message, self._undo_from_message, self._on_code_action)
         
-        self._add_chat_widget(card)
-        self._scroll_to_bottom()
+        self._add_chat_widget(card, insert_index=insert_index)
+        if scroll and not self._suspend_auto_scroll:
+            self._scroll_to_bottom()
 
         # 使用辅助函数后处理
-        post_append_user_message(self, user_round_index, self._update_node_preview)
+        post_append_user_message(
+            self,
+            user_round_index,
+            self._update_node_preview if update_preview else None,
+        )
         return card
 
-    def _append_assistant_message(self, timestamp: str = None) -> MessageCard:
+    def _append_assistant_message(
+        self,
+        timestamp: str = None,
+        scroll: bool = True,
+        insert_index: Optional[int] = None,
+        round_index: Optional[int] = None,
+    ) -> MessageCard:
         session = self.session_manager.get_current_session()
         if session:
             self._displayed_session_id = session.session_id
@@ -1910,7 +2087,11 @@ class OpenAIChatToolWindow(ToolWindow):
         card = create_assistant_card_widget(
             parent=self,
             timestamp=timestamp,
-            round_index=self._current_assistant_round_index,
+            round_index=(
+                round_index
+                if round_index is not None
+                else self._current_assistant_round_index
+            ),
             on_action=self._on_code_action,
             on_context_action=on_context_action,
             on_tool_diff=self._on_tool_diff_requested,
@@ -1918,8 +2099,9 @@ class OpenAIChatToolWindow(ToolWindow):
             on_save_file=self._on_save_file_requested,
         )
         
-        self._add_chat_widget(card)
-        self._scroll_to_bottom()
+        self._add_chat_widget(card, insert_index=insert_index)
+        if scroll and not self._suspend_auto_scroll:
+            self._scroll_to_bottom()
         return card
 
     def _update_assistant_message(self, card: MessageCard, new_content: str):
@@ -1975,8 +2157,16 @@ class OpenAIChatToolWindow(ToolWindow):
 
     def _on_scroll_changed(self, value):
         self._sync_node_preview_to_scroll()
-        # 性能优化：滚动时延迟更新新可见区域的卡片宽度
-        QTimer.singleShot(100, self._sync_visible_cards_on_scroll)
+        if self._bottom_anchor_deadline > 0:
+            scroll_bar = self.chat_scroll_area.verticalScrollBar()
+            if value < scroll_bar.maximum():
+                self._bottom_anchor_deadline = 0.0
+                self._bottom_anchor_timer.stop()
+        if value <= self._history_load_threshold:
+            self._load_more_history_batches()
+        # 滚动时复用单个防抖定时器，避免堆积大量 singleShot 回调
+        self._scroll_sync_timer.stop()
+        self._scroll_sync_timer.start()
 
     def _truncate_session_from_user_round(self, round_index: int) -> bool:
         session = self.session_manager.get_current_session()
@@ -2324,8 +2514,13 @@ class OpenAIChatToolWindow(ToolWindow):
                 position=InfoBarPosition.TOP_RIGHT,
             )
 
-    def _scroll_to_bottom(self):
+    def _scroll_to_bottom(self, sticky_ms: int = 0):
         self._pending_scroll_to_bottom = True
+        if sticky_ms > 0:
+            self._bottom_anchor_deadline = max(
+                self._bottom_anchor_deadline,
+                time.monotonic() + sticky_ms / 1000.0,
+            )
         self._scroll_bottom_timer.start()
 
     def _do_scroll_to_bottom(self):
@@ -2337,7 +2532,22 @@ class OpenAIChatToolWindow(ToolWindow):
         # 再次设置确保卡片高度变化后仍在底部
         scroll_bar.setValue(max_val)
         self._pending_scroll_to_bottom = False
+        if self._bottom_anchor_deadline > time.monotonic():
+            self._bottom_anchor_timer.start()
         self._sync_node_preview_to_scroll()
+
+    def _maintain_bottom_anchor(self):
+        if self._bottom_anchor_deadline <= time.monotonic():
+            self._bottom_anchor_deadline = 0.0
+            return
+        scroll_bar = self.chat_scroll_area.verticalScrollBar()
+        scroll_bar.setValue(scroll_bar.maximum())
+        self._bottom_anchor_timer.start()
+
+    def _on_message_card_height_changed(self, _height: int):
+        if self._bottom_anchor_deadline > time.monotonic():
+            self._pending_scroll_to_bottom = True
+            self._scroll_bottom_timer.start()
 
     def handle_recommended_question(self, content: str, action: str):
         if action == "ask":
