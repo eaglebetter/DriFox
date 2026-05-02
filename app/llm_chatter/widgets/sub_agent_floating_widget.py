@@ -36,64 +36,56 @@ class SubTaskLogWidget(QFrame):
             QFrame {
                 background-color: #1e1e1e;
                 border: 1px solid #3d3d3d;
-                border-radius: 6px;
-                padding: 8px;
+                border-radius: 4px;
+                padding: 6px;
             }
         """)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(4)
+        layout.setContentsMargins(6, 4, 6, 4)
+        layout.setSpacing(2)
 
-        # 任务状态头
-        header = QHBoxLayout()
-        header.setSpacing(8)
+        # 任务状态行：状态 + 步骤 + 时间
+        status_layout = QHBoxLayout()
+        status_layout.setSpacing(4)
 
         self.status_icon = QLabel("⏳")
-        self.status_icon.setFont(get_unified_font(14))
-        header.addWidget(self.status_icon)
+        self.status_icon.setFont(get_unified_font(12))
+        status_layout.addWidget(self.status_icon)
 
         self.status_label = BodyLabel("执行中", self)
-        self.status_label.setFont(get_unified_font(10, True))
+        self.status_label.setFont(get_unified_font(9, True))
         self.status_label.setStyleSheet("color: #FFA500;")
-        header.addWidget(self.status_label)
+        status_layout.addWidget(self.status_label)
 
-        header.addStretch()
+        status_layout.addStretch()
 
         self.step_label = BodyLabel("步骤 0", self)
         self.step_label.setFont(get_unified_font(9))
         self.step_label.setStyleSheet("color: #888;")
-        header.addWidget(self.step_label)
+        status_layout.addWidget(self.step_label)
 
         self.time_label = BodyLabel("00:00", self)
         self.time_label.setFont(get_unified_font(9))
         self.time_label.setStyleSheet("color: #666;")
-        header.addWidget(self.time_label)
+        status_layout.addWidget(self.time_label)
 
-        layout.addLayout(header)
+        layout.addLayout(status_layout)
 
-        # 任务描述
-        desc_preview = self.task_desc[:60] + "..." if len(self.task_desc) > 60 else self.task_desc
-        self.desc_label = BodyLabel(desc_preview, self)
-        self.desc_label.setFont(get_unified_font(9))
-        self.desc_label.setStyleSheet("color: #aaa; padding: 2px 0;")
-        self.desc_label.setWordWrap(False)
-        layout.addWidget(self.desc_label)
-
-        # 日志内容
+        # 日志内容（紧凑）
         self.log_text = QTextEdit(self)
-        self.log_text.setFont(get_unified_font(9))
+        self.log_text.setFont(get_unified_font(8))
         self.log_text.setStyleSheet("""
             QTextEdit {
                 background-color: #252526;
                 color: #d4d4d4;
                 border: none;
-                border-radius: 4px;
-                padding: 6px;
+                border-radius: 3px;
+                padding: 4px;
             }
         """)
         self.log_text.setReadOnly(True)
-        self.log_text.setMaximumHeight(120)
+        self.log_text.setMaximumHeight(80)
         layout.addWidget(self.log_text)
 
         # 初始化日志格式
@@ -230,6 +222,7 @@ class SubAgentFloatingWidget(CardWidget):
         self._tasks: Dict[str, SubTaskLogWidget] = {}  # task_id -> widget
         self._task_labels: Dict[str, str] = {}  # task_id -> label text
         self._active_task_id: str = None
+        self._batch_started: bool = False  # 当前批次是否已开始
         self._timer: QTimer = None
         self._setup_ui()
         self._start_timer()
@@ -324,31 +317,33 @@ class SubAgentFloatingWidget(CardWidget):
 
     def _show_task_log(self, task_id: str):
         """显示指定任务的日志"""
-        # 隐藏所有任务日志
-        for widget in self._tasks.values():
-            widget.hide()
-
+        if task_id not in self._tasks:
+            return
+        
+        # 隐藏当前显示的任务
+        if self._active_task_id and self._active_task_id in self._tasks:
+            self._tasks[self._active_task_id].hide()
+        
         # 显示选中的任务
-        if task_id in self._tasks:
-            self._tasks[task_id].show()
-            self.log_container_layout.addWidget(self._tasks[task_id])
-
+        self._tasks[task_id].show()
+        self.log_container_layout.addWidget(self._tasks[task_id])
         self._active_task_id = task_id
 
     def _on_close(self):
         self.setVisible(False)
+        self._batch_started = False
         self.closed.emit()
 
     def add_task(self, task_id: str, agent_name: str, task_desc: str):
         """添加新任务"""
-        # 创建任务日志组件
+        # 创建任务日志组件（不自动显示启动消息，保持紧凑）
         task_widget = SubTaskLogWidget(task_id, agent_name, task_desc, self.log_container)
-        task_widget.update_progress(f"启动子智能体 {agent_name}...")
 
         self._tasks[task_id] = task_widget
 
-        # 更新 Segment
-        self.segment_widget.addItem(task_id, f"任务{len(self._tasks)}")
+        # 更新 Segment，标签显示任务序号
+        task_index = len(self._tasks)
+        self.segment_widget.addItem(task_id, f"任务{task_index}")
         self.segment_widget.setCurrentItem(task_id)
 
         # 更新计数
@@ -389,10 +384,30 @@ class SubAgentFloatingWidget(CardWidget):
             label = f"{status_text} 任务{task_index}"
             self._task_labels[task_id] = label
             self.segment_widget.setItemText(task_id, label)
+            
+            # 更新计数
+            self._update_task_count()
 
         # 如果当前显示的是这个任务，切换到下一个
         if self._active_task_id == task_id:
             self._switch_to_next_active()
+        
+        # 检查是否所有任务都完成了
+        self._check_all_finished()
+
+    def _check_all_finished(self):
+        """检查是否所有任务都完成了，如果是则隐藏面板"""
+        if not self._tasks:
+            return
+        
+        all_done = all(
+            self._task_labels.get(tid, "").startswith(("✓", "✗"))
+            for tid in self._tasks
+        )
+        
+        if all_done:
+            # 延迟 3 秒后隐藏
+            QTimer.singleShot(3000, self.hide)
 
     def _switch_to_next_active(self):
         """切换到下一个活跃任务"""
@@ -446,6 +461,16 @@ class SubAgentFloatingWidget(CardWidget):
         for task_id in list(self._tasks.keys()):
             self.remove_task(task_id)
         self._active_task_id = None
+        self._batch_started = False
+
+    def clear_finished_tasks(self):
+        """清空已完成的任务（用于新任务开始前清理旧状态）"""
+        finished_ids = [
+            tid for tid, label in self._task_labels.items()
+            if label.startswith(("✓", "✗"))
+        ]
+        for tid in finished_ids:
+            self.remove_task(tid)
 
     def set_opacity(self, opacity: float):
         """设置透明度，用于响应全局透明度变化"""

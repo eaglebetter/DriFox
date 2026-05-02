@@ -260,6 +260,8 @@ class OpenAIChatToolWindow(ToolWindow):
             tool_executor=self._tool_executor,
             get_llm_config=self._get_current_model_config,
         )
+        self._sub_agent_manager.task_started.connect(self._on_sub_agent_task_started)
+        self._sub_agent_manager.task_finished.connect(self._on_sub_agent_task_finished)
         self._tool_executor.set_sub_agent_manager(self._sub_agent_manager)
 
         self._chat_engine = ChatEngine(
@@ -2903,93 +2905,45 @@ class OpenAIChatToolWindow(ToolWindow):
             self._todo_floating_widget.setVisible(True)
             return
 
-        if tool_name == "task_batch":
-            # 批量子智能体任务
-            import uuid
-            tasks = arguments.get("tasks", [])
-
-            for task_item in tasks:
-                task_id = str(uuid.uuid4())
-                agent_name = task_item.get("agent", "unknown")
-                task_desc = task_item.get("description", "")
-
-                self._sub_agent_floating_widget.add_task(task_id, agent_name, task_desc)
-                self._connect_sub_agent_signals(task_id, {})
-
-            return
-
         self._tool_floating_widget.start_tool(tool_name, arguments)
 
-    def _connect_sub_agent_signals(self, task_id: str, arguments: dict):
-        """连接子智能体信号，支持延迟检查"""
+    def _on_sub_agent_task_started(self, task_id: str, agent_name: str, task_description: str):
+        """子智能体任务启动（通过 SubAgentManager 信号触发）"""
+        # 新批次第一个任务时清空面板（不管是否有已完成的任务）
+        if not self._sub_agent_floating_widget._batch_started:
+            self._sub_agent_floating_widget.clear()
+            self._sub_agent_floating_widget.setVisible(True)
+            self._sub_agent_floating_widget._batch_started = True
+        
+        self._sub_agent_floating_widget.add_task(task_id, agent_name, task_description)
 
-        def try_connect():
-            if not hasattr(self._tool_executor, "_builtin_tools"):
-                return
-            if not hasattr(self._tool_executor._builtin_tools, "_sub_agent_manager"):
-                return
+        # 连接 executor 信号
+        sub_agent_mgr = self._tool_executor._builtin_tools._sub_agent_manager
+        executor = sub_agent_mgr._running_tasks.get(task_id)
+        if executor:
+            executor.progress_updated.connect(lambda tid, msg: self._sub_agent_floating_widget.update_progress(tid, msg))
+            executor.tool_call_started.connect(lambda tid, name, args: self._sub_agent_floating_widget.add_tool_call(tid, name, args))
+            executor.tool_result_received.connect(lambda tid, name, result, success: self._sub_agent_floating_widget.add_tool_result(tid, name, result, success))
+            executor.finished_with_result.connect(lambda tid, result: self._on_sub_agent_finished(tid, result))
 
-            sub_agent_mgr = self._tool_executor._builtin_tools._sub_agent_manager
-            if not sub_agent_mgr:
-                return
+    def _on_sub_agent_task_finished(self, task_id: str, result: str):
+        """子智能体任务完成"""
+        success = not (result and ("error" in result.lower() or "失败" in result or "timeout" in result.lower()))
+        self._sub_agent_floating_widget.finish_task(task_id, result, success)
 
-            # 根据 task_id 查找 executor（不再依赖顺序）
-            executor = None
-            if task_id in sub_agent_mgr._running_tasks:
-                executor = sub_agent_mgr._running_tasks[task_id]
-            elif sub_agent_mgr._running_tasks:
-                # 兼容旧代码：取最后一个任务
-                last_task_id = list(sub_agent_mgr._running_tasks.keys())[-1]
-                executor = sub_agent_mgr._running_tasks.get(last_task_id)
+        # 从管理器移除并记录结果
+        sub_agent_mgr = self._tool_executor._builtin_tools._sub_agent_manager
+        if task_id in sub_agent_mgr._running_tasks:
+            executor = sub_agent_mgr._running_tasks[task_id]
+            agent_name = getattr(executor, "agent_name", "")
+            del sub_agent_mgr._running_tasks[task_id]
+        else:
+            agent_name = ""
+        sub_agent_mgr._finished_tasks[task_id] = {"result": result, "error": "", "agent_name": agent_name}
 
-            if not executor:
-                return
-
-            def on_progress(msg):
-                self._sub_agent_floating_widget.update_progress(task_id, msg)
-
-            def on_tool_call(tool_name, args):
-                self._sub_agent_floating_widget.add_tool_call(task_id, tool_name, args)
-
-            def on_tool_result(tool_name, result, success):
-                self._sub_agent_floating_widget.add_tool_result(
-                    task_id, tool_name, result, success
-                )
-
-            def on_finished(result):
-                success = not (
-                    result
-                    and (
-                        "error" in result.lower()
-                        or "失败" in result
-                        or "timeout" in result.lower()
-                    )
-                )
-                self._sub_agent_floating_widget.finish_task(task_id, result, success)
-
-            try:
-                executor.progress_updated.disconnect()
-            except:
-                pass
-            try:
-                executor.tool_call_started.disconnect()
-            except:
-                pass
-            try:
-                executor.tool_result_received.disconnect()
-            except:
-                pass
-            try:
-                executor.finished_with_result.disconnect()
-            except:
-                pass
-
-            executor.progress_updated.connect(on_progress)
-            executor.tool_call_started.connect(on_tool_call)
-            executor.tool_result_received.connect(on_tool_result)
-            executor.finished_with_result.connect(on_finished)
-
-        QTimer.singleShot(100, try_connect)
+    def _on_sub_agent_finished(self, task_id: str, result: str):
+        """单个子智能体执行完成"""
+        self._sub_agent_manager.task_finished.emit(task_id, result)
 
     def _on_tool_cancelled(self):
         """工具执行被用户中止"""

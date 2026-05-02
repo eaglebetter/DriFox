@@ -12,7 +12,7 @@ from loguru import logger
 
 from app.llm_chatter.tools.result import ToolResult
 
-from PyQt5.QtCore import QThread, pyqtSignal, QCoreApplication
+from PyQt5.QtCore import QThread, pyqtSignal, QCoreApplication, QObject
 from openai import OpenAI
 
 from app.llm_chatter.core.provider_profile import get_provider_profile
@@ -21,14 +21,15 @@ from app.llm_chatter.core.provider_profile import get_provider_profile
 class SubAgentExecutor(QThread):
     """子智能体执行器 - 独立线程运行子智能体任务"""
 
-    finished_with_result = pyqtSignal(str)
-    error_occurred = pyqtSignal(str)
-    progress_updated = pyqtSignal(str)
-    tool_call_started = pyqtSignal(str, dict)
-    tool_result_received = pyqtSignal(str, str, bool)
+    finished_with_result = pyqtSignal(str, str)  # task_id, result
+    error_occurred = pyqtSignal(str, str)  # task_id, error
+    progress_updated = pyqtSignal(str, str)  # task_id, message
+    tool_call_started = pyqtSignal(str, str, dict)  # task_id, tool_name, args
+    tool_result_received = pyqtSignal(str, str, str, bool)  # task_id, tool_name, result, success
 
     def __init__(
         self,
+        task_id: str,
         agent_name: str,
         task_description: str,
         llm_config: Dict,
@@ -37,6 +38,7 @@ class SubAgentExecutor(QThread):
         parent_context: str = "",
     ):
         super().__init__()
+        self.task_id = task_id
         self.agent_name = agent_name
         self.task_description = task_description
         self.llm_config = llm_config
@@ -47,6 +49,7 @@ class SubAgentExecutor(QThread):
         self._pending_answer = None
         self._last_result = None
         self._execution_error = None
+        self._start_time = None
 
     def cancel(self):
         self._is_cancelled = True
@@ -55,10 +58,13 @@ class SubAgentExecutor(QThread):
         self._pending_answer = answer
 
     def run(self):
+        import time
+        self._start_time = time.time()
+        
         try:
             agent = self.agent_manager.get_agent(self.agent_name)
             if not agent:
-                self.error_occurred.emit(f"Agent not found: {self.agent_name}")
+                self.error_occurred.emit(self.task_id, f"Agent not found: {self.agent_name}")
                 return
 
             system_prompt = self.agent_manager.get_agent_system_prompt(self.agent_name)
@@ -76,7 +82,7 @@ class SubAgentExecutor(QThread):
             else:
                 messages.append({"role": "user", "content": self.task_description})
 
-            self.progress_updated.emit(f"开始执行子任务: {self.agent_name}")
+            self.progress_updated.emit(self.task_id, f"开始执行子任务: {self.agent_name}")
 
             try:
                 result = self._execute_agent_loop(messages, tools)
@@ -95,12 +101,12 @@ class SubAgentExecutor(QThread):
                 summary = result if result else "执行出错"
                 self._last_result = summary
 
-            self.finished_with_result.emit(summary)
+            self.finished_with_result.emit(self.task_id, summary)
 
         except Exception as e:
             logger.error(f"[SubAgentExecutor] run() error: {e}")
             self._execution_error = str(e)
-            self.error_occurred.emit(f"SubAgent execution error: {str(e)}")
+            self.error_occurred.emit(self.task_id, f"SubAgent execution error: {str(e)}")
 
     def _execute_agent_loop(self, messages: List[Dict], tools: List[Dict]) -> str:
         """执行子智能体对话循环"""
@@ -367,14 +373,14 @@ class SubAgentExecutor(QThread):
                 }
                 return None
 
-            self.tool_call_started.emit(tool_name, arguments)
+            self.tool_call_started.emit(self.task_id, tool_name, arguments)
             QCoreApplication.processEvents()
 
             result = self.tool_executor.execute(tool_name, arguments)
             result_content = str(result) if result else ""
             success = getattr(result, "success", True) if result else False
 
-            self.tool_result_received.emit(tool_name, result_content, success)
+            self.tool_result_received.emit(self.task_id, tool_name, result_content, success)
             QCoreApplication.processEvents()
 
             results.append(
@@ -456,10 +462,14 @@ class SubAgentExecutor(QThread):
             return result[:3000]
 
 
-class SubAgentManager:
+class SubAgentManager(QObject):
     """子智能体管理器 - 管理子智能体任务分发"""
 
+    task_started = pyqtSignal(str, str, str)  # task_id, agent_name, task_description
+    task_finished = pyqtSignal(str, str)  # task_id, result
+
     def __init__(self, agent_manager, tool_executor, get_llm_config: Callable):
+        super().__init__()
         self._agent_manager = agent_manager
         self._tool_executor = tool_executor
         self._get_llm_config = get_llm_config
@@ -486,6 +496,7 @@ class SubAgentManager:
                 return False
 
             executor = SubAgentExecutor(
+                task_id=task_id,
                 agent_name=agent_name,
                 task_description=task_description,
                 llm_config=llm_config,
@@ -506,6 +517,8 @@ class SubAgentManager:
 
             self._running_tasks[task_id] = executor
             executor.start()
+            
+            self.task_started.emit(task_id, agent_name, task_description)
 
             logger.info(
                 f"[SubAgentManager] Started task {task_id} with agent {agent_name}"
@@ -539,10 +552,43 @@ class SubAgentManager:
                 # 收集结果
                 result = getattr(executor, "_last_result", "") or ""
                 error = getattr(executor, "_execution_error", "") or ""
-                self._finished_tasks[task_id] = {"result": result, "error": error}
+                agent_name = getattr(executor, "agent_name", "")
+                self._finished_tasks[task_id] = {
+                    "result": result,
+                    "error": error,
+                    "agent_name": agent_name
+                }
                 del self._running_tasks[task_id]
                 finished.append(task_id)
         return finished
+
+    def cleanup_dead_tasks(self, timeout_seconds: int = 300) -> List[str]:
+        """
+        清理卡死的任务（运行时间超过 timeout_seconds 的任务）
+        
+        Returns: 已清理的任务ID列表
+        """
+        import time
+        cleaned = []
+        now = time.time()
+        
+        for task_id in list(self._running_tasks.keys()):
+            executor = self._running_tasks[task_id]
+            start_time = getattr(executor, "_start_time", None)
+            
+            if start_time and (now - start_time) > timeout_seconds:
+                logger.warning(f"[SubAgentManager] Task {task_id} dead for {now - start_time}s, cancelling")
+                executor.cancel()
+                agent_name = getattr(executor, "agent_name", "")
+                self._finished_tasks[task_id] = {
+                    "result": "",
+                    "error": f"Task cancelled due to timeout ({timeout_seconds}s)",
+                    "agent_name": agent_name
+                }
+                del self._running_tasks[task_id]
+                cleaned.append(task_id)
+        
+        return cleaned
 
     def get_task_result(self, task_id: str) -> Dict:
         """获取指定任务的执行结果"""
@@ -563,7 +609,7 @@ class SubAgentManager:
                 tasks_info.append({
                     "task_id": tid,
                     "status": "finished",
-                    "agent": getattr(executor, "agent_name", ""),
+                    "agent": self._finished_tasks[tid].get("agent_name", ""),
                 })
             else:
                 tasks_info.append({

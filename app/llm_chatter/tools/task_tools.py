@@ -148,20 +148,34 @@ class TaskTools:
 
         results = []
         start_time = time.time()
+        last_cleanup_check = start_time
         pending = set(task_ids)
 
         try:
             while pending:
-                if time.time() - start_time > timeout:
+                now = time.time()
+                
+                # 每 10 秒检查一次卡死的任务
+                if now - last_cleanup_check > 10:
+                    self._sub_agent_manager.cleanup_dead_tasks(timeout_seconds=300)
+                    last_cleanup_check = now
+                
+                if now - start_time > timeout:
                     logger.warning(f"[task_wait] Timeout after {timeout}s, pending: {pending}")
                     for tid in pending:
-                        results.append({"task_id": tid, "status": "timeout", "result": "", "error": "Task execution timeout"})
+                        # 超时的也尝试从 _finished_tasks 获取已有结果
+                        existing = self._sub_agent_manager.get_task_result(tid)
+                        if existing.get("result") or existing.get("error"):
+                            results.append({"task_id": tid, "status": "finished", "result": existing.get("result", ""), "error": existing.get("error", "")})
+                        else:
+                            results.append({"task_id": tid, "status": "timeout", "result": "", "error": "Task execution timeout"})
                     break
 
-                finished_tasks = self._sub_agent_manager.get_finished_tasks()
+                # 检查已完成的任务
+                self._sub_agent_manager.get_finished_tasks()  # 清理已完成的
                 for tid in list(pending):
-                    if tid in finished_tasks:
-                        task_info = self._sub_agent_manager.get_task_result(tid)
+                    task_info = self._sub_agent_manager.get_task_result(tid)
+                    if task_info.get("result") or task_info.get("error"):
                         results.append(task_info)
                         pending.remove(tid)
 
