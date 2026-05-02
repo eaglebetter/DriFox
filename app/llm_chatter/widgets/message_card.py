@@ -1441,11 +1441,18 @@ class PlainTextViewer(QWidget):
         self.setMinimumHeight(40)
 
     def _sync_document_width(self) -> bool:
-        vp_width = self.text_edit.viewport().width()
-        if vp_width <= 0 or vp_width == self._last_document_width:
+        # 直接使用 PlainTextViewer 自身宽度减去布局边距，更准确地反映可用宽度
+        layout = self.layout()
+        if layout:
+            margins = layout.contentsMargins()
+            available_width = self.width() - margins.left() - margins.right()
+        else:
+            available_width = self.width()
+        
+        if available_width <= 0 or available_width == self._last_document_width:
             return False
-        self._last_document_width = vp_width
-        self.text_edit.document().setTextWidth(vp_width)
+        self._last_document_width = available_width
+        self.text_edit.document().setTextWidth(available_width)
         return True
 
     def append_chunk(self, text: str):

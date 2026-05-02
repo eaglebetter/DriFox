@@ -190,12 +190,12 @@ class OpenAIChatToolWindow(ToolWindow):
         # resize 防抖定时器 - 性能优化：增加防抖时间减少卡顿
         self._resize_debounce_timer = QTimer(self)
         self._resize_debounce_timer.setSingleShot(True)
-        self._resize_debounce_timer.setInterval(100)  # 100ms 防抖，减少 resize 期间的计算
+        self._resize_debounce_timer.setInterval(30)  # 30ms 防抖，及时响应 resize
         self._resize_debounce_timer.timeout.connect(self._do_debounced_resize)
         # resize 完成后更新所有卡片的定时器（延迟更新非可见区域卡片）
         self._resize_complete_timer = QTimer(self)
         self._resize_complete_timer.setSingleShot(True)
-        self._resize_complete_timer.setInterval(180)  # resize 结束后尽快恢复真实内容
+        self._resize_complete_timer.setInterval(100)  # resize 结束后尽快恢复真实内容
         self._resize_complete_timer.timeout.connect(self._sync_all_cards_width)
         self._pending_resize_sync = False
         self._resize_preview_active = False
@@ -1045,14 +1045,14 @@ class OpenAIChatToolWindow(ToolWindow):
             item.widget().set_resize_preview_mode(enabled)
 
     def _do_debounced_resize(self):
-        """防抖执行卡片宽度同步 - 性能优化：只更新可见区域的卡片"""
+        """防抖执行卡片宽度同步 - resize 期间同步所有可见卡片宽度"""
         self._pending_resize_sync = False
 
         # 获取滚动区域视口
         scroll_area = getattr(self, 'chat_scroll_area', None)
         if scroll_area:
             viewport_width = scroll_area.viewport().width()
-            if viewport_width <= 0 or viewport_width == self._last_chat_viewport_width:
+            if viewport_width <= 0:
                 return
             self._last_chat_viewport_width = viewport_width
             viewport_rect = scroll_area.viewport().rect()
@@ -1066,16 +1066,8 @@ class OpenAIChatToolWindow(ToolWindow):
             
             card = item.widget()
             
-            # 性能优化：只同步可见区域的卡片
-            if scroll_area:
-                card_rect = card.geometry()
-                card_top = card_rect.top()
-                card_bottom = card_rect.bottom()
-                
-                # 如果卡片完全不可见（上下都不在视口内），跳过
-                if card_bottom < viewport_top - 100 or card_top > viewport_bottom + 100:
-                    continue
-            
+            # resize 期间同步所有卡片的宽度，不做可见性过滤
+            # 占位符模式下只更新宽高，不触发复杂重绘
             card.sync_width()
     
     def _sync_all_cards_width(self):
