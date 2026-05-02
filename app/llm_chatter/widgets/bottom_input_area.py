@@ -493,7 +493,8 @@ class SendableTextEdit(QTextEdit):
         cursor = self.textCursor()
         text = self.toPlainText()
         cursor_pos = cursor.position()
-
+        if cursor_pos - 1 > len(text):
+            return
         if cursor_pos > 0 and text[cursor_pos - 1] == "@":
             # 找到 @ 的位置
             self._at_trigger_pos = cursor_pos - 1
