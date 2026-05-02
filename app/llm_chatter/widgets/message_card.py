@@ -185,7 +185,7 @@ def _wrap_code_blocks_with_copy_button_web(html: str) -> str:
         <div style="
             position: relative;
             margin: 12px 0;
-            background: rgba(30, 32, 40, 0.85);
+            background: rgba(30, 32, 40, 0.20);
             border: 1px solid rgba(58, 63, 71, 0.6);
             border-radius: 10px;
             box-shadow: 0 4px 12px rgba(0,0,0,0.18), 0 1px 3px rgba(0,0,0,0.2);
@@ -196,7 +196,7 @@ def _wrap_code_blocks_with_copy_button_web(html: str) -> str:
             <!-- 顶部工具栏区域 -->
             <div style="
                 display: flex; justify-content: space-between; align-items: center;
-                padding: 6px 10px; height: 30px; background: rgba(28, 28, 36, 0.75);
+                padding: 6px 10px; height: 30px; background: rgba(28, 28, 36, 0.18);
                 border-bottom: 1px solid rgba(45, 45, 57, 0.5); border-radius: 10px 10px 0 0;
             ">
                 {f'<span style="color: #FFA500; font-size: 13px; font-weight: bold;">{lang}</span>' if lang else '<span style="color: #888;">Plain Text</span>'}
@@ -913,14 +913,14 @@ class CodeWebViewer(QWebEngineView):
                     width: 100%;
                     border-collapse: collapse;
                     margin: 10px 0;
-                    background: rgba(30, 32, 40, 0.75);
+                    background: rgba(30, 32, 40, 0.30);
                     border: 1px solid rgba(58, 63, 71, 0.5);
                     border-radius: 10px;
                     overflow: hidden;
                     border: 1px solid var(--border);
                 }}
                 table:not(.code-table) th {{
-                    background: rgba(50, 66, 94, 0.55);
+                    background: rgba(50, 66, 94, 0.35);
                     padding: 8px 12px;
                     text-align: left;
                     font-weight: 600;
@@ -932,8 +932,8 @@ class CodeWebViewer(QWebEngineView):
                     border-bottom: 1px solid rgba(37, 48, 68, 0.8);
                     color: var(--text-secondary) !important;
                 }}
-                table:not(.code-table) tr:nth-child(even) {{ background: rgba(29, 37, 51, 0.72); }}
-                table:not(.code-table) tr:hover {{ background: rgba(38, 50, 69, 0.9); }}
+                table:not(.code-table) tr:nth-child(even) {{ background: rgba(29, 37, 51, 0.35); }}
+                table:not(.code-table) tr:hover {{ background: rgba(38, 50, 69, 0.6); }}
 
                 .context-tag {{
                     display: inline-block;
@@ -1090,7 +1090,7 @@ class CodeWebViewer(QWebEngineView):
 
                 .think-block {{
                     margin: 8px 0;
-                    background: linear-gradient(180deg, rgba(19,26,37,0.92), rgba(16,22,31,0.95));
+                    background: rgba(30, 32, 40, 0.28);
                     border: 1px solid var(--border);
                     border-radius: 10px;
                 }}
@@ -1102,16 +1102,17 @@ class CodeWebViewer(QWebEngineView):
                 .think-content {{
                     padding: 10px 12px;
                     border-top: 1px solid var(--border);
+                    background: rgba(30, 32, 40, 0.18);
                     color: var(--text-muted) !important;
                     font-style: italic;
                 }}
 
                 .tool-block {{
                     margin: 8px 0;
-                    background: linear-gradient(180deg, rgba(18,24,35,0.96), rgba(15,20,29,0.98));
+                    background: rgba(30, 32, 40, 0.28);
                     border: 1px solid var(--border);
                     border-radius: 10px;
-                    box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+                    box-shadow: none;
                 }}
                 .tool-block__summary {{
                     padding: 8px 12px;
@@ -1123,7 +1124,7 @@ class CodeWebViewer(QWebEngineView):
                 .tool-content {{
                     padding: 10px 12px;
                     border-top: 1px solid var(--border);
-                    background: rgba(18, 24, 35, 0.84);
+                    background: rgba(18, 24, 35, 0.25);
                 }}
                 .tool-content pre {{
                     margin: 0;
