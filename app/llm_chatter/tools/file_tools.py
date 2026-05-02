@@ -404,6 +404,10 @@ class FileTools:
                     logger.warning(f"Multi-edit: block not found in {path}")
 
             full_path.write_text(content, encoding="utf-8")
+
+            # 更新修改时间记录
+            self._file_mtimes[str(full_path)] = full_path.stat().st_mtime
+
             return ToolResult(True, content=f"Applied {applied_count}/{len(edits)} edits to {path}")
         except Exception as e:
             return ToolResult(False, error=f"Multi-edit error: {str(e)}")

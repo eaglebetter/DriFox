@@ -222,9 +222,13 @@ class ChatEngine:
             elif tool_name == "websearch":
                 query = arguments.get("query", "")
                 return perm_resolver.resolve(tool_name, query)
-            elif tool_name == "task":
-                subagent = arguments.get("agent", "")
-                return perm_resolver.resolve_task(subagent)
+            elif tool_name == "task_batch":
+                # task_batch 支持多个子智能体，检查第一个的权限
+                tasks = arguments.get("tasks", [])
+                if tasks and len(tasks) > 0:
+                    first_agent = tasks[0].get("agent", "")
+                    return perm_resolver.resolve_task(first_agent)
+                return perm_resolver.resolve_task("")
             elif tool_name == "skill":
                 skill_name = arguments.get("name", "")
                 return perm_resolver.resolve(tool_name, skill_name)

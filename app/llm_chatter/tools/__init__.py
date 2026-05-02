@@ -45,6 +45,7 @@ class BuiltinTools(QObject):
         self._loaded_skills = {}
         self._skill_workspaces = {}
         self._sub_agent_manager = None
+        self._agent_manager = None
         self._set_stage_callback = None
         self._memory_manager = None
         self._get_llm_config = None
@@ -166,8 +167,14 @@ class BuiltinTools(QObject):
     def todo_read(self):
         return self._task_tools.todo_read()
 
-    def task_execute(self, agent: str, description: str, context: str = ""):
-        return self._task_tools.task_execute(agent, description, context)
+    def task_execute_batch(self, tasks: List[Dict]):
+        return self._task_tools.task_execute_batch(tasks)
+
+    def task_wait(self, task_ids: List[str], timeout: int = 1800, poll_interval: float = 0.1):
+        return self._task_tools.task_wait(task_ids, timeout, poll_interval)
+
+    def task_status(self, task_ids: List[str] = None):
+        return self._task_tools.task_status(task_ids)
 
     def load_skill(self, name: str):
         return self._task_tools.load_skill(name)
@@ -764,26 +771,69 @@ def get_builtin_tools_schema() -> List[Dict]:
         {
             "type": "function",
             "function": {
-                "name": "task",
-                "description": "分发任务给子智能体执行。子智能体有独立上下文，不继承主智能体的超长上下文。适用于复杂任务分解、并行处理、隔离上下文等场景。",
+                "name": "task_batch",
+                "description": "批量分发多个子智能体任务（并行执行）。适用于需要多个子智能体同时工作、独立完成的场景。可通过 task_wait 等待结果，task_status 查询状态。",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "agent": {
-                            "type": "string",
-                            "description": "子智能体名称",
-                            "enum": ["build", "plan", "skillful", "explore"],
-                        },
-                        "description": {
-                            "type": "string",
-                            "description": "任务描述，详细说明需要子智能体完成的工作",
-                        },
-                        "context": {
-                            "type": "string",
-                            "description": "传递给子智能体的上下文信息（可选）",
+                        "tasks": {
+                            "type": "array",
+                            "description": "任务列表，每个任务包含 agent/description/context。agent 可选：build(代码构建)、plan(任务规划)、explore(代码探索)等。",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "agent": {
+                                        "type": "string", 
+                                        "description": "子智能体名称（如 build, plan, explore, summary, code-reviewer 等）",
+                                    },
+                                    "description": {"type": "string", "description": "任务描述"},
+                                    "context": {"type": "string", "description": "上下文信息（可选）"},
+                                },
+                                "required": ["agent", "description"],
+                            },
                         },
                     },
-                    "required": ["agent", "description"],
+                    "required": ["tasks"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "task_wait",
+                "description": "等待指定的子智能体任务完成并收集结果（轮询方式）。在 task_batch 之后使用。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "task_ids": {
+                            "type": "array",
+                            "description": "要等待的任务ID列表（来自 task_batch 返回）",
+                            "items": {"type": "string"},
+                        },
+                        "timeout": {
+                            "type": "integer",
+                            "description": "超时秒数，默认 1800（30分钟）",
+                            "default": 1800,
+                        },
+                    },
+                    "required": ["task_ids"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "task_status",
+                "description": "查询子智能体任务状态，可查看活跃任务或指定任务的状态。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "task_ids": {
+                            "type": "array",
+                            "description": "任务ID列表（不传则查询所有活跃任务）",
+                            "items": {"type": "string"},
+                        },
+                    },
                 },
             },
         },

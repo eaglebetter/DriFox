@@ -288,6 +288,11 @@ class AgentManager:
             agents = list(agents) + list(self._hidden_agents.values())
         return [a for a in agents if a.is_subagent()]
 
+    def list_subagent_names(self, include_hidden: bool = False) -> List[str]:
+        """获取所有子智能体的名称列表（用于工具 schema enum）"""
+        agents = self.list_subagents(include_hidden=include_hidden)
+        return [a.name for a in agents]
+
     def get_agent_tools_schema(
         self, agent_name: str, global_permission: Optional[Dict[str, Any]] = None
     ) -> List[Dict]:

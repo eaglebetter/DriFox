@@ -12,6 +12,57 @@ from PyQt5.QtWidgets import QLabel
 from PyQt5.QtCore import Qt
 from loguru import logger
 
+__all__ = [
+    # 代码保存辅助
+    "LANG_EXT_MAP",
+    "get_language_extension",
+    "extract_code_suggested_filename",
+    "get_default_save_filename",
+    "export_messages_to_markdown",
+    # 样式常量
+    "WINDOW_STYLE",
+    "CHAT_SCROLL_STYLE",
+    "TITLE_STYLE",
+    "MODEL_BTN_STYLE",
+    "MODEL_BTN_TEXT_STYLE",
+    # UI 辅助函数
+    "setup_background_label",
+    "is_widget_alive",
+    "sanitize_user_message_for_display",
+    "get_default_timestamp",
+    "filter_alive_cards",
+    "cleanup_stale_card_cache",
+    # 卡片管理辅助
+    "normalize_lines",
+    "truncate_text",
+    "collect_tool_call_ids",
+    "format_file_list",
+    # 动作颜色辅助
+    "ACTION_COLORS",
+    "DEFAULT_ACTION_COLOR",
+    "get_action_color",
+    # Diff 辅助
+    "read_backup_files",
+    "generate_diff_html",
+    "generate_multi_file_diff_html",
+    # Node Preview 辅助
+    "build_node_preview_data",
+    # 卡片删除辅助
+    "find_widgets_to_remove_for_round",
+    "deduplicate_operations",
+    "find_last_assistant_card",
+    "count_user_cards_in_layout",
+    "collect_message_cards_from_layout",
+    "collect_user_card_widgets",
+    "create_session_from_record",
+    "collect_operations_for_round",
+    "get_round_message_indices",
+    "create_new_session_state",
+    "is_session_empty",
+    "truncate_messages_at_round",
+    "get_session_compaction_info",
+]
+
 # 延迟导入 content_to_text（避免循环导入）
 _content_to_text_getter: Optional[Callable] = None
 

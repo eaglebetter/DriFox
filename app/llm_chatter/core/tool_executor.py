@@ -276,7 +276,9 @@ class ToolExecutor:
         "memory_consolidate": [],
         "todowrite": ["todos"],
         "todoread": [],
-        "task": ["agent", "description"],
+        "task_batch": ["tasks"],
+        "task_wait": ["task_ids"],
+        "task_status": [],
         "skill": ["name"],
         "list_skills": [],
         "question": ["question"],
@@ -415,10 +417,16 @@ class ToolExecutor:
             ),
             "todowrite": lambda: self._builtin_tools.todo_write(args.get("todos", [])),
             "todoread": lambda: self._builtin_tools.todo_read(),
-            "task": lambda: self._builtin_tools.task_execute(
-                args.get("agent", ""),
-                args.get("description", ""),
-                args.get("context", ""),
+            "task_batch": lambda: self._builtin_tools.task_execute_batch(
+                args.get("tasks", [])
+            ),
+            "task_wait": lambda: self._builtin_tools.task_wait(
+                args.get("task_ids", []),
+                args.get("timeout", 1800),
+                args.get("poll_interval", 0.1),
+            ),
+            "task_status": lambda: self._builtin_tools.task_status(
+                args.get("task_ids")
             ),
             "skill": lambda: self._builtin_tools.load_skill(args.get("name", "")),
             "list_skills": lambda: self._builtin_tools.list_skills(),

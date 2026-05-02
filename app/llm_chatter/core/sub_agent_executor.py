@@ -6,15 +6,16 @@
 import json
 import re
 import time
-from typing import Dict, List, Optional, Any, Callable
+from typing import Dict, List, Optional, Any, Callable, TYPE_CHECKING
+
 from loguru import logger
+
+from app.llm_chatter.tools.result import ToolResult
 
 from PyQt5.QtCore import QThread, pyqtSignal, QCoreApplication
 from openai import OpenAI
 
-from app.llm_chatter.core.provider_profile import (
-    get_provider_profile,
-)
+from app.llm_chatter.core.provider_profile import get_provider_profile
 
 
 class SubAgentExecutor(QThread):
@@ -463,6 +464,7 @@ class SubAgentManager:
         self._tool_executor = tool_executor
         self._get_llm_config = get_llm_config
         self._running_tasks: Dict[str, SubAgentExecutor] = {}
+        self._finished_tasks: Dict[str, Dict] = {}  # task_id -> {"result": str, "error": str}
 
     def execute_task(
         self,
@@ -527,3 +529,57 @@ class SubAgentManager:
     def get_running_tasks(self) -> List[str]:
         """获取正在运行的任务ID列表"""
         return list(self._running_tasks.keys())
+
+    def get_finished_tasks(self) -> List[str]:
+        """获取已完成的任务ID列表（清理已完成的从running列表）"""
+        finished = []
+        for task_id in list(self._running_tasks.keys()):
+            executor = self._running_tasks[task_id]
+            if executor.isFinished():
+                # 收集结果
+                result = getattr(executor, "_last_result", "") or ""
+                error = getattr(executor, "_execution_error", "") or ""
+                self._finished_tasks[task_id] = {"result": result, "error": error}
+                del self._running_tasks[task_id]
+                finished.append(task_id)
+        return finished
+
+    def get_task_result(self, task_id: str) -> Dict:
+        """获取指定任务的执行结果"""
+        return self._finished_tasks.get(task_id, {"result": "", "error": ""})
+
+    def get_tasks_status(self, task_ids: List[str]) -> ToolResult:
+        """获取指定任务的状态"""
+        tasks_info = []
+        for tid in task_ids:
+            if tid in self._running_tasks:
+                executor = self._running_tasks[tid]
+                tasks_info.append({
+                    "task_id": tid,
+                    "status": "running" if executor.isRunning() else "finishing",
+                    "agent": getattr(executor, "agent_name", ""),
+                })
+            elif tid in self._finished_tasks:
+                tasks_info.append({
+                    "task_id": tid,
+                    "status": "finished",
+                    "agent": getattr(executor, "agent_name", ""),
+                })
+            else:
+                tasks_info.append({
+                    "task_id": tid,
+                    "status": "unknown",
+                    "agent": "",
+                })
+        return ToolResult(True, content={"tasks": tasks_info})
+
+    def get_all_active_tasks(self) -> ToolResult:
+        """获取所有活跃任务"""
+        tasks_info = []
+        for task_id, executor in self._running_tasks.items():
+            tasks_info.append({
+                "task_id": task_id,
+                "status": "running" if executor.isRunning() else "finishing",
+                "agent": getattr(executor, "agent_name", ""),
+            })
+        return ToolResult(True, content={"tasks": tasks_info})

@@ -188,8 +188,8 @@ def render_tool_block(
 ) -> str:
     """渲染工具块，参数横向表格展示（左列参数名，右列结果值）"""
     
-    # 检测是否为子智能体任务
-    is_sub_agent_task = tool_name == "task"
+    # 检测是否为子智能体任务（包括旧的 task 和新的 task_batch）
+    is_sub_agent_task = tool_name in ("task", "task_batch")
 
     # 状态图标
     status_html = ""

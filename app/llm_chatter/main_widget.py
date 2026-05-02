@@ -3,29 +3,26 @@ import ctypes
 import json
 import os
 import time
+from datetime import datetime
 from pathlib import Path
+from typing import Dict, List, Any, Optional
 
 from PyQt5.QtCore import (
     QTimer,
     pyqtSignal,
     QThreadPool,
+    Qt,
 )
+from PyQt5.QtGui import QPixmap
 from PyQt5.QtWidgets import (
     QVBoxLayout,
     QHBoxLayout,
     QApplication,
     QWidget,
     QFileDialog, QGraphicsOpacityEffect,
+    QLabel,
 )
-
-# 注册 QProcess::ExitStatus 元类型，解决跨线程信号连接问题
-# PyInstaller 打包后，uvicorn 可能创建子进程，需要此注册
-try:
-    qRegisterMetaType("QProcess::ExitStatus")
-except NameError:
-    # PyQt5 中 qRegisterMetaType 是内置函数，不需要导入
-    pass
-
+from loguru import logger
 from qfluentwidgets import (
     setFont,
     FluentIcon,
@@ -33,11 +30,8 @@ from qfluentwidgets import (
     InfoBar,
     InfoBarPosition,
     TransparentToolButton,
-    MessageBox,
 )
 
-from app.utils.config import Settings
-from app.utils.utils import get_icon, get_font_family_css
 from app.llm_chatter.constants import (
     FREE_PROVIDERS,
     PROVIDER_ICONS,
@@ -53,11 +47,24 @@ from app.llm_chatter.utils.chat_session import (
     SessionManager,
     ChatSession,
 )
+from app.llm_chatter.utils.diff_viewer import (
+    DiffHtmlGenerator,
+    DiffViewerWindow,
+)
 from app.llm_chatter.utils.history_manager import (
     HistoryManager,
 )
+from app.llm_chatter.utils.message_content import (
+    consolidate_messages,
+    content_to_text,
+    get_user_round_ranges,
+    group_messages_for_display,
+)
 from app.llm_chatter.utils.worker import (
     TopicSummaryTask,
+)
+from app.llm_chatter.widgets.base_settings_card import (
+    BaseSettingsCard,
 )
 from app.llm_chatter.widgets.bottom_input_area import (
     SendableTextEdit,
@@ -68,12 +75,25 @@ from app.llm_chatter.widgets.context_usage_ring import (
 from app.llm_chatter.widgets.conversation_node_preview import (
     ConversationNodePreview,
 )
+from app.llm_chatter.widgets.file_undo_dialog import (
+    FileUndoPreviewDialog,
+)
+from app.llm_chatter.widgets.history_card import (
+    HistoryCard,
+    get_message_preview,
+)
+from app.llm_chatter.widgets.llm_settings_card import (
+    LLMSettingsCard,
+)
 from app.llm_chatter.widgets.memory_manager import (
     MemoryManagerDialog,
 )
 from app.llm_chatter.widgets.message_card import (
     MessageCard,
     create_welcome_card,
+)
+from app.llm_chatter.widgets.model_config_card import (
+    ModelConfigCard,
 )
 from app.llm_chatter.widgets.question_floating_widget import (
     QuestionFloatingWidget,
@@ -87,38 +107,21 @@ from app.llm_chatter.widgets.todo_floating_widget import (
 from app.llm_chatter.widgets.tool_floating_widget import (
     ToolFloatingWidget,
 )
-from app.llm_chatter.widgets.llm_settings_card import (
-    LLMSettingsCard,
-)
-from app.llm_chatter.widgets.base_settings_card import (
-    BaseSettingsCard,
-)
-from app.llm_chatter.widgets.model_config_card import (
-    ModelConfigCard,
-)
-from app.llm_chatter.widgets.history_card import (
-    HistoryCard,
-    get_message_preview,
-)
 from app.llm_chatter.widgets.ui_helpers import *
+from app.llm_chatter.widgets.ui_helpers import add_message_to_layout, refresh_history_card_if_visible, \
+    init_new_session_after_archive, clear_and_show_welcome, refresh_session_view, save_or_archive_session, \
+    invalidate_session_card_cache, delete_widgets_from_layout, init_after_loading_session, setup_user_card_signals, \
+    post_append_user_message, create_assistant_card_widget, scroll_to_bottom_if_streaming, \
+    build_node_preview_from_session, calculate_scroll_progress, find_user_card_at_index, truncate_and_remove_round, \
+    log_deletion_stats, restore_input_from_card, find_last_tool_call_id_after_round, get_first_file_operation, \
+    show_diff_viewer, render_batch_to_assistant_card
 from app.tool_window import (
     ToolWindow,
     DockPosition,
     DockCategory,
 )
-from app.llm_chatter.utils.message_content import (
-    consolidate_messages,
-    content_to_text,
-    get_user_round_ranges,
-    group_messages_for_display,
-)
-from app.llm_chatter.widgets.file_undo_dialog import (
-    FileUndoPreviewDialog,
-)
-from app.llm_chatter.utils.diff_viewer import (
-    DiffHtmlGenerator,
-    DiffViewerWindow,
-)
+from app.utils.config import Settings
+from app.utils.utils import get_icon, get_font_family_css
 
 
 class OpenAIChatToolWindow(ToolWindow):
@@ -2900,19 +2903,24 @@ class OpenAIChatToolWindow(ToolWindow):
             self._todo_floating_widget.setVisible(True)
             return
 
-        if tool_name == "task":
-            agent_name = arguments.get("agent", "unknown")
-            task_desc = arguments.get("description", "")
+        if tool_name == "task_batch":
+            # 批量子智能体任务
+            import uuid
+            tasks = arguments.get("tasks", [])
 
-            self._sub_agent_floating_widget.start_task(agent_name, task_desc)
+            for task_item in tasks:
+                task_id = str(uuid.uuid4())
+                agent_name = task_item.get("agent", "unknown")
+                task_desc = task_item.get("description", "")
 
-            self._connect_sub_agent_signals(arguments)
+                self._sub_agent_floating_widget.add_task(task_id, agent_name, task_desc)
+                self._connect_sub_agent_signals(task_id, {})
 
             return
 
         self._tool_floating_widget.start_tool(tool_name, arguments)
 
-    def _connect_sub_agent_signals(self, arguments: dict):
+    def _connect_sub_agent_signals(self, task_id: str, arguments: dict):
         """连接子智能体信号，支持延迟检查"""
 
         def try_connect():
@@ -2922,26 +2930,30 @@ class OpenAIChatToolWindow(ToolWindow):
                 return
 
             sub_agent_mgr = self._tool_executor._builtin_tools._sub_agent_manager
-            if not sub_agent_mgr or not sub_agent_mgr._running_tasks:
+            if not sub_agent_mgr:
                 return
 
-            last_task_id = list(sub_agent_mgr._running_tasks.keys())[-1]
-            if not last_task_id:
-                return
+            # 根据 task_id 查找 executor（不再依赖顺序）
+            executor = None
+            if task_id in sub_agent_mgr._running_tasks:
+                executor = sub_agent_mgr._running_tasks[task_id]
+            elif sub_agent_mgr._running_tasks:
+                # 兼容旧代码：取最后一个任务
+                last_task_id = list(sub_agent_mgr._running_tasks.keys())[-1]
+                executor = sub_agent_mgr._running_tasks.get(last_task_id)
 
-            executor = sub_agent_mgr._running_tasks.get(last_task_id)
             if not executor:
                 return
 
             def on_progress(msg):
-                self._sub_agent_floating_widget.update_progress(msg)
+                self._sub_agent_floating_widget.update_progress(task_id, msg)
 
             def on_tool_call(tool_name, args):
-                self._sub_agent_floating_widget.add_tool_call(tool_name, args)
+                self._sub_agent_floating_widget.add_tool_call(task_id, tool_name, args)
 
             def on_tool_result(tool_name, result, success):
                 self._sub_agent_floating_widget.add_tool_result(
-                    tool_name, result, success
+                    task_id, tool_name, result, success
                 )
 
             def on_finished(result):
@@ -2953,7 +2965,7 @@ class OpenAIChatToolWindow(ToolWindow):
                         or "timeout" in result.lower()
                     )
                 )
-                self._sub_agent_floating_widget.finish_task(result, success)
+                self._sub_agent_floating_widget.finish_task(task_id, result, success)
 
             try:
                 executor.progress_updated.disconnect()

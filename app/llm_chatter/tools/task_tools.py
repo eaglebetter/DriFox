@@ -68,56 +68,135 @@ class TaskTools:
         except Exception as e:
             return ToolResult(False, error=f"Todo read error: {str(e)}")
 
-    def task_execute(
-        self, agent: str, description: str, context: str = ""
+    def task_execute_batch(
+        self, tasks: List[Dict]
     ) -> ToolResult:
+        """
+        批量执行子智能体任务（并行）。
+
+        Args:
+            tasks: List[Dict], 每个任务包含:
+                - agent: str 子智能体名称
+                - description: str 任务描述
+                - context: str (可选) 父任务上下文
+
+        Returns:
+            ToolResult: success=True, content={"task_ids": [str], "status": "running"}
+        """
         try:
             if not hasattr(self, "_sub_agent_manager") or not self._sub_agent_manager:
                 return ToolResult(False, error="子智能体管理器未初始化")
 
+            if not tasks:
+                return ToolResult(False, error="任务列表为空")
+
             import uuid
 
-            task_id = str(uuid.uuid4())
-            result_container = {"result": None, "error": None}
-            executor_ref = {"executor": None}
+            task_ids = []
+            for task_item in tasks:
+                agent = task_item.get("agent", "")
+                description = task_item.get("description", "")
+                context = task_item.get("context", "")
 
-            logger.info(f"[Task] Starting task {task_id}, agent={agent}")
-            success = self._sub_agent_manager.execute_task(
-                task_id=task_id,
-                agent_name=agent,
-                task_description=description,
-                parent_context=context or "",
-                on_finished=None,
-                on_error=None,
-                executor_ref=executor_ref,
+                if not agent or not description:
+                    continue
+
+                task_id = str(uuid.uuid4())
+                self._sub_agent_manager.execute_task(
+                    task_id=task_id,
+                    agent_name=agent,
+                    task_description=description,
+                    parent_context=context or "",
+                    on_finished=None,
+                    on_error=None,
+                    executor_ref=None,
+                )
+                task_ids.append(task_id)
+
+            return ToolResult(
+                True,
+                content={
+                    "task_ids": task_ids,
+                    "status": "running",
+                    "count": len(task_ids),
+                },
             )
 
-            if not success:
-                return ToolResult(False, error="Failed to start sub-agent task")
+        except Exception as e:
+            logger.error(f"[Task] task_execute_batch exception: {e}")
+            return ToolResult(False, error=f"批量任务启动失败: {str(e)}")
 
-            executor = executor_ref.get("executor")
-            if not executor:
-                return ToolResult(False, error="Failed to get executor")
+    def task_wait(
+        self,
+        task_ids: List[str],
+        timeout: int = 1800,
+        poll_interval: float = 0.1,
+    ) -> ToolResult:
+        """
+        等待指定任务完成并收集结果（轮询方式）。
 
-            logger.info(f"[Task] Waiting for task {task_id} to complete...")
-            timeout = 1800
-            start_time = time.time()
-            while not executor.isFinished():
+        Args:
+            task_ids: 要等待的任务ID列表
+            timeout: 超时秒数（默认30分钟）
+            poll_interval: 轮询间隔秒数
+
+        Returns:
+            ToolResult: success=True, content={"results": [{"task_id": str, "result": str, "error": str}]}
+        """
+        if not hasattr(self, "_sub_agent_manager") or not self._sub_agent_manager:
+            return ToolResult(False, error="子智能体管理器未初始化")
+
+        results = []
+        start_time = time.time()
+        pending = set(task_ids)
+
+        try:
+            while pending:
                 if time.time() - start_time > timeout:
-                    logger.warning(f"[Task] Wait timeout after {timeout}s")
-                    executor.cancel()
-                    return ToolResult(False, error="Task execution timeout")
-                time.sleep(0.1)
+                    logger.warning(f"[task_wait] Timeout after {timeout}s, pending: {pending}")
+                    for tid in pending:
+                        results.append({"task_id": tid, "status": "timeout", "result": "", "error": "Task execution timeout"})
+                    break
 
-            result = executor._last_result if hasattr(executor, "_last_result") else ""
-            if hasattr(executor, "_execution_error") and executor._execution_error:
-                return ToolResult(False, error=executor._execution_error)
+                finished_tasks = self._sub_agent_manager.get_finished_tasks()
+                for tid in list(pending):
+                    if tid in finished_tasks:
+                        task_info = self._sub_agent_manager.get_task_result(tid)
+                        results.append(task_info)
+                        pending.remove(tid)
 
-            return ToolResult(True, content=result)
+                if pending:
+                    time.sleep(poll_interval)
+
+            return ToolResult(
+                True,
+                content={
+                    "count": len(results),
+                    "results": results,
+                },
+            )
 
         except Exception as e:
-            logger.error(f"[Task] Exception: {e}")
-            return ToolResult(False, error=f"Task execution error: {str(e)}")
+            logger.error(f"[task_wait] Exception: {e}")
+            return ToolResult(False, error=f"等待任务失败: {str(e)}")
+
+    def task_status(self, task_ids: List[str] = None) -> ToolResult:
+        """
+        查询任务状态。
+
+        Args:
+            task_ids: 任务ID列表（None=查询所有活跃任务）
+
+        Returns:
+            ToolResult: success=True, content={"tasks": [{"task_id": str, "status": str, "agent": str}]}
+        """
+        if not hasattr(self, "_sub_agent_manager") or not self._sub_agent_manager:
+            return ToolResult(False, error="子智能体管理器未初始化")
+
+        if task_ids:
+            return self._sub_agent_manager.get_tasks_status(task_ids)
+        else:
+            return self._sub_agent_manager.get_all_active_tasks()
 
     def load_skill(self, name: str) -> ToolResult:
         try:
