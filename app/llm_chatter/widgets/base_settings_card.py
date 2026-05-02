@@ -10,19 +10,21 @@ from PyQt5.QtWidgets import (
     QLabel,
     QScrollArea,
 )
-from qfluentwidgets import CardWidget, StrongBodyLabel
-from app.utils.utils import get_unified_font
+from qfluentwidgets import CardWidget, StrongBodyLabel, TransparentToolButton
+from app.utils.utils import get_unified_font, get_icon
 
 
 class BaseSettingsCard(CardWidget):
     """通用设置卡片基类"""
 
     closed = pyqtSignal()
+    tabChanged = pyqtSignal(str)  # 标签切换信号
 
     def __init__(self, title: str, icon: str = "⚙️", parent=None):
         super().__init__(parent)
         self._title = title
         self._icon = icon
+        self._current_tab = "main"  # 支持标签切换
         self._setup_base_ui()
 
     def _setup_base_ui(self):
@@ -53,7 +55,18 @@ class BaseSettingsCard(CardWidget):
 
         header.addWidget(self.icon_label)
         header.addWidget(self.title_label)
+
+        # 标签切换按钮容器
+        self._tab_buttons_container = QHBoxLayout()
+        self._tab_buttons_container.setSpacing(4)
+        header.addLayout(self._tab_buttons_container)
+
         header.addStretch()
+
+        # 额外按钮容器
+        self._extra_buttons_container = QHBoxLayout()
+        self._extra_buttons_container.setSpacing(4)
+        header.addLayout(self._extra_buttons_container)
 
         # 关闭按钮
         self.close_btn = QLabel("✕", self)
@@ -125,3 +138,105 @@ class BaseSettingsCard(CardWidget):
                 border-radius: 8px;
             }}
         """)
+
+    def set_extra_button_handler(self, handler):
+        """
+        设置额外的按钮处理器，用于添加自定义按钮
+
+        Args:
+            handler: 可调用的函数，点击按钮时触发
+        """
+        from qfluentwidgets import TransparentToolButton
+
+        # 移除已有按钮
+        while self._extra_buttons_container.count():
+            item = self._extra_buttons_container.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        # 添加导入按钮
+        import_btn = TransparentToolButton(get_icon("导入"), self)
+        import_btn.setToolTip("导入会话")
+        import_btn.setFixedSize(24, 24)
+        import_btn.clicked.connect(handler)
+        self._extra_buttons_container.addWidget(import_btn)
+
+    def setup_tabs(self, tabs: list, default_tab: str = None):
+        """
+        设置标签切换按钮
+
+        Args:
+            tabs: 标签列表，每项为 (tab_id: str, tab_name: str)
+            default_tab: 默认选中的标签
+        """
+        from qfluentwidgets import TransparentToolButton
+
+        # 清除现有标签按钮
+        while self._tab_buttons_container.count():
+            item = self._tab_buttons_container.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        self._tabs = tabs
+        self._default_tab = default_tab or (tabs[0][0] if tabs else None)
+        self._current_tab = self._default_tab
+
+        self._tab_buttons = {}
+        for tab_id, tab_name in tabs:
+            btn = QLabel(f" {tab_name} ", self)
+            btn.setStyleSheet("""
+                QLabel {
+                    color: rgba(255, 255, 255, 0.5);
+                    font-size: 11px;
+                    padding: 3px 8px;
+                    border-radius: 4px;
+                    cursor: pointer;
+                }
+                QLabel:hover {
+                    color: rgba(255, 255, 255, 0.8);
+                    background-color: rgba(255, 255, 255, 0.1);
+                }
+            """)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.mousePressEvent = lambda e, tid=tab_id: self._on_tab_clicked(tid)
+            self._tab_buttons_container.addWidget(btn)
+            self._tab_buttons[tab_id] = btn
+
+        # 更新样式
+        self._update_tab_styles()
+
+    def _on_tab_clicked(self, tab_id: str):
+        """标签点击处理"""
+        if self._current_tab != tab_id:
+            self._current_tab = tab_id
+            self._update_tab_styles()
+            self.tabChanged.emit(tab_id)
+
+    def _update_tab_styles(self):
+        """更新标签样式"""
+        for tab_id, btn in self._tab_buttons.items():
+            if tab_id == self._current_tab:
+                btn.setStyleSheet("""
+                    QLabel {
+                        color: #fff;
+                        font-size: 11px;
+                        font-weight: bold;
+                        padding: 3px 8px;
+                        border-radius: 4px;
+                        background-color: rgba(102, 198, 255, 0.3);
+                    }
+                """)
+            else:
+                btn.setStyleSheet("""
+                    QLabel {
+                        color: rgba(255, 255, 255, 0.5);
+                        font-size: 11px;
+                        padding: 3px 8px;
+                        border-radius: 4px;
+                        cursor: pointer;
+                    }
+                    QLabel:hover {
+                        color: rgba(255, 255, 255, 0.8);
+                        background-color: rgba(255, 255, 255, 0.1);
+                    }
+                """)

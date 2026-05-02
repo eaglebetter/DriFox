@@ -77,11 +77,16 @@ class SkillCompleterPopup(QWidget):
         super().__init__(parent)
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Tool | Qt.NoDropShadowWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
+        # macOS 上顶层 Tool 窗口更容易抢占输入焦点，补全窗只负责展示和鼠标选择，
+        # 键盘事件仍由文本框统一处理。
+        self.setAttribute(Qt.WA_ShowWithoutActivating, True)
+        self.setFocusPolicy(Qt.NoFocus)
         self.setFixedWidth(220)
         self.setMinimumHeight(40)
         self.setMaximumHeight(280)
 
         self._list_widget = QListWidget(self)
+        self._list_widget.setFocusPolicy(Qt.NoFocus)
         self._list_widget.setStyleSheet(f"""
             QListWidget {{
                 background: rgba(25, 34, 50, 245);
@@ -288,7 +293,8 @@ class SkillCompleterPopup(QWidget):
             
         self.move(x, y)
         self.show()
-        self._list_widget.setFocus()
+        if text_edit is not None:
+            text_edit.setFocus(Qt.OtherFocusReason)
 
 
 def get_local_skills() -> list:
@@ -565,6 +571,7 @@ class SendableTextEdit(QTextEdit):
 
         self._completer_popup.hide()
         self._at_trigger_pos = -1
+        self.setFocus(Qt.OtherFocusReason)
 
     def _on_agent_changed(self, text: str):
         self.agentChanged.emit(text)

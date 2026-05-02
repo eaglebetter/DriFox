@@ -327,6 +327,137 @@ class HistoryManager:
             return True
         return False
 
+    def import_from_json(self, file_path: str) -> Optional[Dict]:
+        """
+        从 JSON 文件导入会话
+
+        Args:
+            file_path: JSON 文件路径
+
+        Returns:
+            导入的会话数据，失败返回 None
+        """
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                data = deserialize_from_json(json.load(f))
+
+            if not isinstance(data, dict):
+                logger.warning(f"[HistoryManager] 导入失败，非法的会话数据格式: {file_path}")
+                return None
+
+            # 规范化会话数据
+            session = self._normalize_single_session(data)
+
+            # 检查是否已存在相同 session_id 的会话
+            existing_session_id = session.get("session_id")
+            if existing_session_id:
+                existing_index = self.find_index_by_session_id(existing_session_id)
+                if existing_index is not None:
+                    # 更新已存在的会话
+                    self._history_sessions[existing_index] = session
+                    session["canvas_id"] = self.canvas_name
+                    self._schedule_save(existing_session_id)
+                    logger.info(f"[HistoryManager] 更新已存在的会话: {existing_session_id}")
+                else:
+                    # 检查归档目录中是否已有该会话（避免重复导入归档文件）
+                    archived_files = list(self.archive_dir.glob(f"*{existing_session_id}*.json"))
+                    if archived_files:
+                        logger.warning(f"[HistoryManager] 该会话已在归档目录中: {existing_session_id}")
+                        # 生成新的 session_id 以避免冲突
+                        session["session_id"] = uuid.uuid4().hex[:8]
+                        session["title"] = f"[导入] {session.get('title', '新对话')}"
+
+                    # 添加到内存缓存顶部
+                    session["canvas_id"] = self.canvas_name
+                    self._history_sessions.insert(0, session)
+                    self._history_sessions = self._history_sessions[: self._history_limit]
+                    self._schedule_save(session["session_id"])
+                    logger.info(f"[HistoryManager] 导入新会话: {session['session_id']}")
+            else:
+                # 没有 session_id，生成一个新的
+                session["session_id"] = uuid.uuid4().hex[:8]
+                session["canvas_id"] = self.canvas_name
+                self._history_sessions.insert(0, session)
+                self._history_sessions = self._history_sessions[: self._history_limit]
+                self._schedule_save(session["session_id"])
+
+            return session
+
+        except json.JSONDecodeError as e:
+            logger.error(f"[HistoryManager] JSON 解析失败: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"[HistoryManager] 导入失败: {e}")
+            return None
+
+    def _normalize_single_session(self, data: Dict) -> Dict:
+        """规范化单个会话数据"""
+        fallback_ts = (
+            data.get("last_time")
+            or data.get("saved_at")
+            or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        )
+
+        # 规范化消息
+        messages = data.get("messages", [])
+        if isinstance(messages, list):
+            messages = self._ensure_message_timestamps(
+                merge_session_messages(messages),
+                fallback_ts,
+            )
+        else:
+            messages = []
+
+        # 构建规范化会话
+        session = {
+            "session_id": data.get("session_id") or uuid.uuid4().hex[:8],
+            "saved_at": data.get("saved_at") or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "title": data.get("title") or data.get("topic_summary") or "导入的对话",
+            "last_time": self._extract_last_message_time(messages) or fallback_ts,
+            "messages": messages,
+            "message_count": self._count_conversation_pairs(messages),
+            "compaction_state": dict(data.get("compaction_state") or {}),
+            "compaction_cache": dict(data.get("compaction_cache") or {}),
+            "system_prompt": data.get("system_prompt") or "",
+        }
+
+        return session
+
+    def get_archived_sessions(self) -> List[Dict]:
+        """
+        获取归档目录中的所有会话文件列表
+
+        Returns:
+            文件信息列表 [{'path': str, 'name': str, 'session_id': str, 'title': str}]
+        """
+        archived_files = []
+        if not self.archive_dir.exists():
+            return archived_files
+
+        try:
+            for json_file in self.archive_dir.glob("*.json"):
+                try:
+                    with open(json_file, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    archived_files.append({
+                        "path": str(json_file),
+                        "name": json_file.name,
+                        "session_id": data.get("session_id", ""),
+                        "title": data.get("title", json_file.stem[:50]),
+                    })
+                except Exception:
+                    # 跳过损坏的文件
+                    continue
+        except Exception:
+            pass
+
+        # 按修改时间倒序排列（最新的在前）
+        archived_files.sort(
+            key=lambda x: os.path.getmtime(x["path"]),
+            reverse=True
+        )
+        return archived_files
+
     def get_session_by_index(self, index: int) -> Optional[List[Dict]]:
         if 0 <= index < len(self._history_sessions):
             session = self._history_sessions[index]
