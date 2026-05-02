@@ -31,54 +31,151 @@ def format_tool_block(
     )
 
 
-def _strip_result_content(text: str) -> str:
+def _escape_text_for_plain(text: str) -> str:
     """
-    清理工具结果中的代码块和 HTML 标签。
-    避免代码块标记被当成渲染内容显示出来。
+    清理文本中的特殊字符，避免纯文本渲染错误。
+    移除：
+    - HTML 标签 <...>
+    - Markdown 代码块标记 ```language, ```
+    - 独立反引号 `
+    - 其他可能导致渲染问题的特殊字符
     """
     if not text:
         return ""
     # 1. 先移除 HTML 代码块标签 <pre>...</pre> <code>...</code>
     text = _HTML_CODE_BLOCK_PATTERN.sub("", text)
-    # 2. 移除 markdown 代码块标记 ``` 和 ```language
+    # 2. 移除 markdown 代码块标记 ```language 和 ```
     text = _CODE_BLOCK_PATTERN.sub("", text)
     text = _CODE_BLOCK_FINAL_PATTERN.sub("", text)
     # 3. 移除独立的反引号
     text = text.replace("`", "")
+    # 4. 移除 HTML 标签（用于清理残留的 HTML 标记）
+    text = re.sub(r"<[^>]+>", "", text)
+    # 5. 移除可能造成渲染问题的特殊空白字符
+    text = text.replace("\x00", "")  # 移除 null 字符
+    # 6. 规范化换行符
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
     return text.strip()
 
 
-def _smart_truncate_args(tool_name: str, tool_args: dict, max_len: int = 150) -> str:
-    """
-    智能截断工具参数。
-    对所有过长的字符串值进行截断，保留结构信息。
-    """
-    def truncate_value(v, max_str_len=80):
-        """截断单个字符串值"""
-        if isinstance(v, str) and len(v) > max_str_len:
-            return v[:max_str_len] + "..."
-        return v
+def _truncate_value(v, max_len: int = 50) -> str:
+    """截断单个参数值"""
+    if isinstance(v, dict):
+        s = json.dumps(v, ensure_ascii=False)
+        return s[:max_len] + "..." if len(s) > max_len else s
+    elif isinstance(v, list):
+        s = json.dumps(v, ensure_ascii=False)
+        return s[:max_len] + "..." if len(s) > max_len else s
+    elif isinstance(v, str):
+        return v[:max_len] + "..." if len(v) > max_len else v
+    else:
+        s = str(v)
+        return s[:max_len] + "..." if len(s) > max_len else s
 
-    def truncate_dict(d, max_str_len=80):
-        """递归处理字典，截断过长的字符串值"""
-        result = {}
-        for k, v in d.items():
-            if isinstance(v, dict):
-                result[k] = truncate_dict(v, max_str_len)
-            elif isinstance(v, str) and len(v) > max_str_len:
-                result[k] = v[:max_str_len] + "..."
-            else:
-                result[k] = v
-        return result
 
-    # 截断后的参数
-    truncated_args = truncate_dict(tool_args)
+def _format_args_preview(tool_args: dict, max_total_len: int = 120) -> str:
+    """
+    格式化参数预览为 '参数1=值1; 参数2=值2' 格式。
+    限制总字数，超过则截断并添加 '...'。
+    """
+    if not tool_args:
+        return ""
     
-    # 检查结果长度，如果仍超过限制则整体截断
-    args_str = json.dumps(truncated_args, ensure_ascii=False)
-    if len(args_str) > max_len:
-        return args_str[:max_len] + "..."
-    return args_str
+    parts = []
+    total_len = 0
+    
+    for key, value in tool_args.items():
+        # 清理值中的特殊字符
+        value_str = _truncate_value(value)
+        value_str = _escape_text_for_plain(value_str)
+        
+        # 构建参数片段
+        part = f"{key}={value_str}"
+        
+        # 检查加上分隔符后是否会超过限制
+        if parts:
+            next_len = total_len + len(part) + 2  # +2 for "; "
+            if next_len > max_total_len:
+                # 检查当前是否已经超过限制
+                if total_len >= max_total_len:
+                    break
+                # 添加当前部分（如果还没超过）
+                remaining = max_total_len - total_len - 3  # space for "..."
+                if remaining > 0:
+                    parts.append(part[:remaining] + "...")
+                else:
+                    parts.append("...")
+                break
+        
+        parts.append(part)
+        total_len += len(part) + 2
+        
+        # 再次检查是否超过总长度
+        if total_len > max_total_len:
+            break
+    
+    result = "; ".join(parts)
+    if len(result) > max_total_len:
+        result = result[:max_total_len] + "..."
+    
+    return result
+
+
+def _format_args_as_table(tool_args: dict) -> str:
+    """
+    将参数字典格式化为横向表格 HTML。
+    左侧是参数名，右侧是对应的值。
+    """
+    if not tool_args:
+        return '<div class="args-table"><div class="args-row empty">无参数</div></div>'
+    
+    rows = []
+    for key, value in tool_args.items():
+        # 清理值中的特殊字符
+        if isinstance(value, dict):
+            value_str = json.dumps(value, ensure_ascii=False)
+        elif isinstance(value, list):
+            value_str = json.dumps(value, ensure_ascii=False)
+        else:
+            value_str = str(value)
+        
+        # 清理特殊字符
+        value_str = _escape_text_for_plain(value_str)
+        
+        # 截断过长的值
+        max_value_len = 200
+        if len(value_str) > max_value_len:
+            value_str = value_str[:max_value_len] + "..."
+        
+        # 转义显示
+        escaped_key = escape(key)
+        escaped_value = escape(value_str)
+        
+        rows.append(f'''
+        <div class="args-row">
+            <span class="args-key">{escaped_key}</span>
+            <span class="args-value">{escaped_value}</span>
+        </div>''')
+    
+    return f'<div class="args-table">{"".join(rows)}</div>'
+
+
+def _format_result_for_display(result: str, max_len: int = 500) -> str:
+    """
+    格式化结果显示，清理特殊字符并截断。
+    """
+    if not result:
+        return '<div class="result-empty">无结果</div>'
+    
+    # 清理特殊字符
+    cleaned = _escape_text_for_plain(str(result))
+    
+    # 截断
+    if len(cleaned) > max_len:
+        cleaned = cleaned[:max_len] + "..."
+    
+    # 转义
+    return f'<div class="result-content">{escape(cleaned)}</div>'
 
 
 def render_tool_block(
@@ -89,13 +186,12 @@ def render_tool_block(
     collapsed: bool = False,
     tool_call_id: str = None,
 ) -> str:
-    """渲染工具块，参数预览单行显示，结果区域可折叠"""
-    # 使用智能截断处理参数
-    args_preview = _smart_truncate_args(tool_name, tool_args)
+    """渲染工具块，参数横向表格展示（左列参数名，右列结果值）"""
     
     # 检测是否为子智能体任务
     is_sub_agent_task = tool_name == "task"
 
+    # 状态图标
     status_html = ""
     if success is not None:
         status_color = "#4CAF50" if success else "#F44336"
@@ -108,16 +204,18 @@ def render_tool_block(
     icon = "🤖" if is_sub_agent_task else "🔧"
     title_color = "#9C27B0" if is_sub_agent_task else "#FFA500"
 
+    # 子智能体任务特殊处理
     if is_sub_agent_task:
         agent_name = tool_args.get("agent", "unknown")
         task_desc = tool_args.get("description", "")[:50]
-        if len(tool_args.get("description", "")) > 50:
-            task_desc += "..."
-        args_preview = f"[{agent_name}] {task_desc}"
+        if tool_args.get("description"):
+            task_desc = tool_args["description"][:50] + ("..." if len(tool_args["description"]) > 50 else "")
 
+    # 文件编辑工具判断
     file_edit_tools = {"write", "edit", "multiedit", "patch"}
     is_file_edit = tool_name in file_edit_tools and tool_args.get("path")
 
+    # 差异对比按钮
     diff_icon_html = ""
     if is_file_edit and tool_call_id:
         diff_icon_html = f'''
@@ -130,60 +228,63 @@ def render_tool_block(
             <img src="qrc:/icons/差异对比.svg" style="width: 16px; height: 16px;" />
         </span>'''
 
-    if result is not None:
-        result_str = str(result)
-        # 子智能体任务的结果需要过滤掉 think 标签
-        if is_sub_agent_task:
-            import re
-            # 过滤掉 <think>...</think> 标签及其内容
-            result_str = re.sub(r"<think>[\s\S]*?</think>", "", result_str)
-        # 使用新的清理函数移除代码块和 HTML 标签
-        result_stripped = _strip_result_content(result_str[:500])
-        result_escaped = escape(result_stripped)
-        result_html = f"""
-        <div style="padding: 8px 12px; border-top: 1px solid #3d3d3d; font-size: 12px;">
-            <div style="color: #888; margin-bottom: 4px;">{"调用子智能体" if is_sub_agent_task else "参数"}:</div>
-            <pre style="margin: 0; padding: 6px; background: #1e1e1e; border-radius: 4px; overflow-x: auto; color: #d4d4d4; font-size: 11px;">{escape(json.dumps(tool_args, ensure_ascii=False, indent=2))}</pre>
-            <div style="color: #888; margin: 8px 0 4px;">{"子智能体结果" if is_sub_agent_task else "结果"}</div>
-            <pre style="margin: 0; padding: 6px; background: #1e1e1e; border-radius: 4px; overflow-x: auto; color: #d4d4d4; font-size: 11px; max-height: 400px; overflow-y: auto;">{result_escaped}</pre>
-        </div>"""
-    else:
-        result_html = f"""
-        <div style="padding: 8px 12px; border-top: 1px solid #3d3d3d; font-size: 12px;">
-            <div style="color: #888; margin-bottom: 4px;">{"调用子智能体" if is_sub_agent_task else "参数"}:</div>
-            <pre style="margin: 0; padding: 6px; background: #1e1e1e; border-radius: 4px; overflow-x: auto; color: #d4d4d4; font-size: 11px;">{escape(json.dumps(tool_args, ensure_ascii=False, indent=2))}</pre>
-        </div>"""
+    # 生成参数预览（折叠时显示）
+    args_preview = _format_args_preview(tool_args)
+    
+    # 生成参数表格（展开时显示）
+    args_table_html = _format_args_as_table(tool_args)
+    
+    # 生成结果内容
+    result_section_label = "调用子智能体" if is_sub_agent_task else "结果"
+    result_content_html = _format_result_for_display(result) if result else '<div class="result-empty">无结果</div>'
 
-    block_seed = "|".join(
-        [
-            str(tool_name or ""),
-            json.dumps(tool_args or {}, ensure_ascii=False, sort_keys=True),
-            str(result or ""),
-            str(success),
-        ]
-    )
+    # 结果区域 HTML
+    result_html = f"""
+    <div class="tool-result-section">
+        <div class="tool-section-label">{result_section_label}</div>
+        {result_content_html}
+    </div>"""
+
+    # 完整的展开内容（参数表格 + 结果）
+    expanded_content = f"""
+    <div class="tool-expanded-content">
+        <div class="tool-params-section">
+            <div class="tool-section-label">参数</div>
+            {args_table_html}
+        </div>
+        {result_html}
+    </div>"""
+
+    # 生成哈希 key
+    block_seed = "|".join([
+        str(tool_name or ""),
+        json.dumps(tool_args or {}, ensure_ascii=False, sort_keys=True),
+        str(result or ""),
+        str(success),
+    ])
     block_key = "tool-" + hashlib.sha1(block_seed.encode("utf-8")).hexdigest()[:12]
     expanded_attr = "false" if collapsed else "true"
     body_style = "" if collapsed else ' style="height:auto; opacity:1;"'
 
-    # 参数预览区域 + 对比按钮（参数可换行，按钮固定在右侧）
-    preview_section = f"""<span style="display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 8px; min-width: 0; width: 100%; margin-left: 15px;">
-        <span style="color: #888; font-size: 11px; font-weight: normal; word-break: break-all; text-align: right; min-width: 0;">{escape(args_preview)}</span>
-        {diff_icon_html}
-    </span>"""
-
     return f"""<div class="cm-collapsible tool-block" data-block-key="{block_key}" data-expanded="{expanded_attr}" data-tool-call-id="{escape(tool_call_id or '')}" style="margin: 8px 0; background: rgba(30, 32, 40, 0.28); border: 1px solid var(--border); border-radius: 6px;">
-    <button type="button" class="cm-collapsible__summary tool-block__summary" aria-expanded="{expanded_attr}" style="cursor: pointer; padding: 6px 10px; color: {title_color}; font-size: 13px; font-weight: 500; display: flex; align-items: flex-start; gap: 10px; width: 100%; background: transparent; border: none; text-align: left; box-sizing: border-box; flex-wrap: nowrap;">
+    <button type="button" class="cm-collapsible__summary tool-block__summary" aria-expanded="{expanded_attr}" style="cursor: pointer; padding: 6px 10px; color: {title_color}; font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 10px; width: 100%; background: transparent; border: none; text-align: left; box-sizing: border-box;">
         <span style="display: inline-flex; align-items: center; gap: 6px; min-width: 0; flex: 0 1 auto;">
             <span class="cm-collapsible__chevron" aria-hidden="true"></span>
             <span style="flex: 0 0 auto;">{icon}</span>
             <span style="white-space: nowrap; flex: 0 0 auto;">{escape(tool_name)}</span>
             {status_html}
         </span>
-        {preview_section}
+        <span style="display: flex; align-items: flex-end; gap: 8px; margin-left: auto; min-width: 0; flex: 0 1 300px; justify-content: flex-end;">
+            <span style="color: #888; font-size: 11px; text-align: right; word-break: break-all; white-space: normal; line-height: 1.4;">
+                {escape(args_preview)}
+            </span>
+        </span>
+        <span style="display: flex; align-items: center; flex: 0 0 auto;">
+            {diff_icon_html}
+        </span>
     </button>
     <div class="cm-collapsible__body"{body_style}>
-        {result_html}
+        {expanded_content}
     </div>
 </div>"""
 

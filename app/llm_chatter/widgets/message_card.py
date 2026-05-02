@@ -1121,6 +1121,74 @@ class CodeWebViewer(QWebEngineView):
                     font-size: 13px;
                     white-space: normal;
                 }}
+                .tool-expanded-content {{
+                    padding: 0;
+                }}
+                .tool-params-section,
+                .tool-result-section {{
+                    padding: 0;
+                }}
+                .tool-section-label {{
+                    color: #888;
+                    font-size: 11px;
+                    font-weight: 500;
+                    padding: 8px 12px 4px;
+                    text-transform: uppercase;
+                    letter-spacing: 0.5px;
+                }}
+                .args-table {{
+                    display: flex;
+                    flex-direction: column;
+                    gap: 0;
+                    margin: 0;
+                }}
+                .args-row {{
+                    display: flex;
+                    align-items: flex-start;
+                    padding: 6px 12px;
+                    border-bottom: 1px solid rgba(58, 63, 71, 0.4);
+                    font-size: 12px;
+                }}
+                .args-row:last-child {{
+                    border-bottom: none;
+                }}
+                .args-row.empty {{
+                    color: #666;
+                    font-style: italic;
+                    padding: 8px 12px;
+                }}
+                .args-key {{
+                    flex: 0 0 auto;
+                    min-width: 80px;
+                    max-width: 120px;
+                    color: #9C9C9C;
+                    font-weight: 500;
+                    margin-right: 12px;
+                    word-break: break-word;
+                }}
+                .args-value {{
+                    flex: 1 1 auto;
+                    color: #d4d4d4;
+                    word-break: break-all;
+                    font-family: Consolas, monospace;
+                    font-size: 11px;
+                }}
+                .result-content {{
+                    padding: 6px 12px 10px;
+                    color: #d4d4d4;
+                    font-size: 12px;
+                    line-height: 1.5;
+                    word-break: break-word;
+                    font-family: Consolas, monospace;
+                    max-height: 400px;
+                    overflow-y: auto;
+                }}
+                .result-empty {{
+                    padding: 6px 12px 10px;
+                    color: #666;
+                    font-style: italic;
+                    font-size: 12px;
+                }}
                 .tool-content {{
                     padding: 10px 12px;
                     border-top: 1px solid var(--border);
