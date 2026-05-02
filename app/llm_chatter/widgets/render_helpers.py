@@ -92,6 +92,9 @@ def render_tool_block(
     """渲染工具块，参数预览单行显示，结果区域可折叠"""
     # 使用智能截断处理参数
     args_preview = _smart_truncate_args(tool_name, tool_args)
+    
+    # 检测是否为子智能体任务
+    is_sub_agent_task = tool_name == "task"
 
     status_html = ""
     if success is not None:
@@ -102,7 +105,6 @@ def render_tool_block(
             f'margin-left: 6px;">{status_text}</span>'
         )
 
-    is_sub_agent_task = tool_name == "task"
     icon = "🤖" if is_sub_agent_task else "🔧"
     title_color = "#9C27B0" if is_sub_agent_task else "#FFA500"
 
@@ -130,6 +132,11 @@ def render_tool_block(
 
     if result is not None:
         result_str = str(result)
+        # 子智能体任务的结果需要过滤掉 think 标签
+        if is_sub_agent_task:
+            import re
+            # 过滤掉 <think>...</think> 标签及其内容
+            result_str = re.sub(r"<think>[\s\S]*?</think>", "", result_str)
         # 使用新的清理函数移除代码块和 HTML 标签
         result_stripped = _strip_result_content(result_str[:500])
         result_escaped = escape(result_stripped)
