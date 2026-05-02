@@ -2909,13 +2909,15 @@ class OpenAIChatToolWindow(ToolWindow):
 
     def _on_sub_agent_task_started(self, task_id: str, agent_name: str, task_description: str):
         """子智能体任务启动（通过 SubAgentManager 信号触发）"""
-        # 新批次第一个任务时清空面板（不管是否有已完成的任务）
-        if not self._sub_agent_floating_widget._batch_started:
-            self._sub_agent_floating_widget.clear()
-            self._sub_agent_floating_widget.setVisible(True)
-            self._sub_agent_floating_widget._batch_started = True
+        widget = self._sub_agent_floating_widget
         
-        self._sub_agent_floating_widget.add_task(task_id, agent_name, task_description)
+        # 新批次开始时清空面板（_batch_started 为 False 表示新批次）
+        if not widget._batch_started:
+            widget.clear()
+            widget.setVisible(True)
+        
+        widget._batch_started = True  # 标记批次已开始
+        widget.add_task(task_id, agent_name, task_description)
 
         # 连接 executor 信号
         sub_agent_mgr = self._tool_executor._builtin_tools._sub_agent_manager
