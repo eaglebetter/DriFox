@@ -38,10 +38,13 @@ def _escape_text_for_plain(text: str) -> str:
     - HTML 标签 <...>
     - Markdown 代码块标记 ```language, ```
     - 独立反引号 `
+    - 思考标签 <think>、
     - 其他可能导致渲染问题的特殊字符
     """
     if not text:
         return ""
+    # 0. 清理思考标签（避免渲染时被误识别）
+    text = text.replace("<think>", "").replace("", "")
     # 1. 先移除 HTML 代码块标签 <pre>...</pre> <code>...</code>
     text = _HTML_CODE_BLOCK_PATTERN.sub("", text)
     # 2. 移除 markdown 代码块标记 ```language 和 ```

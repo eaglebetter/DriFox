@@ -875,17 +875,6 @@ class OpenAIChatToolWindow(ToolWindow):
         self.input_area.agentChanged.connect(self._on_agent_changed)
         layout.addWidget(self.input_area)
 
-    def _on_model_changed(self, provider_name: str, model_name: str):
-        """从模型选择器选中模型后的回调"""
-        if provider_name:
-            self._current_provider_name = provider_name
-            self._current_model_name = model_name
-            setting = Settings.get_instance()
-            setting.set(setting.llm_selected_model, provider_name, save=True)
-            self._update_model_selector_btn()
-            self._refresh_context_usage_indicator()
-            self._update_balance_display()
-
     def _show_model_selector_popup(self):
         """显示扁平式模型选择上拉框"""
         provider_models_data = []
@@ -958,6 +947,8 @@ class OpenAIChatToolWindow(ToolWindow):
         else:
             self._model_btn_text.setText("选择模型...")
             self.current_model_btn.setToolTip("")
+
+        self._update_balance_display()
 
     def _on_context_selection_changed(self, _selected_keys=None):
         self._refresh_context_usage_indicator()
@@ -1302,7 +1293,6 @@ class OpenAIChatToolWindow(ToolWindow):
 
         self._update_model_selector_btn()
         self._refresh_context_usage_indicator()
-        self._update_balance_display()
 
     def _load_agent_list(self):
         """加载智能体列表到选择器（仅显示 primary agents）"""
@@ -1841,32 +1831,24 @@ class OpenAIChatToolWindow(ToolWindow):
         return count_user_cards_in_layout(self.chat_layout)
 
     def _find_user_round_index_for_card(self, card: MessageCard) -> Optional[int]:
-        """通过 session.messages 找到 user card 对应的正确 round_index"""
-        session = self.session_manager.get_current_session()
-        if not session:
-            return None
-        
-        from app.utils.message_content import consolidate_messages
-        
-        canonical_messages = consolidate_messages(session.messages)
-        if not canonical_messages:
-            return None
-        
-        # 获取当前卡片的内容用于匹配
-        card_content = card.get_plain_text()
-        
-        # 在 canonical_messages 中找到匹配的 user 消息，返回其 round_index
-        user_count = 0
-        for msg in canonical_messages:
-            if msg.get("role") == "user":
-                # 尝试匹配内容
-                msg_content = msg.get("content", "")
-                if isinstance(msg_content, str) and card_content:
-                    # 比较内容的前100个字符
-                    if msg_content[:100] == card_content[:100]:
-                        return user_count
-                user_count += 1
-        
+        """
+        通过遍历布局找到 user card 对应的 round_index
+        """
+        # 直接通过布局遍历确定位置（更可靠）
+        user_card_idx = 0
+        for i in range(self.chat_layout.count()):
+            item = self.chat_layout.itemAt(i)
+            if not item or not item.widget():
+                continue
+            widget = item.widget()
+            if not isinstance(widget, MessageCard):
+                continue
+            if getattr(widget, "_is_welcome", False):
+                continue
+            if widget is card:
+                return user_card_idx
+            if widget.role == "user":
+                user_card_idx += 1
         return None
 
     def findRoundIndexForCard(self, card: MessageCard) -> Optional[int]:
@@ -1910,7 +1892,8 @@ class OpenAIChatToolWindow(ToolWindow):
         removing = False
         widgets_to_remove = []
 
-        # 遍历 chat_layout，直接统计可见的 user card 数量来确定 round_index 对应的位置
+        # 遍历 chat_layout
+        for i in range(self.chat_layout.count()):，直接统计可见的 user card 数量来确定 round_index 对应的位置
         for i in range(self.chat_layout.count()):
             item = self.chat_layout.itemAt(i)
             if not item or not item.widget():
@@ -1947,17 +1930,9 @@ class OpenAIChatToolWindow(ToolWindow):
         return removed > 0
 
     def _remove_cards_from_round(self, round_index: int) -> bool:
-        rendered_cards = self._get_rendered_message_cards()
-        user_card_count = sum(1 for c in rendered_cards if c.role == "user")
-        if round_index >= user_card_count:
-            return False
-
-        # 使用辅助函数找出并删除需要删除的卡片
-        widgets_to_remove = find_widgets_to_remove_for_round(
-            self.chat_layout, round_index, user_card_count
-        )
+        widgets_to_remove = find_widgets_to_remove_from_round(self.chat_layout, round_index)
         delete_widgets_from_layout(widgets_to_remove, self.chat_layout)
-        return True
+        return len(widgets_to_remove) > 0
 
     def _invalidate_current_session_card_cache(self):
         invalidate_session_card_cache(
@@ -3056,18 +3031,24 @@ class OpenAIChatToolWindow(ToolWindow):
 
     def _on_sub_agent_task_finished(self, task_id: str, result: str):
         """子智能体任务完成"""
-        success = not (result and ("error" in result.lower() or "失败" in result or "timeout" in result.lower()))
+        # 从管理器获取执行器，检查是否有真实的错误状态
+        sub_agent_mgr = self._tool_executor._builtin_tools._sub_agent_manager
+        executor = sub_agent_mgr._running_tasks.get(task_id)
+        
+        # 优先使用 executor 中记录的 _execution_error 来判断成功/失败
+        # 而不是依赖结果内容中的关键词（这会导致误判）
+        execution_error = getattr(executor, "_execution_error", None) if executor else None
+        success = execution_error is None or execution_error == ""
+        
         self._sub_agent_floating_widget.finish_task(task_id, result, success)
 
         # 从管理器移除并记录结果
-        sub_agent_mgr = self._tool_executor._builtin_tools._sub_agent_manager
-        if task_id in sub_agent_mgr._running_tasks:
-            executor = sub_agent_mgr._running_tasks[task_id]
+        if executor:
             agent_name = getattr(executor, "agent_name", "")
             del sub_agent_mgr._running_tasks[task_id]
         else:
             agent_name = ""
-        sub_agent_mgr._finished_tasks[task_id] = {"result": result, "error": "", "agent_name": agent_name}
+        sub_agent_mgr._finished_tasks[task_id] = {"result": result, "error": execution_error or "", "agent_name": agent_name}
 
     def _on_sub_agent_finished(self, task_id: str, result: str):
         """单个子智能体执行完成"""

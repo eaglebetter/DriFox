@@ -13,6 +13,15 @@ from PyQt5.QtWidgets import (
     QScrollArea,
     QFontComboBox,
 )
+
+
+class NoWheelFontComboBox(QFontComboBox):
+    """禁用滚轮切换的字体下拉框"""
+
+    def wheelEvent(self, event):
+        # 忽略滚轮事件，防止悬浮时滚轮切换字体
+        event.ignore()
+
 from qfluentwidgets import (
     StrongBodyLabel,
     SwitchSettingCard,
@@ -193,7 +202,7 @@ class LLMSettingsCard(SimpleCardWidget):
                 self.cfg = cfg
                 self._parent = parent
 
-                self.fontCombo = QFontComboBox()
+                self.fontCombo = NoWheelFontComboBox()
                 # 设置下拉框向左延伸，框右边对齐
                 self.fontCombo.setSizeAdjustPolicy(QFontComboBox.SizeAdjustPolicy.AdjustToContents)
                 self._apply_font_combo_style()
@@ -228,6 +237,20 @@ class LLMSettingsCard(SimpleCardWidget):
                     QFontComboBox::drop-down {
                         border: none;
                         width: 20px;
+                        subcontrol-origin: padding;
+                        subcontrol-position: right center;
+                    }
+                    QFontComboBox::down-arrow {
+                        image: none;
+                        border-left: 5px solid transparent;
+                        border-right: 5px solid transparent;
+                        border-top: 5px solid #888888;
+                        width: 0px;
+                        height: 0px;
+                        margin-right: 4px;
+                    }
+                    QFontComboBox::down-arrow:hover {
+                        border-top-color: #0078d4;
                     }
                 """)
                 
