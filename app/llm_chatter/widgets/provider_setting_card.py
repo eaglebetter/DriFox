@@ -29,10 +29,9 @@ from qfluentwidgets import (
     InfoBar,
     BodyLabel,
 )
-from app.utils.utils import get_icon
-from app.widgets.basic_widget.searchable_editable_combobox import (
-    SearchableEditableComboBox,
-)
+
+from app.llm_chatter.widgets.searchable_editable_combobox import SearchableEditableComboBox
+from app.utils.utils import get_icon, get_unified_font
 from app.llm_chatter.constants import (
     PROVIDER_ICONS,
     PROVIDER_MODELS,

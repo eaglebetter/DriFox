@@ -2,33 +2,26 @@
 """
 模型配置卡片 - 优化布局，有变化自动保存
 """
-import ast
 import webbrowser
-from loguru import logger
 from PyQt5.QtCore import Qt, pyqtSignal, QTimer
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout
 from qfluentwidgets import (
     BodyLabel,
     LineEdit,
     Slider,
     SpinBox,
-    PushButton,
     SwitchButton,
     PasswordLineEdit,
     ComboBox,
 )
 
-from app.widgets.basic_widget.searchable_editable_combobox import (
+from app.llm_chatter.widgets.searchable_editable_combobox import (
     SearchableEditableComboBox,
 )
 from app.llm_chatter.constants import (
     PARAM_UI_MAP,
     PARAM_RANGE_MAP,
-    PROVIDER_MODELS,
-    FREE_PROVIDERS,
 )
-from app.utils.utils import get_unified_font
-from app.utils.config import Settings
 
 
 class ModelConfigCard(QWidget):

@@ -4,24 +4,20 @@
 """
 
 from PyQt5.QtCore import Qt, pyqtSignal, QTimer
-from PyQt5.QtGui import QFont, QFontDatabase, QColor
+from PyQt5.QtGui import QFont, QColor
 from PyQt5.QtWidgets import (
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
     QLabel,
     QScrollArea,
-    QSizePolicy,
     QFontComboBox,
-    QComboBox,
 )
 from qfluentwidgets import (
     CardWidget,
     StrongBodyLabel,
-    BodyLabel,
     SwitchSettingCard,
     OptionsSettingCard,
-    SettingCard,
     FluentIcon,
 )
 from app.utils.utils import get_icon, get_unified_font
@@ -121,7 +117,7 @@ class LLMSettingsCard(CardWidget):
         content_layout.setSpacing(6)
 
         # 已保存的服务商
-        from app.widgets.card_widget.provider_setting_card import (
+        from app.llm_chatter.widgets.provider_setting_card import (
             ProviderListSettingCard,
         )
 
@@ -137,7 +133,7 @@ class LLMSettingsCard(CardWidget):
         content_layout.addWidget(self.llmProviderCard)
 
         # 启用技能
-        from app.widgets.card_widget.list_setting_card import SkillListSettingCard
+        from app.llm_chatter.widgets.list_setting_card import SkillListSettingCard
 
         self.llmSkillsCard = SkillListSettingCard(
             icon=get_icon("智能体"),
@@ -173,20 +169,6 @@ class LLMSettingsCard(CardWidget):
             parent=self,
         )
         content_layout.addWidget(self.llmSoundCard)
-
-        # # API 服务开关
-        # self.llmApiEnabledCard = SwitchSettingCard(
-        #     get_icon("API"),
-        #     "启用 API 服务",
-        #     f"http://localhost:{self.cfg.llm_api_port.value}/docs",
-        #     configItem=self.cfg.llm_api_enabled,
-        #     parent=self,
-        # )
-        # content_layout.addWidget(self.llmApiEnabledCard)
-        #
-        # # 端口号设置
-        # self._setup_port_card()
-        # content_layout.addWidget(self.llmApiPortCard)
 
         content_layout.addStretch(1)
         scroll.setWidget(content_widget)
@@ -278,14 +260,6 @@ class LLMSettingsCard(CardWidget):
                         width: 14px;
                         margin: 4px 2px 4px 2px;
                     }
-                    QScrollBar::handle:vertical {
-                        background: #555555;
-                        border-radius: 6px;
-                        min-height: 30px;
-                    }
-                    QScrollBar::handle:vertical:hover {
-                        background: #666666;
-                    }
                     QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
                         height: 0px;
                     }
@@ -371,7 +345,6 @@ class LLMSettingsCard(CardWidget):
     def _on_llm_api_enabled_changed(self, enabled):
         """API 服务开关变化时启动/停止服务"""
         from app.llm_chatter.api import (
-            start_llm_api_service,
             stop_llm_api_service,
             is_service_running,
             get_llm_api_service,
@@ -390,7 +363,6 @@ class LLMSettingsCard(CardWidget):
     def _on_llm_api_port_changed(self, port):
         """端口变化时，如果服务正在运行则重启服务"""
         from app.llm_chatter.api import (
-            start_llm_api_service,
             stop_llm_api_service,
             is_service_running,
             get_llm_api_service,

@@ -3,11 +3,9 @@
 扁平式模型选择上拉框 - 类似 OpenCode 风格
 展示所有已配置服务商的模型，服务商作为小标题，下面是模型列表
 """
-import ast
-from typing import Dict, List, Tuple, Optional, Any
-from loguru import logger
-from PyQt5.QtCore import Qt, pyqtSignal, QTimer
-from PyQt5.QtGui import QFont, QPainter, QColor, QBrush, QPen
+from typing import List, Tuple
+
+from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import (
     QWidget,
     QFrame,
@@ -19,21 +17,9 @@ from PyQt5.QtWidgets import (
     QLineEdit,
     QApplication,
 )
-from qfluentwidgets import (
-    BodyLabel,
-    LineEdit,
-    CardWidget,
-    setFont,
-)
-from app.utils.utils import get_icon, get_unified_font, get_font_family_css
-from app.llm_chatter.constants import (
-    PROVIDER_ICONS,
-    PROVIDER_MODELS,
-    FREE_PROVIDERS,
-)
-from app.widgets.card_widget.provider_setting_card import (
-    ProviderIconWidget,
-)
+
+from app.llm_chatter.widgets.provider_setting_card import ProviderIconWidget
+from app.utils.utils import get_font_family_css
 
 
 class ProviderHeader(QWidget):
