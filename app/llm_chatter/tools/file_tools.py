@@ -45,7 +45,7 @@ class GrepTask(QRunnable):
             regex = re.compile(self.pattern, re.IGNORECASE)
             results = []
             
-            exclude_dirs = {'.mypy_cache', '.git', 'node_modules', '__pycache__', 'venv', '.venv',
+            exclude_dirs = {'.drifox', '.mypy_cache', '.git', 'node_modules', '__pycache__', 'venv', '.venv',
                            'dist', 'build', '.idea', '.vscode'}
             
             for root, dirs, files in os.walk(search_root):

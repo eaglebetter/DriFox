@@ -478,6 +478,12 @@ class ToolPopupDialog(QDialog):
         self._sync_lock_btn_position()
         self._lock_btn_widget.show()
 
+    def hideEvent(self, event):
+        """窗口隐藏时（包括最小化）同步隐藏锁定按钮"""
+        super().hideEvent(event)
+        if self._lock_btn_widget:
+            self._lock_btn_widget.hide()
+
     def _restore_geometry(self):
         from PyQt5.QtCore import QSettings
 
