@@ -305,13 +305,17 @@ class SubAgentFloatingWidget(SimpleCardWidget):
         if task_id not in self._tasks:
             return
 
-        # 隐藏当前显示的任务
-        if self._active_task_id and self._active_task_id in self._tasks:
-            self._tasks[self._active_task_id].hide()
+        # 移除所有现有的 widget
+        while self.log_container_layout.count() > 0:
+            item = self.log_container_layout.takeAt(0)
+            if item.widget():
+                item.widget().hide()
 
-        # 显示选中的任务
-        self._tasks[task_id].show()
-        self.log_container_layout.addWidget(self._tasks[task_id])
+        # 添加当前任务 widget
+        widget = self._tasks[task_id]
+        self.log_container_layout.addWidget(widget)
+        widget.show()
+
         self._active_task_id = task_id
 
     def _on_close(self):
@@ -337,11 +341,11 @@ class SubAgentFloatingWidget(SimpleCardWidget):
         # 更新计数
         self._update_task_count()
 
-        # 显示日志
+        # 显示日志（只显示当前任务）
         self._show_task_log(task_id)
         self.setVisible(True)
 
-    def show_task_from_data(self, task_data: dict):
+    def show_task_from_data(self, task_data: dict, clear_first: bool = True):
         """
         从外部数据显示任务日志（用于查看已完成任务的历史日志）。
 
@@ -363,14 +367,16 @@ class SubAgentFloatingWidget(SimpleCardWidget):
                 ],
                 "status": "running"|"finished"
             }
+            clear_first: 是否先清空面板，默认 True
         """
         task_id = task_data.get("task_id", "unknown")
         summary = task_data.get("summary", {})
         logs = task_data.get("logs", [])
         status = task_data.get("status", "finished")
 
-        # 清空现有面板
-        self.clear()
+        # 清空现有面板（仅首次调用时）
+        if clear_first:
+            self.clear()
 
         # 获取任务信息
         agent_name = summary.get("agent_name", "未知")
@@ -378,16 +384,17 @@ class SubAgentFloatingWidget(SimpleCardWidget):
         result = summary.get("result", "")
         error = summary.get("error", "")
 
-        # 创建任务日志组件
+        # 创建任务日志组件（复用现有样式）
         task_widget = SubTaskLogWidget(task_id, agent_name, task_desc, self.log_container)
         self._tasks[task_id] = task_widget
 
-        # 更新 Segment
-        self.segment_widget.addItem(task_id, f"[{agent_name}]")
+        # 更新 Segment（与 add_task 保持一致的命名）
+        task_index = len(self._tasks)
+        self.segment_widget.addItem(task_id, f"任务{task_index}")
         self.segment_widget.setCurrentItem(task_id)
-        self._task_labels[task_id] = f"[{agent_name}]"
+        self._task_labels[task_id] = f"任务{task_index}"
 
-        # 重放日志
+        # 重放日志（与运行时的实时日志格式一致）
         for log in logs:
             log_type = log.get("type", "")
             content = log.get("content", "")
@@ -405,10 +412,8 @@ class SubAgentFloatingWidget(SimpleCardWidget):
                 result_val = log.get("result", "")
                 success = log.get("success", True)
                 task_widget.add_tool_result(content, result_val, success)
-            elif log_type == "finish":
-                task_widget.finish_task(result_val if result_val else content, success=success)
 
-        # 如果有最终结果
+        # 如果有最终结果（只有已完成的任务才有）
         if result:
             success = not (error or "error" in str(result).lower())
             task_widget.finish_task(result, success)
@@ -532,8 +537,9 @@ class SubAgentFloatingWidget(SimpleCardWidget):
 
     def clear(self):
         """清空所有任务"""
-        # 清空所有 widget
-        for widget in self._tasks.values():
+        # 从 layout 中移除所有 widget
+        for widget in list(self._tasks.values()):
+            self.log_container_layout.removeWidget(widget)
             widget.hide()
             widget.deleteLater()
 

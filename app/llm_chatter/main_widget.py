@@ -2670,11 +2670,10 @@ class OpenAIChatToolWindow(ToolWindow):
             return
         
         # 清空现有面板并逐个添加任务
-        self._sub_agent_floating_widget.clear()
-        
-        for task_data in all_logs:
+        for i, task_data in enumerate(all_logs):
             task_id = task_data.get("task_id", task_data.get("summary", {}).get("task_id", "unknown"))
-            self._sub_agent_floating_widget.show_task_from_data(task_data)
+            # 首次清空，后续追加
+            self._sub_agent_floating_widget.show_task_from_data(task_data, clear_first=(i == 0))
         
         # 显示面板
         self._sub_agent_floating_widget.setVisible(True)
