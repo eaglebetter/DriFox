@@ -341,6 +341,87 @@ class SubAgentFloatingWidget(SimpleCardWidget):
         self._show_task_log(task_id)
         self.setVisible(True)
 
+    def show_task_from_data(self, task_data: dict):
+        """
+        从外部数据显示任务日志（用于查看已完成任务的历史日志）。
+
+        Args:
+            task_data: {
+                "task_id": str,
+                "summary": {
+                    "task_id": str,
+                    "agent_name": str,
+                    "task_description": str,
+                    "tool_call_count": int,
+                    "elapsed_seconds": int,
+                    "result": str,
+                    "error": str,
+                },
+                "logs": [
+                    {"type": "progress"|"thinking"|"ai_response"|"tool_call"|"tool_result"|"finish", "content": str, ...},
+                    ...
+                ],
+                "status": "running"|"finished"
+            }
+        """
+        task_id = task_data.get("task_id", "unknown")
+        summary = task_data.get("summary", {})
+        logs = task_data.get("logs", [])
+        status = task_data.get("status", "finished")
+
+        # 清空现有面板
+        self.clear()
+
+        # 获取任务信息
+        agent_name = summary.get("agent_name", "未知")
+        task_desc = summary.get("task_description", summary.get("task_id", ""))
+        result = summary.get("result", "")
+        error = summary.get("error", "")
+
+        # 创建任务日志组件
+        task_widget = SubTaskLogWidget(task_id, agent_name, task_desc, self.log_container)
+        self._tasks[task_id] = task_widget
+
+        # 更新 Segment
+        self.segment_widget.addItem(task_id, f"[{agent_name}]")
+        self.segment_widget.setCurrentItem(task_id)
+        self._task_labels[task_id] = f"[{agent_name}]"
+
+        # 重放日志
+        for log in logs:
+            log_type = log.get("type", "")
+            content = log.get("content", "")
+
+            if log_type == "progress":
+                task_widget.update_progress(content)
+            elif log_type == "thinking":
+                task_widget.add_thinking(content)
+            elif log_type == "ai_response":
+                task_widget.add_ai_response(content)
+            elif log_type == "tool_call":
+                args = log.get("args")
+                task_widget.add_tool_call(content, args)
+            elif log_type == "tool_result":
+                result_val = log.get("result", "")
+                success = log.get("success", True)
+                task_widget.add_tool_result(content, result_val, success)
+            elif log_type == "finish":
+                task_widget.finish_task(result_val if result_val else content, success=success)
+
+        # 如果有最终结果
+        if result:
+            success = not (error or "error" in str(result).lower())
+            task_widget.finish_task(result, success)
+        elif error:
+            task_widget.finish_task(error, success=False)
+
+        # 更新计数
+        self._update_task_count()
+
+        # 显示日志
+        self._show_task_log(task_id)
+        self.setVisible(True)
+
     def update_progress(self, task_id: str, message: str):
         """更新指定任务的进度"""
         if task_id in self._tasks:

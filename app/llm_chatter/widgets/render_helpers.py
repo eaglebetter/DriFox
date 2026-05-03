@@ -178,6 +178,35 @@ def _format_result_for_display(result: str, max_len: int = 500) -> str:
     return f'<div class="result-content">{escape(cleaned)}</div>'
 
 
+def _parse_subagent_task_ids(result: str) -> str:
+    """
+    解析 result 中的 task_ids，返回逗号分隔的字符串。
+    """
+    if not result:
+        return ""
+    
+    # 尝试解析 JSON
+    try:
+        data = json.loads(result)
+        if isinstance(data, dict):
+            task_ids = data.get("task_ids", [])
+            if task_ids:
+                return ",".join(task_ids)
+        elif isinstance(data, list):
+            return ",".join(data)
+    except (json.JSONDecodeError, TypeError):
+        pass
+    
+    # 尝试从文本中提取 task_id（UUID 格式）
+    import re
+    uuid_pattern = r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+    matches = re.findall(uuid_pattern, result)
+    if matches:
+        return ",".join(matches)
+    
+    return ""
+
+
 def render_tool_block(
     tool_name: str,
     tool_args: dict,
@@ -226,6 +255,22 @@ def render_tool_block(
             onkeydown="if(event.key === 'Enter' || event.key === ' '){{ event.preventDefault(); event.stopPropagation(); window._requestToolDiff(this.dataset.toolCallId); }}"
             title="查看文件差异">
             <img src="qrc:/icons/差异对比.svg" style="width: 16px; height: 16px;" />
+        </span>'''
+
+    # 子智能体日志查看按钮
+    subagent_log_btn_html = ""
+    if is_sub_agent_task:
+        # 解析 task_ids
+        task_ids_str = _parse_subagent_task_ids(result)
+        if task_ids_str:
+            subagent_log_btn_html = f'''
+        <span class="tool-subagent-log-btn" data-task-ids="{escape(task_ids_str)}"
+            role="button" tabindex="0"
+            style="display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; background: transparent; cursor: pointer; padding: 4px; margin-left: 8px; border-radius: 4px;"
+            onclick="event.stopPropagation(); window._requestSubAgentLog(this.dataset.taskIds)"
+            onkeydown="if(event.key === 'Enter' || event.key === ' '){{ event.preventDefault(); event.stopPropagation(); window._requestSubAgentLog(this.dataset.taskIds); }}"
+            title="查看子智能体执行日志">
+            <img src="qrc:/icons/日志.svg" style="width: 16px; height: 16px;" />
         </span>'''
 
     # 生成参数预览（折叠时显示）
@@ -281,6 +326,7 @@ def render_tool_block(
         </span>
         <span style="display: flex; align-items: center; flex: 0 0 auto;">
             {diff_icon_html}
+            {subagent_log_btn_html}
         </span>
     </button>
     <div class="cm-collapsible__body"{body_style}>

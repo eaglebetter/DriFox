@@ -2299,6 +2299,7 @@ class OpenAIChatToolWindow(ToolWindow):
             on_tool_diff=self._on_tool_diff_requested,
             on_card_diff=self._on_card_diff_requested,
             on_save_file=self._on_save_file_requested,
+            on_subagent_log=self._on_subagent_log_requested,
         )
         
         self._add_chat_widget(card, insert_index=insert_index)
@@ -2611,6 +2612,72 @@ class OpenAIChatToolWindow(ToolWindow):
                 parent=self,
                 position=InfoBarPosition.TOP_RIGHT,
             )
+
+    def _on_subagent_log_requested(self, task_ids_str: str):
+        """
+        处理子智能体日志查看请求
+        
+        Args:
+            task_ids_str: 逗号分隔的任务ID列表
+        """
+        if not task_ids_str:
+            return
+        
+        # 解析 task_ids
+        task_ids = [tid.strip() for tid in task_ids_str.split(",") if tid.strip()]
+        if not task_ids:
+            return
+        
+        # 获取 sub_agent_manager
+        sub_agent_mgr = self._tool_executor._builtin_tools._sub_agent_manager
+        if not sub_agent_mgr:
+            logger.warning("[LLMChatter] sub_agent_manager 未初始化")
+            return
+        
+        # 如果只有一个任务，直接显示
+        if len(task_ids) == 1:
+            task_id = task_ids[0]
+            task_data = sub_agent_mgr.get_task_logs(task_id)
+            if not task_data.get("found"):
+                InfoBar.warning(
+                    "任务不存在",
+                    f"未找到任务: {task_id[:8]}...",
+                    duration=3000,
+                    parent=self,
+                    position=InfoBarPosition.TOP_RIGHT,
+                )
+                return
+            
+            # 显示日志
+            self._sub_agent_floating_widget.show_task_from_data(task_data)
+            return
+        
+        # 多个任务：收集所有任务的日志
+        all_logs = []
+        for task_id in task_ids:
+            task_data = sub_agent_mgr.get_task_logs(task_id)
+            if task_data.get("found"):
+                all_logs.append(task_data)
+        
+        if not all_logs:
+            InfoBar.warning(
+                "任务不存在",
+                "未找到任何任务日志",
+                duration=3000,
+                parent=self,
+                position=InfoBarPosition.TOP_RIGHT,
+            )
+            return
+        
+        # 清空现有面板并逐个添加任务
+        self._sub_agent_floating_widget.clear()
+        
+        for task_data in all_logs:
+            task_id = task_data.get("task_id", task_data.get("summary", {}).get("task_id", "unknown"))
+            self._sub_agent_floating_widget.show_task_from_data(task_data)
+        
+        # 显示面板
+        self._sub_agent_floating_widget.setVisible(True)
 
     def _on_card_diff_requested(self, round_index: int):
         """

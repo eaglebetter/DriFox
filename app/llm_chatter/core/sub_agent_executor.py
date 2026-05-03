@@ -50,12 +50,45 @@ class SubAgentExecutor(QThread):
         self._last_result = None
         self._execution_error = None
         self._start_time = None
+        # 日志存储: [{"type": "progress"|"thinking"|"ai_response"|"tool_call"|"tool_result"|"finish", "content": str, "timestamp": float}]
+        self._logs: List[Dict] = []
+        self._tool_call_count = 0
 
     def cancel(self):
         self._is_cancelled = True
 
     def provide_answer(self, answer: str):
         self._pending_answer = answer
+
+    def _add_log(self, log_type: str, content: str, extra: dict = None):
+        """记录日志"""
+        import time
+        log_entry = {
+            "type": log_type,
+            "content": content,
+            "timestamp": time.time(),
+        }
+        if extra:
+            log_entry.update(extra)
+        self._logs.append(log_entry)
+
+    def get_logs(self) -> List[Dict]:
+        """获取所有日志"""
+        return self._logs.copy()
+
+    def get_summary(self) -> dict:
+        """获取任务摘要"""
+        import time
+        elapsed = int(time.time() - self._start_time) if self._start_time else 0
+        return {
+            "task_id": self.task_id,
+            "agent_name": self.agent_name,
+            "task_description": self.task_description,
+            "tool_call_count": self._tool_call_count,
+            "elapsed_seconds": elapsed,
+            "result": self._last_result,
+            "error": self._execution_error,
+        }
 
     def run(self):
         import time
@@ -82,6 +115,7 @@ class SubAgentExecutor(QThread):
             else:
                 messages.append({"role": "user", "content": self.task_description})
 
+            self._add_log("progress", f"开始执行子任务: {self.agent_name}")
             self.progress_updated.emit(self.task_id, f"开始执行子任务: {self.agent_name}")
 
             try:
@@ -373,6 +407,8 @@ class SubAgentExecutor(QThread):
                 }
                 return None
 
+            self._tool_call_count += 1
+            self._add_log("tool_call", tool_name, {"args": arguments})
             self.tool_call_started.emit(self.task_id, tool_name, arguments)
             QCoreApplication.processEvents()
 
@@ -380,6 +416,7 @@ class SubAgentExecutor(QThread):
             result_content = str(result) if result else ""
             success = getattr(result, "success", True) if result else False
 
+            self._add_log("tool_result", tool_name, {"result": result_content, "success": success})
             self.tool_result_received.emit(self.task_id, tool_name, result_content, success)
             QCoreApplication.processEvents()
 
@@ -593,6 +630,84 @@ class SubAgentManager(QObject):
     def get_task_result(self, task_id: str) -> Dict:
         """获取指定任务的执行结果"""
         return self._finished_tasks.get(task_id, {"result": "", "error": ""})
+
+    def get_task_logs(self, task_id: str) -> Dict:
+        """
+        获取指定任务的完整日志和摘要。
+        
+        Returns:
+            Dict: {
+                "summary": {...},  # 任务摘要
+                "logs": [...],      # 日志列表
+                "found": bool       # 是否找到任务
+            }
+        """
+        # 先清理已完成的
+        self.get_finished_tasks()
+        
+        # 检查运行中的任务
+        if task_id in self._running_tasks:
+            executor = self._running_tasks[task_id]
+            return {
+                "summary": executor.get_summary(),
+                "logs": executor.get_logs(),
+                "found": True,
+                "status": "running"
+            }
+        
+        # 检查已完成的任务
+        if task_id in self._finished_tasks:
+            task_info = self._finished_tasks[task_id]
+            # 已完成的任务在 _finished_tasks 中没有 logs，需要从 executor 的存储中获取
+            # 但 executor 可能已经销毁，这里返回已保存的信息
+            return {
+                "summary": {
+                    "task_id": task_id,
+                    "agent_name": task_info.get("agent_name", ""),
+                    "result": task_info.get("result", ""),
+                    "error": task_info.get("error", ""),
+                },
+                "logs": [],  # 已完成任务没有存储日志
+                "found": True,
+                "status": "finished"
+            }
+        
+        return {"summary": {}, "logs": [], "found": False, "status": "unknown"}
+
+    def get_all_task_logs(self) -> List[Dict]:
+        """
+        获取所有任务的日志（运行中和已完成的）。
+        
+        Returns:
+            List[Dict]: 每个任务的日志信息列表
+        """
+        results = []
+        self.get_finished_tasks()  # 先清理
+        
+        # 收集运行中的任务
+        for task_id, executor in self._running_tasks.items():
+            results.append({
+                "task_id": task_id,
+                "summary": executor.get_summary(),
+                "logs": executor.get_logs(),
+                "status": "running"
+            })
+        
+        # 收集已完成的任务
+        for task_id, task_info in self._finished_tasks.items():
+            results.append({
+                "task_id": task_id,
+                "summary": {
+                    "task_id": task_id,
+                    "agent_name": task_info.get("agent_name", ""),
+                    "result": task_info.get("result", ""),
+                    "error": task_info.get("error", ""),
+                },
+                "logs": [],  # 已完成任务没有存储日志
+                "status": "finished"
+            })
+        
+        return results
 
     def get_tasks_status(self, task_ids: List[str]) -> ToolResult:
         """获取指定任务的状态"""

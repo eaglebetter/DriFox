@@ -541,6 +541,7 @@ class ConsoleMonitorPage(QWebEnginePage):
     heightReported = pyqtSignal(int)
     contentReady = pyqtSignal()
     toolDiffRequested = pyqtSignal(str)  # tool_call_id
+    subAgentLogRequested = pyqtSignal(str)  # task_ids (comma-separated)
     saveFileRequested = pyqtSignal(str, str)  # code, lang
 
     def javaScriptConsoleMessage(self, level, message, lineNumber, sourceID):
@@ -579,6 +580,13 @@ class ConsoleMonitorPage(QWebEnginePage):
                     self.toolDiffRequested.emit(tool_call_id)
                 except Exception:
                     pass
+            elif "subagent_log:" in msg:
+                # 处理子智能体日志查看请求
+                try:
+                    task_ids = msg.split("subagent_log:", 1)[1]
+                    self.subAgentLogRequested.emit(task_ids)
+                except Exception:
+                    pass
             elif "save_file:" in msg:
                 # 处理保存文件请求
                 try:
@@ -609,6 +617,7 @@ class CodeWebViewer(QWebEngineView):
     codeActionRequested = pyqtSignal(str, str)
     contextActionRequested = pyqtSignal(str, str)
     toolDiffRequested = pyqtSignal(str)  # tool_call_id
+    subAgentLogRequested = pyqtSignal(str)  # task_ids (comma-separated)
     saveFileRequested = pyqtSignal(str, str)  # code, lang
     # WebEngine 上下文丢失信号
     contextLost = pyqtSignal()
@@ -667,6 +676,7 @@ class CodeWebViewer(QWebEngineView):
         self._page.heightReported.connect(self._on_height_reported)
         self._page.contentReady.connect(self._on_js_ready)
         self._page.toolDiffRequested.connect(self.toolDiffRequested.emit)
+        self._page.subAgentLogRequested.connect(self.subAgentLogRequested.emit)
         self._page.saveFileRequested.connect(self.saveFileRequested.emit)
 
         self._load_skeleton()
@@ -1358,6 +1368,11 @@ class CodeWebViewer(QWebEngineView):
                 window._requestToolDiff = function(toolCallId) {{
                     console.log('pywebview_action:tool_diff:' + toolCallId);
                 }};
+
+                // 子智能体日志查看请求函数
+                window._requestSubAgentLog = function(taskIds) {{
+                    console.log('pywebview_action:subagent_log:' + taskIds);
+                }};
             </script>
         </body>
         </html>
@@ -1597,6 +1612,7 @@ class MessageCard(SimpleCardWidget):
     optionSelected = pyqtSignal(dict)
     interventionRequested = pyqtSignal(dict)
     toolDiffRequested = pyqtSignal(str)  # tool_call_id
+    subAgentLogRequested = pyqtSignal(str)  # task_ids (comma-separated)
     cardDiffRequested = pyqtSignal(int)  # round_index
     saveFileRequested = pyqtSignal(str, str)  # code, lang
 
@@ -1803,6 +1819,7 @@ class MessageCard(SimpleCardWidget):
             self.viewer.contextActionRequested.connect(self.contextActionRequested.emit)
             self.viewer.contentHeightChanged.connect(self._update_height)
             self.viewer.toolDiffRequested.connect(self.toolDiffRequested.emit)
+            self.viewer.subAgentLogRequested.connect(self.subAgentLogRequested.emit)
             self.viewer.saveFileRequested.connect(self.saveFileRequested.emit)
             # WebEngine 上下文丢失处理
             self.viewer.contextLost.connect(self._on_webengine_context_lost)

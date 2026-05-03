@@ -1429,10 +1429,11 @@ def create_assistant_card_widget(
     on_tool_diff=None,
     on_card_diff=None,
     on_save_file=None,
+    on_subagent_log=None,
 ) -> Any:
     """
     创建助手消息卡片（带标准配置）
-    
+
     Args:
         parent: 父控件
         timestamp: 时间戳
@@ -1442,7 +1443,8 @@ def create_assistant_card_widget(
         on_tool_diff: 工具差异回调
         on_card_diff: 卡片差异回调
         on_save_file: 保存文件回调
-        
+        on_subagent_log: 子智能体日志回调
+
     Returns:
         配置好的 MessageCard
     """
@@ -1462,7 +1464,9 @@ def create_assistant_card_widget(
         card.cardDiffRequested.connect(on_card_diff)
     if on_save_file:
         card.saveFileRequested.connect(on_save_file)
-        
+    if on_subagent_log:
+        card.subAgentLogRequested.connect(on_subagent_log)
+
     return card
 
 
