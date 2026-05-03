@@ -162,11 +162,15 @@ class TaskTools:
                 
                 if now - start_time > timeout:
                     logger.warning(f"[task_wait] Timeout after {timeout}s, pending: {pending}")
+                    # 超时后，先清理卡死任务（这会将它们移到 _finished_tasks）
+                    self._sub_agent_manager.cleanup_dead_tasks(timeout_seconds=300)
+                    # 然后从 _finished_tasks 获取结果
                     for tid in pending:
-                        # 超时的也尝试从 _finished_tasks 获取已有结果
                         existing = self._sub_agent_manager.get_task_result(tid)
-                        if existing.get("result") or existing.get("error"):
-                            results.append({"task_id": tid, "status": "finished", "result": existing.get("result", ""), "error": existing.get("error", "")})
+                        if existing.get("result"):
+                            results.append({"task_id": tid, "status": "finished", "result": existing.get("result", "")})
+                        elif existing.get("error"):
+                            results.append({"task_id": tid, "status": "timeout", "result": "", "error": existing.get("error", "")})
                         else:
                             results.append({"task_id": tid, "status": "timeout", "result": "", "error": "Task execution timeout"})
                     break
@@ -194,23 +198,25 @@ class TaskTools:
             logger.error(f"[task_wait] Exception: {e}")
             return ToolResult(False, error=f"等待任务失败: {str(e)}")
 
-    def task_status(self, task_ids: List[str] = None) -> ToolResult:
+    def task_status(self, task_ids: List[str] = None, with_log: bool = False, with_result: bool = True) -> ToolResult:
         """
         查询任务状态。
 
         Args:
             task_ids: 任务ID列表（None=查询所有活跃任务）
+            with_log: 是否包含执行日志（默认 False）
+            with_result: 是否包含执行结果（默认 True）
 
         Returns:
-            ToolResult: success=True, content={"tasks": [{"task_id": str, "status": str, "agent": str}]}
+            ToolResult: success=True, content={"tasks": [{"task_id": str, "status": str, "agent": str, "result"?: str, "logs"?: [...]}]}
         """
         if not hasattr(self, "_sub_agent_manager") or not self._sub_agent_manager:
             return ToolResult(False, error="子智能体管理器未初始化")
 
         if task_ids:
-            return self._sub_agent_manager.get_tasks_status(task_ids)
+            return self._sub_agent_manager.get_tasks_status_with_details(task_ids, with_log, with_result)
         else:
-            return self._sub_agent_manager.get_all_active_tasks()
+            return self._sub_agent_manager.get_all_active_tasks_with_details(with_log, with_result)
 
     def load_skill(self, name: str) -> ToolResult:
         try:

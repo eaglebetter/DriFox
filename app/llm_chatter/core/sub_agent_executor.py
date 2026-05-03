@@ -685,11 +685,18 @@ class SubAgentManager(QObject):
                 logger.warning(f"[SubAgentManager] Task {task_id} dead for {now - start_time}s, cancelling")
                 executor.cancel()
                 agent_name = getattr(executor, "agent_name", "")
+                task_description = getattr(executor, "task_description", "")
+                logs = executor.get_logs() if hasattr(executor, "get_logs") else []
+                error_msg = f"Task cancelled due to timeout ({timeout_seconds}s)"
                 self._finished_tasks[task_id] = {
                     "result": "",
-                    "error": f"Task cancelled due to timeout ({timeout_seconds}s)",
-                    "agent_name": agent_name
+                    "error": error_msg,
+                    "agent_name": agent_name,
+                    "task_description": task_description,
+                    "logs": logs,
                 }
+                # 更新数据库
+                self._save_task_to_store(task_id, agent_name, task_description, "timeout", "", error_msg)
                 del self._running_tasks[task_id]
                 cleaned.append(task_id)
         
@@ -827,6 +834,68 @@ class SubAgentManager(QObject):
                     "status": "unknown",
                     "agent": "",
                 })
+        return ToolResult(True, content={"tasks": tasks_info})
+
+    def get_tasks_status_with_details(self, task_ids: List[str], with_log: bool = False, with_result: bool = True) -> ToolResult:
+        """获取指定任务的详细状态"""
+        tasks_info = []
+        for tid in task_ids:
+            task_data = self.get_task_logs(tid)
+            if not task_data.get("found"):
+                tasks_info.append({
+                    "task_id": tid,
+                    "status": "unknown",
+                    "agent": "",
+                })
+                continue
+
+            task_info = {
+                "task_id": tid,
+                "status": task_data.get("status", "unknown"),
+                "agent": task_data.get("summary", {}).get("agent_name", task_data.get("agent_name", "")),
+            }
+
+            # 是否包含结果
+            if with_result:
+                result = task_data.get("result") or task_data.get("summary", {}).get("result", "")
+                error = task_data.get("error") or task_data.get("summary", {}).get("error", "")
+                if result:
+                    task_info["result"] = result
+                if error:
+                    task_info["error"] = error
+
+            # 是否包含日志
+            if with_log:
+                logs = task_data.get("logs", [])
+                if logs:
+                    task_info["logs"] = logs
+
+            tasks_info.append(task_info)
+
+        return ToolResult(True, content={"tasks": tasks_info})
+
+    def get_all_active_tasks_with_details(self, with_log: bool = False, with_result: bool = True) -> ToolResult:
+        """获取所有活跃任务的详细状态"""
+        tasks_info = []
+        for task_id, executor in self._running_tasks.items():
+            task_info = {
+                "task_id": task_id,
+                "status": "running" if executor.isRunning() else "finishing",
+                "agent": getattr(executor, "agent_name", ""),
+            }
+
+            if with_result:
+                result = getattr(executor, "_last_result", "") or ""
+                if result:
+                    task_info["result"] = result
+
+            if with_log:
+                logs = executor.get_logs()
+                if logs:
+                    task_info["logs"] = logs
+
+            tasks_info.append(task_info)
+
         return ToolResult(True, content={"tasks": tasks_info})
 
     def get_all_active_tasks(self) -> ToolResult:

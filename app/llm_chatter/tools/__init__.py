@@ -787,7 +787,7 @@ def get_builtin_tools_schema() -> List[Dict]:
                                         "description": "子智能体名称（如 build, plan, explore, summary, code-reviewer 等）",
                                     },
                                     "description": {"type": "string", "description": "任务描述"},
-                                    "context": {"type": "string", "description": "上下文信息（可选）"},
+                                    "context": {"type": "string", "description": "详细上下文信息（可选）"},
                                 },
                                 "required": ["agent", "description"],
                             },
@@ -830,11 +830,18 @@ def get_builtin_tools_schema() -> List[Dict]:
                     "properties": {
                         "task_ids": {
                             "type": "array",
-                            "description": "任务ID列表（不传则查询所有活跃任务）",
+                            "description": "任务ID列表（不传则查询所有活跃任务，不包括已成功或超时任务）",
                             "items": {"type": "string"},
                         },
-                    },
-                    "required": ["task_ids"],
+                        "with_log": {
+                            "type": "boolean",
+                            "description": "是否包含执行日志（默认 False）",
+                        },
+                        "with_result": {
+                            "type": "boolean",
+                            "description": "是否包含执行结果（默认 True）",
+                        },
+                    }
                 },
             },
         },

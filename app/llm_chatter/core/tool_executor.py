@@ -278,7 +278,7 @@ class ToolExecutor:
         "todoread": [],
         "task_batch": ["tasks"],
         "task_wait": ["task_ids"],
-        "task_status": [],
+        "task_status": ["with_log", "with_result"],
         "skill": ["name"],
         "list_skills": [],
         "question": ["question"],
@@ -426,7 +426,9 @@ class ToolExecutor:
                 args.get("poll_interval", 0.1),
             ),
             "task_status": lambda: self._builtin_tools.task_status(
-                args.get("task_ids")
+                args.get("task_ids"),
+                args.get("with_log", False),
+                args.get("with_result", True),
             ),
             "skill": lambda: self._builtin_tools.load_skill(args.get("name", "")),
             "list_skills": lambda: self._builtin_tools.list_skills(),
