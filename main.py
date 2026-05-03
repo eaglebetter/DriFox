@@ -77,7 +77,7 @@ def main():
     # 创建并显示窗口 - 直接使用 ToolPopupDialog
     logger.info("LLM Chatter 启动中...")
 
-    from app.llm_chatter.main_widget import OpenAIChatToolWindow
+    from app.main_widget import OpenAIChatToolWindow
     from PyQt5.QtWidgets import QWidget
 
     # 创建模拟的 homepage

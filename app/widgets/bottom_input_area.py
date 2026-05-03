@@ -1,0 +1,732 @@
+# 大模型输入框
+import re
+from pathlib import Path
+
+from PyQt5.QtCore import Qt, pyqtSignal, QTimer, QRect, QPoint, QSize
+from PyQt5.QtGui import QKeyEvent, QKeySequence, QDragEnterEvent, QDropEvent, QTextCursor, QPainter, QFont, QColor, QTextCharFormat
+from PyQt5.QtWidgets import QShortcut, QTextEdit, QWidget, QVBoxLayout, QListWidget, QListWidgetItem, QApplication, QLabel
+from qfluentwidgets import FluentIcon, ComboBox
+from qfluentwidgets import TextEdit, TransparentToolButton
+from qtpy import QtCore
+from app.utils.utils import get_font_family_css
+
+
+class SkillListItem(QWidget):
+    """带高亮的技能列表项"""
+    def __init__(self, skill_name: str, query: str, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(36)
+        self._skill_name = skill_name
+        self._query = query
+        self.setStyleSheet("""
+            SkillListItem {
+                background: transparent;
+                padding: 4px 12px;
+                border-radius: 6px;
+            }
+            SkillListItem:hover {
+                background: rgba(255, 255, 255, 0.08);
+            }
+        """)
+        
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        
+        self._label = QLabel()
+        self._update_highlight()
+        layout.addWidget(self._label)
+
+    def _update_highlight(self):
+        """更新高亮显示"""
+        name = self._skill_name
+        query = self._query
+        
+        if query:
+            # 高亮匹配的字母
+            html = ''
+            lower_name = name.lower()
+            lower_query = query.lower()
+            last_end = 0
+            for i in range(len(lower_query)):
+                idx = lower_name.find(lower_query[i], last_end)
+                if idx >= 0:
+                    html += name[last_end:idx]
+                    html += f'<span style="color: #C9A85C; font-weight: bold;">{name[idx]}</span>'
+                    last_end = idx + 1
+                else:
+                    break
+            html += name[last_end:]
+            self._label.setText(html)
+        else:
+            self._label.setText(name)
+            
+        self._label.setStyleSheet(f"""
+            QLabel {{
+                color: #EAF2FF;
+                {get_font_family_css()} font-size: 13px;
+            }}
+        """)
+
+
+class SkillCompleterPopup(QWidget):
+    """技能补全弹窗"""
+
+    skillSelected = pyqtSignal(str)  # 选择技能信号
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Tool | Qt.NoDropShadowWindowHint)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        # macOS 上顶层 Tool 窗口更容易抢占输入焦点，补全窗只负责展示和鼠标选择，
+        # 键盘事件仍由文本框统一处理。
+        self.setAttribute(Qt.WA_ShowWithoutActivating, True)
+        self.setFocusPolicy(Qt.NoFocus)
+        self.setFixedWidth(220)
+        self.setMinimumHeight(40)
+        self.setMaximumHeight(280)
+
+        self._list_widget = QListWidget(self)
+        self._list_widget.setFocusPolicy(Qt.NoFocus)
+        self._list_widget.setStyleSheet(f"""
+            QListWidget {{
+                background: rgba(25, 34, 50, 245);
+                border: 1px solid #2B3850;
+                border-radius: 10px;
+                padding: 4px;
+            }}
+            QListWidget::item {{
+                color: #EAF2FF;
+                background: transparent;
+            }}
+            QListWidget::item:selected {{
+                background: rgba(139, 115, 85, 0.6);
+            }}
+            QListWidget::item:hover {{
+                background: rgba(255, 255, 255, 0.08);
+            }}
+        """)
+        self._list_widget.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._list_widget.itemClicked.connect(self._on_item_clicked)
+        self._list_widget.itemDoubleClicked.connect(self._on_item_double_clicked)
+        self._list_widget.itemSelectionChanged.connect(self._on_selection_changed)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.addWidget(self._list_widget)
+
+        self._skills = []
+        self._current_query = ""
+
+    def load_skills(self, skills: list, query: str = ""):
+        """加载技能列表"""
+        self._skills = skills
+        self._current_query = query
+        self._list_widget.clear()
+        
+        visible_count = 0
+        for skill in skills:
+            item = QListWidgetItem()
+            item.setData(Qt.UserRole, skill["name"])
+            
+            # 匹配过滤
+            if query and query.lower() not in skill["name"].lower():
+                item.setHidden(True)
+            else:
+                visible_count += 1
+                # 设置自定义widget
+                widget = SkillListItem(skill["name"], query)
+                item.setSizeHint(QSize(212, 36))
+                self._list_widget.addItem(item)
+                self._list_widget.setItemWidget(item, widget)
+        
+        # 没有可见项则隐藏
+        if visible_count == 0:
+            self.hide()
+            return
+            
+        if self._list_widget.count() > 0:
+            self._list_widget.setCurrentRow(0)
+            
+        # 调整高度
+        self._adjust_height()
+        
+    def _adjust_height(self):
+        """调整弹窗高度"""
+        visible_count = sum(1 for i in range(self._list_widget.count()) if not self._list_widget.item(i).isHidden())
+        height = min(visible_count * 36 + 8, 288)
+        self.setFixedHeight(max(40, height))
+        # 触发位置重计算
+        if hasattr(self.parent(), '_on_at_trigger_check'):
+            self._pending_resize = True
+
+    def _on_item_clicked(self, item):
+        self._select_current()
+
+    def _on_item_double_clicked(self, item):
+        self._select_current()
+
+    def _on_selection_changed(self):
+        """选中项变化时更新高亮"""
+        pass  # 可以在这里做额外处理
+
+    def _select_current(self):
+        """选择当前项（使用可见项索引）"""
+        visible_items = [i for i in range(self._list_widget.count()) 
+                       if not self._list_widget.item(i).isHidden()]
+        if not visible_items:
+            return
+            
+        current_row = self._list_widget.currentRow()
+        if current_row in visible_items:
+            skill_name = self._list_widget.item(current_row).data(Qt.UserRole)
+            self.skillSelected.emit(skill_name)
+        else:
+            # 选中第一个可见项
+            self._list_widget.setCurrentRow(visible_items[0])
+            skill_name = self._list_widget.item(visible_items[0]).data(Qt.UserRole)
+            self.skillSelected.emit(skill_name)
+        self.hide()
+
+    def key_event(self, event: QKeyEvent):
+        """处理键盘事件"""
+        key = event.key()
+        if key == Qt.Key_Down:
+            self._move_selection(1)
+            event.accept()
+            return True
+        elif key == Qt.Key_Up:
+            self._move_selection(-1)
+            event.accept()
+            return True
+        elif key in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Tab):
+            self._select_current()
+            event.accept()
+            return True
+        elif key == Qt.Key_Escape:
+            self.hide()
+            event.accept()
+            return True
+        return False
+
+    def _move_selection(self, delta: int):
+        """移动选择，只在可见项间移动"""
+        visible_items = [i for i in range(self._list_widget.count()) if not self._list_widget.item(i).isHidden()]
+        if not visible_items:
+            return
+
+        current = self._list_widget.currentRow()
+        try:
+            idx = visible_items.index(current)
+        except ValueError:
+            idx = -1
+
+        new_idx = idx + delta
+        if new_idx < 0:
+            new_idx = len(visible_items) - 1
+        elif new_idx >= len(visible_items):
+            new_idx = 0
+            
+        self._list_widget.setCurrentRow(visible_items[new_idx])
+
+    def show_at_cursor(self, text_edit, cursor_top_global: QPoint, prefer_below: bool = True):
+        """在光标位置显示，自动换向避免超出屏幕
+        
+        Args:
+            text_edit: 文本编辑控件
+            cursor_top_global: 光标顶部在全局坐标系中的位置
+            prefer_below: 是否优先显示在下方
+        """
+        screen = QApplication.primaryScreen()
+        if screen:
+            screen_geo = screen.geometry()
+        else:
+            screen_geo = QRect(0, 0, 1920, 1080)
+        
+        popup_width = self.width()
+        popup_height = self.height()
+        
+        cursor_x = cursor_top_global.x()
+        cursor_y = cursor_top_global.y()
+        
+        # 检查右边界
+        if cursor_x + popup_width > screen_geo.right():
+            cursor_x = screen_geo.right() - popup_width - 10
+        
+        x = cursor_x
+        self._show_below = True
+        
+        # 判断应该在下方还是上方
+        space_below = screen_geo.bottom() - cursor_y
+        space_above = cursor_y - screen_geo.top()
+        
+        # 优先下方，但下方空间不够时用上方
+        if prefer_below and space_below >= popup_height:
+            # 下方足够，弹窗顶部对齐光标顶部
+            y = cursor_y + 2
+            self._show_below = True
+        elif space_above >= popup_height:
+            # 上方足够，弹窗底部对齐光标顶部
+            y = cursor_y - popup_height - 2
+            self._show_below = False
+        elif space_below >= popup_height:
+            # 回退到下方
+            y = cursor_y + 2
+            self._show_below = True
+        elif space_above >= popup_height:
+            # 回退到上方
+            y = cursor_y - popup_height - 2
+            self._show_below = False
+        else:
+            # 空间都不够，选择较大的
+            if space_above > space_below:
+                y = cursor_y - popup_height - 2
+                self._show_below = False
+            else:
+                y = cursor_y + 2
+                self._show_below = True
+        
+        # 确保不超出边界
+        if x < screen_geo.left():
+            x = screen_geo.left() + 10
+        if y < screen_geo.top():
+            y = screen_geo.top() + 10
+            
+        self.move(x, y)
+        self.show()
+        if text_edit is not None:
+            text_edit.setFocus(Qt.OtherFocusReason)
+
+
+def get_local_skills() -> list:
+    """获取本地技能列表，与 list_skills 保持一致"""
+    import yaml
+
+    skills_dirs = [
+        Path(__file__).parent.parent / "skills",
+        Path(".drifox") / "skills",
+        Path.home() / ".agents" / "skills",
+    ]
+
+    results = []
+    seen = set()
+
+    for skills_base in skills_dirs:
+        if not skills_base.exists():
+            continue
+
+        for skill_dir in skills_base.iterdir():
+            if not skill_dir.is_dir():
+                continue
+            if skill_dir.name.startswith("_") or skill_dir.name.startswith("."):
+                continue
+
+            skill_file = skill_dir / "SKILL.md"
+            if not skill_file.exists():
+                skill_file = skill_dir / "skill.md"
+            if not skill_file.exists():
+                continue
+
+            content = skill_file.read_text(encoding="utf-8")
+            name = skill_dir.name
+            description = ""
+
+            # 解析 frontmatter
+            if content.startswith("---"):
+                try:
+                    frontmatter = content.split("---", 2)[1]
+                    meta = yaml.safe_load(frontmatter)
+                    if meta:
+                        name = meta.get("name", skill_dir.name)
+                        description = meta.get("description", "")
+                except Exception:
+                    pass
+
+            if name not in seen:
+                seen.add(name)
+                results.append({
+                    "name": name,
+                    "description": description
+                })
+
+    return results
+
+
+def get_skill_by_name(name: str) -> dict | None:
+    """根据名称获取技能信息"""
+    skills = get_local_skills()
+    for skill in skills:
+        if skill["name"] == name:
+            return skill
+    return None
+
+
+class SendableTextEdit(QTextEdit):
+    sendMessageRequested = pyqtSignal()
+    stopMessageRequested = pyqtSignal()
+    clearRequested = pyqtSignal()
+    newSessionRequested = pyqtSignal()
+    historyUpRequested = pyqtSignal()
+    historyDownRequested = pyqtSignal()
+    agentChanged = pyqtSignal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setPlaceholderText("给 DriFox 发送消息，Enter 发送，Shift+Enter 换行")
+        self.setAcceptRichText(False)
+        self.setLineWrapMode(TextEdit.WidgetWidth)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setAcceptDrops(True)
+        self.setMinimumHeight(96)
+        self.setStyleSheet(f"""
+            QTextEdit {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 rgba(18, 24, 34, 150),
+                    stop:1 rgba(24, 31, 45, 150));
+                color: #F2F6FF;
+                border: 1px solid #2B3850;
+                border-radius: 18px;
+                padding: 14px 128px 18px 16px;
+                selection-background-color: rgba(201, 168, 92, 0.28);
+                {get_font_family_css()} font-size: 14px;
+            }}
+            QTextEdit:focus {{
+                border: 1px solid #C9A85C;
+                background: rgba(22, 29, 41, 200);
+            }}
+            QTextEdit QScrollBar:vertical {{
+                background: rgba(255, 255, 255, 0.05);
+                width: 6px;
+                margin: 2px 0 2px 0;
+                border-radius: 3px;
+            }}
+            QTextEdit QScrollBar::handle:vertical {{
+                background: rgba(255, 255, 255, 0.15);
+                border-radius: 3px;
+                min-height: 20px;
+            }}
+            QTextEdit QScrollBar::handle:vertical:hover {{
+                background: rgba(255, 255, 255, 0.25);
+            }}
+            QTextEdit QScrollBar::add-line:vertical,
+            QTextEdit QScrollBar::sub-line:vertical {{
+                height: 0px;
+            }}
+            QTextEdit QScrollBar::add-page:vertical,
+            QTextEdit QScrollBar::sub-page:vertical {{
+                background: none;
+            }}
+        """)
+
+        self._agent_combo = ComboBox(self)
+        self._agent_combo.setFixedSize(86, 28)
+        self._agent_combo.setStyleSheet(f"""
+            ComboBox {{
+                background-color: rgba(255, 255, 255, 0.05);
+                color: #EAF2FF;
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                border-radius: 10px;
+                padding: 3px 10px;
+                {get_font_family_css()} font-size: 12px;
+            }}
+            ComboBox:hover {{
+                background-color: rgba(255, 255, 255, 0.08);
+                border-color: rgba(201, 168, 92, 0.45);
+            }}
+            ComboBox::drop-down {{
+                border: none;
+                width: 16px;
+            }}
+            ComboBox::down-arrow {{
+                border-left: 4px solid transparent;
+                border-right: 4px solid transparent;
+                border-top: 5px solid #9BB0D3;
+                margin-right: 2px;
+            }}
+            ComboBox AbstractItemView {{
+                background-color: #192232;
+                color: #EAF2FF;
+                selection-background-color: #8B7355;
+                border: 1px solid #2B3850;
+                border-radius: 10px;
+                padding: 4px;
+            }}
+        """)
+        self._agent_combo.currentTextChanged.connect(self._on_agent_changed)
+
+        QTimer.singleShot(0, self._position_elements)
+
+        self.send_btn = TransparentToolButton(FluentIcon.SEND, self)
+        self.send_btn.setFixedSize(34, 34)
+        self.send_btn.setToolTip("发送（Enter）")
+        self.send_btn.clicked.connect(self._on_send_click)
+        self.send_btn.setDisabled(True)
+        self.send_btn.setStyleSheet("""
+            TransparentToolButton {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #C9A85C, stop:1 #B8956A);
+                border: none;
+                border-radius: 17px;
+                color: white;
+            }
+            TransparentToolButton:hover {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #D4B878, stop:1 #C9A060);
+            }
+            TransparentToolButton:disabled {
+                background: rgba(255, 255, 255, 0.10);
+                color: rgba(255, 255, 255, 0.45);
+            }
+        """)
+        self.textChanged.connect(self._on_text_changed)
+        self.textChanged.connect(self._on_at_trigger_check)
+
+        self._setup_keyboard_shortcuts()
+
+        # 技能补全弹窗
+        self._completer_popup = SkillCompleterPopup(self)
+        self._completer_popup.hide()
+        self._completer_popup.skillSelected.connect(self._on_skill_selected)
+        self._at_trigger_pos = -1  # @ 触发位置
+
+    def _on_at_trigger_check(self):
+        """检测 @ 触发"""
+        cursor = self.textCursor()
+        text = self.toPlainText()
+        cursor_pos = cursor.position()
+        if cursor_pos - 1 > len(text):
+            return
+        if cursor_pos > 0 and text[cursor_pos - 1] == "@":
+            # 找到 @ 的位置
+            self._at_trigger_pos = cursor_pos - 1
+
+            # 显示补全弹窗
+            skills = get_local_skills()
+            self._completer_popup.load_skills(skills, "")
+            self._show_completer_popup()
+        elif self._completer_popup.isVisible():
+            # 检查是否还在 @ 后面
+            text_before_cursor = text[:cursor_pos]
+            last_at = text_before_cursor.rfind("@")
+            if last_at == -1:
+                self._completer_popup.hide()
+            else:
+                # 计算 @ 后面的内容
+                query = text_before_cursor[last_at + 1:]
+                # 如果有空格则关闭
+                if " " in query or "\n" in query:
+                    self._completer_popup.hide()
+                else:
+                    # 重新加载并调整位置
+                    old_height = self._completer_popup.height()
+                    self._completer_popup.load_skills(get_local_skills(), query)
+                    new_height = self._completer_popup.height()
+                    
+                    # 如果高度变化，重新计算位置
+                    if old_height != new_height and hasattr(self._completer_popup, '_show_below'):
+                        # 获取当前光标位置重新定位
+                        rect = self.cursorRect()
+                        viewport_pos = self.viewport().mapToGlobal(QPoint(0, 0))
+                        cursor_x = viewport_pos.x() + rect.left()
+                        cursor_y = viewport_pos.y() + rect.top()
+                        self._completer_popup.show_at_cursor(self, QPoint(cursor_x, cursor_y))
+
+    def _show_completer_popup(self):
+        """显示补全弹窗，位置紧贴光标"""
+        rect = self.cursorRect()
+        # 获取光标顶部在全局坐标系中的位置
+        viewport_pos = self.viewport().mapToGlobal(QPoint(0, 0))
+        cursor_x = viewport_pos.x() + rect.left()
+        cursor_y = viewport_pos.y() + rect.top()
+        
+        global_pos = QPoint(cursor_x, cursor_y)
+        self._completer_popup.show_at_cursor(self, global_pos)
+
+    def _on_skill_selected(self, skill_name: str):
+        """技能被选中"""
+        cursor = self.textCursor()
+        text = self.toPlainText()
+        cursor_pos = cursor.position()
+
+        if self._at_trigger_pos >= 0:
+            # 删除 @ 符号和后面的内容
+            cursor.setPosition(self._at_trigger_pos)
+            cursor.setPosition(cursor_pos, QTextCursor.KeepAnchor)
+            
+            # 插入技能名，@符号也保留但给 @ 高亮
+            insert_text = f"@{skill_name} "
+            cursor.insertText(insert_text)
+            
+            # 高亮显示 @ 部分（用特殊颜色）
+            cursor.setPosition(self._at_trigger_pos)
+            cursor.setPosition(self._at_trigger_pos + 1 + len(skill_name), QTextCursor.KeepAnchor)
+            
+            # 创建高亮格式
+            highlight_format = cursor.charFormat()
+            highlight_format.setForeground(QColor("#C9A85C"))
+            highlight_format.setFontWeight(700)
+            cursor.setCharFormat(highlight_format)
+            
+            # 恢复光标到插入文本之后
+            cursor.setPosition(self._at_trigger_pos + len(insert_text))
+            self.setTextCursor(cursor)
+
+        self._completer_popup.hide()
+        self._at_trigger_pos = -1
+        self.setFocus(Qt.OtherFocusReason)
+
+    def _on_agent_changed(self, text: str):
+        self.agentChanged.emit(text)
+
+    def _setup_keyboard_shortcuts(self):
+        self._shortcut_clear = QShortcut(QKeySequence("Ctrl+L"), self)
+        self._shortcut_clear.activated.connect(self._on_clear_shortcut)
+
+        self._shortcut_new = QShortcut(QKeySequence("Ctrl+N"), self)
+        self._shortcut_new.activated.connect(self._on_new_session_shortcut)
+
+    def _on_clear_shortcut(self):
+        self.clearRequested.emit()
+
+    def _on_new_session_shortcut(self):
+        self.newSessionRequested.emit()
+
+    def _on_text_changed(self):
+        has_text = bool(self.toPlainText().strip())
+        self.send_btn.setDisabled(not has_text)
+
+    def _rebind_send_btn(self, handler):
+        try:
+            self.send_btn.clicked.disconnect()
+        except TypeError:
+            pass
+        self.send_btn.clicked.connect(handler)
+
+    def toggle_send_button(self, enable: bool):
+        """启用/禁用发送按钮"""
+        if enable:
+            self.send_btn.setIcon(FluentIcon.SEND)
+            self.send_btn.setToolTip("发送（Enter）")
+            self._rebind_send_btn(self._on_send_click)
+            self._on_text_changed()
+        else:
+            self.send_btn.setIcon(FluentIcon.PAUSE)
+            self.send_btn.setToolTip("停止")
+            QtCore.QTimer.singleShot(100, lambda: self.send_btn.setDisabled(False))
+            self._rebind_send_btn(self._on_stop_click)
+
+    def _on_send_click(self):
+        """发送按钮点击事件"""
+        if not self.toPlainText().strip():
+            return
+        self.toggle_send_button(False)
+        self.sendMessageRequested.emit()
+
+    def _on_stop_click(self):
+        """停止按钮点击事件"""
+        self.toggle_send_button(True)
+        self.stopMessageRequested.emit()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._position_elements()
+
+    def _position_elements(self):
+        """定位智能体选择框和发送按钮"""
+        if self._agent_combo and self.send_btn:
+            btn_size = self.send_btn.size()
+            agent_width = self._agent_combo.width()
+
+            send_btn_x = self.width() - btn_size.width() - 12
+            send_btn_y = self.height() - btn_size.height() - 10
+
+            combo_x = send_btn_x - agent_width - 8
+            combo_y = send_btn_y + (btn_size.height() - self._agent_combo.height()) // 2
+
+            self._agent_combo.move(max(0, combo_x), max(0, combo_y))
+            self.send_btn.move(max(0, send_btn_x), max(0, send_btn_y))
+
+    def keyPressEvent(self, event: QKeyEvent):
+        # 先检查补全弹窗是否可见
+        if self._completer_popup.isVisible():
+            if self._completer_popup.key_event(event):
+                return
+
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter):
+            if event.modifiers() & Qt.ShiftModifier:
+                super().keyPressEvent(event)  # 换行
+            else:
+                self._on_send_click()
+                event.accept()
+        elif event.key() == Qt.Key_Up:
+            if event.modifiers() & Qt.ControlModifier:
+                self.historyUpRequested.emit()
+                event.accept()
+            else:
+                super().keyPressEvent(event)
+        elif event.key() == Qt.Key_Down:
+            if event.modifiers() & Qt.ControlModifier:
+                self.historyDownRequested.emit()
+                event.accept()
+            else:
+                super().keyPressEvent(event)
+        else:
+            super().keyPressEvent(event)
+
+    def dragEnterEvent(self, event: QDragEnterEvent):
+        if event.mimeData().hasText():
+            event.acceptProposedAction()
+        else:
+            super().dragEnterEvent(event)
+
+    def dropEvent(self, event: QDropEvent):
+        text = event.mimeData().text()
+        if text:
+            lines = text.split("\n")
+            component_path = lines[0] if lines else ""
+            extension_path = lines[1] if len(lines) > 1 else ""
+
+            # 统一去除 file:/ 或 file:/// 前缀
+            component_path = re.sub(r'^file:/{1,3}', '', component_path)
+            extension_path = re.sub(r'^file:/{1,3}', '', extension_path)
+
+            insert_text = f"路径: {component_path}"
+            if extension_path:
+                insert_text += f"\n扩展资源路径: {extension_path}"
+
+            # 获取当前文本和光标位置
+            current_text = self.toPlainText()
+            cursor = self.textCursor()
+
+            # 记录当前光标位置
+            cursor_pos = cursor.position()
+
+            # 在当前光标位置插入文本
+            cursor.insertText(insert_text)
+
+            # 重置光标到插入后的位置（保持在此位置，可以自由移动）
+            cursor.setPosition(cursor_pos + len(insert_text))
+            self.setTextCursor(cursor)
+
+            self._on_text_changed()
+            event.acceptProposedAction()
+        else:
+            super().dropEvent(event)
+
+    def focusInEvent(self, event):
+        super().focusInEvent(event)
+        QTimer.singleShot(0, self._ensure_cursor_visible)
+
+    def _ensure_cursor_visible(self):
+        cursor = self.textCursor()
+        if cursor.position() > 0:
+            self.ensureCursorVisible()
+
+    def mousePressEvent(self, event):
+        # 点击时隐藏补全弹窗
+        self._completer_popup.hide()
+        super().mousePressEvent(event)
+
+    def wheelEvent(self, event):
+        # 滚轮时隐藏补全弹窗
+        self._completer_popup.hide()
+        super().wheelEvent(event)

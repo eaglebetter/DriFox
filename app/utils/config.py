@@ -19,7 +19,6 @@ from qfluentwidgets import (
     RangeConfigItem,
 )
 
-from app.widgets.card_widget.list_setting_card import ListValidator
 
 
 class PatchPlatform(Enum):
