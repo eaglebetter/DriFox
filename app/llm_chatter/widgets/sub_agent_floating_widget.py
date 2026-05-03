@@ -204,9 +204,12 @@ class SubAgentFloatingWidget(SimpleCardWidget):
         super().__init__(parent)
         self._tasks: Dict[str, SubTaskLogWidget] = {}  # task_id -> widget
         self._task_labels: Dict[str, str] = {}  # task_id -> label text
+        self._segment_items: Dict[str, object] = {}  # task_id -> segment item
         self._active_task_id: str = None
         self._batch_started: bool = False  # 当前批次是否已开始
         self._timer: QTimer = None
+        self._auto_showed: bool = False  # 是否自动弹出的面板
+        self._was_auto_showed: bool = False  # 是否曾经自动弹出过（用于决定是否自动关闭）
         self._setup_ui()
         self._start_timer()
 
@@ -298,6 +301,7 @@ class SubAgentFloatingWidget(SimpleCardWidget):
         """切换任务标签"""
         if task_id and task_id in self._tasks:
             self._show_task_log(task_id)
+            self._auto_showed = False  # 手动切换后不再是自动弹出的
             self.task_selected.emit(task_id)
 
     def _show_task_log(self, task_id: str):
@@ -321,6 +325,7 @@ class SubAgentFloatingWidget(SimpleCardWidget):
     def _on_close(self):
         self.setVisible(False)
         self._batch_started = False
+        self._auto_showed = False
         self.closed.emit()
 
     def add_task(self, task_id: str, agent_name: str, task_desc: str):
@@ -332,14 +337,19 @@ class SubAgentFloatingWidget(SimpleCardWidget):
 
         # 更新 Segment，使用 task_id 作为唯一标识
         task_index = len(self._tasks)
-        self.segment_widget.addItem(task_id, f"任务{task_index}")
+        item = self.segment_widget.addItem(task_id, f"任务{task_index}")
         self.segment_widget.setCurrentItem(task_id)
 
-        # 同步更新 _task_labels
+        # 同步更新 _task_labels 和 _segment_items
         self._task_labels[task_id] = f"任务{task_index}"
+        self._segment_items[task_id] = item
 
         # 更新计数
         self._update_task_count()
+
+        # 标记为自动弹出的面板
+        self._auto_showed = True
+        self._was_auto_showed = True  # 标记曾经自动弹出过
 
         # 显示日志（只显示当前任务）
         self._show_task_log(task_id)
@@ -390,9 +400,10 @@ class SubAgentFloatingWidget(SimpleCardWidget):
 
         # 更新 Segment（与 add_task 保持一致的命名）
         task_index = len(self._tasks)
-        self.segment_widget.addItem(task_id, f"任务{task_index}")
+        item = self.segment_widget.addItem(task_id, f"任务{task_index}")
         self.segment_widget.setCurrentItem(task_id)
         self._task_labels[task_id] = f"任务{task_index}"
+        self._segment_items[task_id] = item
 
         # 重放日志（与运行时的实时日志格式一致）
         for log in logs:
@@ -417,14 +428,20 @@ class SubAgentFloatingWidget(SimpleCardWidget):
         if result:
             success = not (error or "error" in str(result).lower())
             task_widget.finish_task(result, success)
+            # 调用父方法更新 Segment 标签
+            self.finish_task(task_id, result, success)
         elif error:
             task_widget.finish_task(error, success=False)
+            self.finish_task(task_id, error, success=False)
 
         # 更新计数
         self._update_task_count()
 
         # 显示日志
         self._show_task_log(task_id)
+        # 手动查看时重置自动弹出标记
+        self._auto_showed = False
+        # 但不重置 _was_auto_showed（保持曾经自动弹出的记录）
         self.setVisible(True)
 
     def update_progress(self, task_id: str, message: str):
@@ -452,8 +469,20 @@ class SubAgentFloatingWidget(SimpleCardWidget):
         if task_id in self._tasks:
             self._tasks[task_id].finish_task(result, success)
 
-            # 更新 Segment 标签保持原样，不改变任务名
-            # 只更新 _task_labels 状态标记
+            # 更新 Segment 标签，添加状态图标
+            status_icon = "✓" if success else "✗"
+            base_label = self._task_labels.get(task_id, f"任务{len(self._tasks)}")
+            # 移除已有的状态图标
+            clean_label = base_label.replace(" ✓", "").replace(" ✗", "")
+            self._task_labels[task_id] = f"{clean_label} {status_icon}"
+
+            # 更新 Segment 按钮文字
+            if task_id in self._segment_items:
+                item = self._segment_items[task_id]
+                try:
+                    item.setText(self._task_labels[task_id])
+                except Exception:
+                    pass
 
             # 更新计数
             self._update_task_count()
@@ -466,7 +495,7 @@ class SubAgentFloatingWidget(SimpleCardWidget):
         self._check_all_finished()
 
     def _check_all_finished(self):
-        """检查是否所有任务都完成了，如果是则隐藏面板"""
+        """检查是否所有任务都完成了，如果是则隐藏面板（仅曾经自动弹出的面板）"""
         if not self._tasks:
             return
 
@@ -475,8 +504,8 @@ class SubAgentFloatingWidget(SimpleCardWidget):
             for tid in self._tasks
         )
 
-        if all_done:
-            # 延迟 3 秒后隐藏
+        if all_done and self._was_auto_showed:
+            # 延迟 3 秒后隐藏（曾经自动弹出的面板）
             QTimer.singleShot(3000, self.hide)
 
     def _switch_to_next_active(self):
@@ -522,8 +551,9 @@ class SubAgentFloatingWidget(SimpleCardWidget):
         except:
             pass
 
-        # 清理标签
+        # 清理标签和 segment items
         self._task_labels.clear()
+        self._segment_items.clear()
 
         # 重置活跃任务
         self._active_task_id = None
@@ -552,8 +582,10 @@ class SubAgentFloatingWidget(SimpleCardWidget):
         # 重置所有状态
         self._tasks.clear()
         self._task_labels.clear()
+        self._segment_items.clear()
         self._active_task_id = None
         self._batch_started = False
+        self._was_auto_showed = False
         self.empty_label.show()
 
     def clear_finished_tasks(self):
