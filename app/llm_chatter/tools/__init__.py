@@ -834,6 +834,7 @@ def get_builtin_tools_schema() -> List[Dict]:
                             "items": {"type": "string"},
                         },
                     },
+                    "required": ["task_ids"],
                 },
             },
         },

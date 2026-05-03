@@ -500,7 +500,7 @@ class SubAgentFloatingWidget(SimpleCardWidget):
             return
 
         all_done = all(
-            self._task_labels.get(tid, "").startswith(("✓", "✗"))
+            "✓" in self._task_labels.get(tid, "") or "✗" in self._task_labels.get(tid, "")
             for tid in self._tasks
         )
 
