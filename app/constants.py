@@ -28,7 +28,7 @@ PARAM_RANGE_MAP = {
 
 
 PROVIDER_MODELS = {
-    "MiniMax (月之暗面)": [
+    "MiniMax": [
         "MiniMax-M2.7",
         "MiniMax-M2.7-highspeed",
         "MiniMax-M2.5",
@@ -111,7 +111,7 @@ PROVIDER_MODELS = {
 }
 
 FREE_PROVIDERS = {
-    "MiniMax (月之暗面)": {
+    "MiniMax": {
         "API_URL": "https://api.minimax.chat/v1",
         "API_KEY": "",
         "模型名称": "MiniMax-M2.5",
@@ -213,7 +213,7 @@ FREE_PROVIDERS = {
 }
 
 PROVIDER_ICONS = {
-    "MiniMax (月之暗面)": "MiniMax",
+    "MiniMax": "MiniMax",
     "SiliconFlow (硅基流动)": "siliconflow",
     "阿里云 (DashScope)": "qwen",
     "智谱AI": "智谱",

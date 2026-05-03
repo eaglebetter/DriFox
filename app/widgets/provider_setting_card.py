@@ -410,11 +410,25 @@ class ProviderEditDialog(QDialog):
 
         url_row = QHBoxLayout()
         url_row.addWidget(QLabel("API URL:"))
-        self.apiUrlEdit = LineEdit()
-        self.apiUrlEdit.setText(
-            self.provider_info.get("API_URL", template.get("API_URL", ""))
-        )
-        url_row.addWidget(self.apiUrlEdit, 1)
+        self.apiUrlCombo = SearchableEditableComboBox()
+        
+        # 加载预设端点
+        self._load_preset_urls()
+        
+        # 设置当前值
+        current_url = self.provider_info.get("API_URL", template.get("API_URL", ""))
+        if current_url:
+            # 检查是否在预设列表中，不在则添加
+            existing_items = [self.apiUrlCombo.itemText(i) for i in range(self.apiUrlCombo.count())]
+            if current_url not in existing_items:
+                self.apiUrlCombo.addItem(current_url)
+            idx = self.apiUrlCombo.findText(current_url)
+            if idx >= 0:
+                self.apiUrlCombo.setCurrentIndex(idx)
+            else:
+                self.apiUrlCombo.setCurrentText(current_url)
+        
+        url_row.addWidget(self.apiUrlCombo, 1)
         connection_layout.addLayout(url_row)
 
         key_row = QHBoxLayout()
@@ -546,7 +560,19 @@ class ProviderEditDialog(QDialog):
     def _on_provider_changed(self, name: str):
         if name in FREE_PROVIDERS:
             template = FREE_PROVIDERS[name]
-            self.apiUrlEdit.setText(template.get("API_URL", ""))
+            template_url =  template.get("API_URL", "")
+            # 加载该服务商的预设端点
+            self._load_preset_urls(name, template_url)
+            
+            # 如果有预设URL，设置第一个；否则直接设置
+            preset_url = template.get("API_URL", "")
+            existing_items = [self.apiUrlCombo.itemText(i) for i in range(self.apiUrlCombo.count())]
+            if preset_url and preset_url in existing_items:
+                idx = self.apiUrlCombo.findText(preset_url)
+                self.apiUrlCombo.setCurrentIndex(idx)
+            else:
+                self.apiUrlCombo.setCurrentText(preset_url)
+            
             self.modelCombo.clear()
             if name in PROVIDER_MODELS:
                 self.modelCombo.addItems(PROVIDER_MODELS[name])
@@ -555,8 +581,59 @@ class ProviderEditDialog(QDialog):
             self.contextLengthSpin.setValue(template.get("最大Token", 4096))
         self.fetchStatusLabel.setText("")
 
+    def _load_preset_urls(self, provider_name: str = None, template_url: str = ""):
+        """加载预设的 API URL 端点"""
+        preset_urls = []
+        
+        # 根据服务商名称加载对应的端点
+        if provider_name:
+            if provider_name == "DeepSeek":
+                preset_urls = [
+                    "https://api.deepseek.com",
+                    "https://api.deepseek.com/chat/completions",
+                    # Coding Plan 专用端点（如有）
+                ]
+            elif provider_name == "SiliconFlow (硅基流动)":
+                preset_urls = [
+                    "https://api.siliconflow.cn/v1",
+                    "https://api.siliconflow.cn/v1/chat/completions",
+                ]
+            elif provider_name == "MiniMax":
+                preset_urls = [
+                    "https://api.minimax.chat/v1",
+                    "https://api.minimax.chat/v1/chat/completions",
+                ]
+            elif provider_name == "阿里云 (DashScope)":
+                preset_urls = [
+                    "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                    "https://dashscope.aliyuncs.com/api/v1",
+                ]
+            elif provider_name == "智谱AI":
+                preset_urls = [
+                    "https://open.bigmodel.cn/api/paas/v4",
+                    "https://open.bigmodel.cn/api/coding/paas/v4",  # Coding Plan 专用端点
+                ]
+            elif provider_name == "百度千帆":
+                preset_urls = [
+                    "https://qianfan.baidubce.com/v2",
+                    "https://qianfan.baidubce.com/v2/chat/completions",
+                ]
+            elif provider_name == "OpenAI":
+                preset_urls = [
+                    "https://api.openai.com/v1",
+                    "https://api.openai.com/v1/chat/completions",
+                ]
+        
+        # 去重合并
+        all_urls = list(dict.fromkeys(preset_urls + [template_url]))
+        
+        self.apiUrlCombo.blockSignals(True)
+        self.apiUrlCombo.clear()
+        self.apiUrlCombo.addItems(all_urls)
+        self.apiUrlCombo.blockSignals(False)
+
     def _on_fetch_models(self):
-        api_url = self.apiUrlEdit.text().strip()
+        api_url = self.apiUrlCombo.currentText().strip()
         api_key = self.apiKeyEdit.text().strip()
         provider_name = (
             self.nameCombo.currentText() if self.is_new else self.provider_name
@@ -609,7 +686,7 @@ class ProviderEditDialog(QDialog):
             self.nameCombo.currentText() if self.is_new else self.provider_name
         )
         self.provider_info = {
-            "API_URL": self.apiUrlEdit.text().strip(),
+            "API_URL": self.apiUrlCombo.currentText().strip(),
             "API_KEY": self.apiKeyEdit.text().strip(),
             "模型名称": self.modelCombo.currentText().strip(),
             "温度": self.tempSpin.value(),

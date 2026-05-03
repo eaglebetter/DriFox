@@ -680,11 +680,17 @@ class OpenAIChatToolWindow(ToolWindow):
         self._create_context_menu()
         left_layout.addWidget(self.menu_btn)
 
-        # right_layout 保持简化，仅保留 context_usage_ring
+        # right_layout 保持简化，显示余额和 context_usage_ring
         right_layout = QHBoxLayout()
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(6)
 
+        # 余额显示
+        from app.widgets.balance_display import BalanceDisplay
+        self.balance_display = BalanceDisplay(self)
+        right_layout.addWidget(self.balance_display)
+
+        # 上下文占用圆环
         self.context_usage_ring = ContextUsageRing(self)
         right_layout.addWidget(self.context_usage_ring)
         right_layout.addSpacing(10)
@@ -878,6 +884,7 @@ class OpenAIChatToolWindow(ToolWindow):
             setting.set(setting.llm_selected_model, provider_name, save=True)
             self._update_model_selector_btn()
             self._refresh_context_usage_indicator()
+            self._update_balance_display()
 
     def _show_model_selector_popup(self):
         """显示扁平式模型选择上拉框"""
@@ -923,6 +930,7 @@ class OpenAIChatToolWindow(ToolWindow):
         setting.set(setting.llm_selected_model, provider_name, save=True)
         self._update_model_selector_btn()
         self._refresh_context_usage_indicator()
+        self._update_balance_display()
 
     def _update_model_selector_btn(self):
         """更新模型选择按钮的图标和文字显示"""
@@ -972,6 +980,23 @@ class OpenAIChatToolWindow(ToolWindow):
             snapshot.get("budget_tokens", 0),
             snapshot.get("compaction", {}),
         )
+
+    def _update_balance_display(self):
+        """更新余额显示"""
+        balance_display = getattr(self, "balance_display", None)
+        if not balance_display:
+            return
+
+        # 获取当前选中的服务商配置
+        provider_name = getattr(self, "_current_provider_name", "")
+        if not provider_name:
+            balance_display.clear()
+            return
+
+        config = self._valid_configs.get(provider_name, {})
+        api_key = config.get("API_KEY", "")
+
+        balance_display.set_provider(provider_name, api_key)
 
     def _open_settings_popup(self):
         """打开设置卡片"""
@@ -1277,6 +1302,7 @@ class OpenAIChatToolWindow(ToolWindow):
 
         self._update_model_selector_btn()
         self._refresh_context_usage_indicator()
+        self._update_balance_display()
 
     def _load_agent_list(self):
         """加载智能体列表到选择器（仅显示 primary agents）"""
@@ -3238,6 +3264,24 @@ class OpenAIChatToolWindow(ToolWindow):
                 preview = content[:50] + "..." if len(content) > 50 else content
                 current_title = self.title_edit.text() if self.title_edit else "对话完成"
                 self._notify_if_inactive(current_title, preview)
+
+        # 对话完成后刷新余额显示
+        self._refresh_balance()
+
+    def _refresh_balance(self):
+        """刷新余额显示（对话完成后调用）"""
+        balance_display = getattr(self, "balance_display", None)
+        if balance_display:
+            # 如果当前服务商支持余额查询，则刷新
+            provider_name = getattr(self, "_current_provider_name", "")
+            if provider_name in ("DeepSeek", "SiliconFlow (硅基流动)"):
+                config = self._valid_configs.get(provider_name, {})
+                api_key = config.get("API_KEY", "")
+                if api_key:
+                    balance_display.set_provider(provider_name, api_key)
+                    return
+            # 如果不支持余额查询，隐藏
+            balance_display.setVisible(False)
 
     def _save_current_session_to_history(self):
         session = self.session_manager.get_current_session()
