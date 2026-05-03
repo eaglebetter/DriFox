@@ -1818,13 +1818,32 @@ class OpenAIChatToolWindow(ToolWindow):
         return count_user_cards_in_layout(self.chat_layout)
 
     def _find_user_round_index_for_card(self, card: MessageCard) -> Optional[int]:
-        round_index = 0
-        for rendered_card in self._get_rendered_message_cards():
-            if rendered_card.role != "user":
-                continue
-            if rendered_card is card:
-                return round_index
-            round_index += 1
+        """通过 session.messages 找到 user card 对应的正确 round_index"""
+        session = self.session_manager.get_current_session()
+        if not session:
+            return None
+        
+        from app.llm_chatter.utils.message_content import consolidate_messages
+        
+        canonical_messages = consolidate_messages(session.messages)
+        if not canonical_messages:
+            return None
+        
+        # 获取当前卡片的内容用于匹配
+        card_content = card.get_plain_text()
+        
+        # 在 canonical_messages 中找到匹配的 user 消息，返回其 round_index
+        user_count = 0
+        for msg in canonical_messages:
+            if msg.get("role") == "user":
+                # 尝试匹配内容
+                msg_content = msg.get("content", "")
+                if isinstance(msg_content, str) and card_content:
+                    # 比较内容的前100个字符
+                    if msg_content[:100] == card_content[:100]:
+                        return user_count
+                user_count += 1
+        
         return None
 
     def findRoundIndexForCard(self, card: MessageCard) -> Optional[int]:

@@ -302,6 +302,10 @@ class AgentManager:
 
         all_tools = get_builtin_tools_schema()
 
+        # 【新增】子智能体禁止使用 question 工具（需要用户交互，不支持）
+        if agent.is_subagent():
+            all_tools = [t for t in all_tools if t["function"]["name"].lower() != "question"]
+
         perm_resolver = PermissionResolver(
             agent.permission, global_permission or {}, agent.tools
         )
@@ -320,20 +324,45 @@ class AgentManager:
         if not agent:
             return base_prompt
 
+        # 通用编码契约（所有智能体）
         global_contract = """
 ## Global Coding Contract
 - 这是一个代码工作台，不是普通闲聊窗口。
 - 优先围绕"相关文件、实施动作、验证方式、剩余风险"组织输出。
-- 需要向用户确认的信息，优先使用 `question` 工具。
-- 如果已经有 todo，优先沿用现有执行上下文。
 - 回答要像工程师交付，不要像客服聊天。
 """.strip()
 
+        # 子智能体额外约束
+        subagent_constraints = """
+## 子智能体约束
+- 【禁止】使用 `question` 工具（需要用户交互，不支持）
+- 【禁止】使用 `todowrite` 工具（避免与主智能体冲突）
+- 【禁止】调用 task/task_batch/task_wait 工具（不允许嵌套子智能体）
+- 【必须】任务一次性执行完毕，不支持中途暂停或等待用户确认
+- 【必须】独立完成任务，不需要主智能体介入
+- 如果遇到不确定的情况，根据已有信息做出合理假设并继续执行
+- 如需收集信息，使用 webfetch/websearch 工具代替提问
+""".strip()
+
+        # 主智能体额外约束
+        primary_constraints = """
+## 主智能体约束
+- 需要向用户确认的信息，优先使用 `question` 工具。
+- 如果已经有 todo，优先沿用现有执行上下文。
+""".strip()
+
+        # 根据智能体类型选择约束
+        if agent.is_subagent():
+            role_constraints = subagent_constraints
+        else:
+            role_constraints = primary_constraints
+
         if agent.prompt:
             return "\n\n".join(
-                part for part in [agent.prompt, global_contract, base_prompt] if part
+                part for part in [agent.prompt, global_contract, role_constraints, base_prompt] if part
             )
 
+        # Fallback 提示词
         fallback_prompt = f"""# {agent.name}
 {agent.description}
 
@@ -341,6 +370,7 @@ class AgentManager:
 Use the tools available to you based on your permissions.
 
 {global_contract}
+{role_constraints}
 """
         return "\n\n".join(part for part in [fallback_prompt, base_prompt] if part)
 

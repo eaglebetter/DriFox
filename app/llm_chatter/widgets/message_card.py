@@ -1975,7 +1975,7 @@ class MessageCard(SimpleCardWidget):
     def _emit_card_diff_requested(self):
         """发射卡片差异请求信号"""
         if self._round_index is not None:
-            self.cardDiffRequested.emit(self._round_index)
+            self.cardDiffRequested.emit(self._round_index - 1)
 
     def _update_height(self, h):
         target_height = max(40, h)
