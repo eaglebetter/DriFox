@@ -1247,6 +1247,8 @@ class CodeWebViewer(QWebEngineView):
                     body.style.transition = '';
 
                     if (expand) {{
+                        body.style.height = body.scrollHeight + 'px';
+                        body.offsetHeight;
                         syncExpandedAttrs(block, true);
                         body.style.opacity = '1';
                         body.style.height = body.scrollHeight + 'px';
@@ -1613,7 +1615,7 @@ class MessageCard(SimpleCardWidget):
     interventionRequested = pyqtSignal(dict)
     toolDiffRequested = pyqtSignal(str)  # tool_call_id
     subAgentLogRequested = pyqtSignal(str)  # task_ids (comma-separated)
-    cardDiffRequested = pyqtSignal(int)  # round_index
+    cardDiffRequested = pyqtSignal(int)  # message_index（消息在 session.messages 中的索引）
     saveFileRequested = pyqtSignal(str, str)  # code, lang
 
     def __init__(
@@ -1635,6 +1637,7 @@ class MessageCard(SimpleCardWidget):
         self._content_data: Any = [] if role == "assistant" else ""
         self._streaming = False
         self._round_index: Optional[int] = None  # 用于卡片差异功能
+        self._message_index: Optional[int] = None  # 用于卡片差异和撤销功能：消息在 session.messages 中的索引
         self._reasoning_content = reasoning_content
         self._anim_timer = QTimer(self)
         self._anim_timer.timeout.connect(self._update_anim)
@@ -1643,6 +1646,8 @@ class MessageCard(SimpleCardWidget):
         self._height_anim.setDuration(180)
         self._height_anim.setEasingCurve(QEasingCurve.OutCubic)
         self._height_anim.valueChanged.connect(self._apply_viewer_height)
+        self._height_anim.stateChanged.connect(self._on_height_anim_state_changed)
+        self._is_height_animating = False  # 动画期间抑制重复报告
         self._target_viewer_height = 40
         self._last_applied_viewer_height = 40
         self._theme = self._build_theme(role, error)
@@ -1982,16 +1987,28 @@ class MessageCard(SimpleCardWidget):
         current_height = self.viewer.height() or self.viewer.minimumHeight() or 40
         self._target_viewer_height = target_height
 
+        # 关键优化：高度变化完全由 CSS transition 驱动
+        # PyQt 只设置最终值，不做 QVariantAnimation 插值动画
+        # 因为 CSS transition 已经提供了平滑动画
         if self._streaming or abs(target_height - current_height) < 10:
             if self._height_anim.state() == QVariantAnimation.Running:
                 self._height_anim.stop()
             self._apply_viewer_height(target_height)
             return
 
+        # 停止任何正在进行的动画，直接跳到目标值
+        # CSS transition 会负责平滑过渡
         self._height_anim.stop()
-        self._height_anim.setStartValue(current_height)
-        self._height_anim.setEndValue(target_height)
-        self._height_anim.start()
+        self._apply_viewer_height(target_height)
+
+    def _on_height_anim_state_changed(self, state):
+        self._is_height_animating = (state == QVariantAnimation.Running)
+        # 动画结束时触发一次高度变化信号，让父容器更新
+        if state == QVariantAnimation.Stopped:
+            self.heightChanged.emit(self._last_applied_viewer_height)
+            layout = self.layout()
+            if layout:
+                layout.invalidate()
 
     def _apply_viewer_height(self, value):
         height = max(40, int(value))
@@ -2000,12 +2017,7 @@ class MessageCard(SimpleCardWidget):
         self._last_applied_viewer_height = height
         self.viewer.setFixedHeight(height)
         self.heightChanged.emit(height)
-        # 性能优化：只在必要时触发布局更新，避免频繁向上传播
-        # 直接使用 layout().invalidate() 而非 updateGeometry()
-        layout = self.layout()
-        if layout:
-            layout.invalidate()
-            layout.activate()
+        # 简化：直接触发布局更新，不再区分动画状态
 
     def sync_width(self, force: bool = False):
         """同步卡片宽度

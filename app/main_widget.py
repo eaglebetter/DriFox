@@ -222,6 +222,9 @@ class OpenAIChatToolWindow(ToolWindow):
         self._pending_permission_tool_call_id: Optional[str] = None
         self._question_tool_call_id: Optional[str] = None
         self._current_assistant_round_index: Optional[int] = None  # 跟踪当前应分配给 assistant 的 round_index
+        self._pending_scroll_to_index: Optional[int] = None  # 时间线节点滚动目标索引
+        self._pending_scroll_to_batch: Optional[int] = None  # 时间线节点滚动目标 batch 索引
+        self._pending_scroll_to_update: Optional[int] = None  # 待更新的节点索引（用于同步高亮和进度）
         self.session_manager = SessionManager()
         self.session_manager.create_new_session()
         self._current_session_id = self.session_manager.get_current_session().session_id
@@ -1771,14 +1774,35 @@ class OpenAIChatToolWindow(ToolWindow):
         """清理用户消息用于显示（保留向后兼容）"""
         return sanitize_user_message_for_display(content)
 
-    def _get_user_round_index_for_batch_index(self, batch_index: int) -> int:
-        round_index = 0
-        for idx, batch in enumerate(self._message_batch):
-            if idx >= batch_index:
+    def _get_user_round_index_for_batch_index(
+        self, batch_index: int, batch_offset: int = 0
+    ) -> int:
+        """
+        计算给定 batch 索引对应的 round_index（user 轮次索引）
+
+        逻辑：统计 global_batch_index 之前有多少个 user batch，
+        这就是该 batch 所属的 round_index。
+
+        Args:
+            batch_index: batch 在 _message_batch 中的索引
+            batch_offset: 当前加载批次的起始偏移量（用于分批加载历史消息）
+
+        Returns:
+            round_index：从 0 开始的用户轮次索引
+        """
+        global_batch_index = batch_index
+        
+        # 统计 global_batch_index 之前的 user batch 数量
+        # 这就是该 batch 所属的 round_index
+        user_count = 0
+        for idx in range(global_batch_index):
+            if idx >= len(self._message_batch):
                 break
+            batch = self._message_batch[idx]
             if batch and batch[0].get("role") == "user":
-                round_index += 1
-        return round_index
+                user_count += 1
+        
+        return user_count
 
     def _render_message_to_card(
         self,
@@ -1791,7 +1815,9 @@ class OpenAIChatToolWindow(ToolWindow):
             role = batch[0].get("role")
             timestamp = batch[0].get("timestamp") or get_default_timestamp()
             global_batch_index = batch_offset + local_index
-            round_index = self._get_user_round_index_for_batch_index(global_batch_index)
+            round_index = self._get_user_round_index_for_batch_index(
+                global_batch_index, batch_offset
+            )
 
             if role == "user":
                 content = self._sanitize_user_message_for_display(
@@ -1806,6 +1832,9 @@ class OpenAIChatToolWindow(ToolWindow):
                     user_round_index=round_index,
                     update_preview=not insert_at_top,
                 )
+                if user_card:
+                    # 设置 message_index 用于卡片差异功能
+                    user_card._message_index = global_batch_index
                 if insert_index is not None and user_card:
                     insert_index += 1
 
@@ -1816,6 +1845,9 @@ class OpenAIChatToolWindow(ToolWindow):
                     insert_index=insert_index,
                     round_index=round_index,
                 )
+                if assistant_card:
+                    # 设置 message_index 用于卡片差异功能
+                    assistant_card._message_index = global_batch_index
                 # 使用辅助函数渲染消息
                 render_batch_to_assistant_card(assistant_card, batch)
                 if insert_index is not None and assistant_card:
@@ -1872,6 +1904,49 @@ class OpenAIChatToolWindow(ToolWindow):
                 return round_index
             if widget.role == "user":
                 round_index += 1
+        return None
+
+    def _find_user_round_index_from_session(
+        self,
+        session,
+        user_text: str,
+        timestamp: str,
+    ) -> Optional[int]:
+        """
+        从 session 数据中找到 user 消息对应的 round_index。
+
+        通过在 session.messages 中定位 user 消息，然后计算它是第几个 user。
+
+        Args:
+            session: ChatSession 对象
+            user_text: 用户消息的纯文本内容
+            timestamp: 用户消息的时间戳
+
+        Returns:
+            round_index 或 None
+        """
+        from app.utils.message_content import consolidate_messages
+
+        canonical_messages = consolidate_messages(session.messages)
+
+        # 规范化时间戳进行比较（去掉秒）
+        # MessageCard 的 timestamp 格式是 "YYYY-MM-DD HH:MM"（无秒）
+        # session.messages 的 timestamp 格式是 "YYYY-MM-DD HH:MM:SS"（有秒）
+        card_ts_prefix = timestamp[:16] if timestamp else ""
+
+        # 在消息列表中查找匹配的 user 消息
+        user_count = 0
+        for msg in canonical_messages:
+            if msg.get("role") == "user":
+                msg_content = msg.get("content", "")
+                msg_timestamp = msg.get("timestamp", "") or ""
+
+                # 尝试匹配：时间戳前缀匹配（或内容完全匹配）
+                msg_ts_prefix = msg_timestamp[:16]
+                if msg_ts_prefix == card_ts_prefix or msg_content == user_text:
+                    return user_count
+                user_count += 1
+
         return None
 
     def _remove_cards_for_round(self, round_index: int) -> bool:
@@ -2365,6 +2440,10 @@ class OpenAIChatToolWindow(ToolWindow):
         if not hasattr(self, "chat_scroll_area") or not hasattr(self, "node_preview"):
             return
 
+        session = self.session_manager.get_current_session()
+        if not session:
+            return
+
         # 使用辅助函数收集用户卡片
         user_widgets = collect_user_card_widgets(self.chat_layout)
 
@@ -2377,17 +2456,49 @@ class OpenAIChatToolWindow(ToolWindow):
         scroll_bar = self.chat_scroll_area.verticalScrollBar()
         viewport_height = self.chat_scroll_area.viewport().height()
         visible_top = scroll_bar.value()
+        
+        # 关键修复：基于滚动比例计算进度，而非渲染的卡片数量
+        # 这样即使只渲染了部分卡片，进度条也能正确显示
+        scroll_max = scroll_bar.maximum()
+        if scroll_max > 0:
+            # 计算滚动比例（0.0 到 1.0）
+            scroll_ratio = visible_top / scroll_max
+            # 计算对应的节点索引
+            total_nodes = len(self.node_preview._nodes) if hasattr(self.node_preview, '_nodes') else 1
+            progress = scroll_ratio * (total_nodes - 1)
+        else:
+            progress = 0.0
+        
+        # 计算可见的 user card 索引（用于高亮）
+        # 关键修复：高亮索引基于滚动比例计算，而非渲染的卡片位置
+        # 这样动态加载时高亮也是正确的
         user_tops = [widget.y() for widget in user_widgets]
-
-        # 使用辅助函数计算滚动进度
-        progress, visible_index = calculate_scroll_progress(
+        
+        # 使用辅助函数计算滚动进度（用于进度条）
+        _, _ = calculate_scroll_progress(
             visible_top, viewport_height, user_tops
         )
 
-        self.node_preview.set_progress_position(progress)
-        if visible_index != self._last_visible_user_pair_index:
-            self._last_visible_user_pair_index = visible_index
-            self.node_preview.set_visible_node(visible_index)
+        # 只在节点数量范围内更新
+        total_nodes = len(self.node_preview._nodes) if hasattr(self.node_preview, '_nodes') else 0
+        if total_nodes > 0:
+            # 如果有待更新的目标索引（点击跳转），直接使用它
+            if self._pending_scroll_to_update is not None:
+                highlighted_index = self._pending_scroll_to_update
+                self._pending_scroll_to_update = None
+            else:
+                # 正常滚动时：高亮索引跟随滚动比例计算
+                clamped_progress = min(max(progress, 0.0), total_nodes - 1)
+                highlighted_index = int(round(clamped_progress))
+            
+            highlighted_index = max(0, min(highlighted_index, total_nodes - 1))
+            
+            # 更新进度条（使用索引作为 progress）
+            self.node_preview.set_progress_position(highlighted_index)
+            
+            if highlighted_index != self._last_visible_user_pair_index:
+                self._last_visible_user_pair_index = highlighted_index
+                self.node_preview.set_visible_node(highlighted_index)
 
     def _sync_node_preview_to_last(self):
         """滚动完成后同步到最后一个节点"""
@@ -2409,13 +2520,134 @@ class OpenAIChatToolWindow(ToolWindow):
                 self.node_preview.set_progress_position(last_index)
                 self._last_visible_user_pair_index = last_index
 
+    def _scroll_to_target_node_index(self, target_index: int):
+        """
+        滚动到指定节点索引的位置。如果目标卡片未渲染，先加载历史批次。
+
+        Args:
+            target_index: 目标节点索引（0-based）
+        """
+        session = self.session_manager.get_current_session()
+        if not session:
+            return
+
+        # 计算目标 user 在 _message_batch 中的 batch 索引
+        # 找到 _message_batch 中第 target_index 个 user batch
+        target_batch_index = -1
+        user_count = 0
+        for idx, batch in enumerate(self._message_batch):
+            if batch and batch[0].get("role") == "user":
+                if user_count == target_index:
+                    target_batch_index = idx
+                    break
+                user_count += 1
+
+        if target_batch_index < 0:
+            logger.warning(f"[NodePreview] Cannot find batch for target_index={target_index}")
+            return
+
+        # 检查目标 batch 是否已经加载（可见）
+        if target_batch_index >= self._visible_batch_start:
+            # 已加载，直接滚动到目标位置
+            self._scroll_to_batch_index(target_batch_index)
+            return
+
+        # 需要加载更多历史批次
+        # 计算需要加载的起始位置（预留一些缓冲批次）
+        new_start = max(0, target_batch_index - self._incremental_visible_batch_count // 2)
+        
+        # 标记要滚动的目标索引，以便加载完成后使用
+        self._pending_scroll_to_index = target_index
+        self._pending_scroll_to_batch = target_batch_index
+
+        # 加载历史批次到目标位置
+        self._load_history_to_index(new_start)
+
+    def _load_history_to_index(self, target_batch_start: int):
+        """
+        加载历史批次直到到达目标 batch 起始位置
+
+        Args:
+            target_batch_start: 目标批次起始索引
+        """
+        if target_batch_start >= self._visible_batch_start:
+            # 已经到达目标位置，滚动到目标节点
+            self._scroll_to_pending_target()
+            return
+
+        # 计算需要加载多少批次
+        batch_count = self._visible_batch_start - target_batch_start
+        if batch_count > 0:
+            # 触发分批加载
+            self._render_message_to_card(
+                self._message_batch[target_batch_start:self._visible_batch_start],
+                insert_at_top=True,
+                batch_offset=target_batch_start,
+            )
+
+            # 更新可见范围
+            self._visible_batch_start = target_batch_start
+
+            # 延迟检查是否需要继续加载（使用 QTimer.singleShot 避免重复）
+            QTimer.singleShot(100, lambda: self._load_history_to_index(target_batch_start))
+
+    def _scroll_to_pending_target(self):
+        """滚动到待处理的目标节点"""
+        if self._pending_scroll_to_index is None:
+            return
+
+        target_index = self._pending_scroll_to_index
+        self._pending_scroll_to_index = None
+        self._pending_scroll_to_batch = None
+
+        # 先标记目标索引（但不直接设置进度条）
+        # 让 _sync_node_preview_to_scroll 在滚动时自动计算正确的值
+        total_nodes = len(self.node_preview._nodes) if hasattr(self.node_preview, '_nodes') else 0
+        if total_nodes > 0:
+            self._pending_scroll_to_update = target_index
+        
+        # 现在目标卡片应该已经渲染，尝试找到它并滚动
+        target_widget = find_user_card_at_index(self.chat_layout, target_index)
+        if target_widget:
+            # 滚动到目标位置，_sync_node_preview_to_scroll 会自动更新高亮和进度
+            self.chat_scroll_area.verticalScrollBar().setValue(target_widget.y())
+        else:
+            # 仍然找不到，说明批次数量不足，继续加载
+            logger.info(f"[NodePreview] Still not found, target_index={target_index}")
+
+    def _scroll_to_batch_index(self, batch_index: int):
+        """
+        滚动到指定 batch 索引的位置
+
+        Args:
+            batch_index: 目标 batch 索引
+        """
+        # 标记目标索引
+        total_nodes = len(self.node_preview._nodes) if hasattr(self.node_preview, '_nodes') else 0
+        if total_nodes > 0:
+            self._pending_scroll_to_update = batch_index
+        
+        # 找到对应的 user card widget 并滚动
+        target_widget = find_user_card_at_index(self.chat_layout, batch_index)
+        if target_widget:
+            # 滚动到目标位置，_sync_node_preview_to_scroll 会自动更新高亮和进度
+            self.chat_scroll_area.verticalScrollBar().setValue(target_widget.y())
+
     def _on_node_preview_clicked(self, index: int):
         # 使用辅助函数找到目标卡片
         target_widget = find_user_card_at_index(self.chat_layout, index)
 
         if target_widget:
-            self.node_preview.set_progress_position(index)
+            # 标记目标索引，让 _sync_node_preview_to_scroll 自动计算正确的值
+            total_nodes = len(self.node_preview._nodes) if hasattr(self.node_preview, '_nodes') else 0
+            if total_nodes > 0:
+                self._pending_scroll_to_update = index
+            # 滚动到目标位置，_sync_node_preview_to_scroll 会自动更新高亮和进度
             self.chat_scroll_area.verticalScrollBar().setValue(target_widget.y())
+        else:
+            # 关键修复：目标卡片未渲染（动态加载）
+            # 计算需要加载多少历史批次才能到达该索引
+            self._scroll_to_target_node_index(index)
 
     def _on_scroll_changed(self, value):
         self._sync_node_preview_to_scroll()
@@ -2490,8 +2722,22 @@ class OpenAIChatToolWindow(ToolWindow):
     def _undo_from_message(self, card: MessageCard):
         if card.role != "user":
             return
-        round_index = self._find_user_round_index_for_card(card)
+
+        session = self.session_manager.get_current_session()
+        if not session:
+            return
+
+        # 关键修复：从 session 数据计算 round_index，不依赖 UI 布局
+        # 这样即使卡片动态加载（只渲染部分），也能正确工作
+        user_text = card.get_plain_text()
+        timestamp = card.timestamp
+
+        # 在 session.messages 中找到对应的 user 消息
+        round_index = self._find_user_round_index_from_session(
+            session, user_text, timestamp
+        )
         if round_index is None:
+            logger.warning("[UNDO] Cannot find user message in session")
             return
 
         if self._is_streaming:
