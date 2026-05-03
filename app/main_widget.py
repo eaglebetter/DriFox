@@ -1893,7 +1893,6 @@ class OpenAIChatToolWindow(ToolWindow):
         widgets_to_remove = []
 
         # 遍历 chat_layout
-        for i in range(self.chat_layout.count()):，直接统计可见的 user card 数量来确定 round_index 对应的位置
         for i in range(self.chat_layout.count()):
             item = self.chat_layout.itemAt(i)
             if not item or not item.widget():
@@ -3251,13 +3250,16 @@ class OpenAIChatToolWindow(ToolWindow):
 
     def _refresh_balance(self):
         """刷新余额显示（对话完成后调用）"""
+        print(f"[Balance] _refresh_balance called, provider={getattr(self, '_current_provider_name', 'None')}")
         balance_display = getattr(self, "balance_display", None)
         if balance_display:
             # 如果当前服务商支持余额查询，则刷新
             provider_name = getattr(self, "_current_provider_name", "")
+            print(f"[Balance] provider_name={provider_name}")
             if provider_name in ("DeepSeek", "SiliconFlow (硅基流动)"):
                 config = self._valid_configs.get(provider_name, {})
                 api_key = config.get("API_KEY", "")
+                print(f"[Balance] api_key exists: {bool(api_key)}")
                 if api_key:
                     balance_display.set_provider(provider_name, api_key)
                     return

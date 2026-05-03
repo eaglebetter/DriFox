@@ -763,7 +763,7 @@ def find_last_assistant_card(chat_layout) -> Any:
 
 def count_user_cards_in_layout(chat_layout) -> int:
     """
-    计算布局中的用户消息卡片数量
+    计算布局中的用户消息卡片数量（不包括欢迎卡片）
     
     Args:
         chat_layout: 聊天布局
@@ -780,7 +780,7 @@ def count_user_cards_in_layout(chat_layout) -> int:
         if not item or not item.widget():
             continue
         widget = item.widget()
-        if isinstance(widget, MessageCard) and widget.role == "user":
+        if isinstance(widget, MessageCard) and widget.role == "user" and not getattr(widget, "_is_welcome", False):
             count += 1
     return count
 
@@ -1297,7 +1297,7 @@ def post_append_user_message(
     
     Args:
         self_widget: 自身 widget
-        user_round_index: 用户消息 round 索引
+        user_round_index: 用户消息 round 索引（0-based）
         update_preview_func: 更新预览函数
         sync_preview_func: 同步预览函数
     """

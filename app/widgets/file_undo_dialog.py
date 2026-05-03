@@ -208,7 +208,7 @@ class FileUndoPreviewDialog(QDialog):
 
     def _show_diff(self, index: int):
         """显示指定操作的差异"""
-        from app.llm_chatter.utils.diff_viewer import (
+        from app.utils.diff_viewer import (
             DiffHtmlGenerator,
             DiffViewerWindow,
         )
