@@ -11,6 +11,7 @@ from typing import Dict, List, Optional, Any, Callable, TYPE_CHECKING
 from loguru import logger
 
 from app.llm_chatter.tools.result import ToolResult
+from app.llm_chatter.core.sub_agent_log_store import SubAgentLogStore
 
 from PyQt5.QtCore import QThread, pyqtSignal, QCoreApplication, QObject
 from openai import OpenAI
@@ -512,6 +513,32 @@ class SubAgentManager(QObject):
         self._get_llm_config = get_llm_config
         self._running_tasks: Dict[str, SubAgentExecutor] = {}
         self._finished_tasks: Dict[str, Dict] = {}  # task_id -> {"result": str, "error": str}
+        self._log_store: Optional[SubAgentLogStore] = None
+
+    def set_log_store(self, log_store: SubAgentLogStore):
+        """设置日志存储"""
+        self._log_store = log_store
+
+    def _save_task_to_store(self, task_id: str, agent_name: str, task_description: str,
+                             status: str = "running", result: str = None, error: str = None):
+        """保存任务到数据库"""
+        if not self._log_store:
+            return
+        try:
+            executor = self._running_tasks.get(task_id)
+            logs = []
+            summary = {
+                "agent_name": agent_name,
+                "task_description": task_description,
+            }
+            if executor and hasattr(executor, "get_logs"):
+                logs = executor.get_logs()
+            if executor and hasattr(executor, "get_summary"):
+                summary = executor.get_summary()
+            self._log_store.save_task(task_id, agent_name, task_description, status, result, error, logs, summary)
+            logger.info(f"[SubAgentManager] 保存任务到数据库: {task_id}, status={status}, logs={len(logs)}")
+        except Exception as e:
+            logger.error(f"[SubAgentManager] 保存任务到数据库失败: {e}")
 
     def execute_task(
         self,
@@ -554,7 +581,10 @@ class SubAgentManager(QObject):
 
             self._running_tasks[task_id] = executor
             executor.start()
-            
+
+            # 保存到数据库
+            self._save_task_to_store(task_id, agent_name, task_description, "running")
+
             self.task_started.emit(task_id, agent_name, task_description)
 
             logger.info(
@@ -586,15 +616,29 @@ class SubAgentManager(QObject):
         for task_id in list(self._running_tasks.keys()):
             executor = self._running_tasks[task_id]
             if executor.isFinished():
-                # 收集结果
+                # 收集结果和日志
                 result = getattr(executor, "_last_result", "") or ""
                 error = getattr(executor, "_execution_error", "") or ""
                 agent_name = getattr(executor, "agent_name", "")
+                task_description = getattr(executor, "task_description", "")
+                logs = executor.get_logs() if hasattr(executor, "get_logs") else []
+                tool_call_count = getattr(executor, "_tool_call_count", 0) or 0
+                start_time = getattr(executor, "_start_time", None)
+                elapsed = int(time.time() - start_time) if start_time else 0
+
                 self._finished_tasks[task_id] = {
                     "result": result,
                     "error": error,
-                    "agent_name": agent_name
+                    "agent_name": agent_name,
+                    "task_description": task_description,
+                    "logs": logs,
+                    "tool_call_count": tool_call_count,
+                    "elapsed_seconds": elapsed,
                 }
+
+                # 更新数据库
+                self._save_task_to_store(task_id, agent_name, task_description, "finished", result, error)
+
                 del self._running_tasks[task_id]
                 finished.append(task_id)
         return finished
@@ -634,7 +678,7 @@ class SubAgentManager(QObject):
     def get_task_logs(self, task_id: str) -> Dict:
         """
         获取指定任务的完整日志和摘要。
-        
+
         Returns:
             Dict: {
                 "summary": {...},  # 任务摘要
@@ -642,9 +686,32 @@ class SubAgentManager(QObject):
                 "found": bool       # 是否找到任务
             }
         """
-        # 先清理已完成的
+        # 先从数据库获取
+        if self._log_store:
+            db_task = self._log_store.get_task(task_id)
+            if db_task:
+                summary = db_task.get("summary", {})
+                # 确保 task_description 在 summary 中
+                if not summary.get("task_description"):
+                    summary["task_description"] = db_task.get("task_description", "")
+                # 确保 task_id 在 summary 中
+                if not summary.get("task_id"):
+                    summary["task_id"] = task_id
+                return {
+                    "task_id": task_id,
+                    "summary": summary,
+                    "logs": db_task.get("logs", []),
+                    "found": True,
+                    "status": db_task.get("status", "unknown"),
+                    "agent_name": db_task.get("agent_name", ""),
+                    "task_description": db_task.get("task_description", ""),
+                    "result": db_task.get("result", ""),
+                    "error": db_task.get("error", ""),
+                }
+
+        # 清理并检查内存中的任务
         self.get_finished_tasks()
-        
+
         # 检查运行中的任务
         if task_id in self._running_tasks:
             executor = self._running_tasks[task_id]
@@ -654,36 +721,37 @@ class SubAgentManager(QObject):
                 "found": True,
                 "status": "running"
             }
-        
-        # 检查已完成的任务
+
+        # 检查已完成的任务（内存）
         if task_id in self._finished_tasks:
             task_info = self._finished_tasks[task_id]
-            # 已完成的任务在 _finished_tasks 中没有 logs，需要从 executor 的存储中获取
-            # 但 executor 可能已经销毁，这里返回已保存的信息
             return {
                 "summary": {
                     "task_id": task_id,
                     "agent_name": task_info.get("agent_name", ""),
+                    "task_description": task_info.get("task_description", ""),
                     "result": task_info.get("result", ""),
                     "error": task_info.get("error", ""),
+                    "tool_call_count": task_info.get("tool_call_count", 0),
+                    "elapsed_seconds": task_info.get("elapsed_seconds", 0),
                 },
-                "logs": [],  # 已完成任务没有存储日志
+                "logs": task_info.get("logs", []),
                 "found": True,
                 "status": "finished"
             }
-        
+
         return {"summary": {}, "logs": [], "found": False, "status": "unknown"}
 
     def get_all_task_logs(self) -> List[Dict]:
         """
         获取所有任务的日志（运行中和已完成的）。
-        
+
         Returns:
             List[Dict]: 每个任务的日志信息列表
         """
         results = []
         self.get_finished_tasks()  # 先清理
-        
+
         # 收集运行中的任务
         for task_id, executor in self._running_tasks.items():
             results.append({
@@ -692,7 +760,7 @@ class SubAgentManager(QObject):
                 "logs": executor.get_logs(),
                 "status": "running"
             })
-        
+
         # 收集已完成的任务
         for task_id, task_info in self._finished_tasks.items():
             results.append({
@@ -700,13 +768,16 @@ class SubAgentManager(QObject):
                 "summary": {
                     "task_id": task_id,
                     "agent_name": task_info.get("agent_name", ""),
+                    "task_description": task_info.get("task_description", ""),
                     "result": task_info.get("result", ""),
                     "error": task_info.get("error", ""),
+                    "tool_call_count": task_info.get("tool_call_count", 0),
+                    "elapsed_seconds": task_info.get("elapsed_seconds", 0),
                 },
-                "logs": [],  # 已完成任务没有存储日志
+                "logs": task_info.get("logs", []),
                 "status": "finished"
             })
-        
+
         return results
 
     def get_tasks_status(self, task_ids: List[str]) -> ToolResult:

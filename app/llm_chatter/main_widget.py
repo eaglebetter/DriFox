@@ -300,7 +300,25 @@ class OpenAIChatToolWindow(ToolWindow):
             "permission_approval_requested", self._on_permission_approval_requested
         )
 
+        # 初始化子智能体日志存储（在 ChatEngine 之后）
+        self._init_sub_agent_log_store()
+
         self._initialize_history_manager()
+
+    def _init_sub_agent_log_store(self):
+        """初始化子智能体日志存储"""
+        from app.llm_chatter.core.sub_agent_log_store import SubAgentLogStore
+        import os
+
+        try:
+            db_path = os.path.join(".drifox", "sessions.db")
+
+            log_store = SubAgentLogStore()
+            log_store.init(db_path)
+            self._sub_agent_manager.set_log_store(log_store)
+            logger.info(f"[LLMChatter] 子智能体日志存储初始化完成")
+        except Exception as e:
+            logger.error(f"[LLMChatter] 子智能体日志存储初始化失败: {e}")
 
         # # 自动启动 LLM API 服务
         # self._init_llm_api_service()
