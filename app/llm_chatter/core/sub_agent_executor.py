@@ -54,6 +54,11 @@ class SubAgentExecutor(QThread):
         # 日志存储: [{"type": "progress"|"thinking"|"ai_response"|"tool_call"|"tool_result"|"finish", "content": str, "timestamp": float}]
         self._logs: List[Dict] = []
         self._tool_call_count = 0
+        self._log_store_callback = None  # 日志存储回调
+
+    def set_log_store_callback(self, callback):
+        """设置日志存储回调"""
+        self._log_store_callback = callback
 
     def cancel(self):
         self._is_cancelled = True
@@ -72,6 +77,12 @@ class SubAgentExecutor(QThread):
         if extra:
             log_entry.update(extra)
         self._logs.append(log_entry)
+        # 实时保存到数据库
+        if self._log_store_callback:
+            try:
+                self._log_store_callback(self.task_id, self.agent_name, self.task_description, "running", None, None, self._logs, self.get_summary())
+            except Exception as e:
+                logger.warning(f"[SubAgentExecutor] 实时保存日志失败: {e}")
 
     def get_logs(self) -> List[Dict]:
         """获取所有日志"""
@@ -136,11 +147,24 @@ class SubAgentExecutor(QThread):
                 summary = result if result else "执行出错"
                 self._last_result = summary
 
+            # 任务完成，保存最终状态
+            if self._log_store_callback:
+                try:
+                    self._log_store_callback(self.task_id, self.agent_name, self.task_description, "finished", self._last_result, None, self._logs, self.get_summary())
+                except Exception as e:
+                    logger.warning(f"[SubAgentExecutor] 保存完成状态失败: {e}")
+
             self.finished_with_result.emit(self.task_id, summary)
 
         except Exception as e:
             logger.error(f"[SubAgentExecutor] run() error: {e}")
             self._execution_error = str(e)
+            # 任务出错，保存错误状态
+            if self._log_store_callback:
+                try:
+                    self._log_store_callback(self.task_id, self.agent_name, self.task_description, "error", None, self._execution_error, self._logs, self.get_summary())
+                except Exception as e:
+                    logger.warning(f"[SubAgentExecutor] 保存错误状态失败: {e}")
             self.error_occurred.emit(self.task_id, f"SubAgent execution error: {str(e)}")
 
     def _execute_agent_loop(self, messages: List[Dict], tools: List[Dict]) -> str:
@@ -520,23 +544,19 @@ class SubAgentManager(QObject):
         self._log_store = log_store
 
     def _save_task_to_store(self, task_id: str, agent_name: str, task_description: str,
-                             status: str = "running", result: str = None, error: str = None):
+                             status: str = "running", result: str = None, error: str = None,
+                             logs: List[Dict] = None, summary: Dict = None):
         """保存任务到数据库"""
         if not self._log_store:
             return
         try:
-            executor = self._running_tasks.get(task_id)
-            logs = []
-            summary = {
-                "agent_name": agent_name,
-                "task_description": task_description,
-            }
-            if executor and hasattr(executor, "get_logs"):
-                logs = executor.get_logs()
-            if executor and hasattr(executor, "get_summary"):
-                summary = executor.get_summary()
-            self._log_store.save_task(task_id, agent_name, task_description, status, result, error, logs, summary)
-            logger.info(f"[SubAgentManager] 保存任务到数据库: {task_id}, status={status}, logs={len(logs)}")
+            if logs is None or summary is None:
+                executor = self._running_tasks.get(task_id)
+                if executor and hasattr(executor, "get_logs"):
+                    logs = executor.get_logs()
+                if executor and hasattr(executor, "get_summary"):
+                    summary = executor.get_summary()
+            self._log_store.save_task(task_id, agent_name, task_description, status, result, error, logs or [], summary or {})
         except Exception as e:
             logger.error(f"[SubAgentManager] 保存任务到数据库失败: {e}")
 
@@ -568,6 +588,10 @@ class SubAgentManager(QObject):
                 tool_executor=self._tool_executor,
                 parent_context=parent_context,
             )
+
+            # 设置日志存储回调
+            if self._log_store:
+                executor.set_log_store_callback(self._save_task_to_store)
 
             if executor_ref is not None:
                 executor_ref["executor"] = executor
