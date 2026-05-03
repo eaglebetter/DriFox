@@ -5,11 +5,12 @@ UI 辅助模块 - 从 main_widget.py 提取的 UI 辅助方法
 这些方法独立于主类，可以安全使用。
 """
 import re
-from typing import Optional, List, Dict, Any, Tuple, Callable
 from datetime import datetime
+from typing import Optional, List, Any, Tuple, Callable
+
+from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QPixmap
 from PyQt5.QtWidgets import QLabel
-from PyQt5.QtCore import Qt
 from loguru import logger
 
 __all__ = [
@@ -490,7 +491,6 @@ def read_backup_files(backup_path: str) -> tuple:
     Returns:
         (old_content, new_content, backup_file) 或抛出异常
     """
-    import difflib
     from pathlib import Path
     
     backup_file = Path(backup_path)
@@ -551,7 +551,6 @@ def generate_multi_file_diff_html(operations: list) -> str:
         HTML 报告字符串
     """
     import difflib
-    from pathlib import Path
     from app.llm_chatter.utils.diff_viewer import DiffHtmlGenerator
     
     diff_parts = []
@@ -883,7 +882,7 @@ def create_new_session_state(old_session_manager=None, old_chat_engine=None) -> 
         dict 包含 new_session, new_session_id
     """
     # 延迟导入避免循环依赖
-    from app.llm_chatter.utils.chat_session import ChatSession, SessionManager
+    from app.llm_chatter.utils.chat_session import SessionManager
     
     session_manager = SessionManager()
     session_manager.create_new_session()

@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
-from PyQt5.QtCore import QTimer, Qt, pyqtSignal
-from PyQt5.QtGui import QFont
+from functools import partial
+
+from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import (
     QCheckBox,
     QGridLayout,
@@ -12,9 +13,8 @@ from PyQt5.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from functools import partial
+from qfluentwidgets import PrimaryPushButton, SimpleCardWidget
 
-from qfluentwidgets import CardWidget, PrimaryPushButton
 from app.utils.utils import get_unified_font, get_font_family_css
 
 
@@ -190,7 +190,7 @@ class WrappedCheckOption(QWidget):
         super().mousePressEvent(event)
 
 
-class QuestionFloatingWidget(CardWidget):
+class QuestionFloatingWidget(SimpleCardWidget):
     """悬浮提问卡片，支持单选、多选和切换为文本输入。"""
 
     answered = pyqtSignal(str)

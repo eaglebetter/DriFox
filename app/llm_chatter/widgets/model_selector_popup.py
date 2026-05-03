@@ -17,8 +17,8 @@ from PyQt5.QtWidgets import (
     QLineEdit,
     QApplication,
 )
-
 from app.llm_chatter.widgets.provider_setting_card import ProviderIconWidget
+
 from app.utils.utils import get_font_family_css
 
 

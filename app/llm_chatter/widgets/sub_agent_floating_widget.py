@@ -1,11 +1,8 @@
 # -*- coding: utf-8 -*-
-"""
-子智能体悬浮框组件 - 支持多任务并行和结构化日志
-"""
 from typing import Dict
 
+from PyQt5.QtCore import Qt, pyqtSignal, QTimer
 from PyQt5.QtWidgets import (
-    QWidget,
     QVBoxLayout,
     QLabel,
     QPushButton,
@@ -13,6 +10,8 @@ from PyQt5.QtWidgets import (
     QTextEdit,
     QFrame, QSizePolicy,
 )
+from qfluentwidgets import SimpleCardWidget
+
 from PyQt5.QtCore import Qt, pyqtSignal, QTimer
 from PyQt5.QtGui import QFont, QTextCharFormat, QColor
 from qfluentwidgets import CardWidget, SegmentedWidget, BodyLabel, PrimaryPushButton
@@ -195,12 +194,8 @@ class SubTaskLogWidget(QFrame):
         self._tool_call_count = 0
 
 
-class SubAgentFloatingWidget(CardWidget):
-    """
-    子智能体悬浮框 - 支持多任务并行显示
-    
-    使用 SegmentedWidget 切换不同任务的日志视图
-    """
+class SubAgentFloatingWidget(SimpleCardWidget):
+    """子智能体悬浮框组件"""
 
     closed = pyqtSignal()
     task_selected = pyqtSignal(str)  # 发出选中的任务ID
@@ -220,7 +215,7 @@ class SubAgentFloatingWidget(CardWidget):
         self.setMinimumHeight(100)
         self.setMaximumHeight(400)
         self.setStyleSheet("""
-            CardWidget {
+            SimpleCardWidget {
                 background-color: rgba(30, 30, 30, 240);
                 border: 1px solid #9C27B0;
                 border-radius: 8px;
@@ -309,11 +304,11 @@ class SubAgentFloatingWidget(CardWidget):
         """显示指定任务的日志"""
         if task_id not in self._tasks:
             return
-        
+
         # 隐藏当前显示的任务
         if self._active_task_id and self._active_task_id in self._tasks:
             self._tasks[self._active_task_id].hide()
-        
+
         # 显示选中的任务
         self._tasks[task_id].show()
         self.log_container_layout.addWidget(self._tasks[task_id])
@@ -335,7 +330,7 @@ class SubAgentFloatingWidget(CardWidget):
         task_index = len(self._tasks)
         self.segment_widget.addItem(task_id, f"任务{task_index}")
         self.segment_widget.setCurrentItem(task_id)
-        
+
         # 同步更新 _task_labels
         self._task_labels[task_id] = f"任务{task_index}"
 
@@ -373,14 +368,14 @@ class SubAgentFloatingWidget(CardWidget):
 
             # 更新 Segment 标签保持原样，不改变任务名
             # 只更新 _task_labels 状态标记
-            
+
             # 更新计数
             self._update_task_count()
 
         # 如果当前显示的是这个任务，切换到下一个
         if self._active_task_id == task_id:
             self._switch_to_next_active()
-        
+
         # 检查是否所有任务都完成了
         self._check_all_finished()
 
@@ -388,12 +383,12 @@ class SubAgentFloatingWidget(CardWidget):
         """检查是否所有任务都完成了，如果是则隐藏面板"""
         if not self._tasks:
             return
-        
+
         all_done = all(
             self._task_labels.get(tid, "").startswith(("✓", "✗"))
             for tid in self._tasks
         )
-        
+
         if all_done:
             # 延迟 3 秒后隐藏
             QTimer.singleShot(3000, self.hide)
@@ -434,16 +429,16 @@ class SubAgentFloatingWidget(CardWidget):
             widget.hide()
             widget.deleteLater()
             del self._tasks[task_id]
-        
+
         # 移除 Segment - SegmentedWidget 没有 removeItem，用 clearItems 代替
         try:
             self.segment_widget.clear()
         except:
             pass
-        
+
         # 清理标签
         self._task_labels.clear()
-        
+
         # 重置活跃任务
         self._active_task_id = None
 
@@ -460,13 +455,13 @@ class SubAgentFloatingWidget(CardWidget):
         for widget in self._tasks.values():
             widget.hide()
             widget.deleteLater()
-        
+
         # 清空所有 segment
         try:
             self.segment_widget.clear()
         except:
             pass
-        
+
         # 重置所有状态
         self._tasks.clear()
         self._task_labels.clear()

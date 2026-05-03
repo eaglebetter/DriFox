@@ -1,19 +1,17 @@
 # -*- coding: utf-8 -*-
+from PyQt5.QtCore import Qt, pyqtSignal, QTimer
 from PyQt5.QtWidgets import (
-    QWidget,
     QVBoxLayout,
     QLabel,
     QPushButton,
     QHBoxLayout,
-    QTextEdit,
 )
-from PyQt5.QtCore import Qt, pyqtSignal, QTimer
-from PyQt5.QtGui import QFont, QPainter, QLinearGradient, QColor
-from qfluentwidgets import CardWidget
+from qfluentwidgets import SimpleCardWidget
+
 from app.utils.utils import get_unified_font
 
 
-class ToolFloatingWidget(CardWidget):
+class ToolFloatingWidget(SimpleCardWidget):
     """工具执行悬浮框组件 - 当工具执行时间过长时显示"""
 
     cancelled = pyqtSignal()

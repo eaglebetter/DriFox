@@ -14,17 +14,17 @@ from PyQt5.QtWidgets import (
     QFontComboBox,
 )
 from qfluentwidgets import (
-    CardWidget,
     StrongBodyLabel,
     SwitchSettingCard,
     OptionsSettingCard,
-    FluentIcon,
+    FluentIcon, SimpleCardWidget,
 )
-from app.utils.utils import get_icon, get_unified_font
+
 from app.utils.config import Settings
+from app.utils.utils import get_icon, get_unified_font
 
 
-class LLMSettingsCard(CardWidget):
+class LLMSettingsCard(SimpleCardWidget):
     """大模型设置卡片 - 垂直列表布局"""
 
     closed = pyqtSignal()

@@ -101,7 +101,7 @@ def _unwrap_code_blocks_with_context_links(md_text: str) -> str:
         lang_part = match.group(1) or ""
         code_content = match.group(2)
         if re.search(r"\[[^\[\]]+\]\([^)\s]+\)", code_content) and lang_part not in (
-            "python"
+                "python"
         ):
             return code_content
         else:
@@ -401,7 +401,7 @@ def _inject_tool_blocks(md_text: str, completed: bool = True) -> str:
         parts.append(md_text[i:start_idx])
         end_idx = md_text.find("</tool>", start_idx + len("<tool>"))
         if end_idx != -1:
-            content = md_text[start_idx + len("<tool>") : end_idx]
+            content = md_text[start_idx + len("<tool>"): end_idx]
             parts.append(_render_tool_block_content(content))
             i = end_idx + len("</tool>")
         else:
@@ -470,7 +470,6 @@ WELCOME_TIPS = [
     "💡 子智能体可协助处理复杂任务，观察其工作过程",
 ]
 
-
 # ======== 欢迎卡片欢迎语 ========
 WELCOME_GREETINGS = [
     "你好！我是 Drifox 飘狐 🦊",
@@ -507,6 +506,7 @@ def _inject_context_links(md_text: str) -> str:
     session 类型格式：[文本](session|session_id|last_time)
     last_time 如果为空则不显示
     """
+
     def replacer(match):
         content = match.group(1)
         action = match.group(2)
@@ -757,8 +757,8 @@ class CodeWebViewer(QWebEngineView):
                     parent.lower()
                     # 找到 MessageCard 或聊天容器为止
                     if (
-                        hasattr(parent, "chat_layout")
-                        or parent.__class__.__name__ == "MessageCard"
+                            hasattr(parent, "chat_layout")
+                            or parent.__class__.__name__ == "MessageCard"
                     ):
                         break
                     parent = parent.parent()
@@ -901,7 +901,7 @@ class CodeWebViewer(QWebEngineView):
                     font-family: Consolas, monospace;
                 }}
                 hr {{ border: none; border-top: 1px solid var(--border); margin: 14px 0; }}
-                
+
                 /* 优化：移除首尾元素的边距，彻底消除多余空白 */
                 #content-placeholder > :first-child {{ margin-top: 0 !important; }}
                 #content-placeholder > :last-child {{ margin-bottom: 0 !important; }}
@@ -1218,14 +1218,6 @@ class CodeWebViewer(QWebEngineView):
             <script>
                 const collapsibleState = new Map();
 
-                function debounceReportHeight() {{
-                    if (window._heightReportTimer) return;
-                    window._heightReportTimer = setTimeout(() => {{
-                        reportHeight();
-                        window._heightReportTimer = null;
-                    }}, 50);
-                }}
-
                 function syncExpandedAttrs(block, expanded) {{
                     block.dataset.expanded = expanded ? 'true' : 'false';
                     const summary = block.querySelector('.cm-collapsible__summary');
@@ -1238,37 +1230,37 @@ class CodeWebViewer(QWebEngineView):
                     const body = block.querySelector('.cm-collapsible__body');
                     if (!body) return;
 
-                    const wasExpanded = block.dataset.expanded === 'true';
-                    if (expand === wasExpanded) return;
-
                     body.style.transition = 'none';
-                    const currentHeight = body.getBoundingClientRect().height;
-                    body.style.height = currentHeight + 'px';
+                    const startHeight = body.getBoundingClientRect().height;
+                    body.style.height = startHeight + 'px';
                     body.offsetHeight;
                     body.style.transition = '';
 
-                    syncExpandedAttrs(block, expand);
                     if (expand) {{
+                        syncExpandedAttrs(block, true);
                         body.style.opacity = '1';
                         body.style.height = body.scrollHeight + 'px';
                     }} else {{
+                        body.style.height = body.scrollHeight + 'px';
+                        body.offsetHeight;
+                        syncExpandedAttrs(block, false);
                         body.style.opacity = '0';
                         body.style.height = '0px';
                     }}
 
                     const cleanup = () => {{
-                        body.removeEventListener('transitionend', cleanup);
-                        if (expand) {{
+                        if (block.dataset.expanded === 'true') {{
                             body.style.height = 'auto';
                             body.style.opacity = '1';
                         }} else {{
                             body.style.height = '0px';
                             body.style.opacity = '0';
                         }}
-                        debounceReportHeight();
+                        reportHeight();
                     }};
+
                     body.addEventListener('transitionend', cleanup, {{ once: true }});
-                    debounceReportHeight();
+                    requestAnimationFrame(reportHeight);
                 }}
 
                 function restoreCollapsibleStates(root) {{
@@ -1347,7 +1339,7 @@ class CodeWebViewer(QWebEngineView):
                 document.addEventListener('DOMContentLoaded', () => {{
                     console.log('pywebview_ready');
                     reportHeight();
-                    new ResizeObserver(() => debounceReportHeight()).observe(document.body);
+                    new ResizeObserver(() => requestAnimationFrame(reportHeight)).observe(document.body);
                 }});
                 window.addEventListener('load', () => {{
                     reportHeight();
@@ -1361,7 +1353,7 @@ class CodeWebViewer(QWebEngineView):
                     reportHeight();
                 }}, false);
                 window.pywebview = {{ reportHeight: reportHeight }};
-                
+
                 // 工具差异对比请求函数
                 window._requestToolDiff = function(toolCallId) {{
                     console.log('pywebview_action:tool_diff:' + toolCallId);
@@ -1609,13 +1601,13 @@ class MessageCard(SimpleCardWidget):
     saveFileRequested = pyqtSignal(str, str)  # code, lang
 
     def __init__(
-        self,
-        role: str,
-        timestamp: str = None,
-        parent=None,
-        tag_params: dict = None,
-        error: bool = False,
-        reasoning_content: str = "",
+            self,
+            role: str,
+            timestamp: str = None,
+            parent=None,
+            tag_params: dict = None,
+            error: bool = False,
+            reasoning_content: str = "",
     ):
         super().__init__(parent)
         self.parent = parent
@@ -1637,12 +1629,6 @@ class MessageCard(SimpleCardWidget):
         self._height_anim.valueChanged.connect(self._apply_viewer_height)
         self._target_viewer_height = 40
         self._last_applied_viewer_height = 40
-        # 防抖：延迟处理高度变化，避免折叠动画时频繁更新布局
-        self._height_update_timer = QTimer(self)
-        self._height_update_timer.setSingleShot(True)
-        self._height_update_timer.setInterval(50)
-        self._height_update_timer.timeout.connect(self._do_height_update)
-        self._pending_height = None
         self._theme = self._build_theme(role, error)
         self._base_bg = self._theme["bg"]
         self._base_border = self._theme["border"]
@@ -1976,34 +1962,8 @@ class MessageCard(SimpleCardWidget):
 
     def _update_height(self, h):
         target_height = max(40, h)
-        self._pending_height = target_height
-
-        # 如果已经有待处理的更新，跳过（防抖）
-        if self._height_update_timer.isActive():
-            return
-
-        self._height_update_timer.start()
-
-    def _apply_viewer_height(self, value):
-        height = max(40, int(value))
-        if height == self._last_applied_viewer_height:
-            return
-        self._last_applied_viewer_height = height
-        self.viewer.setFixedHeight(height)
-        # 性能优化：只在必要时触发布局更新，避免频繁向上传播
-        layout = self.layout()
-        if layout:
-            layout.invalidate()
-            layout.activate()
-
-    def _do_height_update(self):
-        """防抖后的实际高度更新"""
-        if self._pending_height is None:
-            return
-        target_height = self._pending_height
-        self._pending_height = None
-
         current_height = self.viewer.height() or self.viewer.minimumHeight() or 40
+        self._target_viewer_height = target_height
 
         if self._streaming or abs(target_height - current_height) < 10:
             if self._height_anim.state() == QVariantAnimation.Running:
@@ -2015,6 +1975,20 @@ class MessageCard(SimpleCardWidget):
         self._height_anim.setStartValue(current_height)
         self._height_anim.setEndValue(target_height)
         self._height_anim.start()
+
+    def _apply_viewer_height(self, value):
+        height = max(40, int(value))
+        if height == self._last_applied_viewer_height:
+            return
+        self._last_applied_viewer_height = height
+        self.viewer.setFixedHeight(height)
+        self.heightChanged.emit(height)
+        # 性能优化：只在必要时触发布局更新，避免频繁向上传播
+        # 直接使用 layout().invalidate() 而非 updateGeometry()
+        layout = self.layout()
+        if layout:
+            layout.invalidate()
+            layout.activate()
 
     def sync_width(self, force: bool = False):
         """同步卡片宽度
@@ -2098,9 +2072,9 @@ class MessageCard(SimpleCardWidget):
             if scroll_area:
                 vbar = scroll_area.verticalScrollBar()
                 if (
-                    vbar
-                    and vbar.minimum() != vbar.maximum()
-                    and event.angleDelta().y() != 0
+                        vbar
+                        and vbar.minimum() != vbar.maximum()
+                        and event.angleDelta().y() != 0
                 ):
                     vbar.setValue(vbar.value() - event.angleDelta().y() // 2)
                     event.accept()
@@ -2143,12 +2117,12 @@ class MessageCard(SimpleCardWidget):
         self.viewer.append_chunk(str(text or ""))
 
     def append_tool_result(
-        self,
-        tool_name: str,
-        arguments: Dict[str, Any] = None,
-        result: Any = None,
-        success: bool = True,
-        tool_call_id: str = None,
+            self,
+            tool_name: str,
+            arguments: Dict[str, Any] = None,
+            result: Any = None,
+            success: bool = True,
+            tool_call_id: str = None,
     ):
         self._content_data.append(
             make_tool_result_block(
@@ -2274,8 +2248,8 @@ class MessageCard(SimpleCardWidget):
 
 
 def create_welcome_card(
-    parent=None, agent_name: str = "", agent_description: str = "",
-    recent_sessions: list = None, top_by_count: list = None
+        parent=None, agent_name: str = "", agent_description: str = "",
+        recent_sessions: list = None, top_by_count: list = None
 ) -> MessageCard:
     """创建欢迎卡片
 
@@ -2337,11 +2311,11 @@ def create_welcome_card(
 </table>
 """
 
-    welcome_md = f"""**{tip}**
+    welcome_md = f"""### 👋 {greeting}
 
 ---
 
-### 👋 {greeting}
+**{tip}**
 
 {history_section}
 """

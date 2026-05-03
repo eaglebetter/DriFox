@@ -3,6 +3,7 @@
 模型配置卡片 - 优化布局，有变化自动保存
 """
 import webbrowser
+
 from PyQt5.QtCore import Qt, pyqtSignal, QTimer
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout
 from qfluentwidgets import (
@@ -12,19 +13,17 @@ from qfluentwidgets import (
     SpinBox,
     SwitchButton,
     PasswordLineEdit,
-    ComboBox,
+    ComboBox, SimpleCardWidget,
 )
 
-from app.llm_chatter.widgets.searchable_editable_combobox import (
-    SearchableEditableComboBox,
-)
 from app.llm_chatter.constants import (
     PARAM_UI_MAP,
     PARAM_RANGE_MAP,
 )
+from app.llm_chatter.widgets.searchable_editable_combobox import SearchableEditableComboBox
 
 
-class ModelConfigCard(QWidget):
+class ModelConfigCard(SimpleCardWidget):
     """模型配置卡片内容 - 有变化自动保存"""
 
     configApplied = pyqtSignal(dict)

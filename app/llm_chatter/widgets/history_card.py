@@ -3,31 +3,26 @@
 历史会话卡片 - 包含当前会话列表和归档会话列表
 """
 import datetime
-import json
-import os
 from typing import List, Dict, Optional
-from pathlib import Path
 
-from PyQt5.QtCore import Qt, pyqtSignal, QMimeData
+from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtGui import QDragEnterEvent
 from PyQt5.QtWidgets import (
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QFileDialog,
 )
-from PyQt5.QtGui import QDragEnterEvent
 from qfluentwidgets import (
     BodyLabel,
     CaptionLabel,
     CardWidget,
     TransparentToolButton,
     FluentIcon,
-    SegmentedWidget,
-    InfoBar,
-    InfoBarPosition,
+    SimpleCardWidget,
 )
+
 from app.utils.utils import get_icon, get_font_family_css
 
 
@@ -75,7 +70,7 @@ def get_message_preview(messages: List[Dict], max_len: int = 50) -> str:
     return ""
 
 
-class _HistoryItemCard(CardWidget):
+class _HistoryItemCard(SimpleCardWidget):
     """历史会话项卡片"""
 
     sessionClicked = pyqtSignal(int)

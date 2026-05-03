@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton, QHBoxLayout
 from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtGui import QFont
-from qfluentwidgets import CardWidget
+from PyQt5.QtWidgets import QVBoxLayout, QLabel, QPushButton, QHBoxLayout
+from qfluentwidgets import SimpleCardWidget
+
 from app.utils.utils import get_unified_font
 
 
-class TodoFloatingWidget(CardWidget):
+class TodoFloatingWidget(SimpleCardWidget):
     """TODO 悬浮框组件"""
 
     closed = pyqtSignal()
