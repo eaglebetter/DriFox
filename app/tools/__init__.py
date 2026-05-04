@@ -173,8 +173,8 @@ class BuiltinTools(QObject):
     def task_wait(self, task_ids: List[str], timeout: int = 1800, poll_interval: float = 0.1):
         return self._task_tools.task_wait(task_ids, timeout, poll_interval)
 
-    def task_status(self, task_ids: List[str] = None):
-        return self._task_tools.task_status(task_ids)
+    def task_status(self, task_ids: str = None, with_log: bool = False, with_result: bool = True):
+        return self._task_tools.task_status(task_ids, with_log, with_result)
 
     def load_skill(self, name: str):
         return self._task_tools.load_skill(name)
@@ -801,7 +801,7 @@ def get_builtin_tools_schema() -> List[Dict]:
             "type": "function",
             "function": {
                 "name": "task_wait",
-                "description": "等待指定的子智能体任务完成并收集结果（轮询方式）。在 task_batch 之后使用。",
+                "description": "等待指定的子智能体任务完成并收集结果（轮询方式）。",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -871,12 +871,12 @@ def get_builtin_tools_schema() -> List[Dict]:
             "type": "function",
             "function": {
                 "name": "question",
-                "description": "向用户提问并获取回答。当你需要了解用户偏好、需求或让用户做选择时，**必须**使用此工具，不要自行生成问卷或选项。",
+                "description": "向用户提问并获取回答。当需要了解用户偏好、需求或让用户做选择时，**必须**使用此工具，不要自行生成问卷或选项。\n\n## 使用原则\n1. **优先使用选项而非文本输入**: 总是通过 options 参数提供选项列表，让用户直接点击选择。选项可以是功能点、技术方案、确认操作等。\n2. **每个问题独立提问**: 当有多个独立问题时，应分多次调用 question 工具，每次只问一个核心问题。避免在一个 question 调用中塞入多个问题要求用户手动输入文本。\n3. **优先多次选择**: 如果需要用户做多个决定或确认多个点，使用多次 question 调用（每次设置 multiple=true 或提供选项），让用户通过选择完成，而非让他们自行组织文本回复。\n\n## 参数说明\n- question: 问题内容，尽量简洁\n- options: 选项列表（**推荐始终提供**），每个选项应该是完整的、可直接选择的\n- multiple: 是否允许多选",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "question": {"type": "string", "description": "问题内容及描述，尽量简洁，不要包含选项内容"},
-                        "options": {"type": "array", "description": "选项列表"},
+                        "options": {"type": "array", "description": "选项列表。当有多个可选方案或需要用户确认时，**必须提供选项列表**，不要留空让用户文本输入。"},
                         "multiple": {
                             "type": "boolean",
                             "description": "是否允许多选，默认false",

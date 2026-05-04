@@ -246,6 +246,7 @@ class _ArchivedItemCard(CardWidget):
         last_time: str,
         message_count: int = 0,
         preview: str = "",
+        project: str = "",
         parent=None,
     ):
         super().__init__(parent)
@@ -254,6 +255,7 @@ class _ArchivedItemCard(CardWidget):
         self._session_id = session_id
         self._is_editing = False
         self._message_count = message_count
+        self._project = project
         self.setCursor(Qt.PointingHandCursor)
 
         # 归档卡片样式 - 使用不同的背景色区分
@@ -305,6 +307,18 @@ class _ArchivedItemCard(CardWidget):
         self.title_edit.returnPressed.connect(self._finish_edit)
         self.title_edit.editingFinished.connect(self._finish_edit)
         top_row.addWidget(self.title_edit, 1, Qt.AlignLeft)
+
+        layout.addLayout(top_row)
+
+        # 项目标签（归档会话显示原项目）
+        if project:
+            project_label = QLabel(f"📁 {project}", self)
+            project_label.setStyleSheet(f"""
+                color: rgba(245, 158, 11, 0.7);
+                {get_font_family_css()} font-size: 11px;
+                padding: 2px 0px 2px 0px;
+            """)
+            layout.addWidget(project_label)
 
         btn_container = QHBoxLayout()
         btn_container.setSpacing(2)
@@ -413,6 +427,7 @@ class HistoryCard(QWidget):
         self._archived_sessions: List[Dict] = []
         self._item_cards = []
         self._current_tab = "history"  # "history" or "archived"
+        self._current_project: Optional[str] = None  # 当前过滤的项目
         self._setup_ui()
         # 启用拖放支持
         self.setAcceptDrops(True)
@@ -420,6 +435,10 @@ class HistoryCard(QWidget):
     def _setup_ui(self):
         """不需要创建自己的布局，直接使用父控件的 scroll_area"""
         pass
+
+    def set_current_project(self, project: str):
+        """设置当前过滤项目"""
+        self._current_project = project
 
     def get_content_layout(self) -> QVBoxLayout:
         """返回内容布局，供外部使用"""
@@ -677,6 +696,7 @@ class HistoryCard(QWidget):
                     last_time=last_time,
                     message_count=message_count,
                     preview=preview,
+                    project=session.get("project", ""),
                 )
                 card.restored.connect(self._on_archived_restored)
                 card.permanentlyDeleted.connect(self._on_archived_deleted)

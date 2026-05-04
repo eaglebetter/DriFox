@@ -128,6 +128,8 @@ class HistoryManager:
                 item["session_id"] = uuid.uuid4().hex[:8]
             item["compaction_state"] = dict(item.get("compaction_state") or {})
             item["compaction_cache"] = dict(item.get("compaction_cache") or {})
+            if "project" not in item:
+                item["project"] = "默认项目"
             normalized.append(item)
         return normalized
 
@@ -139,6 +141,7 @@ class HistoryManager:
         compaction_state: Dict = None,
         compaction_cache: Dict = None,
         system_prompt: str = None,
+        project: str = None,
     ):
         """保存会话"""
         if not messages:
@@ -152,6 +155,7 @@ class HistoryManager:
             compaction_state=compaction_state,
             compaction_cache=compaction_cache,
             system_prompt=system_prompt,
+            project=project,
         )
         new_session_id = session_record["session_id"]
 
@@ -192,6 +196,7 @@ class HistoryManager:
         compaction_state: Dict = None,
         compaction_cache: Dict = None,
         system_prompt: str = None,
+        project: str = None,
     ) -> Dict:
         now = datetime.now()
         saved_at = now.strftime("%Y-%m-%d %H:%M:%S")
@@ -214,6 +219,7 @@ class HistoryManager:
             "session_id": session_id,
             "saved_at": saved_at,
             "title": title,
+            "project": project or "默认项目",
             "last_time": last_msg_time,
             "messages": merged_messages,
             "message_count": self._count_conversation_pairs(merged_messages),
@@ -283,8 +289,50 @@ class HistoryManager:
                 most_recent = session
         return most_recent
 
-    def get_history_list(self) -> List[Dict]:
+    def get_history_list(self, project: str = None) -> List[Dict]:
+        """获取历史会话列表，可选按项目过滤"""
+        if project:
+            return [s for s in self._history_sessions if s.get("project", "默认项目") == project]
         return self._history_sessions
+
+    def get_projects(self) -> List[str]:
+        """获取所有不重复的项目名"""
+        if self._use_sqlite and self._session_store:
+            return self._session_store.get_projects(self.canvas_name)
+        projects = set()
+        for s in self._history_sessions:
+            p = s.get("project", "默认项目")
+            if p:
+                projects.add(p)
+        if not projects:
+            return ["默认项目"]
+        return sorted(projects)
+
+    def move_to_project(self, index: int, project: str) -> bool:
+        """将会话移动到指定项目"""
+        if 0 <= index < len(self._history_sessions):
+            self._history_sessions[index]["project"] = project
+            session = self._history_sessions[index]
+            session["canvas_id"] = self.canvas_name
+            if self._use_sqlite and self._session_store:
+                self._session_store.update_session_project(
+                    session.get("session_id"), project
+                )
+            self._persist_session(session)
+            return True
+        return False
+
+    def archive_sessions_by_project(self, project: str) -> int:
+        """批量归档指定项目的所有会话"""
+        if self._use_sqlite and self._session_store:
+            count = self._session_store.archive_sessions_by_project(self.canvas_name, project)
+            # 同步内存缓存
+            self._history_sessions = [
+                s for s in self._history_sessions
+                if s.get("project", "默认项目") != project
+            ]
+            return count
+        return 0
 
     def archive_history(self, index: int) -> bool:
         """归档历史记录"""
@@ -415,6 +463,7 @@ class HistoryManager:
             "compaction_state": dict(data.get("compaction_state") or {}),
             "compaction_cache": dict(data.get("compaction_cache") or {}),
             "system_prompt": data.get("system_prompt") or "",
+            "project": data.get("project", "默认项目"),
         }
 
         return session
@@ -491,6 +540,13 @@ class HistoryManager:
                 return session
         return None
 
+    def get_session_messages(self, session_id: str) -> Optional[List[Dict]]:
+        """根据 session_id 获取会话的消息列表"""
+        session = self.get_session_by_session_id(session_id)
+        if session:
+            return session.get("messages", [])
+        return None
+
     def update_session(
         self,
         index: int,
@@ -498,6 +554,7 @@ class HistoryManager:
         compaction_state: Dict = None,
         compaction_cache: Dict = None,
         system_prompt: str = None,
+        project: str = None,
     ):
         """更新会话"""
         if 0 <= index < len(self._history_sessions):
@@ -522,6 +579,7 @@ class HistoryManager:
                     if system_prompt is not None
                     else existing.get("system_prompt", "")
                 ),
+                project=project if project is not None else existing.get("project", "默认项目"),
             )
             self._history_sessions[index] = updated
             self._schedule_save(existing.get("session_id"))

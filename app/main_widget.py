@@ -21,6 +21,8 @@ from PyQt5.QtWidgets import (
     QWidget,
     QFileDialog, QGraphicsOpacityEffect,
     QLabel,
+    QPushButton,
+    QButtonGroup, QFrame, QScrollArea,
 )
 from loguru import logger
 from qfluentwidgets import (
@@ -29,7 +31,7 @@ from qfluentwidgets import (
     SingleDirectionScrollArea,
     InfoBar,
     InfoBarPosition,
-    TransparentToolButton,
+    TransparentToolButton, StrongBodyLabel,
 )
 
 from app.constants import (
@@ -98,6 +100,7 @@ from app.widgets.model_config_card import (
 from app.widgets.question_floating_widget import (
     QuestionFloatingWidget,
 )
+from qfluentwidgets import InfoBar, InfoBarPosition
 from app.widgets.sub_agent_floating_widget import (
     SubAgentFloatingWidget,
 )
@@ -135,7 +138,7 @@ class OpenAIChatToolWindow(ToolWindow):
     _valid_configs: Dict[str, Dict[str, Any]] = {}
     history_manager = None
     _agent_manager: Optional[AgentManager] = None
-    _current_agent: str = "plan"
+    _current_agent: str = "build"
     _current_session_id: Optional[str] = None
     _settings_popup = None
     _is_welcome = False
@@ -168,8 +171,13 @@ class OpenAIChatToolWindow(ToolWindow):
     toolStartUiSyncRequested = pyqtSignal(str, str, object, str)
 
     def __init__(self, homepage, button):
+        # 需要在 super().__init__() 之前初始化，因为 setup_ui() 会用到
+        from app.core.agent import AgentManager
+        self._agent_manager = AgentManager()
+        
         super().__init__(homepage, button)
         self._session_card_cache: Dict[str, Dict[str, Any]] = {}
+        self._current_history_project: Optional[str] = None  # 当前历史面板项目过滤
         self._welcome_card_cache: Dict[str, MessageCard] = {}
         self._displayed_session_id: Optional[str] = None
         self._initial_visible_batch_count = 12
@@ -252,7 +260,10 @@ class OpenAIChatToolWindow(ToolWindow):
         self._tool_executor.set_session_messages_getter(
             self._get_current_session_messages_for_tools
         )
-        self._agent_manager = AgentManager()
+        # _agent_manager 已在 __init__ 开头初始化，这里只记录日志
+        all_agents = self._agent_manager.list_agents()
+        primary_agents = self._agent_manager.list_primary_agents()
+        logger.info(f"[Init] AgentManager 加载了 {len(all_agents)} 个智能体，其中 {len(primary_agents)} 个 primary")
 
         from app.core.sub_agent_executor import (
             SubAgentManager,
@@ -598,6 +609,8 @@ class OpenAIChatToolWindow(ToolWindow):
 
     def _create_branched_session(self, messages: List[Dict], name: str):
         """创建分支会话并渲染消息"""
+        logger.info("[Branch] 开始创建分支会话")
+        
         if self._is_streaming and self._chat_engine:
             self._chat_engine.stop()
             self._is_streaming = False
@@ -613,6 +626,13 @@ class OpenAIChatToolWindow(ToolWindow):
         self._clear_chat_area()
         self.title_edit.setText(name)
         self.node_preview.clear_nodes()
+
+        # 重置输入框高度
+        if hasattr(self, 'input_area'):
+            logger.info(f"[Branch] 重置输入框高度，当前: {self.input_area.height()}")
+            self.input_area._initializing = True
+            self.input_area.setFixedHeight(72)
+            self.input_area._initializing = False
 
         # 复用现有的会话显示逻辑
         self._display_current_session()
@@ -656,7 +676,7 @@ class OpenAIChatToolWindow(ToolWindow):
     def setup_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
-        layout.setSpacing(4)
+        layout.setSpacing(1)
 
         self.setStyleSheet(WINDOW_STYLE)
 
@@ -666,15 +686,42 @@ class OpenAIChatToolWindow(ToolWindow):
 
         left_layout = QHBoxLayout()
         left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.setSpacing(4)
+        left_layout.setSpacing(0)
 
+        # 项目选择标签
+        self._current_project = "默认项目"
+        self._project_label = QLabel(self._current_project, self)
+        self._project_label.setStyleSheet(f"""
+            QLabel {{
+                color: #f59e0b;
+                {get_font_family_css()}
+                font-size: 13px;
+                font-weight: bold;
+                padding: 2px 6px;
+                border-radius: 4px;
+                background: rgba(245, 158, 11, 0.1);
+            }}
+            QLabel:hover {{
+                background: rgba(245, 158, 11, 0.2);
+            }}
+        """)
+        self._project_label.setCursor(Qt.PointingHandCursor)
+        self._project_label.mousePressEvent = self._on_project_label_clicked
+        self._project_label.setToolTip("点击切换项目")
+
+        # 分隔符
+        self._title_sep = StrongBodyLabel(" / ", self)
+
+        # 标题
         self.title_edit = QLabel("新对话", self)
         font_css = get_font_family_css()
-        # 标题样式使用 TITLE_STYLE + font_css
         title_style = TITLE_STYLE.replace("    QLabel {", f"    QLabel {{\n        {font_css}")
         self.title_edit.setStyleSheet(title_style)
         self.title_edit.setCursor(Qt.PointingHandCursor)
         self.title_edit.mouseDoubleClickEvent = self._on_title_double_click
+
+        left_layout.addWidget(self._project_label)
+        left_layout.addWidget(self._title_sep)
         left_layout.addWidget(self.title_edit)
 
         self.menu_btn = TransparentToolButton(FluentIcon.MORE, self)
@@ -788,6 +835,8 @@ class OpenAIChatToolWindow(ToolWindow):
         self._history_card.set_extra_button_handler(
             self._history_popup_card.get_import_button_handler()
         )
+
+        # 历史会话卡片
         self._history_card.content_layout.addWidget(self._history_popup_card)
         self._history_card.setVisible(False)
         layout.addWidget(self._history_card)
@@ -808,68 +857,104 @@ class OpenAIChatToolWindow(ToolWindow):
 
         hlayout = QHBoxLayout()
         hlayout.setContentsMargins(0, 0, 0, 0)
-        hlayout.setSpacing(6)
+        hlayout.setSpacing(4)
 
-        # 模型选择 - 扁平式上拉选择器（类似 OpenCode 风格）
-        self.current_model_btn = QWidget(self)
+        # 模型选择 + 配置按钮组 - 紧凑式设计
+        self._model_btn_container = QWidget(self)
+        self._model_btn_container.setFixedHeight(30)
+        self._model_btn_container.setStyleSheet("""
+            background: rgba(27, 35, 50, 180);
+            border: 1px solid rgba(43, 56, 80, 200);
+            border-radius: 12px;
+        """)
+        model_layout = QHBoxLayout(self._model_btn_container)
+        model_layout.setContentsMargins(0, 0, 0, 0)
+        model_layout.setSpacing(0)
+        
+        # 模型选择按钮（可点击弹出模型选择）
+        self.current_model_btn = QWidget(self._model_btn_container)
         self.current_model_btn.setCursor(Qt.PointingHandCursor)
         self.current_model_btn.setStyleSheet(MODEL_BTN_STYLE)
+        self.current_model_btn.setMouseTracking(True)
         self.current_model_btn.mousePressEvent = lambda e: self._show_model_selector_popup()
         btn_layout = QHBoxLayout(self.current_model_btn)
-        btn_layout.setContentsMargins(8, 4, 12, 4)
-        btn_layout.setSpacing(6)
+        btn_layout.setContentsMargins(8, 4, 0, 4)
+        btn_layout.setSpacing(4)
         self._model_btn_icon = QLabel(self.current_model_btn)
+        self._model_btn_icon.setStyleSheet("""background: transparent; border: none;""")
         self._model_btn_icon.setFixedSize(18, 18)
         btn_layout.addWidget(self._model_btn_icon)
         self._model_btn_text = QLabel("正在加载...", self.current_model_btn)
         self._model_btn_text.setStyleSheet(MODEL_BTN_TEXT_STYLE)
         btn_layout.addWidget(self._model_btn_text)
-        btn_layout.addStretch()
-        self.current_model_btn.setFixedHeight(30)
-        hlayout.addWidget(self.current_model_btn)
+        model_layout.addWidget(self.current_model_btn, 1)
+        # 配置按钮（点击弹出配置卡片）
+        self.settings_btn = TransparentToolButton(get_icon("模型选择"), self._model_btn_container)
+        self.settings_btn.setFixedSize(26, 26)
+        self.settings_btn.setToolTip("模型参数配置")
+        self.settings_btn.clicked.connect(self._toggle_model_config_card)
+        model_layout.addWidget(self.settings_btn)
+        
+        hlayout.addWidget(self._model_btn_container)
+        
         # 记下当前选中的服务商和模型，供弹窗使用
         self._current_provider_name = ""
         self._current_model_name = ""
 
-        self.settings_btn = TransparentToolButton(get_icon("模型选择"), self)
-        self.settings_btn.setToolTip("模型参数配置")
-        self.settings_btn.clicked.connect(self._toggle_model_config_card)
-        hlayout.addWidget(self.settings_btn)
+        # 智能体切换按钮组 - 金属质感+简约科技风
+        self._agent_switch_widget = self._create_agent_switch_buttons()
+        hlayout.addWidget(self._agent_switch_widget)
 
-        hlayout.addSpacing(12)  # 和其他按钮分隔
+        hlayout.addStretch(1)
 
-        hlayout.addStretch(1)  # 弹性空间，把其他按钮挤到右边
-
-        self.new_session_btn = TransparentToolButton(FluentIcon.ADD, self)
-        self.new_session_btn.setFixedSize(26, 26)
-        self.new_session_btn.setToolTip("新建对话")
-        self.new_session_btn.clicked.connect(self._create_new_session)
-
-        self.memory_btn = TransparentToolButton(get_icon("长期记忆"), self)
-        self.memory_btn.setFixedSize(26, 26)
-        self.memory_btn.setToolTip("长期记忆管理")
-        self.memory_btn.clicked.connect(self._show_soul_memory)
-
-        self.history_btn = TransparentToolButton(FluentIcon.HISTORY, self)
-        self.history_btn.setFixedSize(26, 26)
-        self.history_btn.setToolTip("历史会话")
-        self.history_btn.clicked.connect(self._toggle_history_card)
+        # 工具栏右侧按钮组 - 胶囊包裹，无分隔线
+        self._toolbar_capsule = QWidget(self)
+        self._toolbar_capsule.setFixedHeight(30)
+        self._toolbar_capsule.setStyleSheet("""
+            background: rgba(27, 35, 50, 180);
+            border: 1px solid rgba(43, 56, 80, 200);
+            border-radius: 12px;
+        """)
+        capsule_layout = QHBoxLayout(self._toolbar_capsule)
+        capsule_layout.setContentsMargins(4, 2, 4, 2)
+        capsule_layout.setSpacing(0)
 
         # Diff 按钮 - 查看文件差异
-        self.diff_btn = TransparentToolButton(get_icon("差异对比"), self)
+        self.diff_btn = TransparentToolButton(get_icon("差异对比"), self._toolbar_capsule)
         self.diff_btn.setFixedSize(26, 26)
         self.diff_btn.setToolTip("查看文件差异")
         self.diff_btn.clicked.connect(self._open_diff_viewer)
+        capsule_layout.addWidget(self.diff_btn)
 
-        hlayout.addWidget(self.diff_btn)
-        hlayout.addWidget(self.memory_btn)
-        hlayout.addWidget(self.history_btn)
-        hlayout.addWidget(self.new_session_btn)
+        # 记忆按钮
+        self.memory_btn = TransparentToolButton(get_icon("长期记忆"), self._toolbar_capsule)
+        self.memory_btn.setFixedSize(26, 26)
+        self.memory_btn.setToolTip("长期记忆管理")
+        self.memory_btn.clicked.connect(self._show_soul_memory)
+        capsule_layout.addWidget(self.memory_btn)
+
+        # 历史按钮
+        self.history_btn = TransparentToolButton(FluentIcon.HISTORY, self._toolbar_capsule)
+        self.history_btn.setFixedSize(26, 26)
+        self.history_btn.setToolTip("历史会话")
+        self.history_btn.clicked.connect(self._toggle_history_card)
+        capsule_layout.addWidget(self.history_btn)
+
+        # 新建按钮
+        self.new_session_btn = TransparentToolButton(FluentIcon.ADD, self._toolbar_capsule)
+        self.new_session_btn.setFixedSize(26, 26)
+        self.new_session_btn.setToolTip("新建对话")
+        self.new_session_btn.clicked.connect(self._create_new_session)
+        capsule_layout.addWidget(self.new_session_btn)
+
+        hlayout.addWidget(self._toolbar_capsule)
 
         layout.addLayout(hlayout)
 
+        # 输入框 - 在工具栏下方
         self.input_area = SendableTextEdit(self)
-        self.input_area.setMaximumHeight(108)
+        self.input_area._agent_combo.hide()  # 隐藏输入框内部的下拉框，用工具栏的按钮组代替
+        self.input_area._initializing = False  # 初始化完成后启用高度调整
         setFont(self.input_area, 15)
         self.input_area.sendMessageRequested.connect(self._on_send_clicked)
         self.input_area.stopMessageRequested.connect(self._on_stop_clicked)
@@ -903,14 +988,57 @@ class OpenAIChatToolWindow(ToolWindow):
             provider_models_data.append((provider_name, model_list, is_current))
 
         if not hasattr(self, "_model_selector_popup") or not self._model_selector_popup:
-            from app.widgets.model_selector_popup import ModelSelectorPopup
+            from app.widgets.model_selector_popup import (
+                ModelSelectorPopup, ProviderConfigListDialog,
+            )
+            from app.widgets.provider_setting_card import ProviderEditDialog
             self._model_selector_popup = ModelSelectorPopup(self)
             self._model_selector_popup.modelSelected.connect(self._on_model_selected_from_popup)
+            self._model_selector_popup.addProviderClicked.connect(
+                lambda: self._on_add_provider_from_popup()
+            )
+            self._model_selector_popup.configureProviderClicked.connect(
+                lambda: self._on_configure_providers_from_popup()
+            )
 
         self._model_selector_popup.set_providers_data(
             provider_models_data, self._current_provider_name or "", self._current_model_name or "",
         )
         self._model_selector_popup.show_at(self.current_model_btn)
+
+    def _on_add_provider_from_popup(self):
+        """从模型选择弹窗点击「添加」按钮 - 弹出添加服务商窗口"""
+        self._model_selector_popup.close()
+        from app.widgets.provider_setting_card import ProviderEditDialog
+        dialog = ProviderEditDialog("", {}, True, self)
+        if dialog.exec():
+            name, info = dialog.get_result()
+            # 刷新配置并重新加载弹窗
+            self._load_model_configs()
+            # 如果添加的服务商有模型，自动选中它
+            if name and info.get("模型名称"):
+                self._on_model_selected_from_popup(name, info.get("模型名称", ""))
+
+    def _on_configure_providers_from_popup(self):
+        """从模型选择弹窗点击「配置」按钮 - 显示设置卡片并展开服务商配置"""
+        self._model_selector_popup.close()
+        # 打开设置卡片
+        self._settings_popup.show()
+        self._settings_popup.raise_()
+        # 展开「已保存的服务商」下拉
+        self._settings_popup.llmProviderCard.setExpand(True)
+        # 滚动到顶部
+        QTimer.singleShot(100, self._scroll_settings_to_top)
+
+    def _scroll_settings_to_top(self):
+        """滚动设置卡片内容到顶部"""
+        try:
+            # 找到 LLMSettingsCard 内部的 QScrollArea 并滚到顶
+            scroll_areas = self._settings_popup.findChildren(QScrollArea)
+            if scroll_areas:
+                scroll_areas[0].verticalScrollBar().setValue(0)
+        except Exception:
+            pass
 
     def _on_model_selected_from_popup(self, provider_name: str, model_name: str):
         """从弹窗选中模型后切换"""
@@ -920,6 +1048,14 @@ class OpenAIChatToolWindow(ToolWindow):
             self._valid_configs[provider_name]["模型名称"] = model_name
         setting = Settings.get_instance()
         setting.set(setting.llm_selected_model, provider_name, save=True)
+        
+        # 关键修复：同步更新 saved_providers 中的模型名称，
+        # 确保 ChatEngine 的 _get_current_model_config 能读到正确的模型名
+        saved_providers = setting.llm_saved_providers.value or {}
+        if provider_name in saved_providers:
+            saved_providers[provider_name]["模型名称"] = model_name
+            setting.set(setting.llm_saved_providers, saved_providers, save=True)
+        
         self._update_model_selector_btn()
         self._refresh_context_usage_indicator()
         self._update_balance_display()
@@ -1051,6 +1187,134 @@ class OpenAIChatToolWindow(ToolWindow):
 
         self._model_config_popup.set_config(current_name, config)
 
+    def _create_agent_switch_buttons(self) -> QWidget:
+        """创建智能体切换按钮 - 单胶囊设计，中间用分隔线"""
+        container = QWidget()
+        container.setFixedHeight(30)
+        container.setStyleSheet("""
+            background: rgba(27, 35, 50, 180);
+            border: 1px solid rgba(43, 56, 80, 200);
+            border-radius: 12px;
+        """)
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(4, 2, 4, 2)
+        layout.setSpacing(0)
+        
+        # 加载智能体列表
+        agents = self._agent_manager.list_primary_agents() if self._agent_manager else []
+        
+        # 如果没有智能体，显示占位文本
+        if not agents:
+            placeholder = QLabel("无可用智能体")
+            placeholder.setStyleSheet(f"""
+                QLabel {{
+                    color: #8FA4C2;
+                    font-size: 12px;
+                    padding: 0 12px;
+                    {get_font_family_css()}
+                }}
+            """)
+            layout.addWidget(placeholder)
+            return container
+        
+        # 默认选中的智能体
+        default_agent = getattr(self, '_current_agent', 'plan')
+        
+        self._agent_buttons = {}
+        self._agent_btn_group = QButtonGroup()
+        self._agent_btn_group.buttonClicked[int].connect(self._on_agent_btn_clicked)
+        
+        # 默认样式
+        default_style = f"""
+            QPushButton {{
+                background: transparent;
+                color: #8FA4C2;
+                border: none;
+                border-radius: 8px;
+                padding: 4px 12px;
+                font-size: 12px;
+                font-weight: 500;
+                {get_font_family_css()}
+            }}
+            QPushButton:hover {{
+                background: rgba(255, 255, 255, 0.05);
+                color: #B4C2D9;
+            }}
+        """
+        
+        # 选中样式
+        selected_style = f"""
+            QPushButton {{
+                background: rgba(201, 168, 92, 0.2);
+                color: #C9A85C;
+                border: none;
+                border-radius: 8px;
+                padding: 4px 12px;
+                font-size: 12px;
+                font-weight: 600;
+                {get_font_family_css()}
+            }}
+            QPushButton:hover {{
+                background: rgba(201, 168, 92, 0.25);
+            }}
+        """
+        
+        for i, agent in enumerate(agents):
+            # 添加分隔线（在按钮之前，除了第一个）
+            if i > 0:
+                sep = QFrame()
+                sep.setFrameShape(QFrame.VLine)
+                sep.setFixedWidth(1)
+                sep.setStyleSheet("background: rgba(60, 75, 95, 150); margin: 4px 0;")
+                layout.addWidget(sep)
+            
+            btn = QPushButton(agent.name)
+            btn.setFixedHeight(22)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setCheckable(True)
+            btn.setStyleSheet(default_style)
+            btn.setToolTip(agent.description)
+            
+            self._agent_btn_group.addButton(btn, i)
+            self._agent_buttons[agent.name] = {"btn": btn, "style": default_style, "selected_style": selected_style}
+            layout.addWidget(btn)
+            
+            # 如果是默认选中的智能体，则选中它
+            if agent.name == default_agent:
+                btn.setChecked(True)
+                btn.setStyleSheet(selected_style)
+        
+        # 如果没有匹配默认智能体，选中第一个
+        if default_agent not in self._agent_buttons and agents:
+            btn = self._agent_buttons[agents[0].name]["btn"]
+            btn.setChecked(True)
+            btn.setStyleSheet(selected_style)
+            self._current_agent = agents[0].name
+        
+        return container
+    
+    def _on_agent_btn_clicked(self, btn_id: int):
+        """智能体按钮点击处理"""
+        agents = self._agent_manager.list_primary_agents() if self._agent_manager else []
+        if btn_id >= len(agents):
+            return
+        
+        agent = agents[btn_id]
+        agent_name = agent.name
+        
+        logger.info(f"[_on_agent_btn_clicked] btn_id={btn_id}, agent_name={agent_name}, _current_agent before={self._current_agent}")
+        
+        # 更新按钮样式
+        for name, data in self._agent_buttons.items():
+            btn = data["btn"]
+            if name == agent_name:
+                btn.setStyleSheet(data["selected_style"])
+            else:
+                btn.setStyleSheet(data["style"])
+        
+        # 触发智能体切换
+        self._on_agent_changed(agent_name)
+
     def _toggle_history_card(self):
         """切换历史会话卡片的显示"""
         # 切换当前卡片
@@ -1067,17 +1331,42 @@ class OpenAIChatToolWindow(ToolWindow):
         current_tab = self._history_card._current_tab if hasattr(self._history_card, '_current_tab') else "history"
         
         if current_tab == "history":
-            # 刷新历史会话
+            # 刷新历史会话 - 使用 _current_project（从配置加载的）
             current_idx = (
                 self.history_manager.find_index_by_session_id(self._current_session_id)
                 if self._current_session_id and self.history_manager
                 else None
             )
-            history_list = self.history_manager.get_history_list() if self.history_manager else []
+            history_list = self.history_manager.get_history_list(self._current_project) if self.history_manager else []
             self._history_popup_card.set_history(history_list, current_idx)
         else:
             # 刷新归档会话
             self._refresh_archived_sessions()
+
+    def _on_history_project_selected(self, project: str):
+        """历史面板项目切换（现在和标题栏同步）"""
+        self._current_project = project
+        self._current_history_project = project
+        self._history_popup_card.set_current_project(project)
+        self._refresh_history_toggle_panel()
+
+    def _on_session_dropped_on_project(self, project: str, session_index: int):
+        """将会话拖拽到指定项目"""
+        if not self.history_manager:
+            return
+        history_list = self.history_manager.get_history_list(self._current_project) if self.history_manager else []
+        if 0 <= session_index < len(history_list):
+            # 获取 session_id
+            session = history_list[session_index]
+            session_id = session.get("session_id")
+            if session_id:
+                # 更新项目的 session 记录
+                idx = self.history_manager.find_index_by_session_id(session_id)
+                if idx is not None:
+                    self.history_manager.move_to_project(idx, project)
+                    # 刷新
+                    self._history_popup_card.refreshRequested.emit()
+                    InfoBar.success("已移动", f"会话已移至「{project}」项目", duration=2000, parent=self)
 
     def _refresh_archived_sessions(self):
         """刷新归档会话列表"""
@@ -1298,35 +1587,69 @@ class OpenAIChatToolWindow(ToolWindow):
         self._refresh_context_usage_indicator()
 
     def _load_agent_list(self):
-        """加载智能体列表到选择器（仅显示 primary agents）"""
-        if not self._agent_manager or not hasattr(self, "input_area"):
+        """加载智能体列表到按钮组（仅显示 primary agents）"""
+        if not self._agent_manager:
             return
+        if not hasattr(self, "_agent_btn_group"):
+            return  # 按钮组还未创建
+        
         self._suppress_agent_intro = True
         agents = self._agent_manager.list_primary_agents()
-        self.input_area._agent_combo.clear()
-        for agent in agents:
-            self.input_area._agent_combo.addItem(agent.name, agent.description)
-        if self.input_area._agent_combo.count() > 0:
-            self.input_area._agent_combo.setCurrentIndex(0)
-            self._current_agent = self.input_area._agent_combo.currentText()
+        buttons = self._agent_btn_group.buttons()
+        default_agent = getattr(self, '_current_agent', 'build')
+        
+        # 更新按钮文本和提示
+        for i, agent in enumerate(agents):
+            if i < len(buttons):
+                btn = buttons[i]
+                btn.setText(agent.name)
+                btn.setToolTip(agent.description)
+        
+        # 根据当前智能体选中对应按钮
+        found = False
+        for i, agent in enumerate(agents):
+            if i < len(buttons) and agent.name == default_agent:
+                buttons[i].setChecked(True)
+                self._update_agent_button_style(default_agent)
+                found = True
+                logger.info(f"[_load_agent_list] Found match for {default_agent}, btn_id={i}")
+                break
+        
+        if not found:
+            # 如果没找到匹配的，默认选中第一个
+            logger.warning(f"[_load_agent_list] {default_agent} not found, using agents[0]={agents[0].name if agents else 'None'}")
+            if buttons:
+                buttons[0].setChecked(True)
+                self._current_agent = agents[0].name if agents else "build"
+                self._update_agent_button_style(self._current_agent)
+        
+        # 同步 ChatEngine 的 agent（关键修复！）
+        if self._chat_engine:
+            self._chat_engine._current_agent = self._current_agent
+            logger.info(f"[_load_agent_list] Synced ChatEngine._current_agent = {self._current_agent}")
+        
         self._suppress_agent_intro = False
+    
+    def _update_agent_button_style(self, active_agent: str):
+        """更新智能体按钮样式"""
+        if not hasattr(self, "_agent_buttons"):
+            return
+        for name, data in self._agent_buttons.items():
+            btn = data["btn"]
+            if name == active_agent:
+                btn.setStyleSheet(data["selected_style"])
+            else:
+                btn.setStyleSheet(data["style"])
 
     def _on_agent_changed(self, agent_name: str):
         """智能体切换处理"""
-        logger.info(f"[DEBUG] _on_agent_changed called: agent_name={agent_name}")
         if not agent_name or not self._chat_engine:
-            logger.info(
-                f"[DEBUG] _on_agent_changed: early return, agent_name={agent_name}, _chat_engine={self._chat_engine}"
-            )
             return
+        
+        logger.info(f"[_on_agent_changed] Switching from {self._current_agent} to {agent_name}")
+        
         self._current_agent = agent_name
         self._chat_engine.switch_agent(agent_name)
-        if hasattr(self, "input_area") and hasattr(self.input_area, "_agent_combo"):
-            idx = self.input_area._agent_combo.findText(agent_name)
-            if idx >= 0:
-                self.input_area._agent_combo.blockSignals(True)
-                self.input_area._agent_combo.setCurrentIndex(idx)
-                self.input_area._agent_combo.blockSignals(False)
         self._update_agent_status(agent_name)
         if not getattr(self, "_suppress_agent_intro", False):
             self._show_agent_intro(agent_name)
@@ -1352,16 +1675,20 @@ class OpenAIChatToolWindow(ToolWindow):
         self._scroll_to_bottom()
 
     def _update_agent_status(self, agent_name: str):
-        """更新智能体状态显示"""
-        if not self._agent_manager or not hasattr(self, "input_area"):
+        """更新智能体状态显示（按钮组模式下主要更新按钮提示）"""
+        if not self._agent_manager:
             return
         agent = self._agent_manager.get_agent(agent_name)
         if agent:
             mode = agent.mode
             hidden = "hidden" if agent.hidden else "visible"
-            self.input_area._agent_combo.setToolTip(
-                f"{agent.name}: {agent.description}\nMode: {mode}, {hidden}"
-            )
+            tooltip = f"{agent.name}: {agent.description}\nMode: {mode}, {hidden}"
+            # 更新按钮组的 tooltip
+            if hasattr(self, "_agent_buttons") and agent_name in self._agent_buttons:
+                self._agent_buttons[agent_name]["btn"].setToolTip(tooltip)
+            # 更新模型选择按钮的 tooltip
+            if hasattr(self, "current_model_btn"):
+                self.current_model_btn.setToolTip(f"{agent.name}: {agent.description}\nMode: {mode}, {hidden}")
 
     def _create_new_session(self):
         if self._chat_engine:
@@ -1521,6 +1848,11 @@ class OpenAIChatToolWindow(ToolWindow):
     def _initialize_history_manager(self):
         canvas_name = getattr(self.homepage, "workflow_name", "default") or "default"
         self.history_manager = HistoryManager(canvas_name)
+        # 从配置加载上次选中的项目
+        from app.utils.config import Settings
+        cfg = Settings.get_instance()
+        self._current_project = cfg.current_project.value
+        self._project_label.setText(self._current_project)
 
     def _restore_latest_session(self) -> bool:
         if not self.history_manager:
@@ -1556,6 +1888,10 @@ class OpenAIChatToolWindow(ToolWindow):
         self._history_preview_messages = None
         self._current_session_id = session_id
         self.title_edit.setText(latest.get("title") or "最近会话")
+        # 恢复项目
+        project = latest.get("project", "默认项目") or "默认项目"
+        self._current_project = project
+        self._project_label.setText(project)
         self._load_agent_list()
         if self._tool_executor:
             self._tool_executor.set_session_context(self._current_session_id)
@@ -1736,8 +2072,8 @@ class OpenAIChatToolWindow(ToolWindow):
         agent_name = agent.name if agent else ""
         agent_desc = agent.description if agent else ""
         
-        # 获取最近会话和最多消息的会话用于欢迎卡片
-        history_list = self.history_manager.get_history_list()
+        # 获取最近会话和最多消息的会话用于欢迎卡片（按当前项目过滤）
+        history_list = self.history_manager.get_history_list(self._current_project)
         
         # 最近会话（按时间排序，取前3）
         recent_sessions = []
@@ -1937,24 +2273,57 @@ class OpenAIChatToolWindow(ToolWindow):
         from app.utils.message_content import consolidate_messages
 
         canonical_messages = consolidate_messages(session.messages)
+        user_count_total = sum(1 for msg in canonical_messages if msg.get("role") == "user")
 
         # 规范化时间戳进行比较（去掉秒）
         # MessageCard 的 timestamp 格式是 "YYYY-MM-DD HH:MM"（无秒）
         # session.messages 的 timestamp 格式是 "YYYY-MM-DD HH:MM:SS"（有秒）
         card_ts_prefix = timestamp[:16] if timestamp else ""
 
+        logger.debug(f"[UNDO] Searching for user message: card_ts={card_ts_prefix}, content_len={len(user_text)}")
+        logger.debug(f"[UNDO] Session has {len(canonical_messages)} messages, {user_count_total} user messages")
+
         # 在消息列表中查找匹配的 user 消息
+        # 关键修复：同时匹配时间戳+内容，避免多条消息匹配到同一条
         user_count = 0
         for msg in canonical_messages:
             if msg.get("role") == "user":
                 msg_content = msg.get("content", "")
                 msg_timestamp = msg.get("timestamp", "") or ""
-
-                # 尝试匹配：时间戳前缀匹配（或内容完全匹配）
                 msg_ts_prefix = msg_timestamp[:16]
-                if msg_ts_prefix == card_ts_prefix or msg_content == user_text:
+
+                # 同时匹配时间戳和内容，确保唯一性
+                # 时间戳精确到分钟，内容完全匹配
+                if msg_ts_prefix == card_ts_prefix and msg_content == user_text:
+                    logger.info(
+                        f"[UNDO] Matched user message: user_count={user_count}, "
+                        f"ts={card_ts_prefix}, content_len={len(user_text)}"
+                    )
                     return user_count
                 user_count += 1
+
+        # 兜底：如果时间戳+内容都没匹配到，尝试内容匹配（兼容旧数据）
+        user_count = 0
+        for msg in canonical_messages:
+            if msg.get("role") == "user":
+                msg_content = msg.get("content", "")
+                if msg_content == user_text:
+                    logger.warning(
+                        f"[UNDO] Fallback match by content only: user_count={user_count}, "
+                        f"content_len={len(user_text)}"
+                    )
+                    return user_count
+                user_count += 1
+
+        # 调试：显示所有 user 消息的时间戳，帮助诊断
+        logger.warning(f"[UNDO] No match found for user message. Total user messages: {user_count_total}")
+        if user_count_total > 0:
+            logger.warning("[UNDO] Available user messages in session:")
+            for i, msg in enumerate(canonical_messages):
+                if msg.get("role") == "user":
+                    msg_ts = (msg.get("timestamp", "") or "")[:16]
+                    msg_content_preview = (msg.get("content", "") or "")[:50]
+                    logger.warning(f"[UNDO]   [{i}] ts={msg_ts}, content={msg_content_preview}...")
 
         return None
 
@@ -2013,8 +2382,33 @@ class OpenAIChatToolWindow(ToolWindow):
         return removed > 0
 
     def _remove_cards_from_round(self, round_index: int) -> bool:
-        widgets_to_remove = find_widgets_to_remove_from_round(self.chat_layout, round_index)
+        """从指定 round 开始删除所有卡片（包括后续卡片）"""
+        # 计算预期删除的卡片数量
+        session = self.session_manager.get_current_session()
+        cards_to_remove_hint = 0
+        if session:
+            from app.utils.message_content import consolidate_messages, get_user_round_ranges
+            canonical_messages = consolidate_messages(session.messages)
+            round_ranges = get_user_round_ranges(canonical_messages)
+            if round_index < len(round_ranges):
+                start_idx, end_idx = round_ranges[round_index]
+                cards_to_remove_hint = end_idx - start_idx
+        
+        widgets_to_remove = find_widgets_to_remove_from_round(
+            self.chat_layout, round_index, cards_to_remove_hint
+        )
         delete_widgets_from_layout(widgets_to_remove, self.chat_layout)
+        
+        # 关键修复：如果 UI 删除的卡片数量少于预期，清空整个聊天区域并重新渲染
+        if cards_to_remove_hint > 0 and len(widgets_to_remove) < cards_to_remove_hint:
+            from loguru import logger
+            logger.warning(
+                f"[UNDO] UI cards incomplete: deleting {len(widgets_to_remove)}/{cards_to_remove_hint}. "
+                f"Clearing and re-rendering session view."
+            )
+            self._clear_chat_area()
+            self._display_current_session()
+            return False
         return len(widgets_to_remove) > 0
 
     def _invalidate_current_session_card_cache(self):
@@ -2114,7 +2508,7 @@ class OpenAIChatToolWindow(ToolWindow):
             widget.sync_width()
 
     def _archive_history_session(self, index: int):
-        history_list = self.history_manager.get_history_list()
+        history_list = self.history_manager.get_history_list(self._current_project)
         if index < 0 or index >= len(history_list):
             return
 
@@ -2148,7 +2542,16 @@ class OpenAIChatToolWindow(ToolWindow):
     def _rename_history_session(self, index: int, new_title: str):
         if not self.history_manager:
             return
-        self.history_manager.update_session_title(index, new_title)
+        history_list = self.history_manager.get_history_list(self._current_project)
+        if 0 <= index < len(history_list):
+            session_record = history_list[index]
+            session_id = session_record.get("session_id")
+            if session_id:
+                session = self.history_manager.get_session_by_session_id(session_id)
+                if session:
+                    idx = self.history_manager.find_index_by_session_id(session_id)
+                    if idx is not None:
+                        self.history_manager.update_session_title(idx, new_title)
         # 刷新历史会话卡片
         refresh_history_card_if_visible(self._history_card, self._refresh_history_toggle_panel)
 
@@ -2314,13 +2717,14 @@ class OpenAIChatToolWindow(ToolWindow):
 
         self._tool_executor.reset_session_state()
 
-        history_list = self.history_manager.get_history_list()
+        history_list = self.history_manager.get_history_list(self._current_project)
         if index < 0 or index >= len(history_list):
             return
 
         session_record = history_list[index]
         session_id = session_record.get("session_id")
-        messages = self.history_manager.get_session_by_index(index)
+        # 通过 session_id 获取会话消息，而非通过 index
+        messages = self.history_manager.get_session_messages(session_id)
         if not messages:
             return
 
@@ -2334,6 +2738,11 @@ class OpenAIChatToolWindow(ToolWindow):
             self, restored, session_id, title,
             self._tool_executor
         )
+
+        # 如果会话有自己的项目，显示在标题上
+        session_project = session_record.get("project", "默认项目") or "默认项目"
+        self._current_project = session_project
+        self._project_label.setText(session_project)
 
         self._display_current_session()
 
@@ -2671,61 +3080,159 @@ class OpenAIChatToolWindow(ToolWindow):
         self._scroll_sync_timer.stop()
         self._scroll_sync_timer.start()
 
-    def _truncate_session_from_user_round(self, round_index: int) -> bool:
+    def _truncate_session_from_user_round(self, round_index: int, card: MessageCard = None) -> bool:
+        """
+        截断 session 数据到指定 round 之前，并删除 UI 卡片
+        
+        UI 删除策略：基于 card widget 对象在 chat_layout 中的位置精准删除，
+        不依赖 round_index 遍历（解决懒加载时卡片序号对不上的问题）
+        """
+        from loguru import logger
+        
         session = self.session_manager.get_current_session()
         if not session:
+            logger.error("[UNDO] No session found")
             return False
 
+        # === 1. 删除 UI 卡片：从 card 到末尾 ===
+        if card is not None:
+            # 找到 card 在 chat_layout 中的索引
+            card_layout_idx = -1
+            for i in range(self.chat_layout.count()):
+                item = self.chat_layout.itemAt(i)
+                if item and item.widget() is card:
+                    card_layout_idx = i
+                    break
+            
+            if card_layout_idx >= 0:
+                # 收集要删除的 widgets：从 card 到末尾（撤销 = 删除之后所有）
+                widgets_to_remove = []
+                for i in range(card_layout_idx, self.chat_layout.count()):
+                    item = self.chat_layout.itemAt(i)
+                    if item and item.widget():
+                        w = item.widget()
+                        if hasattr(w, '_is_welcome') and w._is_welcome:
+                            continue
+                        widgets_to_remove.append(w)
+                
+                from app.widgets.ui_helpers import delete_widgets_from_layout
+                deleted_count = delete_widgets_from_layout(widgets_to_remove, self.chat_layout)
+                logger.info(f"[UNDO] Removed {deleted_count} cards from UI")
+            else:
+                logger.warning("[UNDO] Card not found in layout, UI cards not deleted")
+        else:
+            logger.warning("[UNDO] No card provided, skipping UI deletion")
+        
+        # === 2. 基于 session.messages 计算截断位置 ===
         canonical_messages = consolidate_messages(session.messages)
         round_ranges = get_user_round_ranges(canonical_messages)
         
-        # 使用辅助函数截断消息
-        if not truncate_messages_at_round(session, round_index, round_ranges):
+        if round_index < 0 or round_index >= len(round_ranges):
+            logger.error(f"[UNDO] Invalid round_index: {round_index}, available: {len(round_ranges)}")
             return False
-            
+        
+        cutoff_index = round_ranges[round_index][0]
+        logger.info(f"[UNDO] Truncating session: round_index={round_index}, cutoff_index={cutoff_index}")
+        
+        # === 3. 截断 session.messages ===
+        session.set_messages(
+            session.messages[:cutoff_index], preserve_compaction=False
+        )
+        
+        # === 4. 同步 _message_batch ===
+        self._message_batch = group_messages_for_display(session.messages)
+        
+        # === 5. 保存 session ===
         self._persist_session_after_mutation()
-        self._remove_cards_from_round(round_index)
+        
+        # === 6. 收尾 ===
         self._finalize_local_session_mutation()
+        
         return True
 
     def _delete_message(self, card: MessageCard):
         if card.role != "user":
             return
-        round_index = self._find_user_round_index_for_card(card)
-        if round_index is None:
-            return
-        self._delete_user_round(round_index)
+        # 直接传 card 对象，不依赖 round_index 定位 UI 卡片
+        self._delete_user_round(card)
 
-    def _delete_user_round(self, round_index: int):
+    def _delete_user_round(self, card: MessageCard):
+        """
+        删除单个 round：找到 card 在 chat_layout 中的位置，
+        删除该 user card 及其后直到下一个 user card 之间的所有卡片
+        """
+        from loguru import logger
+        
+        logger.info(f"[DELETE] Starting deletion for card at round_index={card._round_index}")
+        
+        # === 1. 删除 UI 卡片：基于 card widget 对象在 layout 中的位置 ===
+        # 找到 card 在 chat_layout 中的索引
+        card_layout_idx = -1
+        for i in range(self.chat_layout.count()):
+            item = self.chat_layout.itemAt(i)
+            if item and item.widget() is card:
+                card_layout_idx = i
+                break
+        
+        if card_layout_idx < 0:
+            logger.warning("[DELETE] Card not found in layout")
+            return
+        
+        # 收集要删除的 widgets：从 card 开始，直到下一个 user card 或末尾
+        widgets_to_remove = [card]
+        for i in range(card_layout_idx + 1, self.chat_layout.count()):
+            item = self.chat_layout.itemAt(i)
+            if not item or not item.widget():
+                continue
+            w = item.widget()
+            # 遇到下一个 user card 就停止
+            if hasattr(w, 'role') and w.role == "user" and not getattr(w, "_is_welcome", False):
+                break
+            widgets_to_remove.append(w)
+        
+        from app.widgets.ui_helpers import delete_widgets_from_layout
+        delete_widgets_from_layout(widgets_to_remove, self.chat_layout)
+        logger.info(f"[DELETE] Removed {len(widgets_to_remove)} cards from UI")
+        
+        # === 2. 更新 session 数据 ===
         session = self.session_manager.get_current_session()
         if not session:
+            logger.error("[DELETE] No session found")
             return
-
-        # Step 1: 先删除UI卡片，确保用户立即看到效果
-        ui_deleted = self._remove_cards_for_round(round_index)
-
-        # Step 2: 更新 session 数据
+        
+        # 从 card._round_index 计算 session 截断位置
+        round_index = card._round_index
+        if round_index is None:
+            logger.error("[DELETE] Card has no _round_index")
+            return
+        
         canonical_messages = consolidate_messages(session.messages)
         round_ranges = get_user_round_ranges(canonical_messages)
+        
+        if round_index < 0 or round_index >= len(round_ranges):
+            logger.warning(f"[DELETE] Invalid round_index: {round_index}")
+            return
         
         success, old_count, new_count = truncate_and_remove_round(
             session, round_index, round_ranges
         )
         if not success:
-            logger.warning(f"[DELETE] Invalid round_index: {round_index}")
             return
-
-        # 记录统计信息
-        log_deletion_stats(round_index, ui_deleted, old_count, new_count)
-
-        # Step 3: 保存session数据
+        
+        log_deletion_stats(round_index, len(widgets_to_remove), old_count, new_count)
+        
+        # === 3. 同步 _message_batch ===
+        self._message_batch = group_messages_for_display(session.messages)
+        
+        # === 4. 保存 session ===
+        if self._current_session_id != session.session_id:
+            self._current_session_id = session.session_id
+        
         try:
             self._persist_session_after_mutation()
-            logger.info("[DELETE] Session persisted successfully")
         except Exception as e:
             logger.error(f"[DELETE] Failed to persist session: {e}")
-
-        # Step 4: 收尾处理
+        
         self._finalize_local_session_mutation()
 
     def _undo_from_message(self, card: MessageCard):
@@ -2780,7 +3287,7 @@ class OpenAIChatToolWindow(ToolWindow):
 
         user_input = card.get_plain_text()
         context_tags = card.context_tags.copy()
-        if not self._truncate_session_from_user_round(round_index):
+        if not self._truncate_session_from_user_round(round_index=round_index, card=card):
             return
 
         # 恢复输入框内容
@@ -3155,10 +3662,19 @@ class OpenAIChatToolWindow(ToolWindow):
                 self._hide_welcome_cards()
                 return
         
-        # 再从 history_manager 查找并恢复
-        index = self.history_manager.find_index_by_session_id(session_id)
-        if index is not None:
-            self._load_history_session_from_popup(index)
+        # 再从 history_manager 查找并恢复（通过 session_id 直接获取）
+        session_record = self.history_manager.get_session_by_session_id(session_id)
+        if session_record:
+            messages = self.history_manager.get_session_messages(session_id)
+            title = session_record.get("title") or session_record.get("name") or "历史对话"
+            from app.widgets.ui_helpers import create_session_from_record, init_after_loading_session
+            restored = create_session_from_record(session_record, messages, title)
+            init_after_loading_session(self, restored, session_id, title, self._tool_executor)
+            # 同步项目
+            session_project = session_record.get("project", "默认项目") or "默认项目"
+            self._current_project = session_project
+            self._project_label.setText(session_project)
+            self._display_current_session()
             self._hide_welcome_cards()
         else:
             logger.warning(f"未找到 session_id: {session_id}")
@@ -3542,6 +4058,7 @@ class OpenAIChatToolWindow(ToolWindow):
                     compaction_state=getattr(session, "compaction_state", {}),
                     compaction_cache=getattr(session, "compaction_cache", {}),
                     system_prompt=system_prompt,
+                    project=self._current_project,
                 )
             else:
                 self.history_manager.save_session(
@@ -3551,6 +4068,7 @@ class OpenAIChatToolWindow(ToolWindow):
                     compaction_state=getattr(session, "compaction_state", {}),
                     compaction_cache=getattr(session, "compaction_cache", {}),
                     system_prompt=system_prompt,
+                    project=self._current_project,
                 )
                 self._current_session_id = session.session_id if session else None
         else:
@@ -3561,6 +4079,7 @@ class OpenAIChatToolWindow(ToolWindow):
                 compaction_state=getattr(session, "compaction_state", {}),
                 compaction_cache=getattr(session, "compaction_cache", {}),
                 system_prompt=system_prompt,
+                project=self._current_project,
             )
             self._current_session_id = session.session_id if session else None
 
@@ -3809,6 +4328,62 @@ class OpenAIChatToolWindow(ToolWindow):
 
     def _update_title_display(self, title: str):
         self.title_edit.setText(title)
+
+    def _update_project_display(self, project: str):
+        """更新项目名称显示"""
+        self._current_project = project
+        self._project_label.setText(project)
+
+    def _on_project_label_clicked(self, event):
+        """项目标签点击 - 显示项目选择 popup"""
+        self._show_project_selector_popup()
+
+    def _show_project_selector_popup(self):
+        """显示项目选择弹窗"""
+        from app.widgets.project_selector_popup import ProjectSelectorPopup
+        if hasattr(self, '_project_selector_popup') and self._project_selector_popup:
+            self._project_selector_popup.close()
+            self._project_selector_popup.deleteLater()
+
+        projects = self.history_manager.get_projects() if self.history_manager else ["默认项目"]
+        self._project_selector_popup = ProjectSelectorPopup(
+            projects=projects,
+            current_project=self._current_project,
+            parent=self
+        )
+        self._project_selector_popup.projectSelected.connect(self._on_project_selected)
+        self._project_selector_popup.newProjectCreated.connect(self._on_new_project_created)
+        self._project_selector_popup.show_at(self._project_label)
+
+    def _on_project_selected(self, project: str):
+        """切换到选中的项目"""
+        self._current_project = project
+        self._project_label.setText(project)
+        # 保存到配置
+        from app.utils.config import Settings
+        cfg = Settings.get_instance()
+        cfg.current_project.value = project
+        cfg.save()
+        # 刷新历史面板（切换项目过滤）
+        self._current_history_project = project
+        self._history_popup_card.set_current_project(project)
+        self._refresh_history_toggle_panel()
+        # 自动触发新建会话，避免原会话与切换后的项目不匹配
+        self._create_new_session()
+
+    def _on_new_project_created(self, project: str):
+        """新建项目后"""
+        self._current_project = project
+        self._project_label.setText(project)
+        # 保存到配置
+        from app.utils.config import Settings
+        cfg = Settings.get_instance()
+        cfg.current_project.value = project
+        cfg.save()
+        # 刷新历史面板
+        self._history_popup_card.refreshRequested.emit()
+        # 自动触发新建会话
+        self._create_new_session()
 
     def _show_soul_memory(self):
         if not self._memory_manager:

@@ -314,7 +314,7 @@ def render_tool_block(
     expanded_attr = "false" if collapsed else "true"
     body_style = "" if collapsed else ' style="height:auto; opacity:1;"'
 
-    return f"""<div class="cm-collapsible tool-block" data-block-key="{block_key}" data-expanded="{expanded_attr}" data-tool-call-id="{escape(tool_call_id or '')}" style="margin: 8px 0; background: rgba(30, 32, 40, 0.28); border: 1px solid var(--border); border-radius: 6px;">
+    return f"""<div class="cm-collapsible tool-block" data-block-key="{block_key}" data-expanded="{expanded_attr}" data-tool-call-id="{escape(tool_call_id or '')}" style="margin: 8px 0; background: rgba(30, 32, 40, 0.28); border-radius: 6px;">
     <button type="button" class="cm-collapsible__summary tool-block__summary" aria-expanded="{expanded_attr}" style="cursor: pointer; padding: 6px 10px; color: {title_color}; font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 10px; width: 100%; background: transparent; border: none; text-align: left; box-sizing: border-box;">
         <span style="display: inline-flex; align-items: center; gap: 6px; min-width: 0; flex: 0 1 auto;">
             <span class="cm-collapsible__chevron" aria-hidden="true"></span>

@@ -198,12 +198,12 @@ class TaskTools:
             logger.error(f"[task_wait] Exception: {e}")
             return ToolResult(False, error=f"等待任务失败: {str(e)}")
 
-    def task_status(self, task_ids: List[str] = None, with_log: bool = False, with_result: bool = True) -> ToolResult:
+    def task_status(self, task_ids: str = None, with_log: bool = False, with_result: bool = True) -> ToolResult:
         """
         查询任务状态。
 
         Args:
-            task_ids: 任务ID列表（None=查询所有活跃任务）
+            task_ids: 任务ID列表，用逗号分隔。None或空=查询所有活跃任务
             with_log: 是否包含执行日志（默认 False）
             with_result: 是否包含执行结果（默认 True）
 
@@ -213,8 +213,15 @@ class TaskTools:
         if not hasattr(self, "_sub_agent_manager") or not self._sub_agent_manager:
             return ToolResult(False, error="子智能体管理器未初始化")
 
+        # 解析任务ID：支持字符串（逗号分隔）或列表格式
         if task_ids:
-            return self._sub_agent_manager.get_tasks_status_with_details(task_ids, with_log, with_result)
+            if isinstance(task_ids, list):
+                # 直接是列表
+                id_list = [str(tid).strip() for tid in task_ids if tid]
+            else:
+                # 字符串格式：逗号分隔
+                id_list = [tid.strip() for tid in str(task_ids).split(",") if tid.strip()]
+            return self._sub_agent_manager.get_tasks_status_with_details(id_list, with_log, with_result)
         else:
             return self._sub_agent_manager.get_all_active_tasks_with_details(with_log, with_result)
 

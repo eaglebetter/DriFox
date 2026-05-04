@@ -102,16 +102,16 @@ class LLMSettingsCard(SimpleCardWidget):
             QScrollBar:vertical {
                 border: none;
                 background: transparent;
-                width: 6px;
-                margin: 2px 2px 2px 2px;
+                width: 12px;
+                margin: 4px 4px 4px 4px;
             }
             QScrollBar::handle:vertical {
                 background: #555555;
-                border-radius: 3px;
-                min-height: 20px;
+                border-radius: 6px;
+                min-height: 30px;
             }
             QScrollBar::handle:vertical:hover {
-                background: #666666;
+                background: #888888;
             }
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
                 height: 0px;

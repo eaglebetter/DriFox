@@ -17,6 +17,7 @@ from typing import List, Dict, Optional, Any, Tuple
 from loguru import logger
 
 from app.utils.db_manager import DatabaseManager
+from app.utils.message_content import consolidate_messages
 
 
 class SessionStore:
@@ -70,6 +71,9 @@ class SessionStore:
                 self._db.execute_sql(
                     f'CREATE INDEX IF NOT EXISTS idx_updated ON {self.TABLE_NAME}(updated_at DESC)'
                 )
+                self._db.execute_sql(
+                    f'CREATE INDEX IF NOT EXISTS idx_project ON {self.TABLE_NAME}(project)'
+                )
 
                 # 创建长期记忆表
                 self._db.create_table(self.MEMORIES_TABLE, [
@@ -110,11 +114,32 @@ class SessionStore:
                 )
 
                 self._initialized = True
+                # 迁移：为已存在的表添加 project 列（如果不存在）
+                self._migrate_add_project_column()
                 logger.info(f"[SessionStore] 初始化完成: {self._db_path}")
 
             except Exception as e:
                 logger.error(f"[SessionStore] 初始化失败: {e}")
                 raise
+
+    def _migrate_add_project_column(self):
+        """迁移：为旧的 sessions 表添加 project 列"""
+        if not self._db or not self._db.is_connected:
+            return
+        try:
+            columns = self._db.get_table_info(self.TABLE_NAME)
+            col_names = [c.get("name", "") for c in columns]
+            if "project" not in col_names:
+                logger.info("[SessionStore] 迁移：添加 project 列")
+                self._db.execute_sql(
+                    f"ALTER TABLE {self.TABLE_NAME} ADD COLUMN project TEXT DEFAULT '默认项目'"
+                )
+                self._db.execute_sql(
+                    f"UPDATE {self.TABLE_NAME} SET project = '默认项目' WHERE project IS NULL"
+                )
+                logger.info("[SessionStore] project 列迁移完成")
+        except Exception as e:
+            logger.warning(f"[SessionStore] project 列迁移失败(可能已存在): {e}")
 
     @property
     def is_initialized(self) -> bool:
@@ -160,6 +185,7 @@ class SessionStore:
                 "session_id": session_id,
                 "canvas_id": session.get("canvas_id", "default"),
                 "title": session.get("title", ""),
+                "project": session.get("project", "默认项目"),
                 "messages": json.dumps(session.get("messages", []), ensure_ascii=False),
                 "system_prompt": session.get("system_prompt", ""),
                 "compaction_state": json.dumps(session.get("compaction_state", {})),
@@ -170,11 +196,11 @@ class SessionStore:
             # 使用 INSERT OR REPLACE，使用本地时间
             success, result = self._execute(f'''
                 INSERT OR REPLACE INTO {self.TABLE_NAME}
-                (session_id, canvas_id, title, messages, system_prompt,
+                (session_id, canvas_id, title, project, messages, system_prompt,
                  compaction_state, compaction_cache, message_count,
                  created_at, updated_at)
                 VALUES (
-                    :session_id, :canvas_id, :title, :messages, :system_prompt,
+                    :session_id, :canvas_id, :title, :project, :messages, :system_prompt,
                     :compaction_state, :compaction_cache, :message_count,
                     COALESCE((SELECT created_at FROM {self.TABLE_NAME} WHERE session_id = :session_id), :now),
                     :now
@@ -195,7 +221,7 @@ class SessionStore:
     def _dict_to_params(self, d: Dict) -> Tuple:
         """将字典转换为参数元组（按字段顺序）"""
         fields = [
-            "session_id", "canvas_id", "title", "messages", "system_prompt",
+            "session_id", "canvas_id", "title", "project", "messages", "system_prompt",
             "compaction_state", "compaction_cache", "message_count"
         ]
         return tuple(d.get(f) for f in fields)
@@ -275,7 +301,9 @@ class SessionStore:
         # 反序列化 JSON 字段
         try:
             messages_str = session.get("messages", "[]")
-            session["messages"] = json.loads(messages_str) if isinstance(messages_str, str) else (messages_str or [])
+            raw_messages = json.loads(messages_str) if isinstance(messages_str, str) else (messages_str or [])
+            # 应用 consolidate_messages 处理消息（与内存加载保持一致）
+            session["messages"] = consolidate_messages(raw_messages)
         except (json.JSONDecodeError, TypeError):
             session["messages"] = []
 
@@ -312,12 +340,10 @@ class SessionStore:
         """获取指定画布的会话数量"""
         if not self.is_initialized:
             return 0
-
         success, result = self._execute(
             f'SELECT COUNT(*) FROM {self.TABLE_NAME} WHERE canvas_id = ?',
             (canvas_id,)
         )
-
         if success and result:
             first = result[0]
             if isinstance(first, (int, float)):
@@ -325,6 +351,74 @@ class SessionStore:
             if isinstance(first, tuple):
                 return int(first[0]) if first[0] else 0
         return 0
+
+    def get_projects(self, canvas_id: str = "default") -> List[str]:
+        """获取指定画布下所有不重复的项目名"""
+        if not self.is_initialized:
+            return ["默认项目"]
+        try:
+            success, rows = self._execute(
+                f'SELECT DISTINCT project FROM {self.TABLE_NAME} WHERE canvas_id = ? ORDER BY project',
+                (canvas_id,)
+            )
+            if success and rows:
+                projects = [row[0] if isinstance(row, tuple) else row["project"] for row in rows]
+                return [p for p in projects if p]
+            return ["默认项目"]
+        except Exception as e:
+            logger.error(f"[SessionStore] get_projects 异常: {e}")
+            return ["默认项目"]
+
+    def update_session_project(self, session_id: str, project: str) -> bool:
+        """更新会话的项目归属"""
+        if not self.is_initialized:
+            return False
+        try:
+            success, _ = self._execute(
+                f'UPDATE {self.TABLE_NAME} SET project = ?, updated_at = ? WHERE session_id = ?',
+                (project, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), session_id)
+            )
+            return success
+        except Exception as e:
+            logger.error(f"[SessionStore] update_session_project 异常: {e}")
+            return False
+
+    def get_sessions_by_project(self, canvas_id: str, project: str, limit: int = 100) -> List[Dict]:
+        """加载指定项目的会话列表"""
+        if not self.is_initialized:
+            return []
+        try:
+            success, rows = self._execute(
+                f'SELECT * FROM {self.TABLE_NAME} WHERE canvas_id = ? AND project = ? ORDER BY updated_at DESC LIMIT ?',
+                (canvas_id, project, limit)
+            )
+            if not success:
+                return []
+            return [self._row_to_session(row) for row in rows]
+        except Exception as e:
+            logger.error(f"[SessionStore] get_sessions_by_project 异常: {e}")
+            return []
+
+    def archive_sessions_by_project(self, canvas_id: str, project: str) -> int:
+        """归档指定项目的所有会话"""
+        if not self.is_initialized:
+            return 0
+        try:
+            sessions = self.get_sessions_by_project(canvas_id, project, limit=1000)
+            count = 0
+            for s in sessions:
+                sid = s.get("session_id")
+                if sid:
+                    success, _ = self._execute(
+                        f'UPDATE {self.TABLE_NAME} SET project = ? WHERE session_id = ?',
+                        (f"__archived__/{project}", sid)
+                    )
+                    if success:
+                        count += 1
+            return count
+        except Exception as e:
+            logger.error(f"[SessionStore] archive_sessions_by_project 异常: {e}")
+            return 0
 
     def migrate_from_json(self, json_path: str) -> int:
         """

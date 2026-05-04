@@ -390,6 +390,11 @@ class FileTools:
             if not full_path.exists():
                 return ToolResult(False, error=f"File not found: {path}")
 
+            # 检查文件是否被外部修改
+            check_result = self._check_file_modified(full_path)
+            if check_result:
+                return check_result
+
             content = full_path.read_text(encoding="utf-8", errors="replace")
 
             applied_count = 0

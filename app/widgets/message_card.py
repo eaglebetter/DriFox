@@ -123,7 +123,11 @@ def _strip_code_blocks(text: str) -> str:
     text = re.sub(r"```[\s\S]*?```", "", text)
     # 移除剩余的反引号
     text = text.replace("`", "")
-    return text
+    # 将换行符替换为空格，让内容自然填充，避免多余空行
+    text = text.replace("\r\n", " ").replace("\n", " ")
+    # 合并多余空格
+    text = re.sub(r" +", " ", text)
+    return text.strip()
 
 
 # ======== 核心逻辑：保留你的原始代码块样式 ========
@@ -257,7 +261,7 @@ def _render_think_block(content: str, completed: bool = True) -> str:
         <span style="color: #666; font-size: 11px; font-weight: normal; margin-left: auto;">{escape(content_preview)}</span>
     </button>
     <div class="cm-collapsible__body"{body_style}>
-        <div class="think-content" style="white-space: pre-wrap; word-break: break-word;">{content}</div>
+        <div class="think-content loading" style="white-space: normal; word-break: break-word; line-height: 1.6;">{content}</div>
     </div>
 </div>"""
 
@@ -1092,7 +1096,7 @@ class CodeWebViewer(QWebEngineView):
                     opacity: 0;
                     overflow: hidden;
                     will-change: height, opacity;
-                    transition: height 220ms cubic-bezier(0.22, 1, 0.36, 1), opacity 160ms ease;
+                    transition: height 250ms cubic-bezier(0.4, 0, 0.2, 1), opacity 200ms ease;
                 }}
                 .cm-collapsible[data-expanded="true"] .cm-collapsible__body {{
                     opacity: 1;
@@ -1103,6 +1107,10 @@ class CodeWebViewer(QWebEngineView):
                     background: rgba(30, 32, 40, 0.28);
                     border: 1px solid var(--border);
                     border-radius: 10px;
+                    transition: border-color 220ms ease;
+                }}
+                .think-block[data-expanded="true"] {{
+                    border-color: rgba(102, 198, 255, 0.4);
                 }}
                 .think-block__summary {{
                     padding: 8px 12px;
@@ -1115,6 +1123,23 @@ class CodeWebViewer(QWebEngineView):
                     background: rgba(30, 32, 40, 0.18);
                     color: var(--text-muted) !important;
                     font-style: italic;
+                    font-size: 13px;
+                    line-height: 1.6;
+                }}
+                /* 思考内容加载骨架屏动画 */
+                .think-content.loading {{
+                    background-image: linear-gradient(
+                        90deg,
+                        rgba(30, 32, 40, 0.18) 25%,
+                        rgba(40, 44, 55, 0.28) 50%,
+                        rgba(30, 32, 40, 0.18) 75%
+                    );
+                    background-size: 200% 100%;
+                    animation: think-shimmer 1.5s ease-in-out infinite;
+                }}
+                @keyframes think-shimmer {{
+                    0% {{ background-position: 200% 0; }}
+                    100% {{ background-position: -200% 0; }}
                 }}
 
                 .tool-block {{
@@ -1123,6 +1148,10 @@ class CodeWebViewer(QWebEngineView):
                     border: 1px solid var(--border);
                     border-radius: 10px;
                     box-shadow: none;
+                    transition: border-color 220ms ease;
+                }}
+                .tool-block[data-expanded="true"] {{
+                    border-color: rgba(95, 209, 140, 0.5);
                 }}
                 .tool-block__summary {{
                     padding: 8px 12px;
@@ -1240,39 +1269,53 @@ class CodeWebViewer(QWebEngineView):
                     const body = block.querySelector('.cm-collapsible__body');
                     if (!body) return;
 
-                    body.style.transition = 'none';
+                    const ANIM_DURATION = 220;
+                    const startTime = performance.now();
                     const startHeight = body.getBoundingClientRect().height;
-                    body.style.height = startHeight + 'px';
-                    body.offsetHeight;
-                    body.style.transition = '';
+                    const startOpacity = expand ? 0 : 1;
+                    const endHeight = expand ? body.scrollHeight : 0;
+                    const endOpacity = expand ? 1 : 0;
 
-                    if (expand) {{
-                        body.style.height = body.scrollHeight + 'px';
-                        body.offsetHeight;
-                        syncExpandedAttrs(block, true);
-                        body.style.opacity = '1';
-                        body.style.height = body.scrollHeight + 'px';
-                    }} else {{
-                        body.style.height = body.scrollHeight + 'px';
-                        body.offsetHeight;
-                        syncExpandedAttrs(block, false);
-                        body.style.opacity = '0';
-                        body.style.height = '0px';
+                    // 立即更新展开状态
+                    syncExpandedAttrs(block, expand);
+
+                    // 阻止 CSS transition 干扰
+                    body.style.transition = 'none';
+                    body.style.height = startHeight + 'px';
+                    body.style.opacity = startOpacity;
+
+                    // 强制重绘
+                    void body.offsetHeight;
+
+                    // 取消之前的动画
+                    if (window._collapsibleAnimId) {{
+                        cancelAnimationFrame(window._collapsibleAnimId);
                     }}
 
-                    const cleanup = () => {{
-                        if (block.dataset.expanded === 'true') {{
-                            body.style.height = 'auto';
-                            body.style.opacity = '1';
-                        }} else {{
-                            body.style.height = '0px';
-                            body.style.opacity = '0';
-                        }}
-                        reportHeight();
-                    }};
+                    function tick(now) {{
+                        const elapsed = now - startTime;
+                        const progress = Math.min(elapsed / ANIM_DURATION, 1);
+                        // 使用 easeOutQuad 缓动
+                        const eased = 1 - (1 - progress) * (1 - progress);
 
-                    body.addEventListener('transitionend', cleanup, {{ once: true }});
-                    requestAnimationFrame(reportHeight);
+                        const currentHeight = startHeight + (endHeight - startHeight) * eased;
+                        const currentOpacity = startOpacity + (endOpacity - startOpacity) * eased;
+
+                        body.style.height = currentHeight + 'px';
+                        body.style.opacity = currentOpacity;
+
+                        if (progress < 1) {{
+                            window._collapsibleAnimId = requestAnimationFrame(tick);
+                        }} else {{
+                            // 动画结束
+                            body.style.height = expand ? 'auto' : '0px';
+                            body.style.opacity = endOpacity;
+                            // 动画结束后只报告一次高度
+                            setTimeout(() => reportHeight(), 0);
+                        }}
+                    }}
+
+                    window._collapsibleAnimId = requestAnimationFrame(tick);
                 }}
 
                 function restoreCollapsibleStates(root) {{
@@ -1301,8 +1344,34 @@ class CodeWebViewer(QWebEngineView):
                 function updateContent(newHtml) {{
                     const container = document.getElementById('content-placeholder');
                     if (container.innerHTML !== newHtml) {{
+                        // 记录当前展开状态的思考块
+                        const expandedStates = new Map();
+                        container.querySelectorAll('.think-block').forEach(block => {{
+                            expandedStates.set(block.dataset.blockKey, block.dataset.expanded === 'true');
+                        }});
+
                         container.innerHTML = newHtml;
+
+                        // 恢复展开状态并移除骨架屏动画
+                        container.querySelectorAll('.think-content').forEach(content => {{
+                            content.classList.remove('loading');
+                        }});
+
                         restoreCollapsibleStates(container);
+
+                        // 恢复展开状态
+                        container.querySelectorAll('.think-block').forEach(block => {{
+                            const savedState = expandedStates.get(block.dataset.blockKey);
+                            if (savedState !== undefined) {{
+                                block.dataset.expanded = savedState ? 'true' : 'false';
+                                const body = block.querySelector('.cm-collapsible__body');
+                                if (body) {{
+                                    body.style.height = savedState ? 'auto' : '0px';
+                                    body.style.opacity = savedState ? '1' : '0';
+                                }}
+                            }}
+                        }});
+
                         if (window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise();
                         reportHeight();
                     }}
@@ -1648,6 +1717,8 @@ class MessageCard(SimpleCardWidget):
         self._height_anim.valueChanged.connect(self._apply_viewer_height)
         self._height_anim.stateChanged.connect(self._on_height_anim_state_changed)
         self._is_height_animating = False  # 动画期间抑制重复报告
+        # 禁用 Python 端的动画，依赖 JS 动画控制高度
+        self._height_anim.setDuration(0)  # 设置为0相当于禁用插值
         self._target_viewer_height = 40
         self._last_applied_viewer_height = 40
         self._theme = self._build_theme(role, error)
