@@ -123,7 +123,11 @@ def _strip_code_blocks(text: str) -> str:
     text = re.sub(r"```[\s\S]*?```", "", text)
     # 移除剩余的反引号
     text = text.replace("`", "")
-    return text
+    # 将换行符替换为空格，让内容自然填充，避免多余空行
+    text = text.replace("\r\n", " ").replace("\n", " ")
+    # 合并多余空格
+    text = re.sub(r" +", " ", text)
+    return text.strip()
 
 
 # ======== 核心逻辑：保留你的原始代码块样式 ========
@@ -257,7 +261,7 @@ def _render_think_block(content: str, completed: bool = True) -> str:
         <span style="color: #666; font-size: 11px; font-weight: normal; margin-left: auto;">{escape(content_preview)}</span>
     </button>
     <div class="cm-collapsible__body"{body_style}>
-        <div class="think-content" style="white-space: pre-wrap; word-break: break-word;">{content}</div>
+        <div class="think-content" style="white-space: normal; word-break: break-word; line-height: 1.6;">{content}</div>
     </div>
 </div>"""
 
