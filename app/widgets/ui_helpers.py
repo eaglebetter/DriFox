@@ -256,7 +256,8 @@ TITLE_STYLE = """
 
 MODEL_BTN_STYLE = """
     QWidget {
-        background-color: rgba(255, 255, 255, 0.06);
+        background-color: transparent;
+        border: none;
         border-radius: 8px;
         padding: 0px;
     }

@@ -650,7 +650,7 @@ class SendableTextEdit(QTextEdit):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        # 只定位发送按钮（智能体下拉已移到外部）
+        # 定位发送按钮（智能体下拉已移到外部）
         self._position_send_button()
 
     def _position_send_button(self):

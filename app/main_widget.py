@@ -850,13 +850,13 @@ class OpenAIChatToolWindow(ToolWindow):
         btn_layout.setContentsMargins(8, 4, 0, 4)
         btn_layout.setSpacing(4)
         self._model_btn_icon = QLabel(self.current_model_btn)
+        self._model_btn_icon.setStyleSheet("""background: transparent; border: none;""")
         self._model_btn_icon.setFixedSize(18, 18)
         btn_layout.addWidget(self._model_btn_icon)
         self._model_btn_text = QLabel("正在加载...", self.current_model_btn)
         self._model_btn_text.setStyleSheet(MODEL_BTN_TEXT_STYLE)
         btn_layout.addWidget(self._model_btn_text)
         model_layout.addWidget(self.current_model_btn, 1)
-        
         # 配置按钮（点击弹出配置卡片）
         self.settings_btn = TransparentToolButton(get_icon("模型选择"), self._model_btn_container)
         self.settings_btn.setFixedSize(26, 26)
@@ -876,32 +876,47 @@ class OpenAIChatToolWindow(ToolWindow):
 
         hlayout.addSpacing(12)  # 和其他按钮分隔
 
-        self.new_session_btn = TransparentToolButton(FluentIcon.ADD, self)
-        self.new_session_btn.setFixedSize(26, 26)
-        self.new_session_btn.setToolTip("新建对话")
-        self.new_session_btn.clicked.connect(self._create_new_session)
-
-        self.memory_btn = TransparentToolButton(get_icon("长期记忆"), self)
-        self.memory_btn.setFixedSize(26, 26)
-        self.memory_btn.setToolTip("长期记忆管理")
-        self.memory_btn.clicked.connect(self._show_soul_memory)
-
-        self.history_btn = TransparentToolButton(FluentIcon.HISTORY, self)
-        self.history_btn.setFixedSize(26, 26)
-        self.history_btn.setToolTip("历史会话")
-        self.history_btn.clicked.connect(self._toggle_history_card)
+        # 工具栏右侧按钮组 - 胶囊包裹，无分隔线
+        self._toolbar_capsule = QWidget(self)
+        self._toolbar_capsule.setFixedHeight(30)
+        self._toolbar_capsule.setStyleSheet("""
+            background: rgba(27, 35, 50, 180);
+            border: 1px solid rgba(43, 56, 80, 200);
+            border-radius: 12px;
+        """)
+        capsule_layout = QHBoxLayout(self._toolbar_capsule)
+        capsule_layout.setContentsMargins(4, 2, 4, 2)
+        capsule_layout.setSpacing(0)
 
         # Diff 按钮 - 查看文件差异
-        self.diff_btn = TransparentToolButton(get_icon("差异对比"), self)
+        self.diff_btn = TransparentToolButton(get_icon("差异对比"), self._toolbar_capsule)
         self.diff_btn.setFixedSize(26, 26)
         self.diff_btn.setToolTip("查看文件差异")
         self.diff_btn.clicked.connect(self._open_diff_viewer)
+        capsule_layout.addWidget(self.diff_btn)
 
-        hlayout.addStretch(1)  # 弹性空间，把右侧按钮挤到最右边
-        hlayout.addWidget(self.diff_btn)
-        hlayout.addWidget(self.memory_btn)
-        hlayout.addWidget(self.history_btn)
-        hlayout.addWidget(self.new_session_btn)
+        # 记忆按钮
+        self.memory_btn = TransparentToolButton(get_icon("长期记忆"), self._toolbar_capsule)
+        self.memory_btn.setFixedSize(26, 26)
+        self.memory_btn.setToolTip("长期记忆管理")
+        self.memory_btn.clicked.connect(self._show_soul_memory)
+        capsule_layout.addWidget(self.memory_btn)
+
+        # 历史按钮
+        self.history_btn = TransparentToolButton(FluentIcon.HISTORY, self._toolbar_capsule)
+        self.history_btn.setFixedSize(26, 26)
+        self.history_btn.setToolTip("历史会话")
+        self.history_btn.clicked.connect(self._toggle_history_card)
+        capsule_layout.addWidget(self.history_btn)
+
+        # 新建按钮
+        self.new_session_btn = TransparentToolButton(FluentIcon.ADD, self._toolbar_capsule)
+        self.new_session_btn.setFixedSize(26, 26)
+        self.new_session_btn.setToolTip("新建对话")
+        self.new_session_btn.clicked.connect(self._create_new_session)
+        capsule_layout.addWidget(self.new_session_btn)
+
+        hlayout.addWidget(self._toolbar_capsule)
 
         layout.addLayout(hlayout)
 
