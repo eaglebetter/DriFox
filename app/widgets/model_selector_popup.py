@@ -3,7 +3,7 @@
 扁平式模型选择上拉框 - 类似 OpenCode 风格
 展示所有已配置服务商的模型，服务商作为小标题，下面是模型列表
 """
-from typing import List, Tuple
+from typing import List, Tuple, Dict, Any
 
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import (
@@ -16,10 +16,13 @@ from PyQt5.QtWidgets import (
     QSizePolicy,
     QLineEdit,
     QApplication,
+    QDialog,
+    QPushButton,
 )
+from qfluentwidgets import FluentIcon, TransparentToolButton
 from app.widgets.provider_setting_card import ProviderIconWidget
 
-from app.utils.utils import get_font_family_css
+from app.utils.utils import get_font_family_css, get_icon
 
 
 class ProviderHeader(QWidget):
@@ -110,6 +113,8 @@ class ModelItem(QWidget):
 class ModelSelectorPopup(QWidget):
     """扁平式模型选择弹窗"""
     modelSelected = pyqtSignal(str, str)  # provider_name, model_name
+    addProviderClicked = pyqtSignal()  # 添加服务商
+    configureProviderClicked = pyqtSignal()  # 配置服务商
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -142,7 +147,11 @@ class ModelSelectorPopup(QWidget):
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(0)
 
-        # 搜索框
+        # 搜索框 + 操作按钮区域
+        search_layout = QHBoxLayout()
+        search_layout.setContentsMargins(0, 0, 0, 0)
+        search_layout.setSpacing(4)
+
         self.search_edit = QLineEdit(self)
         self.search_edit.setPlaceholderText("搜索模型...")
         self.search_edit.setClearButtonEnabled(True)
@@ -182,7 +191,23 @@ class ModelSelectorPopup(QWidget):
             }}
         """)
         self.search_edit.textChanged.connect(self._on_search_changed)
-        layout.addWidget(self.search_edit)
+        search_layout.addWidget(self.search_edit, 1)
+
+        # 添加服务商按钮
+        self.add_provider_btn = TransparentToolButton(FluentIcon.ADD, self)
+        self.add_provider_btn.setFixedSize(28, 28)
+        self.add_provider_btn.setToolTip("添加服务商")
+        self.add_provider_btn.clicked.connect(lambda: self.addProviderClicked.emit())
+        search_layout.addWidget(self.add_provider_btn)
+
+        # 配置服务商按钮
+        self.config_provider_btn = TransparentToolButton(get_icon("配置管理"), self)
+        self.config_provider_btn.setFixedSize(28, 28)
+        self.config_provider_btn.setToolTip("配置服务商")
+        self.config_provider_btn.clicked.connect(lambda: self.configureProviderClicked.emit())
+        search_layout.addWidget(self.config_provider_btn)
+
+        layout.addLayout(search_layout)
 
         # 分隔线
         separator = QFrame(self)
@@ -385,3 +410,180 @@ class ModelSelectorPopup(QWidget):
         self.raise_()
         self.search_edit.setFocus()
         self.search_edit.selectAll()
+
+
+class ProviderConfigListDialog(QDialog):
+    """配置服务商弹窗 - 展示已配置的服务商列表"""
+
+    def __init__(self, providers: Dict[str, Dict[str, Any]], current_provider: str, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("配置服务商")
+        self.setMinimumSize(420, 350)
+        self.setMaximumSize(520, 600)
+        self.setWindowFlags(Qt.Dialog | Qt.WindowCloseButtonHint | Qt.WindowTitleHint)
+        self.setModal(True)
+        self._providers = providers
+        self._current_provider = current_provider
+        self._setup_ui()
+
+    def _setup_ui(self):
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #2b2b2b;
+            }
+            QLabel {
+                color: #cccccc;
+                background: transparent;
+            }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
+
+        # 标题
+        title = QLabel("已配置的服务商")
+        title.setStyleSheet(f"color: #ffffff; font-size: 16px; font-weight: bold; {get_font_family_css()}")
+        layout.addWidget(title)
+
+        # 提示文字
+        hint = QLabel("点击编辑按钮可修改服务商配置，点击删除按钮可移除服务商。")
+        hint.setStyleSheet(f"color: #888888; font-size: 12px; {get_font_family_css()}")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+
+        # 分隔线
+        sep = QFrame(self)
+        sep.setFrameShape(QFrame.HLine)
+        sep.setStyleSheet("background-color: #3d3d3d; max-height: 1px;")
+        layout.addWidget(sep)
+
+        # 滚动区域
+        scroll = QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setStyleSheet("""
+            QScrollArea {
+                border: none;
+                background: transparent;
+            }
+            QScrollArea > QWidget > QWidget {
+                background: transparent;
+            }
+            QScrollBar:vertical {
+                border: none;
+                background: transparent;
+                width: 6px;
+                margin: 2px;
+            }
+            QScrollBar::handle:vertical {
+                background: #555555;
+                border-radius: 3px;
+                min-height: 20px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: #666666;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0px;
+            }
+        """)
+
+        content_widget = QWidget()
+        content_widget.setStyleSheet("background: transparent;")
+        content_layout = QVBoxLayout(content_widget)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(4)
+
+        if not self._providers:
+            empty_label = QLabel("暂无已配置的服务商，请点击「添加」按钮添加。")
+            empty_label.setAlignment(Qt.AlignCenter)
+            empty_label.setStyleSheet(f"color: #888888; {get_font_family_css()} font-size: 13px; padding: 30px;")
+            content_layout.addWidget(empty_label)
+        else:
+            for provider_name, config in self._providers.items():
+                provider_widget = self._create_provider_item(provider_name, config)
+                content_layout.addWidget(provider_widget)
+
+        content_layout.addStretch(1)
+        scroll.setWidget(content_widget)
+        layout.addWidget(scroll, 1)
+
+        # 关闭按钮
+        close_btn_layout = QHBoxLayout()
+        close_btn_layout.addStretch()
+        close_btn = QPushButton("关闭")
+        close_btn.setFixedSize(100, 36)
+        close_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: #3d3d3d;
+                color: #cccccc;
+                border: 1px solid #555555;
+                border-radius: 6px;
+                {get_font_family_css()} font-size: 13px;
+            }}
+            QPushButton:hover {{
+                background-color: #4d4d4d;
+                color: #ffffff;
+            }}
+        """)
+        close_btn.clicked.connect(self.accept)
+        close_btn_layout.addWidget(close_btn)
+        layout.addLayout(close_btn_layout)
+
+    def _create_provider_item(self, provider_name: str, config: Dict[str, Any]) -> QWidget:
+        """创建一个服务商配置项"""
+        widget = QWidget()
+        widget.setFixedHeight(48)
+        is_current = provider_name == self._current_provider
+        widget.setStyleSheet(f"""
+            QWidget#provider_item_{provider_name} {{
+                background-color: {'#383838' if is_current else '#333333'};
+                border-radius: 6px;
+                border: {'1px solid #0078d4' if is_current else '1px solid transparent'};
+            }}
+            QWidget#provider_item_{provider_name}:hover {{
+                background-color: #3d3d3d;
+            }}
+        """)
+        widget.setObjectName(f"provider_item_{provider_name}")
+
+        hlayout = QHBoxLayout(widget)
+        hlayout.setContentsMargins(12, 4, 8, 4)
+        hlayout.setSpacing(8)
+
+        # 服务商图标
+        icon_widget = ProviderIconWidget(provider_name, 24)
+        hlayout.addWidget(icon_widget)
+
+        # 服务商名称 + 模型名称
+        info_layout = QVBoxLayout()
+        info_layout.setSpacing(1)
+
+        name_label = QLabel(provider_name)
+        name_label.setStyleSheet(f"color: #ffffff; {get_font_family_css()} font-size: 13px; font-weight: bold; background: transparent;")
+        info_layout.addWidget(name_label)
+
+        model_name = config.get("模型名称", "")
+        model_label = QLabel(f"模型: {model_name}" if model_name else "未设置模型")
+        model_label.setStyleSheet(f"color: #888888; {get_font_family_css()} font-size: 11px; background: transparent;")
+        info_layout.addWidget(model_label)
+
+        hlayout.addLayout(info_layout, 1)
+
+        if is_current:
+            current_tag = QLabel("当前")
+            current_tag.setStyleSheet(f"""
+                QLabel {{
+                    color: #0078d4;
+                    {get_font_family_css()} font-size: 11px;
+                    font-weight: bold;
+                    background: rgba(0, 120, 212, 0.15);
+                    border: 1px solid rgba(0, 120, 212, 0.3);
+                    border-radius: 4px;
+                    padding: 2px 6px;
+                }}
+            """)
+            hlayout.addWidget(current_tag)
+
+        return widget

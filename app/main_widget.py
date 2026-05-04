@@ -942,14 +942,57 @@ class OpenAIChatToolWindow(ToolWindow):
             provider_models_data.append((provider_name, model_list, is_current))
 
         if not hasattr(self, "_model_selector_popup") or not self._model_selector_popup:
-            from app.widgets.model_selector_popup import ModelSelectorPopup
+            from app.widgets.model_selector_popup import (
+                ModelSelectorPopup, ProviderConfigListDialog,
+            )
+            from app.widgets.provider_setting_card import ProviderEditDialog
             self._model_selector_popup = ModelSelectorPopup(self)
             self._model_selector_popup.modelSelected.connect(self._on_model_selected_from_popup)
+            self._model_selector_popup.addProviderClicked.connect(
+                lambda: self._on_add_provider_from_popup()
+            )
+            self._model_selector_popup.configureProviderClicked.connect(
+                lambda: self._on_configure_providers_from_popup()
+            )
 
         self._model_selector_popup.set_providers_data(
             provider_models_data, self._current_provider_name or "", self._current_model_name or "",
         )
         self._model_selector_popup.show_at(self.current_model_btn)
+
+    def _on_add_provider_from_popup(self):
+        """从模型选择弹窗点击「添加」按钮 - 弹出添加服务商窗口"""
+        self._model_selector_popup.close()
+        from app.widgets.provider_setting_card import ProviderEditDialog
+        dialog = ProviderEditDialog("", {}, True, self)
+        if dialog.exec():
+            name, info = dialog.get_result()
+            # 刷新配置并重新加载弹窗
+            self._load_model_configs()
+            # 如果添加的服务商有模型，自动选中它
+            if name and info.get("模型名称"):
+                self._on_model_selected_from_popup(name, info.get("模型名称", ""))
+
+    def _on_configure_providers_from_popup(self):
+        """从模型选择弹窗点击「配置」按钮 - 显示设置卡片并展开服务商配置"""
+        self._model_selector_popup.close()
+        # 打开设置卡片
+        self._settings_popup.show()
+        self._settings_popup.raise_()
+        # 展开「已保存的服务商」下拉
+        self._settings_popup.llmProviderCard.setExpand(True)
+        # 滚动到顶部
+        QTimer.singleShot(100, self._scroll_settings_to_top)
+
+    def _scroll_settings_to_top(self):
+        """滚动设置卡片内容到顶部"""
+        try:
+            # 找到 LLMSettingsCard 内部的 QScrollArea 并滚到顶
+            scroll_areas = self._settings_popup.findChildren(QScrollArea)
+            if scroll_areas:
+                scroll_areas[0].verticalScrollBar().setValue(0)
+        except Exception:
+            pass
 
     def _on_model_selected_from_popup(self, provider_name: str, model_name: str):
         """从弹窗选中模型后切换"""
@@ -959,6 +1002,14 @@ class OpenAIChatToolWindow(ToolWindow):
             self._valid_configs[provider_name]["模型名称"] = model_name
         setting = Settings.get_instance()
         setting.set(setting.llm_selected_model, provider_name, save=True)
+        
+        # 关键修复：同步更新 saved_providers 中的模型名称，
+        # 确保 ChatEngine 的 _get_current_model_config 能读到正确的模型名
+        saved_providers = setting.llm_saved_providers.value or {}
+        if provider_name in saved_providers:
+            saved_providers[provider_name]["模型名称"] = model_name
+            setting.set(setting.llm_saved_providers, saved_providers, save=True)
+        
         self._update_model_selector_btn()
         self._refresh_context_usage_indicator()
         self._update_balance_display()

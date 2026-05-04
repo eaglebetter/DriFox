@@ -662,7 +662,6 @@ class OpenAIChatWorker(QThread):
         model = str(self.llm_config.get("模型名称", "gpt-4o"))
 
         sanitized = messages_to_api(messages)
-        print(sanitized)
         req_kwargs: Dict[str, Any] = {
             "model": model,
             "messages": sanitized,
