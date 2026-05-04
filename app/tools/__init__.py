@@ -173,8 +173,8 @@ class BuiltinTools(QObject):
     def task_wait(self, task_ids: List[str], timeout: int = 1800, poll_interval: float = 0.1):
         return self._task_tools.task_wait(task_ids, timeout, poll_interval)
 
-    def task_status(self, task_ids: List[str] = None):
-        return self._task_tools.task_status(task_ids)
+    def task_status(self, task_ids: str = None, with_log: bool = False, with_result: bool = True):
+        return self._task_tools.task_status(task_ids, with_log, with_result)
 
     def load_skill(self, name: str):
         return self._task_tools.load_skill(name)

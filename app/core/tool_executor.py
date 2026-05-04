@@ -277,7 +277,7 @@ class ToolExecutor:
         "todoread": [],
         "task_batch": ["tasks"],
         "task_wait": ["task_ids"],
-        "task_status": ["with_log", "with_result"],
+        "task_status": [],
         "skill": ["name"],
         "list_skills": [],
         "question": ["question"],
