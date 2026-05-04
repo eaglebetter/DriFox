@@ -22,7 +22,7 @@ from PyQt5.QtWidgets import (
     QFileDialog, QGraphicsOpacityEffect,
     QLabel,
     QPushButton,
-    QButtonGroup, QFrame,
+    QButtonGroup, QFrame, QScrollArea,
 )
 from loguru import logger
 from qfluentwidgets import (
@@ -31,7 +31,7 @@ from qfluentwidgets import (
     SingleDirectionScrollArea,
     InfoBar,
     InfoBarPosition,
-    TransparentToolButton,
+    TransparentToolButton, StrongBodyLabel,
 )
 
 from app.constants import (
@@ -100,6 +100,7 @@ from app.widgets.model_config_card import (
 from app.widgets.question_floating_widget import (
     QuestionFloatingWidget,
 )
+from qfluentwidgets import InfoBar, InfoBarPosition
 from app.widgets.sub_agent_floating_widget import (
     SubAgentFloatingWidget,
 )
@@ -176,6 +177,7 @@ class OpenAIChatToolWindow(ToolWindow):
         
         super().__init__(homepage, button)
         self._session_card_cache: Dict[str, Dict[str, Any]] = {}
+        self._current_history_project: Optional[str] = None  # 当前历史面板项目过滤
         self._welcome_card_cache: Dict[str, MessageCard] = {}
         self._displayed_session_id: Optional[str] = None
         self._initial_visible_batch_count = 12
@@ -684,15 +686,42 @@ class OpenAIChatToolWindow(ToolWindow):
 
         left_layout = QHBoxLayout()
         left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.setSpacing(4)
+        left_layout.setSpacing(0)
 
+        # 项目选择标签
+        self._current_project = "默认项目"
+        self._project_label = QLabel(self._current_project, self)
+        self._project_label.setStyleSheet(f"""
+            QLabel {{
+                color: #f59e0b;
+                {get_font_family_css()}
+                font-size: 13px;
+                font-weight: bold;
+                padding: 2px 6px;
+                border-radius: 4px;
+                background: rgba(245, 158, 11, 0.1);
+            }}
+            QLabel:hover {{
+                background: rgba(245, 158, 11, 0.2);
+            }}
+        """)
+        self._project_label.setCursor(Qt.PointingHandCursor)
+        self._project_label.mousePressEvent = self._on_project_label_clicked
+        self._project_label.setToolTip("点击切换项目")
+
+        # 分隔符
+        self._title_sep = StrongBodyLabel(" / ", self)
+
+        # 标题
         self.title_edit = QLabel("新对话", self)
         font_css = get_font_family_css()
-        # 标题样式使用 TITLE_STYLE + font_css
         title_style = TITLE_STYLE.replace("    QLabel {", f"    QLabel {{\n        {font_css}")
         self.title_edit.setStyleSheet(title_style)
         self.title_edit.setCursor(Qt.PointingHandCursor)
         self.title_edit.mouseDoubleClickEvent = self._on_title_double_click
+
+        left_layout.addWidget(self._project_label)
+        left_layout.addWidget(self._title_sep)
         left_layout.addWidget(self.title_edit)
 
         self.menu_btn = TransparentToolButton(FluentIcon.MORE, self)
@@ -806,6 +835,8 @@ class OpenAIChatToolWindow(ToolWindow):
         self._history_card.set_extra_button_handler(
             self._history_popup_card.get_import_button_handler()
         )
+
+        # 历史会话卡片
         self._history_card.content_layout.addWidget(self._history_popup_card)
         self._history_card.setVisible(False)
         layout.addWidget(self._history_card)
@@ -1300,17 +1331,42 @@ class OpenAIChatToolWindow(ToolWindow):
         current_tab = self._history_card._current_tab if hasattr(self._history_card, '_current_tab') else "history"
         
         if current_tab == "history":
-            # 刷新历史会话
+            # 刷新历史会话 - 使用 _current_project（从配置加载的）
             current_idx = (
                 self.history_manager.find_index_by_session_id(self._current_session_id)
                 if self._current_session_id and self.history_manager
                 else None
             )
-            history_list = self.history_manager.get_history_list() if self.history_manager else []
+            history_list = self.history_manager.get_history_list(self._current_project) if self.history_manager else []
             self._history_popup_card.set_history(history_list, current_idx)
         else:
             # 刷新归档会话
             self._refresh_archived_sessions()
+
+    def _on_history_project_selected(self, project: str):
+        """历史面板项目切换（现在和标题栏同步）"""
+        self._current_project = project
+        self._current_history_project = project
+        self._history_popup_card.set_current_project(project)
+        self._refresh_history_toggle_panel()
+
+    def _on_session_dropped_on_project(self, project: str, session_index: int):
+        """将会话拖拽到指定项目"""
+        if not self.history_manager:
+            return
+        history_list = self.history_manager.get_history_list(self._current_project) if self.history_manager else []
+        if 0 <= session_index < len(history_list):
+            # 获取 session_id
+            session = history_list[session_index]
+            session_id = session.get("session_id")
+            if session_id:
+                # 更新项目的 session 记录
+                idx = self.history_manager.find_index_by_session_id(session_id)
+                if idx is not None:
+                    self.history_manager.move_to_project(idx, project)
+                    # 刷新
+                    self._history_popup_card.refreshRequested.emit()
+                    InfoBar.success("已移动", f"会话已移至「{project}」项目", duration=2000, parent=self)
 
     def _refresh_archived_sessions(self):
         """刷新归档会话列表"""
@@ -1792,6 +1848,11 @@ class OpenAIChatToolWindow(ToolWindow):
     def _initialize_history_manager(self):
         canvas_name = getattr(self.homepage, "workflow_name", "default") or "default"
         self.history_manager = HistoryManager(canvas_name)
+        # 从配置加载上次选中的项目
+        from app.utils.config import Settings
+        cfg = Settings.get_instance()
+        self._current_project = cfg.current_project.value
+        self._project_label.setText(self._current_project)
 
     def _restore_latest_session(self) -> bool:
         if not self.history_manager:
@@ -1827,6 +1888,10 @@ class OpenAIChatToolWindow(ToolWindow):
         self._history_preview_messages = None
         self._current_session_id = session_id
         self.title_edit.setText(latest.get("title") or "最近会话")
+        # 恢复项目
+        project = latest.get("project", "默认项目") or "默认项目"
+        self._current_project = project
+        self._project_label.setText(project)
         self._load_agent_list()
         if self._tool_executor:
             self._tool_executor.set_session_context(self._current_session_id)
@@ -2007,8 +2072,8 @@ class OpenAIChatToolWindow(ToolWindow):
         agent_name = agent.name if agent else ""
         agent_desc = agent.description if agent else ""
         
-        # 获取最近会话和最多消息的会话用于欢迎卡片
-        history_list = self.history_manager.get_history_list()
+        # 获取最近会话和最多消息的会话用于欢迎卡片（按当前项目过滤）
+        history_list = self.history_manager.get_history_list(self._current_project)
         
         # 最近会话（按时间排序，取前3）
         recent_sessions = []
@@ -2443,7 +2508,7 @@ class OpenAIChatToolWindow(ToolWindow):
             widget.sync_width()
 
     def _archive_history_session(self, index: int):
-        history_list = self.history_manager.get_history_list()
+        history_list = self.history_manager.get_history_list(self._current_project)
         if index < 0 or index >= len(history_list):
             return
 
@@ -2477,7 +2542,16 @@ class OpenAIChatToolWindow(ToolWindow):
     def _rename_history_session(self, index: int, new_title: str):
         if not self.history_manager:
             return
-        self.history_manager.update_session_title(index, new_title)
+        history_list = self.history_manager.get_history_list(self._current_project)
+        if 0 <= index < len(history_list):
+            session_record = history_list[index]
+            session_id = session_record.get("session_id")
+            if session_id:
+                session = self.history_manager.get_session_by_session_id(session_id)
+                if session:
+                    idx = self.history_manager.find_index_by_session_id(session_id)
+                    if idx is not None:
+                        self.history_manager.update_session_title(idx, new_title)
         # 刷新历史会话卡片
         refresh_history_card_if_visible(self._history_card, self._refresh_history_toggle_panel)
 
@@ -2643,13 +2717,14 @@ class OpenAIChatToolWindow(ToolWindow):
 
         self._tool_executor.reset_session_state()
 
-        history_list = self.history_manager.get_history_list()
+        history_list = self.history_manager.get_history_list(self._current_project)
         if index < 0 or index >= len(history_list):
             return
 
         session_record = history_list[index]
         session_id = session_record.get("session_id")
-        messages = self.history_manager.get_session_by_index(index)
+        # 通过 session_id 获取会话消息，而非通过 index
+        messages = self.history_manager.get_session_messages(session_id)
         if not messages:
             return
 
@@ -2663,6 +2738,11 @@ class OpenAIChatToolWindow(ToolWindow):
             self, restored, session_id, title,
             self._tool_executor
         )
+
+        # 如果会话有自己的项目，显示在标题上
+        session_project = session_record.get("project", "默认项目") or "默认项目"
+        self._current_project = session_project
+        self._project_label.setText(session_project)
 
         self._display_current_session()
 
@@ -3582,10 +3662,19 @@ class OpenAIChatToolWindow(ToolWindow):
                 self._hide_welcome_cards()
                 return
         
-        # 再从 history_manager 查找并恢复
-        index = self.history_manager.find_index_by_session_id(session_id)
-        if index is not None:
-            self._load_history_session_from_popup(index)
+        # 再从 history_manager 查找并恢复（通过 session_id 直接获取）
+        session_record = self.history_manager.get_session_by_session_id(session_id)
+        if session_record:
+            messages = self.history_manager.get_session_messages(session_id)
+            title = session_record.get("title") or session_record.get("name") or "历史对话"
+            from app.widgets.ui_helpers import create_session_from_record, init_after_loading_session
+            restored = create_session_from_record(session_record, messages, title)
+            init_after_loading_session(self, restored, session_id, title, self._tool_executor)
+            # 同步项目
+            session_project = session_record.get("project", "默认项目") or "默认项目"
+            self._current_project = session_project
+            self._project_label.setText(session_project)
+            self._display_current_session()
             self._hide_welcome_cards()
         else:
             logger.warning(f"未找到 session_id: {session_id}")
@@ -3969,6 +4058,7 @@ class OpenAIChatToolWindow(ToolWindow):
                     compaction_state=getattr(session, "compaction_state", {}),
                     compaction_cache=getattr(session, "compaction_cache", {}),
                     system_prompt=system_prompt,
+                    project=self._current_project,
                 )
             else:
                 self.history_manager.save_session(
@@ -3978,6 +4068,7 @@ class OpenAIChatToolWindow(ToolWindow):
                     compaction_state=getattr(session, "compaction_state", {}),
                     compaction_cache=getattr(session, "compaction_cache", {}),
                     system_prompt=system_prompt,
+                    project=self._current_project,
                 )
                 self._current_session_id = session.session_id if session else None
         else:
@@ -3988,6 +4079,7 @@ class OpenAIChatToolWindow(ToolWindow):
                 compaction_state=getattr(session, "compaction_state", {}),
                 compaction_cache=getattr(session, "compaction_cache", {}),
                 system_prompt=system_prompt,
+                project=self._current_project,
             )
             self._current_session_id = session.session_id if session else None
 
@@ -4236,6 +4328,62 @@ class OpenAIChatToolWindow(ToolWindow):
 
     def _update_title_display(self, title: str):
         self.title_edit.setText(title)
+
+    def _update_project_display(self, project: str):
+        """更新项目名称显示"""
+        self._current_project = project
+        self._project_label.setText(project)
+
+    def _on_project_label_clicked(self, event):
+        """项目标签点击 - 显示项目选择 popup"""
+        self._show_project_selector_popup()
+
+    def _show_project_selector_popup(self):
+        """显示项目选择弹窗"""
+        from app.widgets.project_selector_popup import ProjectSelectorPopup
+        if hasattr(self, '_project_selector_popup') and self._project_selector_popup:
+            self._project_selector_popup.close()
+            self._project_selector_popup.deleteLater()
+
+        projects = self.history_manager.get_projects() if self.history_manager else ["默认项目"]
+        self._project_selector_popup = ProjectSelectorPopup(
+            projects=projects,
+            current_project=self._current_project,
+            parent=self
+        )
+        self._project_selector_popup.projectSelected.connect(self._on_project_selected)
+        self._project_selector_popup.newProjectCreated.connect(self._on_new_project_created)
+        self._project_selector_popup.show_at(self._project_label)
+
+    def _on_project_selected(self, project: str):
+        """切换到选中的项目"""
+        self._current_project = project
+        self._project_label.setText(project)
+        # 保存到配置
+        from app.utils.config import Settings
+        cfg = Settings.get_instance()
+        cfg.current_project.value = project
+        cfg.save()
+        # 刷新历史面板（切换项目过滤）
+        self._current_history_project = project
+        self._history_popup_card.set_current_project(project)
+        self._refresh_history_toggle_panel()
+        # 自动触发新建会话，避免原会话与切换后的项目不匹配
+        self._create_new_session()
+
+    def _on_new_project_created(self, project: str):
+        """新建项目后"""
+        self._current_project = project
+        self._project_label.setText(project)
+        # 保存到配置
+        from app.utils.config import Settings
+        cfg = Settings.get_instance()
+        cfg.current_project.value = project
+        cfg.save()
+        # 刷新历史面板
+        self._history_popup_card.refreshRequested.emit()
+        # 自动触发新建会话
+        self._create_new_session()
 
     def _show_soul_memory(self):
         if not self._memory_manager:

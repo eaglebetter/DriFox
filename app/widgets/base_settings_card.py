@@ -105,6 +105,9 @@ class BaseSettingsCard(CardWidget):
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
                 height: 0px;
             }
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+                background: none;
+            }
         """)
         self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
@@ -116,6 +119,13 @@ class BaseSettingsCard(CardWidget):
 
         self.scroll_area.setWidget(self.content_widget)
         main_layout.addWidget(self.scroll_area, 1)
+
+    def _on_tab_clicked(self, tab_id: str):
+        """标签点击处理"""
+        if self._current_tab != tab_id:
+            self._current_tab = tab_id
+            self._update_tab_styles()
+            self.tabChanged.emit(tab_id)
 
     def _on_close(self):
         self.setVisible(False)

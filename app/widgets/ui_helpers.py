@@ -245,7 +245,7 @@ TITLE_STYLE = """
         color: #f3f6fc;
         font-size: 15px;
         font-weight: bold;
-        padding: 6px 10px;
+        padding: 6px 4px;
         border-radius: 10px;
         background-color: transparent;
     }
