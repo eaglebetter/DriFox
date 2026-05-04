@@ -607,7 +607,7 @@ class SendableTextEdit(QTextEdit):
         # 计算文档高度 + padding
         content_height = int(doc.size().height()) + 28  # 上下 padding
         # 限制在最小和最大高度之间
-        new_height = max(72, min(280, content_height))
+        new_height = max(72, min(200, content_height))
 
         if self.height() != new_height:
             self.setFixedHeight(new_height)
