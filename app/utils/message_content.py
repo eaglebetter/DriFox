@@ -8,10 +8,9 @@ VALID_MESSAGE_ROLES = {"system", "user", "assistant", "tool"}
 
 # 渲染敏感标记（按长度降序排列，避免部分匹配）
 _SENSITIVE_MARKERS = [
+    "<think>",
     "</tool>",
     "<tool>",
-    "",
-    "</think>",
     "```",
 ]
 
@@ -217,9 +216,9 @@ def content_to_markdown(content: Any) -> str:
             # 序列化为单行 JSON，避免换行破坏解析
             args_json = json.dumps(block.get("arguments", {}) or {}, ensure_ascii=False)
             
-            # 处理 result：转义 </tool> 标记，避免提前终止解析
+            # 处理 result：清理可能影响渲染的标签（<think>、</tool>等）
             result_raw = str(block.get("result", ""))
-            result_escaped = result_raw.replace("</tool>", "&lt;/tool&gt;")[:300]
+            result_escaped = _sanitize_result(result_raw)[:300]
             
             success = bool(block.get("success", True))
             tool_call_id = block.get("tool_call_id", "")

@@ -38,10 +38,38 @@ from app.constants import (
 )
 
 
+def _is_text_chat_model(model_id: str) -> bool:
+    """判断模型是否为文本聊天模型，过滤掉图片、音频、词嵌入等非文本模型"""
+    if not model_id:
+        return False
+    
+    model_lower = model_id.lower()
+    
+    # 非文本模型关键词黑名单
+    non_text_keywords = [
+        # 图片生成模型
+        'dall-e', 'dalle', 'stable-diffusion', 'sd-', 'imagen', 'flux',
+        'image', 'diffusion', 'kandinsky', 'midjourney', "wan"
+        # 音频模型
+        'whisper', 'tts', 'speech', 'audio', 'piper', "voice"
+        # 词嵌入模型
+        'embedding', 'embed', 'text-embedding', 'bge'
+        # 其他非聊天模型
+        'moderation', 'rerank', 'search', 'retrieval',
+    ]
+    
+    # 检查是否包含非文本模型关键词
+    for keyword in non_text_keywords:
+        if keyword in model_lower:
+            return False
+    
+    return True
+
+
 def fetch_provider_models(
     api_url: str, api_key: str, provider_name: str, auth_type: str = "bearer"
 ) -> list:
-    """Fetch model list from provider API. Returns (success, models_or_error_msg)."""
+    """Fetch model list from provider API. Returns text chat models only."""
     headers = {"Authorization": f"Bearer {api_key}"} if auth_type == "bearer" else {}
 
     urls_to_try = []
@@ -70,35 +98,41 @@ def fetch_provider_models(
 
                 if isinstance(data, dict):
                     if "data" in data:
-                        return [
+                        all_models = [
                             m.get("id") or m.get("name", "") or m.get("model", "")
                             for m in data["data"]
                             if isinstance(m, dict)
                         ]
+                        # 过滤只保留文本聊天模型
+                        return [m for m in all_models if _is_text_chat_model(m)]
                     elif "models" in data:
-                        return [
+                        all_models = [
                             m.get("id") or m.get("name", "")
                             for m in data["models"]
                             if isinstance(m, dict)
                         ]
+                        return [m for m in all_models if _is_text_chat_model(m)]
                     elif "object" in data and isinstance(data["object"], list):
-                        return [
+                        all_models = [
                             m.get("id", "")
                             for m in data["object"]
                             if isinstance(m, dict)
                         ]
+                        return [m for m in all_models if _is_text_chat_model(m)]
                     for key in ["items", "result"]:
                         if key in data and isinstance(data[key], list):
-                            return [
+                            all_models = [
                                 m.get("id")
                                 or m.get("name", "")
                                 or (m if isinstance(m, str) else "")
                                 for m in data[key]
                             ]
+                            return [m for m in all_models if _is_text_chat_model(m)]
                 elif isinstance(data, list):
-                    return [
+                    all_models = [
                         m.get("id", "") if isinstance(m, dict) else str(m) for m in data
                     ]
+                    return [m for m in all_models if _is_text_chat_model(m)]
             else:
                 last_error = f"HTTP {response.status_code}"
 

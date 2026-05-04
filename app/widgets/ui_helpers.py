@@ -50,6 +50,7 @@ __all__ = [
     "build_node_preview_data",
     # 卡片删除辅助
     "find_widgets_to_remove_for_round",
+    "find_widgets_to_remove_from_round",
     "deduplicate_operations",
     "find_last_assistant_card",
     "count_user_cards_in_layout",
@@ -659,11 +660,54 @@ def find_widgets_to_remove_for_round(
             continue
 
         if widget.role == "user":
-            if user_card_idx >= round_index:
+            if user_card_idx == round_index:
                 widgets_to_remove.append(widget)
                 removing = True
             else:
-                user_card_idx += 1
+                removing = False
+            user_card_idx += 1
+        elif widget.role == "assistant" and removing:
+            widgets_to_remove.append(widget)
+    
+    return widgets_to_remove
+
+
+def find_widgets_to_remove_from_round(
+    chat_layout,
+    round_index: int,
+) -> list:
+    """
+    找出从指定 round 到末尾的所有消息卡片（用于撤销操作）
+    
+    Args:
+        chat_layout: 聊天布局
+        round_index: 起始 round 索引
+        
+    Returns:
+        需要删除的卡片列表
+    """
+    widgets_to_remove = []
+    user_card_idx = 0
+    removing = False
+    
+    for i in range(chat_layout.count()):
+        item = chat_layout.itemAt(i)
+        if not item or not item.widget():
+            continue
+        widget = item.widget()
+        
+        if not hasattr(widget, 'role'):
+            continue
+        if getattr(widget, "_is_welcome", False):
+            continue
+        if widget.role not in ("user", "assistant"):
+            continue
+
+        if widget.role == "user":
+            if user_card_idx >= round_index:
+                widgets_to_remove.append(widget)
+                removing = True
+            user_card_idx += 1
         elif widget.role == "assistant" and removing:
             widgets_to_remove.append(widget)
     
@@ -719,7 +763,7 @@ def find_last_assistant_card(chat_layout) -> Any:
 
 def count_user_cards_in_layout(chat_layout) -> int:
     """
-    计算布局中的用户消息卡片数量
+    计算布局中的用户消息卡片数量（不包括欢迎卡片）
     
     Args:
         chat_layout: 聊天布局
@@ -736,7 +780,7 @@ def count_user_cards_in_layout(chat_layout) -> int:
         if not item or not item.widget():
             continue
         widget = item.widget()
-        if isinstance(widget, MessageCard) and widget.role == "user":
+        if isinstance(widget, MessageCard) and widget.role == "user" and not getattr(widget, "_is_welcome", False):
             count += 1
     return count
 
@@ -1253,7 +1297,7 @@ def post_append_user_message(
     
     Args:
         self_widget: 自身 widget
-        user_round_index: 用户消息 round 索引
+        user_round_index: 用户消息 round 索引（0-based）
         update_preview_func: 更新预览函数
         sync_preview_func: 同步预览函数
     """
