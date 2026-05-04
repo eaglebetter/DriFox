@@ -786,22 +786,40 @@ class OpenAIChatWorker(QThread):
                 error_str = str(e)
                 error_type = type(e).__name__
 
-                # 判断是否应该重试
+                # 判断是否应该重试 - 使用异常继承关系系统性覆盖
+                # httpx/httpcore 的异常体系：
+                # - NetworkError: 连接失败、协议错误等
+                # - TimeoutException: 所有超时（Read/Write/Connect）
+                # - ProtocolError: 协议层错误（RemoteProtocolError, LocalProtocolError）
+                import httpx as httpx_err
+                
+                is_retryable_network = isinstance(e, (httpx_err.NetworkError, httpcore.NetworkError))
+                is_retryable_timeout = isinstance(e, (httpx_err.TimeoutException, httpcore.TimeoutException))
+                is_retryable_protocol = isinstance(e, (httpx_err.ProtocolError, httpcore.ProtocolError))
                 is_rate_limit = isinstance(e, RateLimitError)
                 is_server_overload = isinstance(e, APIError) and ("2064" in error_str or "overload" in error_str.lower())
-                is_read_timeout = isinstance(e, (httpcore.ReadTimeout, HttpxReadTimeout))
-                is_conn_error = isinstance(e, (httpcore.ConnectError, httpcore.ConnectTimeout, APIConnectionError))
+                is_conn_error = isinstance(e, APIConnectionError)
 
                 should_retry = (
-                    is_rate_limit or is_server_overload or is_read_timeout or is_conn_error
+                    is_rate_limit or is_server_overload or is_conn_error or
+                    is_retryable_network or is_retryable_timeout or is_retryable_protocol
                 )
 
                 if should_retry and attempt < max_retries - 1:
                     wait_time = retry_delay * (attempt + 1)
-                    retry_reason = "RateLimit" if is_rate_limit else ("ServerOverload" if is_server_overload else "ReadTimeout" if is_read_timeout else "ConnectionError")
+                    if is_rate_limit:
+                        retry_reason = "RateLimit"
+                    elif is_server_overload:
+                        retry_reason = "ServerOverload"
+                    elif is_retryable_timeout:
+                        retry_reason = "Timeout"
+                    elif is_retryable_protocol:
+                        retry_reason = "ProtocolError"
+                    else:
+                        retry_reason = "ConnectionError"
                     logger.warning(
-                        f"[API] {retry_reason} error, retrying in {wait_time}s "
-                        f"(attempt {attempt + 1}/{max_retries})"
+                        f"[API] {retry_reason} ({error_type}): {error_str[:120]}, "
+                        f"retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})"
                     )
                     time.sleep(wait_time)
                     continue
