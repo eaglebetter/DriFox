@@ -374,9 +374,9 @@ class SendableTextEdit(QTextEdit):
         self.setPlaceholderText("给 DriFox 发送消息，Enter 发送，Shift+Enter 换行")
         self.setAcceptRichText(False)
         self.setLineWrapMode(TextEdit.WidgetWidth)
-        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setAcceptDrops(True)
-        self.setMinimumHeight(96)
+        self.setMinimumHeight(72)
+        self.setMaximumHeight(250)
         self.setStyleSheet(f"""
             QTextEdit {{
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
@@ -418,7 +418,7 @@ class SendableTextEdit(QTextEdit):
         """)
 
         self._agent_combo = ComboBox(self)
-        self._agent_combo.setFixedSize(86, 28)
+        self._agent_combo.setFixedSize(75, 28)
         self._agent_combo.setStyleSheet(f"""
             ComboBox {{
                 background-color: rgba(255, 255, 255, 0.05);
@@ -452,8 +452,6 @@ class SendableTextEdit(QTextEdit):
             }}
         """)
         self._agent_combo.currentTextChanged.connect(self._on_agent_changed)
-
-        QTimer.singleShot(0, self._position_elements)
 
         self.send_btn = TransparentToolButton(FluentIcon.SEND, self)
         self.send_btn.setFixedSize(34, 34)
@@ -593,6 +591,21 @@ class SendableTextEdit(QTextEdit):
     def _on_text_changed(self):
         has_text = bool(self.toPlainText().strip())
         self.send_btn.setDisabled(not has_text)
+        self._adjust_height_to_content()
+
+    def _adjust_height_to_content(self):
+        """根据内容自动调整高度"""
+        doc = self.document()
+        # 计算文档高度 + padding
+        content_height = int(doc.size().height()) + 28  # 上下 padding
+        # 限制在最小和最大高度之间
+        new_height = max(72, min(280, content_height))
+        if self.height() != new_height:
+            self.setFixedHeight(new_height)
+            # 触发父布局重新计算
+            if self.parent():
+                self.parent().updateGeometry()
+                self.updateGeometry()
 
     def _rebind_send_btn(self, handler):
         try:
@@ -628,21 +641,15 @@ class SendableTextEdit(QTextEdit):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        self._position_elements()
+        # 只定位发送按钮（智能体下拉已移到外部）
+        self._position_send_button()
 
-    def _position_elements(self):
-        """定位智能体选择框和发送按钮"""
-        if self._agent_combo and self.send_btn:
+    def _position_send_button(self):
+        """只定位发送按钮"""
+        if self.send_btn:
             btn_size = self.send_btn.size()
-            agent_width = self._agent_combo.width()
-
             send_btn_x = self.width() - btn_size.width() - 12
             send_btn_y = self.height() - btn_size.height() - 10
-
-            combo_x = send_btn_x - agent_width - 8
-            combo_y = send_btn_y + (btn_size.height() - self._agent_combo.height()) // 2
-
-            self._agent_combo.move(max(0, combo_x), max(0, combo_y))
             self.send_btn.move(max(0, send_btn_x), max(0, send_btn_y))
 
     def keyPressEvent(self, event: QKeyEvent):

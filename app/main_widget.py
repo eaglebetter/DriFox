@@ -836,9 +836,11 @@ class OpenAIChatToolWindow(ToolWindow):
         self.settings_btn.clicked.connect(self._toggle_model_config_card)
         hlayout.addWidget(self.settings_btn)
 
-        hlayout.addSpacing(12)  # 和其他按钮分隔
+        # 智能体选择下拉 - 移到模型按钮旁边
+        self.input_area = SendableTextEdit(self)
+        hlayout.addWidget(self.input_area._agent_combo)
 
-        hlayout.addStretch(1)  # 弹性空间，把其他按钮挤到右边
+        hlayout.addSpacing(12)  # 和其他按钮分隔
 
         self.new_session_btn = TransparentToolButton(FluentIcon.ADD, self)
         self.new_session_btn.setFixedSize(26, 26)
@@ -861,6 +863,7 @@ class OpenAIChatToolWindow(ToolWindow):
         self.diff_btn.setToolTip("查看文件差异")
         self.diff_btn.clicked.connect(self._open_diff_viewer)
 
+        hlayout.addStretch(1)  # 弹性空间，把右侧按钮挤到最右边
         hlayout.addWidget(self.diff_btn)
         hlayout.addWidget(self.memory_btn)
         hlayout.addWidget(self.history_btn)
@@ -868,8 +871,6 @@ class OpenAIChatToolWindow(ToolWindow):
 
         layout.addLayout(hlayout)
 
-        self.input_area = SendableTextEdit(self)
-        self.input_area.setMaximumHeight(108)
         setFont(self.input_area, 15)
         self.input_area.sendMessageRequested.connect(self._on_send_clicked)
         self.input_area.stopMessageRequested.connect(self._on_stop_clicked)
