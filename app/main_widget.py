@@ -1780,8 +1780,9 @@ class OpenAIChatToolWindow(ToolWindow):
         """
         计算给定 batch 索引对应的 round_index（user 轮次索引）
 
-        逻辑：统计 global_batch_index 之前有多少个 user batch，
-        这就是该 batch 所属的 round_index。
+        逻辑：
+        - 对于 user batch：round_index = 前面有多少个 user batch
+        - 对于 assistant batch：round_index = 前面有多少个 user batch - 1
 
         Args:
             batch_index: batch 在 _message_batch 中的索引
@@ -1792,8 +1793,7 @@ class OpenAIChatToolWindow(ToolWindow):
         """
         global_batch_index = batch_index
         
-        # 统计 global_batch_index 之前的 user batch 数量
-        # 这就是该 batch 所属的 round_index
+        # 统计 global_batch_index 之前有多少个 user batch
         user_count = 0
         for idx in range(global_batch_index):
             if idx >= len(self._message_batch):
@@ -1801,6 +1801,15 @@ class OpenAIChatToolWindow(ToolWindow):
             batch = self._message_batch[idx]
             if batch and batch[0].get("role") == "user":
                 user_count += 1
+        
+        # 对于 assistant batch，round_index 需要减 1
+        # 这是因为 assistant 属于它前面那个 user 的 round
+        current_batch = None
+        if global_batch_index < len(self._message_batch):
+            current_batch = self._message_batch[global_batch_index]
+        
+        if current_batch and current_batch[0].get("role") != "user":
+            user_count = max(0, user_count - 1)
         
         return user_count
 
