@@ -2934,13 +2934,12 @@ class OpenAIChatToolWindow(ToolWindow):
         self._scroll_sync_timer.stop()
         self._scroll_sync_timer.start()
 
-    def _truncate_session_from_user_round(self, round_index: int) -> bool:
+    def _truncate_session_from_user_round(self, round_index: int, card: MessageCard = None) -> bool:
         """
-        截断 session 数据到指定 round 之前，并刷新 UI
+        截断 session 数据到指定 round 之前，并删除 UI 卡片
         
-        策略：基于 session.messages 数据计算截断位置，完成截断后
-              清空聊天区并重新渲染，确保 UI 与 session 数据完全一致
-              不依赖 UI 布局（chat_layout），解决懒加载时卡片匹配不到的问题
+        UI 删除策略：基于 card widget 对象在 chat_layout 中的位置精准删除，
+        不依赖 round_index 遍历（解决懒加载时卡片序号对不上的问题）
         """
         from loguru import logger
         
@@ -2949,7 +2948,36 @@ class OpenAIChatToolWindow(ToolWindow):
             logger.error("[UNDO] No session found")
             return False
 
-        # 1. 基于 session.messages 计算截断位置
+        # === 1. 删除 UI 卡片：从 card 到末尾 ===
+        if card is not None:
+            # 找到 card 在 chat_layout 中的索引
+            card_layout_idx = -1
+            for i in range(self.chat_layout.count()):
+                item = self.chat_layout.itemAt(i)
+                if item and item.widget() is card:
+                    card_layout_idx = i
+                    break
+            
+            if card_layout_idx >= 0:
+                # 收集要删除的 widgets：从 card 到末尾（撤销 = 删除之后所有）
+                widgets_to_remove = []
+                for i in range(card_layout_idx, self.chat_layout.count()):
+                    item = self.chat_layout.itemAt(i)
+                    if item and item.widget():
+                        w = item.widget()
+                        if hasattr(w, '_is_welcome') and w._is_welcome:
+                            continue
+                        widgets_to_remove.append(w)
+                
+                from app.widgets.ui_helpers import delete_widgets_from_layout
+                deleted_count = delete_widgets_from_layout(widgets_to_remove, self.chat_layout)
+                logger.info(f"[UNDO] Removed {deleted_count} cards from UI")
+            else:
+                logger.warning("[UNDO] Card not found in layout, UI cards not deleted")
+        else:
+            logger.warning("[UNDO] No card provided, skipping UI deletion")
+        
+        # === 2. 基于 session.messages 计算截断位置 ===
         canonical_messages = consolidate_messages(session.messages)
         round_ranges = get_user_round_ranges(canonical_messages)
         
@@ -2958,24 +2986,20 @@ class OpenAIChatToolWindow(ToolWindow):
             return False
         
         cutoff_index = round_ranges[round_index][0]
-        logger.info(f"[UNDO] Truncating session: round_index={round_index}, cutoff_index={cutoff_index}, total_messages={len(canonical_messages)}")
+        logger.info(f"[UNDO] Truncating session: round_index={round_index}, cutoff_index={cutoff_index}")
         
-        # 2. 截断 session.messages（直接基于数据计算，不依赖 UI）
+        # === 3. 截断 session.messages ===
         session.set_messages(
             session.messages[:cutoff_index], preserve_compaction=False
         )
         
-        # 3. 同步更新 _message_batch
+        # === 4. 同步 _message_batch ===
         self._message_batch = group_messages_for_display(session.messages)
         
-        # 4. 保存 session
+        # === 5. 保存 session ===
         self._persist_session_after_mutation()
         
-        # 5. 清空聊天区并从 session 数据重新渲染（确保 UI 与数据一致）
-        self._clear_chat_area()
-        self._display_current_session()
-        
-        # 6. 收尾处理
+        # === 6. 收尾 ===
         self._finalize_local_session_mutation()
         
         return True
@@ -2983,59 +3007,86 @@ class OpenAIChatToolWindow(ToolWindow):
     def _delete_message(self, card: MessageCard):
         if card.role != "user":
             return
-        round_index = self._find_user_round_index_for_card(card)
-        if round_index is None:
-            return
-        self._delete_user_round(round_index)
+        # 直接传 card 对象，不依赖 round_index 定位 UI 卡片
+        self._delete_user_round(card)
 
-    def _delete_user_round(self, round_index: int):
+    def _delete_user_round(self, card: MessageCard):
+        """
+        删除单个 round：找到 card 在 chat_layout 中的位置，
+        删除该 user card 及其后直到下一个 user card 之间的所有卡片
+        """
         from loguru import logger
         
+        logger.info(f"[DELETE] Starting deletion for card at round_index={card._round_index}")
+        
+        # === 1. 删除 UI 卡片：基于 card widget 对象在 layout 中的位置 ===
+        # 找到 card 在 chat_layout 中的索引
+        card_layout_idx = -1
+        for i in range(self.chat_layout.count()):
+            item = self.chat_layout.itemAt(i)
+            if item and item.widget() is card:
+                card_layout_idx = i
+                break
+        
+        if card_layout_idx < 0:
+            logger.warning("[DELETE] Card not found in layout")
+            return
+        
+        # 收集要删除的 widgets：从 card 开始，直到下一个 user card 或末尾
+        widgets_to_remove = [card]
+        for i in range(card_layout_idx + 1, self.chat_layout.count()):
+            item = self.chat_layout.itemAt(i)
+            if not item or not item.widget():
+                continue
+            w = item.widget()
+            # 遇到下一个 user card 就停止
+            if hasattr(w, 'role') and w.role == "user" and not getattr(w, "_is_welcome", False):
+                break
+            widgets_to_remove.append(w)
+        
+        from app.widgets.ui_helpers import delete_widgets_from_layout
+        delete_widgets_from_layout(widgets_to_remove, self.chat_layout)
+        logger.info(f"[DELETE] Removed {len(widgets_to_remove)} cards from UI")
+        
+        # === 2. 更新 session 数据 ===
         session = self.session_manager.get_current_session()
         if not session:
             logger.error("[DELETE] No session found")
             return
-
-        # 调试日志：记录操作前的状态
-        logger.info(f"[DELETE] Starting deletion: round_index={round_index}, session_id={session.session_id}")
-        logger.info(f"[DELETE] _current_session_id={self._current_session_id}")
-        logger.info(f"[DELETE] session.messages count before: {len(session.messages)}")
-
-        # Step 1: 先删除UI卡片，确保用户立即看到效果
-        ui_deleted = self._remove_cards_for_round(round_index)
-
-        # Step 2: 更新 session 数据
+        
+        # 从 card._round_index 计算 session 截断位置
+        round_index = card._round_index
+        if round_index is None:
+            logger.error("[DELETE] Card has no _round_index")
+            return
+        
         canonical_messages = consolidate_messages(session.messages)
         round_ranges = get_user_round_ranges(canonical_messages)
         
-        logger.info(f"[DELETE] canonical_messages count: {len(canonical_messages)}, round_ranges: {len(round_ranges)}")
+        if round_index < 0 or round_index >= len(round_ranges):
+            logger.warning(f"[DELETE] Invalid round_index: {round_index}")
+            return
         
         success, old_count, new_count = truncate_and_remove_round(
             session, round_index, round_ranges
         )
         if not success:
-            logger.warning(f"[DELETE] Invalid round_index: {round_index}")
             return
-
-        logger.info(f"[DELETE] After truncate: old_count={old_count}, new_count={new_count}")
-        logger.info(f"[DELETE] session.messages count after: {len(session.messages)}")
-
-        # 记录统计信息
-        log_deletion_stats(round_index, ui_deleted, old_count, new_count)
-
-        # Step 3: 保存session数据
-        # 关键修复：确保 _current_session_id 与 session.session_id 同步
+        
+        log_deletion_stats(round_index, len(widgets_to_remove), old_count, new_count)
+        
+        # === 3. 同步 _message_batch ===
+        self._message_batch = group_messages_for_display(session.messages)
+        
+        # === 4. 保存 session ===
         if self._current_session_id != session.session_id:
-            logger.warning(f"[DELETE] Session ID mismatch: _current_session_id={self._current_session_id}, session.session_id={session.session_id}. Syncing.")
             self._current_session_id = session.session_id
         
         try:
             self._persist_session_after_mutation()
-            logger.info("[DELETE] Session persisted successfully")
         except Exception as e:
             logger.error(f"[DELETE] Failed to persist session: {e}")
-
-        # Step 4: 收尾处理
+        
         self._finalize_local_session_mutation()
 
     def _undo_from_message(self, card: MessageCard):
@@ -3090,7 +3141,7 @@ class OpenAIChatToolWindow(ToolWindow):
 
         user_input = card.get_plain_text()
         context_tags = card.context_tags.copy()
-        if not self._truncate_session_from_user_round(round_index):
+        if not self._truncate_session_from_user_round(round_index=round_index, card=card):
             return
 
         # 恢复输入框内容
