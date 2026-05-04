@@ -1476,8 +1476,6 @@ class OpenAIChatToolWindow(ToolWindow):
         buttons = self._agent_btn_group.buttons()
         default_agent = getattr(self, '_current_agent', 'build')
         
-        logger.info(f"[_load_agent_list] agents={[a.name for a in agents]}, default_agent={default_agent}, buttons={len(buttons)}")
-        
         # 更新按钮文本和提示
         for i, agent in enumerate(agents):
             if i < len(buttons):
@@ -1503,6 +1501,11 @@ class OpenAIChatToolWindow(ToolWindow):
                 self._current_agent = agents[0].name if agents else "build"
                 self._update_agent_button_style(self._current_agent)
         
+        # 同步 ChatEngine 的 agent（关键修复！）
+        if self._chat_engine:
+            self._chat_engine._current_agent = self._current_agent
+            logger.info(f"[_load_agent_list] Synced ChatEngine._current_agent = {self._current_agent}")
+        
         self._suppress_agent_intro = False
     
     def _update_agent_button_style(self, active_agent: str):
@@ -1520,6 +1523,9 @@ class OpenAIChatToolWindow(ToolWindow):
         """智能体切换处理"""
         if not agent_name or not self._chat_engine:
             return
+        
+        logger.info(f"[_on_agent_changed] Switching from {self._current_agent} to {agent_name}")
+        
         self._current_agent = agent_name
         self._chat_engine.switch_agent(agent_name)
         self._update_agent_status(agent_name)
@@ -2136,11 +2142,15 @@ class OpenAIChatToolWindow(ToolWindow):
         from app.utils.message_content import consolidate_messages
 
         canonical_messages = consolidate_messages(session.messages)
+        user_count_total = sum(1 for msg in canonical_messages if msg.get("role") == "user")
 
         # 规范化时间戳进行比较（去掉秒）
         # MessageCard 的 timestamp 格式是 "YYYY-MM-DD HH:MM"（无秒）
         # session.messages 的 timestamp 格式是 "YYYY-MM-DD HH:MM:SS"（有秒）
         card_ts_prefix = timestamp[:16] if timestamp else ""
+
+        logger.debug(f"[UNDO] Searching for user message: card_ts={card_ts_prefix}, content_len={len(user_text)}")
+        logger.debug(f"[UNDO] Session has {len(canonical_messages)} messages, {user_count_total} user messages")
 
         # 在消息列表中查找匹配的 user 消息
         # 关键修复：同时匹配时间戳+内容，避免多条消息匹配到同一条
@@ -2154,7 +2164,7 @@ class OpenAIChatToolWindow(ToolWindow):
                 # 同时匹配时间戳和内容，确保唯一性
                 # 时间戳精确到分钟，内容完全匹配
                 if msg_ts_prefix == card_ts_prefix and msg_content == user_text:
-                    logger.debug(
+                    logger.info(
                         f"[UNDO] Matched user message: user_count={user_count}, "
                         f"ts={card_ts_prefix}, content_len={len(user_text)}"
                     )
@@ -2173,6 +2183,16 @@ class OpenAIChatToolWindow(ToolWindow):
                     )
                     return user_count
                 user_count += 1
+
+        # 调试：显示所有 user 消息的时间戳，帮助诊断
+        logger.warning(f"[UNDO] No match found for user message. Total user messages: {user_count_total}")
+        if user_count_total > 0:
+            logger.warning("[UNDO] Available user messages in session:")
+            for i, msg in enumerate(canonical_messages):
+                if msg.get("role") == "user":
+                    msg_ts = (msg.get("timestamp", "") or "")[:16]
+                    msg_content_preview = (msg.get("content", "") or "")[:50]
+                    logger.warning(f"[UNDO]   [{i}] ts={msg_ts}, content={msg_content_preview}...")
 
         return None
 
@@ -2918,8 +2938,8 @@ class OpenAIChatToolWindow(ToolWindow):
         """
         截断 session 数据到指定 round 之前，并精确删除 UI 卡片
         
-        策略：只删除 chat_layout 中被撤销的卡片及其后面的卡片，
-              不清空整个聊天区域，不重新渲染，保持性能
+        策略：基于 session.messages 数据直接计算截断位置，
+              不依赖 UI 布局（chat_layout），确保即使卡片懒加载也能正确工作
         """
         from loguru import logger
         from app.widgets.message_card import MessageCard
@@ -2929,8 +2949,25 @@ class OpenAIChatToolWindow(ToolWindow):
             logger.error("[UNDO] No session found")
             return False
 
-        # 1. 找到 chat_layout 中 round_index 对应的卡片
+        # 1. 基于 session.messages 计算截断位置（不依赖 UI 布局）
+        canonical_messages = consolidate_messages(session.messages)
+        round_ranges = get_user_round_ranges(canonical_messages)
+        
+        if round_index < 0 or round_index >= len(round_ranges):
+            logger.error(f"[UNDO] Invalid round_index: {round_index}, available: {len(round_ranges)}")
+            return False
+        
+        cutoff_index = round_ranges[round_index][0]
+        logger.info(f"[UNDO] Truncating session: round_index={round_index}, cutoff_index={cutoff_index}, total_messages={len(canonical_messages)}")
+        
+        # 2. 计算需要删除的卡片数量（基于 session 数据）
+        cards_to_remove_count = len(canonical_messages) - cutoff_index
+        logger.info(f"[UNDO] Expected cards to remove from session: {cards_to_remove_count}")
+        
+        # 3. 删除 chat_layout 中从 round_index 开始的卡片
+        #    注意：这里遍历 UI 布局只是为了删除可见的卡片
         user_card_idx = 0
+        cards_deleted = 0
         cards_to_delete = []
         start_deletion = False
         
@@ -2951,17 +2988,15 @@ class OpenAIChatToolWindow(ToolWindow):
                     start_deletion = True
                 if start_deletion:
                     cards_to_delete.append(widget)
+                    cards_deleted += 1
                 user_card_idx += 1
             elif widget.role == "assistant" and start_deletion:
                 cards_to_delete.append(widget)
+                cards_deleted += 1
         
-        logger.info(f"[UNDO] Found {len(cards_to_delete)} cards to delete (round_index={round_index})")
+        logger.info(f"[UNDO] Found {len(cards_to_delete)} cards to delete in UI (expected: {cards_to_remove_count})")
         
-        if not cards_to_delete:
-            logger.warning("[UNDO] No cards found to delete")
-            return False
-        
-        # 2. 从 layout 中删除这些卡片
+        # 4. 从 layout 中删除这些卡片
         for widget in cards_to_delete:
             for i in range(self.chat_layout.count()):
                 item = self.chat_layout.itemAt(i)
@@ -2972,26 +3007,18 @@ class OpenAIChatToolWindow(ToolWindow):
         
         logger.info(f"[UNDO] Deleted {len(cards_to_delete)} cards from layout")
         
-        # 3. 截断 session.messages
-        canonical_messages = consolidate_messages(session.messages)
-        round_ranges = get_user_round_ranges(canonical_messages)
-        
-        if round_index < 0 or round_index >= len(round_ranges):
-            logger.error(f"[UNDO] Invalid round_index: {round_index}")
-            return False
-        
-        cutoff_index = round_ranges[round_index][0]
+        # 5. 截断 session.messages（基于数据计算，不依赖 UI）
         session.set_messages(
             session.messages[:cutoff_index], preserve_compaction=False
         )
         
-        # 4. 同步更新 _message_batch（用于后续渲染）
+        # 6. 同步更新 _message_batch（用于后续渲染）
         self._message_batch = group_messages_for_display(session.messages)
         
-        # 5. 保存 session
+        # 7. 保存 session
         self._persist_session_after_mutation()
         
-        # 6. 收尾处理
+        # 8. 收尾处理
         self._finalize_local_session_mutation()
         
         return True
@@ -3005,9 +3032,17 @@ class OpenAIChatToolWindow(ToolWindow):
         self._delete_user_round(round_index)
 
     def _delete_user_round(self, round_index: int):
+        from loguru import logger
+        
         session = self.session_manager.get_current_session()
         if not session:
+            logger.error("[DELETE] No session found")
             return
+
+        # 调试日志：记录操作前的状态
+        logger.info(f"[DELETE] Starting deletion: round_index={round_index}, session_id={session.session_id}")
+        logger.info(f"[DELETE] _current_session_id={self._current_session_id}")
+        logger.info(f"[DELETE] session.messages count before: {len(session.messages)}")
 
         # Step 1: 先删除UI卡片，确保用户立即看到效果
         ui_deleted = self._remove_cards_for_round(round_index)
@@ -3016,6 +3051,8 @@ class OpenAIChatToolWindow(ToolWindow):
         canonical_messages = consolidate_messages(session.messages)
         round_ranges = get_user_round_ranges(canonical_messages)
         
+        logger.info(f"[DELETE] canonical_messages count: {len(canonical_messages)}, round_ranges: {len(round_ranges)}")
+        
         success, old_count, new_count = truncate_and_remove_round(
             session, round_index, round_ranges
         )
@@ -3023,10 +3060,18 @@ class OpenAIChatToolWindow(ToolWindow):
             logger.warning(f"[DELETE] Invalid round_index: {round_index}")
             return
 
+        logger.info(f"[DELETE] After truncate: old_count={old_count}, new_count={new_count}")
+        logger.info(f"[DELETE] session.messages count after: {len(session.messages)}")
+
         # 记录统计信息
         log_deletion_stats(round_index, ui_deleted, old_count, new_count)
 
         # Step 3: 保存session数据
+        # 关键修复：确保 _current_session_id 与 session.session_id 同步
+        if self._current_session_id != session.session_id:
+            logger.warning(f"[DELETE] Session ID mismatch: _current_session_id={self._current_session_id}, session.session_id={session.session_id}. Syncing.")
+            self._current_session_id = session.session_id
+        
         try:
             self._persist_session_after_mutation()
             logger.info("[DELETE] Session persisted successfully")
