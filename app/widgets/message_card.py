@@ -1096,7 +1096,7 @@ class CodeWebViewer(QWebEngineView):
                     opacity: 0;
                     overflow: hidden;
                     will-change: height, opacity;
-                    transition: height 220ms cubic-bezier(0.22, 1, 0.36, 1), opacity 160ms ease;
+                    transition: height 250ms cubic-bezier(0.4, 0, 0.2, 1), opacity 200ms ease;
                 }}
                 .cm-collapsible[data-expanded="true"] .cm-collapsible__body {{
                     opacity: 1;
@@ -1269,39 +1269,53 @@ class CodeWebViewer(QWebEngineView):
                     const body = block.querySelector('.cm-collapsible__body');
                     if (!body) return;
 
-                    body.style.transition = 'none';
+                    const ANIM_DURATION = 220;
+                    const startTime = performance.now();
                     const startHeight = body.getBoundingClientRect().height;
-                    body.style.height = startHeight + 'px';
-                    body.offsetHeight;
-                    body.style.transition = '';
+                    const startOpacity = expand ? 0 : 1;
+                    const endHeight = expand ? body.scrollHeight : 0;
+                    const endOpacity = expand ? 1 : 0;
 
-                    if (expand) {{
-                        body.style.height = body.scrollHeight + 'px';
-                        body.offsetHeight;
-                        syncExpandedAttrs(block, true);
-                        body.style.opacity = '1';
-                        body.style.height = body.scrollHeight + 'px';
-                    }} else {{
-                        body.style.height = body.scrollHeight + 'px';
-                        body.offsetHeight;
-                        syncExpandedAttrs(block, false);
-                        body.style.opacity = '0';
-                        body.style.height = '0px';
+                    // 立即更新展开状态
+                    syncExpandedAttrs(block, expand);
+
+                    // 阻止 CSS transition 干扰
+                    body.style.transition = 'none';
+                    body.style.height = startHeight + 'px';
+                    body.style.opacity = startOpacity;
+
+                    // 强制重绘
+                    void body.offsetHeight;
+
+                    // 取消之前的动画
+                    if (window._collapsibleAnimId) {{
+                        cancelAnimationFrame(window._collapsibleAnimId);
                     }}
 
-                    const cleanup = () => {{
-                        if (block.dataset.expanded === 'true') {{
-                            body.style.height = 'auto';
-                            body.style.opacity = '1';
-                        }} else {{
-                            body.style.height = '0px';
-                            body.style.opacity = '0';
-                        }}
-                        reportHeight();
-                    }};
+                    function tick(now) {{
+                        const elapsed = now - startTime;
+                        const progress = Math.min(elapsed / ANIM_DURATION, 1);
+                        // 使用 easeOutQuad 缓动
+                        const eased = 1 - (1 - progress) * (1 - progress);
 
-                    body.addEventListener('transitionend', cleanup, {{ once: true }});
-                    requestAnimationFrame(reportHeight);
+                        const currentHeight = startHeight + (endHeight - startHeight) * eased;
+                        const currentOpacity = startOpacity + (endOpacity - startOpacity) * eased;
+
+                        body.style.height = currentHeight + 'px';
+                        body.style.opacity = currentOpacity;
+
+                        if (progress < 1) {{
+                            window._collapsibleAnimId = requestAnimationFrame(tick);
+                        }} else {{
+                            // 动画结束
+                            body.style.height = expand ? 'auto' : '0px';
+                            body.style.opacity = endOpacity;
+                            // 动画结束后只报告一次高度
+                            setTimeout(() => reportHeight(), 0);
+                        }}
+                    }}
+
+                    window._collapsibleAnimId = requestAnimationFrame(tick);
                 }}
 
                 function restoreCollapsibleStates(root) {{
@@ -1703,6 +1717,8 @@ class MessageCard(SimpleCardWidget):
         self._height_anim.valueChanged.connect(self._apply_viewer_height)
         self._height_anim.stateChanged.connect(self._on_height_anim_state_changed)
         self._is_height_animating = False  # 动画期间抑制重复报告
+        # 禁用 Python 端的动画，依赖 JS 动画控制高度
+        self._height_anim.setDuration(0)  # 设置为0相当于禁用插值
         self._target_viewer_height = 40
         self._last_applied_viewer_height = 40
         self._theme = self._build_theme(role, error)

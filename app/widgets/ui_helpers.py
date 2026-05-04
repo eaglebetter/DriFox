@@ -675,6 +675,7 @@ def find_widgets_to_remove_for_round(
 def find_widgets_to_remove_from_round(
     chat_layout,
     round_index: int,
+    cards_to_remove_hint: int = 0,
 ) -> list:
     """
     找出从指定 round 到末尾的所有消息卡片（用于撤销操作）
@@ -682,10 +683,13 @@ def find_widgets_to_remove_from_round(
     Args:
         chat_layout: 聊天布局
         round_index: 起始 round 索引
+        cards_to_remove_hint: 预期删除的卡片数量（来自 session 数据）
         
     Returns:
         需要删除的卡片列表
     """
+    from loguru import logger
+    
     widgets_to_remove = []
     user_card_idx = 0
     removing = False
@@ -710,6 +714,14 @@ def find_widgets_to_remove_from_round(
             user_card_idx += 1
         elif widget.role == "assistant" and removing:
             widgets_to_remove.append(widget)
+    
+    # 关键修复：检查删除数量是否与预期相符
+    if cards_to_remove_hint > 0 and len(widgets_to_remove) < cards_to_remove_hint:
+        logger.warning(
+            f"[UNDO] Partial card removal: found {len(widgets_to_remove)} cards, "
+            f"expected {cards_to_remove_hint}. round_index={round_index}. "
+            f"This may indicate some cards are not in current layout (lazy loaded)."
+        )
     
     return widgets_to_remove
 
