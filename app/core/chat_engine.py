@@ -206,14 +206,17 @@ class ChatEngine:
 
             agent = agent_manager.get_agent(self._current_agent)
             if not agent:
+                logger.warning(f"[_check_tool_permission] Agent not found: {self._current_agent}")
                 return "allow"
 
             perm_resolver = PermissionResolver(agent.permission, {}, agent.tools)
+            result = perm_resolver.resolve(tool_name)
+            logger.info(f"[_check_tool_permission] agent={self._current_agent}, tool={tool_name}, result={result}")
 
             if tool_name == "bash":
                 command = arguments.get("command", "")
                 return perm_resolver.resolve(tool_name, command)
-            elif tool_name in ("read", "edit", "write", "patch"):
+            elif tool_name in ("read", "edit", "write", "patch", "multiedit"):
                 file_path = arguments.get("filePath", "")
                 return perm_resolver.resolve(tool_name, file_path)
             elif tool_name == "webfetch":

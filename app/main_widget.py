@@ -22,7 +22,7 @@ from PyQt5.QtWidgets import (
     QFileDialog, QGraphicsOpacityEffect,
     QLabel,
     QPushButton,
-    QButtonGroup,
+    QButtonGroup, QFrame,
 )
 from loguru import logger
 from qfluentwidgets import (
@@ -137,7 +137,7 @@ class OpenAIChatToolWindow(ToolWindow):
     _valid_configs: Dict[str, Dict[str, Any]] = {}
     history_manager = None
     _agent_manager: Optional[AgentManager] = None
-    _current_agent: str = "plan"
+    _current_agent: str = "build"
     _current_session_id: Optional[str] = None
     _settings_popup = None
     _is_welcome = False
@@ -607,6 +607,8 @@ class OpenAIChatToolWindow(ToolWindow):
 
     def _create_branched_session(self, messages: List[Dict], name: str):
         """创建分支会话并渲染消息"""
+        logger.info("[Branch] 开始创建分支会话")
+        
         if self._is_streaming and self._chat_engine:
             self._chat_engine.stop()
             self._is_streaming = False
@@ -622,6 +624,13 @@ class OpenAIChatToolWindow(ToolWindow):
         self._clear_chat_area()
         self.title_edit.setText(name)
         self.node_preview.clear_nodes()
+
+        # 重置输入框高度
+        if hasattr(self, 'input_area'):
+            logger.info(f"[Branch] 重置输入框高度，当前: {self.input_area.height()}")
+            self.input_area._initializing = True
+            self.input_area.setFixedHeight(72)
+            self.input_area._initializing = False
 
         # 复用现有的会话显示逻辑
         self._display_current_session()
@@ -817,33 +826,49 @@ class OpenAIChatToolWindow(ToolWindow):
 
         hlayout = QHBoxLayout()
         hlayout.setContentsMargins(0, 0, 0, 0)
-        hlayout.setSpacing(6)
+        hlayout.setSpacing(4)
 
-        # 模型选择 - 扁平式上拉选择器（类似 OpenCode 风格）
-        self.current_model_btn = QWidget(self)
+        # 模型选择 + 配置按钮组 - 紧凑式设计
+        self._model_btn_container = QWidget(self)
+        self._model_btn_container.setFixedHeight(30)
+        self._model_btn_container.setStyleSheet("""
+            background: rgba(27, 35, 50, 180);
+            border: 1px solid rgba(43, 56, 80, 200);
+            border-radius: 12px;
+        """)
+        model_layout = QHBoxLayout(self._model_btn_container)
+        model_layout.setContentsMargins(0, 0, 0, 0)
+        model_layout.setSpacing(0)
+        
+        # 模型选择按钮（可点击弹出模型选择）
+        self.current_model_btn = QWidget(self._model_btn_container)
         self.current_model_btn.setCursor(Qt.PointingHandCursor)
         self.current_model_btn.setStyleSheet(MODEL_BTN_STYLE)
+        self.current_model_btn.setMouseTracking(True)
         self.current_model_btn.mousePressEvent = lambda e: self._show_model_selector_popup()
         btn_layout = QHBoxLayout(self.current_model_btn)
-        btn_layout.setContentsMargins(8, 4, 12, 4)
-        btn_layout.setSpacing(6)
+        btn_layout.setContentsMargins(8, 4, 0, 4)
+        btn_layout.setSpacing(4)
         self._model_btn_icon = QLabel(self.current_model_btn)
         self._model_btn_icon.setFixedSize(18, 18)
         btn_layout.addWidget(self._model_btn_icon)
         self._model_btn_text = QLabel("正在加载...", self.current_model_btn)
         self._model_btn_text.setStyleSheet(MODEL_BTN_TEXT_STYLE)
         btn_layout.addWidget(self._model_btn_text)
-        btn_layout.addStretch()
-        self.current_model_btn.setFixedHeight(30)
-        hlayout.addWidget(self.current_model_btn)
+        model_layout.addWidget(self.current_model_btn, 1)
+        
+        # 配置按钮（点击弹出配置卡片）
+        self.settings_btn = TransparentToolButton(get_icon("模型选择"), self._model_btn_container)
+        self.settings_btn.setFixedSize(26, 26)
+        self.settings_btn.setToolTip("模型参数配置")
+        self.settings_btn.clicked.connect(self._toggle_model_config_card)
+        model_layout.addWidget(self.settings_btn)
+        
+        hlayout.addWidget(self._model_btn_container)
+        
         # 记下当前选中的服务商和模型，供弹窗使用
         self._current_provider_name = ""
         self._current_model_name = ""
-
-        self.settings_btn = TransparentToolButton(get_icon("模型选择"), self)
-        self.settings_btn.setToolTip("模型参数配置")
-        self.settings_btn.clicked.connect(self._toggle_model_config_card)
-        hlayout.addWidget(self.settings_btn)
 
         # 智能体切换按钮组 - 金属质感+简约科技风
         self._agent_switch_widget = self._create_agent_switch_buttons()
@@ -883,6 +908,7 @@ class OpenAIChatToolWindow(ToolWindow):
         # 输入框 - 在工具栏下方
         self.input_area = SendableTextEdit(self)
         self.input_area._agent_combo.hide()  # 隐藏输入框内部的下拉框，用工具栏的按钮组代替
+        self.input_area._initializing = False  # 初始化完成后启用高度调整
         setFont(self.input_area, 15)
         self.input_area.sendMessageRequested.connect(self._on_send_clicked)
         self.input_area.stopMessageRequested.connect(self._on_stop_clicked)
@@ -1065,22 +1091,20 @@ class OpenAIChatToolWindow(ToolWindow):
         self._model_config_popup.set_config(current_name, config)
 
     def _create_agent_switch_buttons(self) -> QWidget:
-        """创建智能体切换按钮组 - 金属质感+简约科技风"""
-        from PyQt5.QtCore import QSize
-        
+        """创建智能体切换按钮 - 单胶囊设计，中间用分隔线"""
         container = QWidget()
-        container.setFixedHeight(32)
+        container.setFixedHeight(30)
+        container.setStyleSheet("""
+            background: rgba(27, 35, 50, 180);
+            border: 1px solid rgba(43, 56, 80, 200);
+            border-radius: 12px;
+        """)
         layout = QHBoxLayout(container)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(4)
+        layout.setContentsMargins(4, 2, 4, 2)
+        layout.setSpacing(0)
         
         # 加载智能体列表
         agents = self._agent_manager.list_primary_agents() if self._agent_manager else []
-        
-        # 调试日志
-        logger.info(f"[AgentSwitch] 创建智能体按钮组，找到 {len(agents)} 个 primary agents")
-        for agent in agents:
-            logger.info(f"[AgentSwitch] - {agent.name}: {agent.description}")
         
         # 如果没有智能体，显示占位文本
         if not agents:
@@ -1089,63 +1113,66 @@ class OpenAIChatToolWindow(ToolWindow):
                 QLabel {{
                     color: #8FA4C2;
                     font-size: 12px;
+                    padding: 0 12px;
                     {get_font_family_css()}
                 }}
             """)
             layout.addWidget(placeholder)
             return container
         
-        # 按钮组
+        # 默认选中的智能体
+        default_agent = getattr(self, '_current_agent', 'plan')
+        
+        self._agent_buttons = {}
         self._agent_btn_group = QButtonGroup()
         self._agent_btn_group.buttonClicked[int].connect(self._on_agent_btn_clicked)
         
         # 默认样式
         default_style = f"""
             QPushButton {{
-                background: rgba(30, 40, 55, 180);
+                background: transparent;
                 color: #8FA4C2;
-                border: 1px solid rgba(60, 75, 95, 150);
+                border: none;
                 border-radius: 8px;
-                padding: 4px 14px;
+                padding: 4px 12px;
                 font-size: 12px;
                 font-weight: 500;
                 {get_font_family_css()}
             }}
             QPushButton:hover {{
-                background: rgba(45, 55, 70, 200);
-                border-color: rgba(100, 120, 150, 180);
+                background: rgba(255, 255, 255, 0.05);
                 color: #B4C2D9;
             }}
         """
         
-        # 选中样式 - 金属质感边框+选中色
+        # 选中样式
         selected_style = f"""
             QPushButton {{
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 rgba(60, 70, 85, 220),
-                    stop:0.5 rgba(50, 60, 75, 200),
-                    stop:1 rgba(40, 50, 65, 180));
+                background: rgba(201, 168, 92, 0.2);
                 color: #C9A85C;
-                border: 1px solid #C9A85C;
+                border: none;
                 border-radius: 8px;
-                padding: 4px 14px;
+                padding: 4px 12px;
                 font-size: 12px;
                 font-weight: 600;
                 {get_font_family_css()}
             }}
             QPushButton:hover {{
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 rgba(70, 80, 95, 220),
-                    stop:1 rgba(55, 65, 80, 200));
-                border-color: #D4B878;
+                background: rgba(201, 168, 92, 0.25);
             }}
         """
         
-        self._agent_buttons = {}
-        
         for i, agent in enumerate(agents):
+            # 添加分隔线（在按钮之前，除了第一个）
+            if i > 0:
+                sep = QFrame()
+                sep.setFrameShape(QFrame.VLine)
+                sep.setFixedWidth(1)
+                sep.setStyleSheet("background: rgba(60, 75, 95, 150); margin: 4px 0;")
+                layout.addWidget(sep)
+            
             btn = QPushButton(agent.name)
-            btn.setFixedHeight(28)
+            btn.setFixedHeight(22)
             btn.setCursor(Qt.PointingHandCursor)
             btn.setCheckable(True)
             btn.setStyleSheet(default_style)
@@ -1155,14 +1182,17 @@ class OpenAIChatToolWindow(ToolWindow):
             self._agent_buttons[agent.name] = {"btn": btn, "style": default_style, "selected_style": selected_style}
             layout.addWidget(btn)
             
-            logger.info(f"[AgentSwitch] 创建按钮: {agent.name}")
-            
-            # 默认选中第一个
-            if i == 0:
+            # 如果是默认选中的智能体，则选中它
+            if agent.name == default_agent:
                 btn.setChecked(True)
                 btn.setStyleSheet(selected_style)
-                self._current_agent = agent.name
-                logger.info(f"[AgentSwitch] 默认选中: {agent.name}")
+        
+        # 如果没有匹配默认智能体，选中第一个
+        if default_agent not in self._agent_buttons and agents:
+            btn = self._agent_buttons[agents[0].name]["btn"]
+            btn.setChecked(True)
+            btn.setStyleSheet(selected_style)
+            self._current_agent = agents[0].name
         
         return container
     
@@ -1174,6 +1204,8 @@ class OpenAIChatToolWindow(ToolWindow):
         
         agent = agents[btn_id]
         agent_name = agent.name
+        
+        logger.info(f"[_on_agent_btn_clicked] btn_id={btn_id}, agent_name={agent_name}, _current_agent before={self._current_agent}")
         
         # 更新按钮样式
         for name, data in self._agent_buttons.items():
@@ -1442,6 +1474,9 @@ class OpenAIChatToolWindow(ToolWindow):
         self._suppress_agent_intro = True
         agents = self._agent_manager.list_primary_agents()
         buttons = self._agent_btn_group.buttons()
+        default_agent = getattr(self, '_current_agent', 'build')
+        
+        logger.info(f"[_load_agent_list] agents={[a.name for a in agents]}, default_agent={default_agent}, buttons={len(buttons)}")
         
         # 更新按钮文本和提示
         for i, agent in enumerate(agents):
@@ -1450,12 +1485,36 @@ class OpenAIChatToolWindow(ToolWindow):
                 btn.setText(agent.name)
                 btn.setToolTip(agent.description)
         
-        # 默认选中第一个
-        if buttons:
-            buttons[0].setChecked(True)
-            self._current_agent = agents[0].name if agents else "plan"
+        # 根据当前智能体选中对应按钮
+        found = False
+        for i, agent in enumerate(agents):
+            if i < len(buttons) and agent.name == default_agent:
+                buttons[i].setChecked(True)
+                self._update_agent_button_style(default_agent)
+                found = True
+                logger.info(f"[_load_agent_list] Found match for {default_agent}, btn_id={i}")
+                break
+        
+        if not found:
+            # 如果没找到匹配的，默认选中第一个
+            logger.warning(f"[_load_agent_list] {default_agent} not found, using agents[0]={agents[0].name if agents else 'None'}")
+            if buttons:
+                buttons[0].setChecked(True)
+                self._current_agent = agents[0].name if agents else "build"
+                self._update_agent_button_style(self._current_agent)
         
         self._suppress_agent_intro = False
+    
+    def _update_agent_button_style(self, active_agent: str):
+        """更新智能体按钮样式"""
+        if not hasattr(self, "_agent_buttons"):
+            return
+        for name, data in self._agent_buttons.items():
+            btn = data["btn"]
+            if name == active_agent:
+                btn.setStyleSheet(data["selected_style"])
+            else:
+                btn.setStyleSheet(data["style"])
 
     def _on_agent_changed(self, agent_name: str):
         """智能体切换处理"""

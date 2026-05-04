@@ -371,12 +371,14 @@ class SendableTextEdit(QTextEdit):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._initializing = True  # 初始化标志，防止早期高度调整
         self.setPlaceholderText("给 DriFox 发送消息，Enter 发送，Shift+Enter 换行")
         self.setAcceptRichText(False)
         self.setLineWrapMode(TextEdit.WidgetWidth)
         self.setAcceptDrops(True)
         self.setMinimumHeight(72)
         self.setMaximumHeight(250)
+        self.setFixedHeight(72)  # 初始化时设为最小高度
         self.setStyleSheet(f"""
             QTextEdit {{
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
@@ -591,15 +593,22 @@ class SendableTextEdit(QTextEdit):
     def _on_text_changed(self):
         has_text = bool(self.toPlainText().strip())
         self.send_btn.setDisabled(not has_text)
-        self._adjust_height_to_content()
+        # 初始化期间不调整高度
+        if not getattr(self, '_initializing', False):
+            self._adjust_height_to_content()
 
     def _adjust_height_to_content(self):
         """根据内容自动调整高度"""
+        # 初始化期间不调整高度
+        if getattr(self, '_initializing', False):
+            return
+        
         doc = self.document()
         # 计算文档高度 + padding
         content_height = int(doc.size().height()) + 28  # 上下 padding
         # 限制在最小和最大高度之间
         new_height = max(72, min(280, content_height))
+
         if self.height() != new_height:
             self.setFixedHeight(new_height)
             # 触发父布局重新计算
