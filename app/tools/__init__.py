@@ -801,7 +801,7 @@ def get_builtin_tools_schema() -> List[Dict]:
             "type": "function",
             "function": {
                 "name": "task_wait",
-                "description": "等待指定的子智能体任务完成并收集结果（轮询方式）。在 task_batch 之后使用。",
+                "description": "等待指定的子智能体任务完成并收集结果（轮询方式）。",
                 "parameters": {
                     "type": "object",
                     "properties": {
