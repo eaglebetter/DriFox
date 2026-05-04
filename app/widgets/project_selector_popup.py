@@ -3,7 +3,7 @@
 项目选择弹窗 - 点击标题栏项目名时弹出
 支持选择已有项目或新建项目
 """
-from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtCore import Qt, pyqtSignal, QPoint
 from PyQt5.QtWidgets import (
     QWidget,
     QFrame,
@@ -92,9 +92,13 @@ class ProjectSelectorPopup(QWidget):
         self._projects = list(projects)
         self._current_project = current_project
         
-        self.setWindowFlags(Qt.Popup | Qt.FramelessWindowHint | Qt.NoDropShadowWindowHint)
+        self.setWindowFlags(Qt.Tool | Qt.FramelessWindowHint | Qt.NoDropShadowWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
+        self.setAttribute(Qt.WA_InputMethodEnabled)
+        
+        # 安装事件过滤器，检测外部点击
+        QApplication.instance().installEventFilter(self)
         
         self._setup_ui()
     
@@ -127,6 +131,10 @@ class ProjectSelectorPopup(QWidget):
         
         self._new_project_edit = QLineEdit(self)
         self._new_project_edit.setPlaceholderText("新建项目...")
+        self._new_project_edit.setInputMethodHints(
+            Qt.ImhPreferLatin | Qt.ImhNoAutoUppercase | Qt.ImhSensitiveData |
+            Qt.ImhNoPredictiveText | Qt.ImhMultiLine
+        )
         self._new_project_edit.setStyleSheet(f"""
             QLineEdit {{
                 background-color: #3d3d3d;
@@ -294,3 +302,24 @@ class ProjectSelectorPopup(QWidget):
         
         self.move(x, y)
         self.raise_()
+    
+    def eventFilter(self, obj, event):
+        """检测外部点击，关闭弹窗"""
+        if event.type() == event.MouseButtonPress:
+            # 检查点击是否在弹窗内部
+            global_pos = event.globalPos()
+            popup_geo = self.geometry()
+            if not popup_geo.contains(global_pos):
+                # 检查是否点击在输入框上（输入法需要）
+                focus_widget = QApplication.focusWidget()
+                if focus_widget and isinstance(focus_widget, QLineEdit):
+                    edit_geo = focus_widget.rect().translated(focus_widget.mapToGlobal(QPoint(0, 0)))
+                    if edit_geo.contains(global_pos):
+                        return False
+                self.close()
+        return super().eventFilter(obj, event)
+    
+    def close(self):
+        """关闭弹窗时移除事件过滤器"""
+        QApplication.instance().removeEventFilter(self)
+        super().close()
