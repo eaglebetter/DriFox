@@ -99,7 +99,7 @@ class ToolWindowTitleBar(QWidget):
         self._memory_label = QLabel(self)
         self._memory_label.setObjectName("memoryLabel")
         self._memory_label.setFixedHeight(22)
-        self._memory_label.setStyleSheet("color: #ffffff; font-size: 12px; padding: 2px 6px; background-color: rgba(0, 0, 0, 20); border-radius: 4px;")
+        self._memory_label.setStyleSheet("color: #ffffff; font-size: 12px; padding: 2px 6px; background-color: transparent; border: none; border-radius: 4px;")
         self._memory_label.hide()  # 默认隐藏，子类可以控制显示
         layout.insertWidget(layout.indexOf(self._action_container) - 1, self._memory_label)
 

@@ -234,8 +234,8 @@ WINDOW_STYLE = """
 
 CHAT_SCROLL_STYLE = """
     SingleDirectionScrollArea {
-        background-color: rgba(255, 255, 255, 0.02);
-        border: 1px solid rgba(255, 255, 255, 0.04);
+        background-color: transparent;
+        border: none;
         border-radius: 18px;
     }
 """
@@ -247,7 +247,7 @@ TITLE_STYLE = """
         font-weight: bold;
         padding: 6px 10px;
         border-radius: 10px;
-        background-color: rgba(255, 255, 255, 0.03);
+        background-color: transparent;
     }
     QLabel:hover {
         background-color: rgba(255, 255, 255, 0.06);

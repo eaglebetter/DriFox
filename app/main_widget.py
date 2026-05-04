@@ -674,7 +674,7 @@ class OpenAIChatToolWindow(ToolWindow):
     def setup_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
-        layout.setSpacing(4)
+        layout.setSpacing(1)
 
         self.setStyleSheet(WINDOW_STYLE)
 
@@ -874,7 +874,7 @@ class OpenAIChatToolWindow(ToolWindow):
         self._agent_switch_widget = self._create_agent_switch_buttons()
         hlayout.addWidget(self._agent_switch_widget)
 
-        hlayout.addSpacing(12)  # 和其他按钮分隔
+        hlayout.addStretch(1)
 
         # 工具栏右侧按钮组 - 胶囊包裹，无分隔线
         self._toolbar_capsule = QWidget(self)
