@@ -377,7 +377,7 @@ class SendableTextEdit(QTextEdit):
         self.setLineWrapMode(TextEdit.WidgetWidth)
         self.setAcceptDrops(True)
         self.setMinimumHeight(72)
-        self.setMaximumHeight(250)
+        self.setMaximumHeight(200)
         self.setFixedHeight(72)  # 初始化时设为最小高度
         self.setStyleSheet(f"""
             QTextEdit {{
