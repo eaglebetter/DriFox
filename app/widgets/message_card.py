@@ -261,7 +261,7 @@ def _render_think_block(content: str, completed: bool = True) -> str:
         <span style="color: #666; font-size: 11px; font-weight: normal; margin-left: auto;">{escape(content_preview)}</span>
     </button>
     <div class="cm-collapsible__body"{body_style}>
-        <div class="think-content" style="white-space: normal; word-break: break-word; line-height: 1.6;">{content}</div>
+        <div class="think-content loading" style="white-space: normal; word-break: break-word; line-height: 1.6;">{content}</div>
     </div>
 </div>"""
 
@@ -1107,6 +1107,10 @@ class CodeWebViewer(QWebEngineView):
                     background: rgba(30, 32, 40, 0.28);
                     border: 1px solid var(--border);
                     border-radius: 10px;
+                    transition: border-color 220ms ease;
+                }}
+                .think-block[data-expanded="true"] {{
+                    border-color: rgba(102, 198, 255, 0.4);
                 }}
                 .think-block__summary {{
                     padding: 8px 12px;
@@ -1119,6 +1123,23 @@ class CodeWebViewer(QWebEngineView):
                     background: rgba(30, 32, 40, 0.18);
                     color: var(--text-muted) !important;
                     font-style: italic;
+                    font-size: 13px;
+                    line-height: 1.6;
+                }}
+                /* 思考内容加载骨架屏动画 */
+                .think-content.loading {{
+                    background-image: linear-gradient(
+                        90deg,
+                        rgba(30, 32, 40, 0.18) 25%,
+                        rgba(40, 44, 55, 0.28) 50%,
+                        rgba(30, 32, 40, 0.18) 75%
+                    );
+                    background-size: 200% 100%;
+                    animation: think-shimmer 1.5s ease-in-out infinite;
+                }}
+                @keyframes think-shimmer {{
+                    0% {{ background-position: 200% 0; }}
+                    100% {{ background-position: -200% 0; }}
                 }}
 
                 .tool-block {{
@@ -1127,6 +1148,10 @@ class CodeWebViewer(QWebEngineView):
                     border: 1px solid var(--border);
                     border-radius: 10px;
                     box-shadow: none;
+                    transition: border-color 220ms ease;
+                }}
+                .tool-block[data-expanded="true"] {{
+                    border-color: rgba(95, 209, 140, 0.5);
                 }}
                 .tool-block__summary {{
                     padding: 8px 12px;
@@ -1305,8 +1330,34 @@ class CodeWebViewer(QWebEngineView):
                 function updateContent(newHtml) {{
                     const container = document.getElementById('content-placeholder');
                     if (container.innerHTML !== newHtml) {{
+                        // 记录当前展开状态的思考块
+                        const expandedStates = new Map();
+                        container.querySelectorAll('.think-block').forEach(block => {{
+                            expandedStates.set(block.dataset.blockKey, block.dataset.expanded === 'true');
+                        }});
+
                         container.innerHTML = newHtml;
+
+                        // 恢复展开状态并移除骨架屏动画
+                        container.querySelectorAll('.think-content').forEach(content => {{
+                            content.classList.remove('loading');
+                        }});
+
                         restoreCollapsibleStates(container);
+
+                        // 恢复展开状态
+                        container.querySelectorAll('.think-block').forEach(block => {{
+                            const savedState = expandedStates.get(block.dataset.blockKey);
+                            if (savedState !== undefined) {{
+                                block.dataset.expanded = savedState ? 'true' : 'false';
+                                const body = block.querySelector('.cm-collapsible__body');
+                                if (body) {{
+                                    body.style.height = savedState ? 'auto' : '0px';
+                                    body.style.opacity = savedState ? '1' : '0';
+                                }}
+                            }}
+                        }});
+
                         if (window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise();
                         reportHeight();
                     }}
