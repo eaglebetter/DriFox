@@ -385,7 +385,7 @@ class SendableTextEdit(QTextEdit):
                 color: #F2F6FF;
                 border: 1px solid #2B3850;
                 border-radius: 18px;
-                padding: 14px 128px 18px 16px;
+                padding: 14px 50px 18px 16px;
                 selection-background-color: rgba(201, 168, 92, 0.28);
                 {get_font_family_css()} font-size: 14px;
             }}
