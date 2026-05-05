@@ -618,6 +618,7 @@ class OpenAIChatWorker(QThread):
     def _build_response_message_sequence(self, tool_results=None) -> List[Dict]:
         now_ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         tool_call_map = {}
+        # 也从 _tool_calls_buffer 获取未完成解析的 tool_calls
         for tc in self._current_tool_calls or []:
             if not isinstance(tc, dict):
                 continue
@@ -634,6 +635,20 @@ class OpenAIChatWorker(QThread):
                 },
             }
             tool_call_map[tool_call_id] = normalized_tc
+        
+        # 从 _tool_calls_buffer 获取未解析完成的 tool_calls
+        for tc_id, buffer in (self._tool_calls_buffer or {}).items():
+            if tc_id in tool_call_map:
+                continue
+            function = buffer.get("function", {}) or {}
+            tool_call_map[tc_id] = {
+                "id": tc_id,
+                "type": buffer.get("type", "function"),
+                "function": {
+                    "name": function.get("name", ""),
+                    "arguments": function.get("arguments", "{}"),
+                },
+            }
 
         tool_result_map = {}
         for item in tool_results or []:
@@ -1437,39 +1452,79 @@ class OpenAIChatWorker(QThread):
                         # 确实是空字符串
                         arguments = {}
                     else:
-                        # 无法修复，返回错误
-                        logger.warning(
-                            f"[ToolCall] ⚠️ JSON 解析失败且无法修复，tool={tool_name}, "
-                            f"error={str(e)}, "
-                            f"raw_args='{arguments[:300]}...'"
-                        )
-                        tool_call_id = tc["id"]
-                        round_id = f"round_{id(tc)}"
-                        error_result = {
-                            "success": False,
-                            "content": None,
-                            "error": f"[参数错误] JSON 格式无效: {str(e)}\n"
-                                     f"工具: {tool_name}\n"
-                                     f"原始内容(前500字): {arguments[:500]}...",
-                        }
-                        self._emit_with_callback(
-                            "tool_result_received",
-                            self.tool_result_received,
-                            tool_call_id, tool_name, {},
-                            error_result
-                        )
-                        if not self._direct_callbacks:
-                            QApplication.processEvents()
-                        results.append({
-                            "role": "tool",
-                            "tool_call_id": tool_call_id,
-                            "name": tool_name,
-                            "arguments": {},
-                            "content": error_result["error"],
-                            "success": False,
-                            "round_id": round_id,
-                        })
-                        continue
+                        # 无法修复，检查是否是参数太长
+                        args_len = len(arguments)
+                        if args_len > 10000:
+                            # 参数太长，返回明确的错误提示
+                            logger.warning(
+                                f"[ToolCall] ⚠️ 工具参数过长: tool={tool_name}, "
+                                f"args_len={args_len}, 请减少参数长度"
+                            )
+                            tool_call_id = tc["id"]
+                            raw_args = tc["function"]["arguments"]
+                            round_id = f"round_{id(tc)}"
+                            error_result = {
+                                "success": False,
+                                "content": None,
+                                "error": f"[参数过长] 工具参数长度 {args_len} 字符，超过限制。\n"
+                                         f"工具: {tool_name}\n"
+                                         f"建议: 请减少参数长度（建议不超过 5000 字符），"
+                                         f"可以将内容拆分为多次工具调用，例如先 write 文件头，"
+                                         f"再用 edit 追加内容，或使用其他方式分批处理。",
+                            }
+                            self._emit_with_callback(
+                                "tool_result_received",
+                                self.tool_result_received,
+                                tool_call_id, tool_name, {"_raw_args": raw_args[:500]},
+                                error_result
+                            )
+                            if not self._direct_callbacks:
+                                QApplication.processEvents()
+                            results.append({
+                                "role": "tool",
+                                "tool_call_id": tool_call_id,
+                                "name": tool_name,
+                                "arguments": {"_raw_args": raw_args[:500]},
+                                "content": error_result["error"],
+                                "success": False,
+                                "round_id": round_id,
+                            })
+                            continue
+                        else:
+                            # 其他 JSON 解析错误
+                            logger.warning(
+                                f"[ToolCall] ⚠️ JSON 解析失败且无法修复，tool={tool_name}, "
+                                f"error={str(e)}, "
+                                f"raw_args='{arguments[:300]}...'"
+                            )
+                            tool_call_id = tc["id"]
+                            raw_args = tc["function"]["arguments"]
+                            round_id = f"round_{id(tc)}"
+                            error_result = {
+                                "success": False,
+                                "content": None,
+                                "error": f"[参数错误] JSON 格式无效: {str(e)}\n"
+                                         f"工具: {tool_name}\n"
+                                         f"原始内容(前500字): {arguments[:500]}...",
+                            }
+                            self._emit_with_callback(
+                                "tool_result_received",
+                                self.tool_result_received,
+                                tool_call_id, tool_name, {"_raw_args": raw_args[:500]},
+                                error_result
+                            )
+                            if not self._direct_callbacks:
+                                QApplication.processEvents()
+                            results.append({
+                                "role": "tool",
+                                "tool_call_id": tool_call_id,
+                                "name": tool_name,
+                                "arguments": {"_raw_args": raw_args[:500]},
+                                "content": error_result["error"],
+                                "success": False,
+                                "round_id": round_id,
+                            })
+                            continue
 
             # 检查必需参数
             required_args = self.tool_executor.REQUIRED_ARGS.get(tool_name, [])

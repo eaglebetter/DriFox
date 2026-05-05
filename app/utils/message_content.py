@@ -75,7 +75,13 @@ def normalize_tool_arguments(arguments: Any) -> Dict[str, Any]:
                 return parsed
         except Exception:
             pass
-        return {}
+        # JSON 解析失败，尝试使用正则提取关键参数
+        # 这处理模型生成的不规范 JSON（包含未转义换行符等）
+        extracted = _extract_params_from_raw_json(text)
+        if extracted:
+            return extracted
+        # 实在解析不了，返回包含原始内容的占位符
+        return {"_raw_args": text[:300] + "..." if len(text) > 300 else text}
     return {}
 
 
@@ -215,29 +221,28 @@ def content_to_markdown(content: Any) -> str:
             if text:
                 parts.append(text)
         elif block_type == "tool_result":
-            # 序列化为单行 JSON，避免换行破坏解析
+            # 直接从 block 中提取关键参数，避免 JSON 序列化问题
             args = block.get("arguments", {}) or {}
             
-            # 截断过长的参数值（避免生成的 markdown 过长导致解析出错）
-            # 关键：确保截断不破坏 JSON 语法，不截断字符串中间
-            MAX_ARG_LEN = 400
-            args_preview = {}
-            for k, v in args.items():
-                if isinstance(v, str) and len(v) > MAX_ARG_LEN:
-                    # 找到最后一个换行或合理断点
-                    truncated = v[:MAX_ARG_LEN]
-                    last_newline = truncated.rfind('\n')
-                    last_space = truncated.rfind(' ')
-                    cut_pos = max(last_newline, last_space)
-                    if cut_pos > 50:  # 确保不是在太短的位置截断
-                        truncated = truncated[:cut_pos]
-                    args_preview[k] = truncated + "\n... [内容已截断]"
-                else:
-                    args_preview[k] = v
+            # 生成安全的参数字符串表示
+            if isinstance(args, dict) and args:
+                args_parts = []
+                for k, v in args.items():
+                    if isinstance(v, str) and len(v) > 100:
+                        # 截断长字符串但保留格式
+                        truncated = v[:80] + "..."
+                        args_parts.append(f'"{k}": "{truncated}"')
+                    elif isinstance(v, str):
+                        # 转义字符串中的引号和换行
+                        safe_v = v.replace('"', '\\"').replace('\n', '\\n')[:100]
+                        args_parts.append(f'"{k}": "{safe_v}"')
+                    else:
+                        args_parts.append(f'"{k}": {json.dumps(v, ensure_ascii=False)[:50]}')
+                args_json = "{" + ", ".join(args_parts) + "}"
+            else:
+                args_json = "{}"
             
-            args_json = json.dumps(args_preview, ensure_ascii=False)
-            
-            # 处理 result：清理可能影响渲染的标签（<think>、</tool>等）
+            # 处理 result：清理可能影响渲染的标签
             result_raw = str(block.get("result", ""))
             result_escaped = _sanitize_result(result_raw)[:300]
             
