@@ -2512,10 +2512,16 @@ class OpenAIChatToolWindow(ToolWindow):
         if index < 0 or index >= len(history_list):
             return
 
-        target_session_id = history_list[index].get("session_id")
+        session_record = history_list[index]
+        session_id = session_record.get("session_id")
+        # 通过 session_id 找到全量列表中的真实 index
+        full_index = self.history_manager.find_index_by_session_id(session_id)
+        if full_index is None:
+            return
+
         archived_current = (
             self._current_session_id is not None
-            and target_session_id == self._current_session_id
+            and session_id == self._current_session_id
         )
 
         old_session_manager = self.session_manager
@@ -2523,10 +2529,10 @@ class OpenAIChatToolWindow(ToolWindow):
 
         # 清理归档会话的文件操作记录和备份
         if self._tool_executor and self._tool_executor.file_recorder:
-            self._tool_executor.file_recorder.clear_session(target_session_id)
-            logger.info(f"[FileRecorder] 已清理归档会话的文件操作记录: {target_session_id}")
+            self._tool_executor.file_recorder.clear_session(session_id)
+            logger.info(f"[FileRecorder] 已清理归档会话的文件操作记录: {session_id}")
 
-        archived = self.history_manager.archive_history(index)
+        archived = self.history_manager.archive_history(full_index)
 
         if archived_current and archived:
             # 使用辅助函数创建新会话状态
