@@ -2,7 +2,7 @@
 """
 聊天引擎模块 - 处理 LLM 对话的核心逻辑
 """
-
+import json
 from datetime import datetime
 from typing import Dict, List, Optional, Any, Callable
 
@@ -229,8 +229,8 @@ class ChatEngine:
         position: int,
         total: int,
         target_total_length: Optional[int] = None,
-        min_keep_ratio: float = 0.15,
-        max_keep_ratio: float = 0.65,
+        min_keep_ratio: float = 0.2,
+        max_keep_ratio: float = 0.7,
         max_keep_length: int = 1000,
         content_ratios: Optional[List[float]] = None,
     ) -> str:
@@ -261,54 +261,39 @@ class ChatEngine:
 
         keep_length: int
 
-        if target_total_length is not None and total > 0:
-            # 自适应模式：根据目标总长度分配每条消息的配额
-            # 每条消息的配额需要根据位置和内容比例调整
+        # 自适应模式：根据目标总长度分配每条消息的配额
+        # 每条消息的配额需要根据位置和内容比例调整
 
-            # 计算基础配额
-            base_quota = target_total_length / total
+        # 计算基础配额
+        base_quota = target_total_length / total
 
-            # 根据位置计算权重（遗忘曲线，指数衰减）
-            position_ratio = position / max(total - 1, 1)
-            # 使用平方根让曲线更平滑，避免极端值
-            weight = min_keep_ratio + (max_keep_ratio - min_keep_ratio) * (position_ratio ** 0.3)
+        # 根据位置计算权重（遗忘曲线，指数衰减）
+        position_ratio = position / max(total - 1, 1)
+        # 使用平方根让曲线更平滑，避免极端值
+        weight = min_keep_ratio + (max_keep_ratio - min_keep_ratio) * (position_ratio ** 0.5)
 
-            # 计算该消息的目标配额
-            target_quota = base_quota * weight
+        # 计算该消息的目标配额
+        target_quota = base_quota * weight
 
-            # 如果有内容比例参考，进行调整
-            if content_ratios and len(content_ratios) == total:
-                # 长内容多分配，短内容少分配（按比例）
-                msg_ratio = content_ratios[position]
-                avg_ratio = 1.0 / total
-                # 调整系数：长内容适当多给，短内容适当少给
-                ratio_factor = 0.5 + 0.5 * (msg_ratio / max(avg_ratio, 0.001))
-                target_quota *= ratio_factor
+        # 如果有内容比例参考，进行调整
+        if content_ratios and len(content_ratios) == total:
+            # 长内容多分配，短内容少分配（按比例）
+            msg_ratio = content_ratios[position]
+            avg_ratio = 1.0 / total
+            # 调整系数：长内容适当多给，短内容适当少给
+            ratio_factor = 0.5 + 0.5 * (msg_ratio / max(avg_ratio, 0.001))
+            target_quota *= ratio_factor
+        keep_length = int(target_quota)
 
-            keep_length = int(target_quota)
+        # 应用 max_keep_length 限制
+        keep_length = min(keep_length, max_keep_length)
 
-            # 应用 max_keep_length 限制
-            keep_length = min(keep_length, max_keep_length)
+        # 最少保留 20 字符
+        keep_length = max(keep_length, 20)
 
-            # 最少保留 20 字符
-            keep_length = max(keep_length, 20)
-
-            # 如果计算出的保留长度大于等于内容长度，不截断
-            if keep_length >= content_len:
-                return content
-
-        else:
-            # 传统模式：使用固定比例
-            if total <= 1:
-                keep_ratio = max_keep_ratio
-            else:
-                position_ratio = position / (total - 1)
-                keep_ratio = min_keep_ratio + (max_keep_ratio - min_keep_ratio) * position_ratio
-
-            keep_length = min(int(content_len * keep_ratio), max_keep_length)
-
-            if keep_length < 100 or keep_length >= content_len:
-                return content
+        # 如果计算出的保留长度大于等于内容长度，不截断
+        if keep_length >= content_len:
+            return content
 
         # 首尾保留策略：保留前40%和后40%
         head_ratio = 0.4
@@ -382,9 +367,16 @@ class ChatEngine:
                 summary_lines.append("# Assistant")
                 summary_lines.append(f"{content}")
             elif role == "tool":
-                tool_name = msg.get("tool_call", {}).get("name", "")
+                tool_name = msg.get("name", "")
                 summary_lines.append("# Tool")
-                summary_lines.append(f"{tool_name}: {content}")
+                args = self._adaptive_truncate_content(
+                    json.dumps(msg.get("arguments", "")),
+                    position=idx,
+                    total=total_messages,
+                    target_total_length=target_total_length,
+                    content_ratios=content_ratios if total_content_length > 1000 else None,
+                )
+                summary_lines.append(f"{tool_name}:\n args:{args}\nresult:{content}")
 
         summary_lines.append(
             "### Compression Note\n如果后续细节与当前上下文冲突，以最近保留的原始消息和最新任务状态为准。"
@@ -610,6 +602,11 @@ class ChatEngine:
 
         summary_message = {"role": "assistant", "content": compact_summary}
         result_messages = [summary_message] + recent_messages
+        print(f"原消息长度：{estimate_tokens_from_messages(history_messages)}")
+        print(f"未压缩长度：{estimate_tokens_from_messages(compacted)}")
+        print(f"压缩后长度：{estimate_tokens_from_messages([summary_message])}")
+        print(f"最近消息长度: {estimate_tokens_from_messages(recent_messages)}")
+        print(f"压缩后消息长度: {estimate_tokens_from_messages(result_messages)}")
 
         return (
             result_messages,
@@ -766,7 +763,7 @@ class ChatEngine:
 
             result_messages = [summary_message]
             break
-
+        print(f"压缩长度：{estimate_tokens_from_messages(compacted) - estimate_tokens_from_messages([summary_message])}")
         return (
             result_messages,
             self._make_compaction_state(
@@ -776,7 +773,7 @@ class ChatEngine:
                 original_count=len(normalized),
                 summarized_count=len(compacted),
                 kept_count=len(recent_messages),
-                summary_count=1,
+                summary_count=estimate_tokens_from_messages(compacted) - estimate_tokens_from_messages([summary_message]),
                 note=f"已压缩 {len(compacted)} 条较早消息",
             ),
             self._make_compaction_cache(
