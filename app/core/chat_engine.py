@@ -181,12 +181,6 @@ class ChatEngine:
         """获取上下文管理器"""
         return self._context_manager
 
-    def _get_canvas_tools(self):
-        context_provider = self._get_context_provider()
-        if context_provider and hasattr(context_provider, "get_canvas_tools_schema"):
-            return context_provider.get_canvas_tools_schema()
-        return []
-
     def _setup_canvas_tools(self):
         context_provider = self._get_context_provider()
         if context_provider and hasattr(context_provider, "get_canvas_tools_executor"):
@@ -255,34 +249,82 @@ class ChatEngine:
         if self._current_worker:
             self._current_worker.deny_permission(tool_call_id)
 
-    def _smart_trim_messages(self, cards: List[Any], max_tokens: int) -> List[Any]:
-        if not cards:
-            return []
-        available_tokens = max_tokens - 200
-        if available_tokens <= 0:
-            return []
-        selected = []
-        total_tokens = 0
-        recent_cards = list(cards[-20:])
-        for i, card in enumerate(recent_cards):
-            role = getattr(card, "role", None)
-            if not role or role == "system":
-                continue
-            content = ""
-            if hasattr(card, "viewer") and hasattr(card.viewer, "get_plain_text"):
-                content = card.viewer.get_plain_text()
-            if not content:
-                continue
-            card_tokens = estimate_tokens(content) + 20
-            if total_tokens + card_tokens <= available_tokens:
-                selected.append(card)
-                total_tokens += card_tokens
-            elif i < 3:
-                truncated = content[: available_tokens - total_tokens * 4]
-                if truncated:
-                    selected.append(card)
-                    break
-        return selected
+    def _truncate_with_head_tail(self, content: str, max_length: int) -> str:
+        """
+        首尾保留截断：保留内容开头和结尾，中间截断。
+        适用于工具返回等长内容，保留关键结果。
+        """
+        if len(content) <= max_length:
+            return content
+
+        # 头尾各保留 40%，中间截断
+        head_length = int(max_length * 0.4)
+        tail_length = int(max_length * 0.4)
+
+        # 确保头尾不重叠
+        if head_length + tail_length >= max_length:
+            return content[:max_length]
+
+        head = content[:head_length]
+        tail = content[-tail_length:]
+        return f"{head}...[{len(content)}字截断]...{tail}"
+
+    def _adaptive_truncate_content(
+        self,
+        content: str,
+        position: int,
+        total: int,
+        min_keep_ratio: float = 0.2,
+        max_keep_ratio: float = 0.7,
+        max_keep_length: int = 1000,
+    ) -> str:
+        """
+        根据消息位置自适应截断内容。
+
+        遗忘曲线模型：越久远的消息截断越多，保留越少；
+        越近的消息截断越少，保留越多。
+
+        Args:
+            content: 原始内容
+            position: 消息在列表中的索引（0=最旧）
+            total: 消息总数
+            min_keep_ratio: 最旧消息的最小保留比例（默认20%）
+            max_keep_ratio: 最新消息的最大保留比例（默认70%）
+            max_keep_length: 最大保留长度（默认1000，防止工具结果过长）
+
+        Returns:
+            截断后的内容，保留首尾关键信息
+        """
+        content_len = len(content)
+
+        # 单条消息视为"最新"消息，直接用 max_keep_ratio
+        if total <= 1:
+            keep_ratio = max_keep_ratio
+            position_ratio = 1.0  # 用于截断标记
+        else:
+            position_ratio = position / (total - 1)
+            keep_ratio = min_keep_ratio + (max_keep_ratio - min_keep_ratio) * position_ratio
+
+        # 如果内容本身就小于等于 max_keep_length，不截断
+        if content_len <= max_keep_length:
+            return content
+
+        # 计算保留长度：受比例和 max_keep_length 限制
+        keep_length = min(int(content_len * keep_ratio), max_keep_length)
+
+        # 如果计算出的保留长度小于最小值，也不截断（内容已经够短了）
+        if keep_length < 100:
+            return content
+
+        # 首尾保留策略：保留前40%和后40%
+        head_ratio = 0.4
+        head_length = int(keep_length * head_ratio)
+        tail_length = int(keep_length * head_ratio)
+
+        head = content[:head_length]
+        tail = content[-tail_length:] if tail_length > 0 else ""
+
+        return f"{head}...[{position_ratio:.0%}保留]...{tail}"
 
     def _summarize_compacted_messages(
         self,
@@ -303,39 +345,32 @@ class ChatEngine:
             "以下是为节省上下文窗口而压缩的较早对话，请把它当作已确认的历史上下文继续工作。",
         ]
 
-        user_points = []
-        assistant_points = []
-        tool_points = []
-        for msg in messages:
+        total_messages = len(messages)
+
+        for idx, msg in enumerate(messages):
             role = msg.get("role")
             content = _normalize_message_content(msg.get("content", ""))
             if not content:
                 continue
             single_line = " ".join(content.split())
-            if len(single_line) > 1000:
-                single_line = f"{single_line[:500]}...{single_line[-500:]}"
+
+            # 自适应截断：越旧的消息截断越多
+            single_line = self._adaptive_truncate_content(
+                single_line,
+                position=idx,
+                total=total_messages,
+            )
+
             if role == "user":
-                user_points.append(single_line)
+                summary_lines.append("# User")
+                summary_lines.append(f"{single_line}")
             elif role == "assistant":
-                assistant_points.append(single_line)
+                summary_lines.append("# Assistant")
+                summary_lines.append(f"{single_line}")
             elif role == "tool":
-                tool_name = msg.get("name") or msg.get("tool_call_id") or "tool"
-                tool_points.append(f"{tool_name}: {single_line}")
-
-        if user_points:
-            summary_lines.append("### User Requests")
-            for idx, item in enumerate(user_points[-6:], 1):
-                summary_lines.append(f"{idx}. {item}")
-
-        if assistant_points:
-            summary_lines.append("### Assistant Progress")
-            for idx, item in enumerate(assistant_points[-6:], 1):
-                summary_lines.append(f"{idx}. {item}")
-
-        if tool_points:
-            summary_lines.append("### Tool Results")
-            for idx, item in enumerate(tool_points[-6:], 1):
-                summary_lines.append(f"{idx}. {item}")
+                tool_name = msg.get("tool_call", {}).get("name", "")
+                summary_lines.append("# Tool")
+                summary_lines.append(f"{tool_name}: {single_line}")
 
         summary_lines.append(
             "### Compression Note\n如果后续细节与当前上下文冲突，以最近保留的原始消息和最新任务状态为准。"
@@ -1036,9 +1071,6 @@ class ChatEngine:
 
     def _on_worker_messages_updated(self, messages: List[Dict]):
         self._emit("messages_updated", consolidate_messages(messages or []))
-
-    def _on_worker_compaction_status_changed(self, state: Dict[str, Any]):
-        return
 
     def _on_error(self, error: str):
         self._is_streaming = False
