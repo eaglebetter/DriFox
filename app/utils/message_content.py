@@ -9,6 +9,7 @@ VALID_MESSAGE_ROLES = {"system", "user", "assistant", "tool"}
 # 渲染敏感标记（按长度降序排列，避免部分匹配）
 _SENSITIVE_MARKERS = [
     "<think>",
+    "</think>"
     "</tool>",
     "<tool>",
     "```",
@@ -62,29 +63,6 @@ def _sanitize_result(result: Any) -> str:
     return str(result)
 
 
-def normalize_tool_arguments(arguments: Any) -> Dict[str, Any]:
-    if isinstance(arguments, dict):
-        return dict(arguments)
-    if isinstance(arguments, str):
-        text = arguments.strip()
-        if not text:
-            return {}
-        try:
-            parsed = json.loads(text)
-            if isinstance(parsed, dict):
-                return parsed
-        except Exception:
-            pass
-        # JSON 解析失败，尝试使用正则提取关键参数
-        # 这处理模型生成的不规范 JSON（包含未转义换行符等）
-        extracted = _extract_params_from_raw_json(text)
-        if extracted:
-            return extracted
-        # 实在解析不了，返回包含原始内容的占位符
-        return {"_raw_args": text[:300] + "..." if len(text) > 300 else text}
-    return {}
-
-
 def make_text_block(text: Any) -> Dict[str, Any]:
     return {
         "type": "text",
@@ -105,7 +83,7 @@ def make_tool_result_block(
     block = {
         "type": "tool_result",
         "name": str(tool_name or "tool"),
-        "arguments": _sanitize_tool_args(normalize_tool_arguments(arguments)),
+        "arguments": _sanitize_tool_args(arguments),
         "result": _sanitize_rendering_string("") if result is None else _sanitize_rendering_string(str(result)),
         "success": bool(success),
         "is_subagent": is_subagent,  # 标记是否为子智能体结果
@@ -317,10 +295,10 @@ def normalize_tool_call(tool_call: Any) -> Optional[Dict[str, Any]]:
     try:
         parsed_arguments = json.loads(function_arguments)
     except Exception:
-        return None
+        parsed_arguments = {}
 
     if not isinstance(parsed_arguments, dict):
-        return None
+        parsed_arguments = {}
 
     normalized = {
         "id": str(tool_call.get("id", "") or ""),
@@ -330,8 +308,6 @@ def normalize_tool_call(tool_call: Any) -> Optional[Dict[str, Any]]:
             "arguments": json.dumps(parsed_arguments, ensure_ascii=False),
         },
     }
-    if not normalized["id"] or not function_name:
-        return None
     return normalized
 
 
@@ -379,7 +355,7 @@ def normalize_message(message: Any) -> Optional[Dict[str, Any]]:
         normalized["tool_call_id"] = tool_call_id
         normalized["content"] = content_to_text(message.get("content", ""))
         normalized["name"] = str(message.get("name", "tool") or "tool")
-        normalized["arguments"] = normalize_tool_arguments(message.get("arguments", {}))
+        normalized["arguments"] = message.get("arguments", {})
         normalized["success"] = bool(message.get("success", True))
         if message.get("round_id"):
             normalized["round_id"] = str(message.get("round_id"))
@@ -509,7 +485,7 @@ def to_api_message(message: Dict[str, Any]) -> Dict[str, Any]:
 
 def messages_to_api(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     api_messages: List[Dict[str, Any]] = []
-    for message in consolidate_messages(messages or []):
+    for message in messages:
         api_message = to_api_message(message)
         if api_message:
             if api_message.get("role") == "user" and not api_message.get("content"):

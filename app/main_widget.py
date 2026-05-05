@@ -628,7 +628,6 @@ class OpenAIChatToolWindow(ToolWindow):
 
         # 重置输入框高度
         if hasattr(self, 'input_area'):
-            logger.info(f"[Branch] 重置输入框高度，当前: {self.input_area.height()}")
             self.input_area._initializing = True
             self.input_area.setFixedHeight(72)
             self.input_area._initializing = False
