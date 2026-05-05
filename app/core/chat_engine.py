@@ -57,24 +57,17 @@ class ChatEngine:
         self,
         session_manager: SessionManager,
         get_model_config: Callable[[], Dict[str, Any]],
-        get_context_provider: Any,
         tool_executor: Optional[Any] = None,
         agent_manager: Any = None,
         get_chat_cards: Callable[[], List[Any]] = None,
         get_memory_context: Optional[Callable[[], str]] = None,
         worker_callbacks: Optional[Dict[str, Callable]] = None,
         api_mode: bool = False,
-        # 新增参数
-        event_bus: Any = None,
-        context_manager: Any = None,
     ):
         self._session_manager = session_manager
         self._get_model_config = get_model_config
-        self._get_context_provider = get_context_provider
         self._tool_executor = tool_executor
         self._agent_manager = agent_manager
-
-        self._setup_canvas_tools()
         self._get_chat_cards = get_chat_cards
         self._get_memory_context = get_memory_context
 
@@ -86,17 +79,6 @@ class ChatEngine:
         # API 模式专用：直接回调（绕过 Qt 信号-槽，避免跨线程事件循环问题）
         self._worker_callbacks = worker_callbacks or {}
         self._api_mode = api_mode
-        
-        # 新增：EventBus 和 ContextManager
-        self._event_bus = event_bus
-        self._context_manager = context_manager
-        
-        # 如果提供了 ContextManager，使用它初始化压缩状态
-        if self._context_manager:
-            self._compaction_state = self._make_compaction_state(
-                active=False,
-                source="context_manager"
-            )
 
     def _make_compaction_state(
         self,
@@ -159,34 +141,6 @@ class ChatEngine:
     def set_session_manager(self, session_manager):
         """Update the session manager reference (used when session is archived)."""
         self._session_manager = session_manager
-
-    def set_event_bus(self, event_bus):
-        """设置事件总线"""
-        self._event_bus = event_bus
-        
-    def set_context_manager(self, context_manager):
-        """设置上下文管理器"""
-        self._context_manager = context_manager
-        if self._context_manager:
-            self._compaction_state = self._make_compaction_state(
-                active=False,
-                source="context_manager"
-            )
-            
-    def get_event_bus(self):
-        """获取事件总线"""
-        return self._event_bus
-        
-    def get_context_manager(self):
-        """获取上下文管理器"""
-        return self._context_manager
-
-    def _setup_canvas_tools(self):
-        context_provider = self._get_context_provider()
-        if context_provider and hasattr(context_provider, "get_canvas_tools_executor"):
-            canvas_executor = context_provider.get_canvas_tools_executor()
-            if canvas_executor and self._tool_executor:
-                self._tool_executor.set_canvas_tools_executor(canvas_executor)
 
     def _check_tool_permission(self, tool_name: str, arguments: dict) -> str:
         agent_manager = self._get_agent_manager()
@@ -666,7 +620,7 @@ class ChatEngine:
                 original_count=len(history_messages),
                 summarized_count=len(compacted),
                 kept_count=len(recent_messages),
-                summary_count=1,
+                summary_count=estimate_tokens_from_messages(compacted) - estimate_tokens_from_messages([summary_message]),
                 note=f"已压缩 {len(compacted)} 条含工具历史消息",
             ),
             self._make_compaction_cache(
@@ -939,7 +893,6 @@ class ChatEngine:
             if skills_content:
                 prompt_parts.append(skills_content)
         custom_prompt = llm_config.get("系统提示", "").strip()
-        context_provider = self._get_context_provider()
         if custom_prompt:
             prompt_parts.append(custom_prompt)
 
@@ -980,7 +933,6 @@ class ChatEngine:
                 messages[0]["content"] = (
                     messages[0]["content"] + "\n\n" + memory_context
                 )
-        supports_vision = provider_supports_vision(llm_config)
         available_history_budget = (
             max_context_tokens - estimate_tokens(latest_user_message) - 200
         )
@@ -997,19 +949,6 @@ class ChatEngine:
 
         filtered_history = [m for m in history_for_api if m.get("role") != "system"]
         messages.extend(filtered_history)
-
-        if supports_vision and context_provider:
-            has_image = any(
-                item[-1] for item in getattr(context_provider, "_context_cache", [])
-            )
-            if has_image:
-                user_content = context_provider.get_multimodal_context_items()
-                user_content.append({"type": "text", "text": latest_user_message})
-                user_msg = {"role": "user", "content": user_content, "params": params}
-                if latest_user_timestamp:
-                    user_msg["timestamp"] = latest_user_timestamp
-                messages.append(user_msg)
-                return messages
 
         user_msg = {"role": "user", "content": latest_user_message, "params": params}
         if latest_user_timestamp:

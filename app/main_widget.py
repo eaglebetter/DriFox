@@ -281,7 +281,6 @@ class OpenAIChatToolWindow(ToolWindow):
         self._chat_engine = ChatEngine(
             session_manager=self.session_manager,
             get_model_config=self._get_current_model_config,
-            get_context_provider=lambda: None,
             tool_executor=self._tool_executor,
             agent_manager=self._agent_manager,
             get_chat_cards=self._get_chat_cards_for_engine,
