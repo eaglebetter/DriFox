@@ -173,13 +173,6 @@ class TopicSummaryTask(QRunnable):
         self.existing_memories = existing_memories or []
         self.setAutoDelete(True)
 
-    def _extract_content_without_think(self, content: str) -> str:
-        import re
-
-        think_pattern = re.compile(r"<think>[\s\S]*?</think>", re.IGNORECASE)
-        content = think_pattern.sub("", content)
-        return content.strip()
-
     def _build_conversation_context(self) -> str:
         """构建包含更多历史的消息上下文"""
         # 取最近12条消息，覆盖更多对话历史
@@ -195,25 +188,6 @@ class TopicSummaryTask(QRunnable):
             lines.append(truncated)
         
         return "\n".join(lines)
-
-    def _should_update_title(self, new_user_content: str) -> Dict[str, Any]:
-        """判断新消息是否应该触发标题更新"""
-        # 简单问候/确认类内容，不应该更新标题
-        greeting_patterns = [
-            r"^(你好|您好|hi|hello|hi\s|hey|嗨|哈喽|呀)$",
-            r"^(好的|好的吧|好|ok|okay|嗯|是的|对)$",
-            r"^(谢谢|感谢|多谢|谢了)$",
-            r"^(继续|接着说|请继续)$",
-            r"^(请问|问一下|想问一下)[。,]?$",
-            r"^\s*$",  # 空内容
-        ]
-        import re
-        content = new_user_content.strip().lower()
-        for pattern in greeting_patterns:
-            if re.match(pattern, content, re.IGNORECASE):
-                return {"should_update": False, "reason": "简单问候/确认类内容"}
-        
-        return {"should_update": True, "reason": ""}
 
     @pyqtSlot()
     def run(self):
@@ -897,7 +871,7 @@ class OpenAIChatWorker(QThread):
         req_kwargs: Dict[str, Any] = {
             "model": model,
             "messages": sanitized,
-            "stream": self.stream,
+            "stream": self.stream
         }
         extra_body = {}
         mapping = {
@@ -958,7 +932,7 @@ class OpenAIChatWorker(QThread):
         client = OpenAI(
             api_key=api_key if api_key and auth_type != "none" else "dummy",
             base_url=base_url,
-            timeout=httpx.Timeout(600.0, connect=30.0),  # 增加读取超时到 600 秒
+            timeout=httpx.Timeout(600.0, connect=60.0),  # 增加读取超时到 600 秒
         )
 
         if "o1-preview" in model or "o1-mini" in model:
@@ -1075,31 +1049,6 @@ class OpenAIChatWorker(QThread):
                 raise
 
         return self._process_response(response)
-
-    def _estimate_message_tokens(self, messages: List[Dict]) -> int:
-        total_chars = 0
-        for msg in messages:
-            content = msg.get("content", "")
-            if isinstance(content, str):
-                total_chars += len(content)
-            elif isinstance(content, list):
-                for block in content:
-                    if not isinstance(block, dict):
-                        continue
-                    for value in block.values():
-                        if isinstance(value, str):
-                            total_chars += len(value)
-            for tc in msg.get("tool_calls", []):
-                if not isinstance(tc, dict):
-                    continue
-                for value in tc.values():
-                    if isinstance(value, str):
-                        total_chars += len(value)
-        return int(total_chars / 3.5)
-
-    def _infer_context_limit(self, model: str) -> int:
-        profile = get_provider_profile(self.llm_config)
-        return int(profile.get("context_limit", 128000))
 
     def _cap_max_output_tokens(self, model: str, requested: int) -> int:
         try:
