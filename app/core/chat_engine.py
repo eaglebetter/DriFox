@@ -879,6 +879,7 @@ class ChatEngine:
             full_system_prompt = self._get_agent_manager().get_unified_system_prompt()
 
         prompt_parts = [
+            f"# 当前系统时间\n{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
             full_system_prompt,
         ]
 

@@ -19,6 +19,8 @@ def _sanitize_rendering_string(text: str) -> str:
     """
     清理字符串中的渲染敏感标记。
     在字符串进入渲染流程前调用，防止标记被错误解析。
+    
+    注意：只清理完整的工具块标记，不要清理参数中的子串！
     """
     if not text or not isinstance(text, str):
         return str(text) if text is not None else ""
@@ -214,7 +216,26 @@ def content_to_markdown(content: Any) -> str:
                 parts.append(text)
         elif block_type == "tool_result":
             # 序列化为单行 JSON，避免换行破坏解析
-            args_json = json.dumps(block.get("arguments", {}) or {}, ensure_ascii=False)
+            args = block.get("arguments", {}) or {}
+            
+            # 截断过长的参数值（避免生成的 markdown 过长导致解析出错）
+            # 关键：确保截断不破坏 JSON 语法，不截断字符串中间
+            MAX_ARG_LEN = 400
+            args_preview = {}
+            for k, v in args.items():
+                if isinstance(v, str) and len(v) > MAX_ARG_LEN:
+                    # 找到最后一个换行或合理断点
+                    truncated = v[:MAX_ARG_LEN]
+                    last_newline = truncated.rfind('\n')
+                    last_space = truncated.rfind(' ')
+                    cut_pos = max(last_newline, last_space)
+                    if cut_pos > 50:  # 确保不是在太短的位置截断
+                        truncated = truncated[:cut_pos]
+                    args_preview[k] = truncated + "\n... [内容已截断]"
+                else:
+                    args_preview[k] = v
+            
+            args_json = json.dumps(args_preview, ensure_ascii=False)
             
             # 处理 result：清理可能影响渲染的标签（<think>、</tool>等）
             result_raw = str(block.get("result", ""))
