@@ -274,9 +274,11 @@ class ChatEngine:
         content: str,
         position: int,
         total: int,
-        min_keep_ratio: float = 0.2,
-        max_keep_ratio: float = 0.7,
+        target_total_length: Optional[int] = None,
+        min_keep_ratio: float = 0.15,
+        max_keep_ratio: float = 0.65,
         max_keep_length: int = 1000,
+        content_ratios: Optional[List[float]] = None,
     ) -> str:
         """
         根据消息位置自适应截断内容。
@@ -288,33 +290,71 @@ class ChatEngine:
             content: 原始内容
             position: 消息在列表中的索引（0=最旧）
             total: 消息总数
-            min_keep_ratio: 最旧消息的最小保留比例（默认20%）
-            max_keep_ratio: 最新消息的最大保留比例（默认70%）
+            target_total_length: 目标总长度（上下文限制的60%-70%）
+            min_keep_ratio: 最旧消息的最小保留比例（默认15%）
+            max_keep_ratio: 最新消息的最大保留比例（默认65%）
             max_keep_length: 最大保留长度（默认1000，防止工具结果过长）
+            content_ratios: 预计算的内容比例列表（用于整体调整）
 
         Returns:
             截断后的内容，保留首尾关键信息
         """
         content_len = len(content)
 
-        # 单条消息视为"最新"消息，直接用 max_keep_ratio
-        if total <= 1:
-            keep_ratio = max_keep_ratio
-            position_ratio = 1.0  # 用于截断标记
-        else:
-            position_ratio = position / (total - 1)
-            keep_ratio = min_keep_ratio + (max_keep_ratio - min_keep_ratio) * position_ratio
-
         # 如果内容本身就小于等于 max_keep_length，不截断
         if content_len <= max_keep_length:
             return content
 
-        # 计算保留长度：受比例和 max_keep_length 限制
-        keep_length = min(int(content_len * keep_ratio), max_keep_length)
+        keep_length: int
 
-        # 如果计算出的保留长度小于最小值，也不截断（内容已经够短了）
-        if keep_length < 100:
-            return content
+        if target_total_length is not None and total > 0:
+            # 自适应模式：根据目标总长度分配每条消息的配额
+            # 每条消息的配额需要根据位置和内容比例调整
+
+            # 计算基础配额
+            base_quota = target_total_length / total
+
+            # 根据位置计算权重（遗忘曲线，指数衰减）
+            position_ratio = position / max(total - 1, 1)
+            # 使用平方根让曲线更平滑，避免极端值
+            weight = min_keep_ratio + (max_keep_ratio - min_keep_ratio) * (position_ratio ** 0.3)
+
+            # 计算该消息的目标配额
+            target_quota = base_quota * weight
+
+            # 如果有内容比例参考，进行调整
+            if content_ratios and len(content_ratios) == total:
+                # 长内容多分配，短内容少分配（按比例）
+                msg_ratio = content_ratios[position]
+                avg_ratio = 1.0 / total
+                # 调整系数：长内容适当多给，短内容适当少给
+                ratio_factor = 0.5 + 0.5 * (msg_ratio / max(avg_ratio, 0.001))
+                target_quota *= ratio_factor
+
+            keep_length = int(target_quota)
+
+            # 应用 max_keep_length 限制
+            keep_length = min(keep_length, max_keep_length)
+
+            # 最少保留 20 字符
+            keep_length = max(keep_length, 20)
+
+            # 如果计算出的保留长度大于等于内容长度，不截断
+            if keep_length >= content_len:
+                return content
+
+        else:
+            # 传统模式：使用固定比例
+            if total <= 1:
+                keep_ratio = max_keep_ratio
+            else:
+                position_ratio = position / (total - 1)
+                keep_ratio = min_keep_ratio + (max_keep_ratio - min_keep_ratio) * position_ratio
+
+            keep_length = min(int(content_len * keep_ratio), max_keep_length)
+
+            if keep_length < 100 or keep_length >= content_len:
+                return content
 
         # 首尾保留策略：保留前40%和后40%
         head_ratio = 0.4
@@ -324,12 +364,13 @@ class ChatEngine:
         head = content[:head_length]
         tail = content[-tail_length:] if tail_length > 0 else ""
 
-        return f"{head}...[{position_ratio:.0%}保留]...{tail}"
+        return f"{head}...[{keep_length}字]...{tail}"
 
     def _summarize_compacted_messages(
         self,
         messages: List[Dict[str, str]],
         allow_llm_summary: bool = False,
+        history_budget: Optional[int] = None,
     ) -> str:
         if not messages:
             return ""
@@ -347,30 +388,49 @@ class ChatEngine:
 
         total_messages = len(messages)
 
-        for idx, msg in enumerate(messages):
-            role = msg.get("role")
+        # 预计算每条消息内容的长度比例，用于智能分配配额
+        contents = []
+        for msg in messages:
             content = _normalize_message_content(msg.get("content", ""))
             if not content:
-                continue
+                content = ""
             single_line = " ".join(content.split())
+            contents.append(single_line)
+
+        total_content_length = sum(len(c) for c in contents)
+        content_ratios = [
+            len(c) / total_content_length if total_content_length > 0 else 1 / total_messages
+            for c in contents
+        ]
+
+        # 计算目标总长度（上下文限制的60%-70%）
+        target_total_length: Optional[int] = None
+        if history_budget is not None and history_budget > 0:
+            target_total_length = int(history_budget * 0.6)
+
+        for idx, msg in enumerate(messages):
+            role = msg.get("role")
+            content = contents[idx] if idx < len(contents) else ""
 
             # 自适应截断：越旧的消息截断越多
-            single_line = self._adaptive_truncate_content(
-                single_line,
+            content = self._adaptive_truncate_content(
+                content,
                 position=idx,
                 total=total_messages,
+                target_total_length=target_total_length,
+                content_ratios=content_ratios if total_content_length > 1000 else None,
             )
 
             if role == "user":
                 summary_lines.append("# User")
-                summary_lines.append(f"{single_line}")
+                summary_lines.append(f"{content}")
             elif role == "assistant":
                 summary_lines.append("# Assistant")
-                summary_lines.append(f"{single_line}")
+                summary_lines.append(f"{content}")
             elif role == "tool":
                 tool_name = msg.get("tool_call", {}).get("name", "")
                 summary_lines.append("# Tool")
-                summary_lines.append(f"{tool_name}: {single_line}")
+                summary_lines.append(f"{tool_name}: {content}")
 
         summary_lines.append(
             "### Compression Note\n如果后续细节与当前上下文冲突，以最近保留的原始消息和最新任务状态为准。"
@@ -575,9 +635,14 @@ class ChatEngine:
                 ),
                 self._make_compaction_cache(),
             )
+
         compacted = history_messages[: len(history_messages) - len(recent_messages)]
+
+        # 计算 summary 可用的空间 = budget - recent_tokens - summary_message 开销
+        summary_budget = history_budget - recent_tokens - 500  # 500 是基础开销
+
         compact_summary = self._summarize_compacted_messages(
-            compacted, allow_llm_summary=allow_llm_summary
+            compacted, allow_llm_summary=allow_llm_summary, history_budget=summary_budget
         )
         if not compact_summary:
             return (
@@ -713,8 +778,12 @@ class ChatEngine:
             )
 
         compacted = normalized[: len(normalized) - len(recent_messages)]
+
+        # 计算 summary 可用的空间 = budget - recent_tokens - summary_message 开销
+        summary_budget = history_budget - recent_tokens - 500
+
         compact_summary = self._summarize_compacted_messages(
-            compacted, allow_llm_summary=allow_llm_summary
+            compacted, allow_llm_summary=allow_llm_summary, history_budget=summary_budget
         )
         if not compact_summary:
             return (
