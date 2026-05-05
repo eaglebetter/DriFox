@@ -148,10 +148,10 @@ class ChatEngine:
         }
 
     def _get_compaction_soft_limit(self, history_budget: int) -> int:
-        return max(1, int(history_budget * 0.75))
+        return max(1, int(history_budget * 0.7))
 
     def _get_compaction_target_limit(self, history_budget: int) -> int:
-        return max(1, int(history_budget * 0.65))
+        return max(1, int(history_budget * 0.5))
 
     def _get_agent_manager(self):
         return self._agent_manager
