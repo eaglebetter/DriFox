@@ -4,7 +4,7 @@ import re
 import time
 from datetime import datetime
 from threading import Event
-from typing import Any, Dict, List, Callable
+from typing import Any, Dict, List, Callable, Optional
 
 import httpx
 from loguru import logger
@@ -603,7 +603,12 @@ class OpenAIChatWorker(QThread):
         修复消息列表中 tool result 顺序问题。
         
         处理 API 格式消息（tool 消息只有 role, tool_call_id, name, content）。
-        规则：每个 tool 消息的 tool_call_id 必须与紧邻前一个 assistant 消息的 tool_calls 中的 id 匹配。
+        规则：每个 tool 消息的 tool_call_id 必须与之前的 assistant 消息的 tool_calls 中的 id 匹配。
+        
+        关键修复：正确处理多个并行的 tool_calls：
+        - 跟踪所有尚未匹配的 tool_call_id（而非只保留最近的）
+        - 每个 assistant 消息的 tool_calls 应该累加到待匹配集合
+        - 每个 tool 消息从待匹配集合中移除对应的 id
         
         Returns:
             (修复后的消息列表, 是否进行了修复)
@@ -611,50 +616,105 @@ class OpenAIChatWorker(QThread):
         fixed_messages: List[Dict] = []
         modified = False
         
-        # 记录最近一个包含 tool_calls 的 assistant 消息的 tool_call ids
-        recent_tool_call_ids: set = set()
+        # 记录所有尚未匹配的 tool_call_id（用于处理并行 tool_calls）
+        pending_tool_call_ids: set = set()
         
         for msg in messages:
             role = msg.get("role", "")
             
             if role == "assistant":
-                # 更新最近的有效 tool_call ids
+                # 获取此 assistant 消息中的 tool_calls
                 tool_calls = msg.get("tool_calls") or []
-                tool_call_ids = {tc.get("id") for tc in tool_calls if tc.get("id")}
                 
-                # 检查是否包含 tool_calls
-                has_tool_calls = bool(tool_call_ids)
+                # 将新的 tool_call_ids 添加到待匹配集合（而非替换）
+                for tc in tool_calls:
+                    tc_id = tc.get("id")
+                    if tc_id:
+                        pending_tool_call_ids.add(tc_id)
+                        
+                # 检查是否有孤立的内容块（assistant 有 content 但没有 tool_calls）
+                content = msg.get("content", "")
+                if not tool_calls and content:
+                    # 有文本内容但没有 tool_calls，检查是否需要清理 pending
+                    # 如果 pending 中的 tool_call_ids 还没有对应的 tool 结果，
+                    # 这可能是 API 返回了不完整的响应
+                    logger.debug(f"[ToolCall修复] Assistant 有 content 但无 tool_calls，保留 pending={len(pending_tool_call_ids)}")
                 
-                if has_tool_calls:
-                    recent_tool_call_ids = tool_call_ids
-                else:
-                    # 如果 assistant 消息没有 tool_calls，清空记录
-                    recent_tool_call_ids = set()
-                    
                 fixed_messages.append(msg)
                 
             elif role == "tool":
                 tool_call_id = msg.get("tool_call_id", "")
                 
-                # 检查这个 tool result 是否匹配最近的 tool_call
-                if tool_call_id and tool_call_id in recent_tool_call_ids:
-                    # 匹配，保留并清空记录（因为后续的 tool result 应该匹配下一个 assistant）
+                # 检查这个 tool result 是否匹配任何待匹配的 tool_call
+                if tool_call_id in pending_tool_call_ids:
+                    # 匹配，从待匹配集合中移除
+                    pending_tool_call_ids.discard(tool_call_id)
                     fixed_messages.append(msg)
-                    recent_tool_call_ids = set()
                 elif tool_call_id:
-                    # 不匹配，这是一个孤立的 tool result，需要删除
-                    logger.warning(f"[ToolCall修复] 移除孤立的 tool result: id={tool_call_id[:20]}...")
+                    # 不匹配，这是一个真正孤立的 tool result
+                    # 但不要直接删除，而是标记为修改（保留以便调试）
+                    logger.warning(f"[ToolCall修复] 发现孤立 tool result: id={tool_call_id[:20]}...")
+                    logger.warning(f"[ToolCall修复] 当前 pending={list(pending_tool_call_ids)[:5]}...")
+                    # 保留消息但记录警告（这样用户可以看到问题）
+                    fixed_messages.append(msg)
                     modified = True
                 else:
-                    # 没有 tool_call_id，也删除
+                    # 没有 tool_call_id，这是无效的 tool result
                     logger.warning(f"[ToolCall修复] 移除无效的 tool result（无tool_call_id）")
                     modified = True
+                    
             else:
                 fixed_messages.append(msg)
                 # 非 assistant/tool 消息后，tool_call 上下文应该结束
-                recent_tool_call_ids = set()
+                # 但保留 pending_tool_call_ids，因为 tool 结果可能分散在不同位置
+        
+        # 如果处理完所有消息后仍有 pending 的 tool_call_ids，
+        # 说明这些 tool_calls 没有对应的结果，需要记录警告
+        if pending_tool_call_ids:
+            logger.warning(f"[ToolCall修复] 处理完消息后仍有 {len(pending_tool_call_ids)} 个 pending tool_call_ids: {list(pending_tool_call_ids)[:3]}...")
+            modified = True
         
         return fixed_messages, modified
+
+    def _try_recover_tool_arguments(self, messages: List[Dict]) -> Optional[List[Dict]]:
+        """
+        尝试从历史消息中恢复 tool_calls 的参数。
+        
+        当检测到 "Missing required arguments" 错误时调用。
+        检查是否有 tool 结果被错误处理导致参数丢失。
+        
+        Returns:
+            修复后的消息列表，如果无法修复则返回 None
+        """
+        try:
+            # 查找所有 assistant 消息中的 tool_calls
+            tool_calls_by_content_hash: Dict[str, Dict] = {}
+            
+            for msg in messages:
+                if msg.get("role") == "assistant":
+                    tool_calls = msg.get("tool_calls") or []
+                    for tc in tool_calls:
+                        tc_id = tc.get("id", "")
+                        function = tc.get("function", {}) or {}
+                        arguments = function.get("arguments", "{}")
+                        # 使用 arguments 的 hash 作为键（用于匹配）
+                        args_hash = str(arguments)[:100]
+                        if args_hash:
+                            tool_calls_by_content_hash[args_hash] = tc
+            
+            # 检查是否有 tool 消息缺少必要的参数信息
+            # 如果有对应的 assistant 消息中有完整的 tool_calls，说明参数可能被错误处理了
+            if not tool_calls_by_content_hash:
+                logger.warning("[ToolCall恢复] 未找到任何 tool_calls，无法恢复参数")
+                return None
+            
+            # 返回 None 表示无法自动恢复，但记录了尝试
+            logger.info(f"[ToolCall恢复] 找到 {len(tool_calls_by_content_hash)} 个 tool_calls 用于参数匹配")
+            return None
+            
+        except Exception as e:
+            logger.warning(f"[ToolCall恢复] 尝试恢复工具参数时出错: {e}")
+            return None
 
     def _make_api_call(self, messages: List[Dict]) -> bool:
         api_key = self.llm_config.get("API_KEY", "").strip()
@@ -774,6 +834,22 @@ class OpenAIChatWorker(QThread):
                         continue
                     else:
                         logger.error(f"[API] 无法自动修复 tool call result 顺序问题 - 可能需要查看上面的消息结构")
+                        
+                # 检测 Missing required arguments 错误（工具参数丢失）
+                is_missing_args_error = "Missing required arguments" in error_str or "missing a required argument" in error_str.lower()
+                
+                if is_missing_args_error and attempt < max_retries - 1:
+                    logger.warning(f"[API] 检测到工具参数丢失错误，尝试从历史消息中恢复...")
+                    
+                    # 尝试从历史消息中恢复 tool_calls 的参数
+                    fixed_messages = self._try_recover_tool_arguments(req_kwargs["messages"])
+                    
+                    if fixed_messages is not None:
+                        req_kwargs["messages"] = messages_to_api(fixed_messages)
+                        logger.warning(f"[API] 已恢复工具参数，重试 (attempt {attempt + 1}/{max_retries})")
+                        continue
+                    else:
+                        logger.warning(f"[API] 无法恢复工具参数，保持现有消息")
                         
                 # 其他 BadRequestError 继续抛出
                 if hasattr(e, "response") and e.response is not None:

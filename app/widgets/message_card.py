@@ -1205,6 +1205,14 @@ class CodeWebViewer(QWebEngineView):
                     margin-right: 12px;
                     word-break: break-word;
                 }}
+                .args-row.result-success {{
+                    border-top: 1px solid rgba(95, 209, 140, 0.3);
+                    background: rgba(95, 209, 140, 0.05);
+                }}
+                .args-row.result-fail {{
+                    border-top: 1px solid rgba(244, 67, 54, 0.3);
+                    background: rgba(244, 67, 54, 0.05);
+                }}
                 .args-value {{
                     flex: 1 1 auto;
                     color: #d4d4d4;
