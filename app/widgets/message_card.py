@@ -315,6 +315,8 @@ def _render_tool_block_content(content: str) -> str:
     tool_call_id: xxx
     </tool>
     """
+    from loguru import logger
+    
     tool_name = ""
     tool_args_str = ""
     tool_result = ""
@@ -330,6 +332,9 @@ def _render_tool_block_content(content: str) -> str:
 
     # ========== 解析 args（需要正确处理嵌套 JSON）==========
     args_start = content.find("args:")
+    result_search_start = 0  # 默认值
+    tool_args_str = ""
+    
     if args_start != -1:
         brace_start = content.find("{", args_start)
         if brace_start != -1:
@@ -343,15 +348,21 @@ def _render_tool_block_content(content: str) -> str:
                     depth -= 1
                     if depth == 0:
                         tool_args_str = content[brace_start:i + 1]
+                        result_search_start = i + 1
                         break
                 i += 1
-            result_search_start = i + 1
+            if depth != 0:  # 循环结束但没找到匹配的 }
+                # JSON 未正确闭合，回退到单行解析
+                tool_args_str = ""
+                # 尝试找到 args: 后的内容作为替代
+                line_match = re.search(r"args:\s*(\{[^}]*\})", content)
+                if line_match:
+                    tool_args_str = line_match.group(1)
+                    result_search_start = args_start + len(line_match.group(0))
         else:
             line = content[args_start:].split("\n")[0]
             tool_args_str = line[args_start + 5:].strip()
             result_search_start = args_start + len(line)
-    else:
-        result_search_start = 0
 
     # ========== 解析 success ==========
     success_match = re.search(r"^success:\s*(.+?)\s*$", content, re.MULTILINE)
@@ -382,12 +393,55 @@ def _render_tool_block_content(content: str) -> str:
             if not isinstance(args_dict, dict):
                 args_dict = {}
         except json.JSONDecodeError:
-            args_dict = {}
+            # JSON 解析失败，尝试使用正则提取参数
+            args_dict = _extract_args_by_regex(tool_args_str)
+    else:
+        # 没有 args，尝试从整个 content 中提取参数
+        args_dict = _extract_args_by_regex(content)
 
     return render_tool_block(
         tool_name, args_dict, tool_result, tool_success, collapsed=True,
         tool_call_id=tool_call_id
     )
+
+
+def _extract_args_by_regex(content: str) -> dict:
+    """
+    当 JSON 解析失败时，使用正则表达式提取参数。
+    处理包含大量转义字符和被截断的字符串的情况。
+    """
+    args = {}
+    
+    # 提取常见的字符串参数
+    string_params = ["path", "oldString", "newString", "command", "url", "pattern", "query", "name"]
+    
+    for param in string_params:
+        # 查找 "param": " 后面开始的位置
+        pattern = rf'"{param}"\s*:\s*"'
+        match = re.search(pattern, content)
+        if match:
+            start = match.end()
+            # 从 start 开始，找到第一个未转义的引号 "
+            i = start
+            while i < len(content):
+                if content[i] == '"':
+                    # 找到结束引号
+                    value = content[start:i]
+                    # 清理截断标记
+                    value = value.replace('\n... [内容已截断]', '').replace('... [内容已截断]', '')
+                    # 解码转义字符
+                    try:
+                        args[param] = value.encode().decode('unicode_escape')
+                    except:
+                        args[param] = value
+                    break
+                elif content[i] == '\\':
+                    # 转义字符，跳过下一个字符
+                    i += 2
+                else:
+                    i += 1
+    
+    return args
 
 
 def _inject_tool_blocks(md_text: str, completed: bool = True) -> str:

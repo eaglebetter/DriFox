@@ -16,7 +16,6 @@ from app.core.agent import (
     AgentManager,
     create_agent_manager,
 )
-from app.core.context_manager import ContextManager
 
 __all__ = [
     "ChatEngine",
@@ -25,5 +24,4 @@ __all__ = [
     "Agent",
     "AgentManager",
     "create_agent_manager",
-    "ContextManager",
 ]

@@ -4,10 +4,140 @@ import re
 import time
 from datetime import datetime
 from threading import Event
-from typing import Any, Dict, List, Callable, Optional
+from typing import Any, Dict, List, Callable, Optional, Tuple
 
 import httpx
 from loguru import logger
+
+
+def _try_fix_malformed_json_arguments(raw_args: str, tool_name: str) -> Tuple[Optional[Dict], str]:
+    """
+    尝试修复模型生成的不规范 JSON。
+    
+    常见问题：content 字段包含未转义的换行符，导致 JSON 解析失败。
+    例如：{"content": "第一行\n第二行"} 而非 {"content": "第一行\\n第二行"}
+    
+    Returns:
+        (修复后的参数字典, 修复状态描述)
+    """
+    if not raw_args or not isinstance(raw_args, str):
+        return None, "empty_or_invalid_input"
+    
+    args = {}
+    
+    # 策略1: 尝试提取 path 参数（通常在开头，较少出问题）
+    path_match = re.search(r'"path"\s*:\s*"([^"]*)"', raw_args)
+    if path_match:
+        args["path"] = path_match.group(1)
+    
+    # 策略2: 尝试提取 filePath 参数（某些工具使用）
+    if "filePath" not in args:
+        file_path_match = re.search(r'"filePath"\s*:\s*"([^"]*)"', raw_args)
+        if file_path_match:
+            args["filePath"] = file_path_match.group(1)
+    
+    # 策略3: 尝试提取 command 参数（bash 工具）
+    command_match = re.search(r'"command"\s*:\s*"([^"]*)"', raw_args)
+    if command_match:
+        args["command"] = command_match.group(1)
+    
+    # 策略4: 尝试提取其他简单字符串参数
+    for param_name in ["url", "pattern", "query", "name", "question"]:
+        matches = re.finditer(rf'"{param_name}"\s*:\s*"([^"]*)"', raw_args)
+        for match in matches:
+            args[param_name] = match.group(1)
+    
+    # 策略5: 智能提取 content 字段（最常见的问题来源）
+    # 思路：如果 JSON 以 {"path": "...", "content": "... 或 {"content": "... 开头，
+    # content 从第一个 " 之后开始，到最后一个 } 或 ", 之前结束
+    
+    # 检查是否是 write 工具的参数格式
+    is_write_format = '"path"' in raw_args and '"content"' in raw_args
+    is_content_only = raw_args.strip().startswith('"content"') or '"content"' in raw_args
+    
+    if is_write_format or is_content_only:
+        # 找到 content 字段的开始位置
+        content_key_match = re.search(r'"content"\s*:\s*"', raw_args)
+        if content_key_match:
+            content_start = content_key_match.end()
+            
+            # 找到 JSON 对象的结束位置
+            # 从后往前找 } 或 }] 
+            # 同时确保这个 } 确实属于这个 JSON 对象（通过检查前面的内容是否平衡）
+            
+            # 简单策略：从后往前找到最后一个独立的 }
+            last_brace = raw_args.rfind('}')
+            last_bracket = raw_args.rfind(']')
+            json_end = max(last_brace, last_bracket) if last_bracket > 0 else last_brace
+            
+            if json_end > content_start:
+                # 提取 content 内容（从 content": " 之后到 JSON 结束之前）
+                content_value = raw_args[content_start:json_end]
+                
+                # 清理 content：移除末尾可能的引号和多余空白
+                content_value = content_value.rstrip('"').rstrip()
+                
+                # 如果 content 看起来不完整（以逗号、分号等结尾），尝试延伸
+                # 这是因为 JSON 可能被截断
+                if content_value and content_value[-1] in ',;\\':
+                    # 截断到最后一个完整的句子
+                    last_newline = content_value.rfind('\n')
+                    last_punctuation = max(
+                        content_value.rfind('。'),
+                        content_value.rfind('.'),
+                        content_value.rfind('!'),
+                        content_value.rfind('?'),
+                    )
+                    cut_pos = max(last_newline, last_punctuation)
+                    if cut_pos > 0:
+                        content_value = content_value[:cut_pos + 1]
+                
+                args["content"] = content_value
+    
+    # 如果成功提取了必需参数，返回修复后的结果
+    if tool_name == "write":
+        # write 工具必需 path 和 content
+        if "path" in args and "content" in args:
+            return {"path": args["path"], "content": args["content"]}, "fixed_write"
+        elif "content" in args and "path" not in args:
+            # 尝试从 raw_args 中提取 path
+            path_match2 = re.search(r'"path"\s*:\s*"([^"]*)"', raw_args)
+            if path_match2:
+                return {"path": path_match2.group(1), "content": args["content"]}, "fixed_write"
+            # 没有 path，尝试推断文件名
+            return {"content": args["content"]}, "fixed_content_only"
+    elif tool_name == "bash":
+        if "command" in args:
+            return {"command": args["command"]}, "fixed_bash"
+    elif args:
+        return args, "fixed_partial"
+    
+    return None, "fix_failed"
+
+
+def _smart_parse_arguments(raw_args: str, tool_name: str) -> Optional[Dict]:
+    """
+    智能解析 arguments，优先尝试标准 JSON，失败后尝试修复。
+    
+    Returns:
+        解析后的参数字典，解析失败返回 None
+    """
+    if not raw_args:
+        return {}
+    
+    # 首先尝试标准 JSON 解析
+    try:
+        return json.loads(raw_args)
+    except json.JSONDecodeError:
+        pass
+    
+    # 标准解析失败，尝试修复
+    fixed_args, status = _try_fix_malformed_json_arguments(raw_args, tool_name)
+    if fixed_args:
+        logger.info(f"[ToolCall] JSON 智能修复成功: tool={tool_name}, status={status}")
+        return fixed_args
+    
+    return None
 
 from PyQt5.QtCore import QRunnable, pyqtSlot, QThread, pyqtSignal, QCoreApplication
 from PyQt5.QtWidgets import QApplication
@@ -301,11 +431,14 @@ class OpenAIChatWorker(QThread):
         self._permission_approved = False
         self._round_permission_cache = {}
         self._previewed_tool_call_ids = set()
-        self._current_tool_calls = []
+        self._current_tool_calls = {}  # 改成字典
         self._tool_calls_buffer = {}
         self._reasoning_content = ""
         self._response_content_blocks = []
         self._tool_execution_cancelled = False
+        # 等待完整参数的 tool_calls（用于处理超长 arguments 流式传输场景）
+        self._waiting_tool_params: Dict[str, dict] = {}  # tool_call_id -> {buffer, attempt_count}
+        self._max_param_retry_count = 10  # 最多重试10次（每收到一个 chunk 重试一次）
         self._last_compaction_state = {
             "active": False,
             "source": "worker",
@@ -375,7 +508,7 @@ class OpenAIChatWorker(QThread):
         return consolidate_messages(snapshot)
 
     def _clear_pending_response_state(self):
-        self._current_tool_calls = []
+        self._current_tool_calls = {}  # 改成字典
         self._tool_calls_buffer = {}
         self._response_content_blocks = []
         self._previewed_tool_call_ids = set()
@@ -409,12 +542,6 @@ class OpenAIChatWorker(QThread):
             current_session_messages = list(self.session_messages)
             self._current_session_messages = list(current_session_messages)
             self._emit_compaction_status(self._last_compaction_state)
-            compacted_messages, compaction_state = self._maybe_compact_messages(
-                current_messages
-            )
-            self._emit_compaction_status(compaction_state)
-            current_messages = compacted_messages
-
             self.full_response = ""
             self._reasoning_content = ""
 
@@ -465,7 +592,6 @@ class OpenAIChatWorker(QThread):
                     self._pending_answer = None
                     self._answer_event.clear()
                     continue
-
                 response_sequence = self._build_response_message_sequence(tool_results)
                 current_messages.extend(response_sequence)
                 current_session_messages.extend(response_sequence)
@@ -485,7 +611,8 @@ class OpenAIChatWorker(QThread):
     def _build_response_message_sequence(self, tool_results=None) -> List[Dict]:
         now_ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         tool_call_map = {}
-        for tc in self._current_tool_calls or []:
+        # 从 _current_tool_calls 字典获取 tool_calls
+        for tc in (self._current_tool_calls or {}).values():
             if not isinstance(tc, dict):
                 continue
             tool_call_id = str(tc.get("id") or "")
@@ -501,6 +628,34 @@ class OpenAIChatWorker(QThread):
                 },
             }
             tool_call_map[tool_call_id] = normalized_tc
+        
+        # 从 _tool_calls_buffer 获取未解析完成的 tool_calls
+        for tc_id, buffer in (self._tool_calls_buffer or {}).items():
+            if tc_id in tool_call_map:
+                continue
+            function = buffer.get("function", {}) or {}
+            tool_call_map[tc_id] = {
+                "id": tc_id,
+                "type": buffer.get("type", "function"),
+                "function": {
+                    "name": function.get("name", ""),
+                    "arguments": function.get("arguments", "{}"),
+                },
+            }
+        
+        # 也从 tool_results 中的 _tool_call 字段获取（处理残留的 tool_calls）
+        for item in tool_results or []:
+            if isinstance(item, dict) and "tool_call_id" in item:
+                tc_id = item["tool_call_id"]
+                if tc_id and tc_id not in tool_call_map:
+                    tool_call_map[tc_id] = {
+                        "id": tc_id,
+                        "type": "function",
+                        "function": {
+                            "name": item.get("name", ""),
+                            "arguments": item.get("arguments", "{}"),
+                        },
+                    }
 
         tool_result_map = {}
         for item in tool_results or []:
@@ -509,12 +664,26 @@ class OpenAIChatWorker(QThread):
             tool_call_id = str(item.get("tool_call_id") or "")
             if not tool_call_id:
                 continue
+            
+            # 获取 content 并进行安全处理
+            content = item.get("content", "")
+            # 截断过长的 content，避免 API 处理超时或 JSON 格式错误
+            MAX_CONTENT_LENGTH = 6000
+            if len(content) > MAX_CONTENT_LENGTH:
+                head_len = int(MAX_CONTENT_LENGTH * 0.6)
+                tail_len = MAX_CONTENT_LENGTH - head_len
+                content = (
+                    content[:head_len]
+                    + f"\n\n... [已截断，原始长度 {len(content)}] ...\n\n"
+                    + content[-tail_len:]
+                )
+            
             tool_result_map[tool_call_id] = {
                 "role": "tool",
                 "tool_call_id": tool_call_id,
                 "name": item.get("name", "tool"),
                 "arguments": item.get("arguments", {}),
-                "content": item.get("content", ""),
+                "content": content,
                 "success": item.get("success", True),
                 "round_id": item.get("round_id"),
                 "timestamp": item.get("timestamp", now_ts),
@@ -522,7 +691,6 @@ class OpenAIChatWorker(QThread):
 
         sequence: List[Dict] = []
         pending_text_blocks = []
-
         for block in self._response_content_blocks or []:
             if not isinstance(block, dict):
                 continue
@@ -555,6 +723,28 @@ class OpenAIChatWorker(QThread):
             pending_text_blocks = []
             tool_result = tool_result_map.get(tool_call_id)
             if tool_result:
+                sequence.append(tool_result)
+
+        # 处理没有对应 marker 的 tool_result（解析失败的情况）
+        for tool_call_id, tool_result in tool_result_map.items():
+            already_added = any(
+                block.get("tool_call_id") == tool_call_id
+                for block in sequence
+                if block.get("role") == "tool"
+            )
+            if not already_added:
+                # 创建一个 assistant 消息来承载这个 tool_result
+                assistant_msg: Dict[str, Any] = {
+                    "role": "assistant",
+                    "timestamp": now_ts,
+                }
+                tool_call = tool_call_map.get(tool_call_id)
+                if tool_call:
+                    assistant_msg["tool_calls"] = [tool_call]
+                if self._reasoning_content:
+                    assistant_msg["reasoning_content"] = self._reasoning_content
+                if assistant_msg.get("tool_calls"):
+                    sequence.append(assistant_msg)
                 sequence.append(tool_result)
 
         if pending_text_blocks:
@@ -615,54 +805,37 @@ class OpenAIChatWorker(QThread):
         """
         fixed_messages: List[Dict] = []
         modified = False
-        
+        too_call_template = {
+          "id": "",
+          "type": "function",
+          "function": {
+            "name": "",
+            "arguments": ""
+          }
+        }
         # 记录所有尚未匹配的 tool_call_id（用于处理并行 tool_calls）
         pending_tool_call_ids: set = set()
         
-        for msg in messages:
+        for msg in messages[::-1]:
             role = msg.get("role", "")
-            
-            if role == "assistant":
+            if role == "tool":
+                tool_call_id = msg.get("tool_call_id", "")
+                name = msg.get("name", "")
+                pending_tool_call_ids.add((tool_call_id, name))
+            elif role == "assistant":
                 # 获取此 assistant 消息中的 tool_calls
                 tool_calls = msg.get("tool_calls") or []
-                
-                # 将新的 tool_call_ids 添加到待匹配集合（而非替换）
-                for tc in tool_calls:
-                    tc_id = tc.get("id")
-                    if tc_id:
-                        pending_tool_call_ids.add(tc_id)
-                        
-                # 检查是否有孤立的内容块（assistant 有 content 但没有 tool_calls）
-                content = msg.get("content", "")
-                if not tool_calls and content:
-                    # 有文本内容但没有 tool_calls，检查是否需要清理 pending
-                    # 如果 pending 中的 tool_call_ids 还没有对应的 tool 结果，
-                    # 这可能是 API 返回了不完整的响应
-                    logger.debug(f"[ToolCall修复] Assistant 有 content 但无 tool_calls，保留 pending={len(pending_tool_call_ids)}")
-                
+                tool_calls_ids = [tc.get("id") for tc in tool_calls]
+                for tc_id, name in pending_tool_call_ids:
+                    if tc_id not in tool_calls_ids:
+                        # 添加一个空的 tool_call，用于占位
+                        too_call_template["id"] = tc_id
+                        too_call_template["function"]["name"] = name
+                        tool_calls.append(too_call_template)
+                        logger.warning(f"[ToolCall修复] 发现孤立 tool result: id={tool_call_id[:20]}...")
+                        modified = True
+                msg["tool_calls"] = tool_calls
                 fixed_messages.append(msg)
-                
-            elif role == "tool":
-                tool_call_id = msg.get("tool_call_id", "")
-                
-                # 检查这个 tool result 是否匹配任何待匹配的 tool_call
-                if tool_call_id in pending_tool_call_ids:
-                    # 匹配，从待匹配集合中移除
-                    pending_tool_call_ids.discard(tool_call_id)
-                    fixed_messages.append(msg)
-                elif tool_call_id:
-                    # 不匹配，这是一个真正孤立的 tool result
-                    # 但不要直接删除，而是标记为修改（保留以便调试）
-                    logger.warning(f"[ToolCall修复] 发现孤立 tool result: id={tool_call_id[:20]}...")
-                    logger.warning(f"[ToolCall修复] 当前 pending={list(pending_tool_call_ids)[:5]}...")
-                    # 保留消息但记录警告（这样用户可以看到问题）
-                    fixed_messages.append(msg)
-                    modified = True
-                else:
-                    # 没有 tool_call_id，这是无效的 tool result
-                    logger.warning(f"[ToolCall修复] 移除无效的 tool result（无tool_call_id）")
-                    modified = True
-                    
             else:
                 fixed_messages.append(msg)
                 # 非 assistant/tool 消息后，tool_call 上下文应该结束
@@ -674,7 +847,7 @@ class OpenAIChatWorker(QThread):
             logger.warning(f"[ToolCall修复] 处理完消息后仍有 {len(pending_tool_call_ids)} 个 pending tool_call_ids: {list(pending_tool_call_ids)[:3]}...")
             modified = True
         
-        return fixed_messages, modified
+        return fixed_messages[::-1], modified
 
     def _try_recover_tool_arguments(self, messages: List[Dict]) -> Optional[List[Dict]]:
         """
@@ -694,7 +867,6 @@ class OpenAIChatWorker(QThread):
                 if msg.get("role") == "assistant":
                     tool_calls = msg.get("tool_calls") or []
                     for tc in tool_calls:
-                        tc_id = tc.get("id", "")
                         function = tc.get("function", {}) or {}
                         arguments = function.get("arguments", "{}")
                         # 使用 arguments 的 hash 作为键（用于匹配）
@@ -786,7 +958,7 @@ class OpenAIChatWorker(QThread):
         client = OpenAI(
             api_key=api_key if api_key and auth_type != "none" else "dummy",
             base_url=base_url,
-            timeout=httpx.Timeout(300.0, connect=30.0),
+            timeout=httpx.Timeout(600.0, connect=30.0),  # 增加读取超时到 600 秒
         )
 
         if "o1-preview" in model or "o1-mini" in model:
@@ -799,7 +971,6 @@ class OpenAIChatWorker(QThread):
 
         # 需要重试的错误类型
         from openai import RateLimitError, APIError, APIConnectionError, BadRequestError
-        from httpx import ReadTimeout as HttpxReadTimeout
         import httpcore
 
         for attempt in range(max_retries):
@@ -807,7 +978,6 @@ class OpenAIChatWorker(QThread):
                 response = client.chat.completions.create(**req_kwargs)
                 break
             except BadRequestError as e:
-                last_error = e
                 error_str = str(e)
                 
                 # 检测 tool call result 错误码 2013
@@ -946,105 +1116,9 @@ class OpenAIChatWorker(QThread):
                 cap = max(cap, min(requested_int, 32768))
         return min(requested_int, cap)
 
-    def _build_compaction_messages(
-        self, old_messages: List[Dict], recent_messages: List[Dict]
-    ) -> List[Dict]:
-        def extract_text(content: Any, max_len: int) -> str:
-            if isinstance(content, list):
-                text_parts = []
-                for item in content:
-                    if isinstance(item, dict) and item.get("type") == "text":
-                        text_parts.append(item.get("text", ""))
-                content = "\n".join(text_parts)
-            return str(content)[:max_len]
-
-        transcript_lines = []
-        for msg in old_messages:
-            role = msg.get("role", "unknown")
-            transcript_lines.append(
-                f"[{role}] {extract_text(msg.get('content', ''), 1800)}"
-            )
-
-        recent_hint = []
-        for msg in recent_messages[-4:]:
-            role = msg.get("role", "unknown")
-            recent_hint.append(f"[{role}] {extract_text(msg.get('content', ''), 400)}")
-
-        prompt = (
-            "请压缩较早的对话上下文，生成一个后续可继续执行编码任务的摘要。\n\n"
-            "要求：\n"
-            "1. 保留任务目标、已做决定、相关文件、关键工具结果、未完成事项。\n"
-            "2. 删除重复探索和无关寒暄。\n"
-            "3. 输出简洁 Markdown，不要使用 JSON。\n"
-            "4. 如果最近消息与旧消息有潜在冲突，请明确标出。\n\n"
-            "【较早对话】\n"
-            + "\n".join(transcript_lines)
-            + "\n\n【最近保留消息提示】\n"
-            + "\n".join(recent_hint)
-        )
-
-        return [
-            {
-                "role": "system",
-                "content": self.compaction_prompt
-                or "你是一个上下文压缩助手，负责提炼编码任务继续执行所需的摘要。",
-            },
-            {"role": "user", "content": prompt},
-        ]
-
-    def _summarize_old_messages(
-        self, old_messages: List[Dict], recent_messages: List[Dict]
-    ) -> str:
-        api_key = self.llm_config.get("API_KEY", "").strip()
-        base_url = self.llm_config.get("API_URL") or None
-        model = str(
-            self.compaction_config.get("model")
-            or self.llm_config.get("模型名称", "gpt-4o")
-        )
-
-        client = OpenAI(
-            api_key=api_key
-            if api_key and self.llm_config.get("认证方式", "bearer") != "none"
-            else "dummy",
-            base_url=base_url,
-            timeout=60.0,
-        )
-
-        req_kwargs = {
-            "model": model,
-            "messages": self._build_compaction_messages(old_messages, recent_messages),
-            "stream": False,
-            "max_tokens": self._cap_max_output_tokens(model, 1800),
-            "temperature": self.compaction_config.get("temperature", 0.1),
-        }
-        top_p = self.compaction_config.get("top_p")
-        if top_p is not None:
-            req_kwargs["top_p"] = top_p
-
-        from .retry_helper import create_api_call_with_retry
-
-        def create_task():
-            return client.chat.completions.create(**req_kwargs)
-
-        resp = create_api_call_with_retry(client, create_task)
-        return (resp.choices[0].message.content or "").strip()
-
-    def _maybe_compact_messages(self, messages: List[Dict]) -> tuple[List[Dict], Dict]:
-        inactive_state = {
-            "active": False,
-            "source": "worker",
-            "kind": "",
-            "original_count": len(messages or []),
-            "summarized_count": 0,
-            "kept_count": len(messages or []),
-            "summary_count": 0,
-            "note": "",
-        }
-        return messages, inactive_state
-
     def _process_response(self, response):
         self._response_content_blocks = []
-        self._current_tool_calls = []
+        self._current_tool_calls = {}  # 改成字典，key 是 tool_call_id
         self._tool_calls_buffer = {}
         tool_calls_found = False
 
@@ -1080,23 +1154,38 @@ class OpenAIChatWorker(QThread):
                         )
 
                     buffer = self._tool_calls_buffer[tc_id]
+                    tool_name = ""
                     if tc.function and tc.function.name:
                         buffer["function"]["name"] = tc.function.name
                         tool_name = buffer["function"]["name"]
+                        
+                        # 收到 tool name 时立即添加到 _current_tool_calls（如果是新工具）
+                        if tc_id not in self._current_tool_calls:
+                            self._current_tool_calls[tc_id] = {
+                                "id": tc_id,
+                                "type": getattr(tc, "type", "function"),
+                                "function": {
+                                    "name": tool_name,
+                                    "arguments": "",
+                                },
+                            }
+                        
                         if (
                             tool_name
                             and tool_name not in self._DEFERRED_PREVIEW_TOOLS
                             and tc_id not in self._previewed_tool_call_ids
                         ):
                             self._previewed_tool_call_ids.add(tc_id)
+                            # preview 阶段：arguments 可能还没接收完，显示 "加载中..." 而不是空 {}
+                            preview_args = {"_status": "loading", "_preview_hint": "参数接收中..."}
                             if self.tool_start_callback:
                                 self.tool_start_callback(
-                                    tc_id, tool_name, {}, "preview"
+                                    tc_id, tool_name, preview_args, "preview"
                                 )
                             else:
                                 self._emit_with_callback(
                                     "tool_call_started", self.tool_call_started,
-                                    tc_id, tool_name, {}, "preview"
+                                    tc_id, tool_name, preview_args, "preview"
                                 )
                     if tc.function and tc.function.arguments:
                         buffer["function"]["arguments"] += tc.function.arguments
@@ -1104,19 +1193,23 @@ class OpenAIChatWorker(QThread):
                     if buffer["function"]["name"] and buffer["function"]["arguments"]:
                         try:
                             parsed_args = json.loads(buffer["function"]["arguments"])
-                            self._current_tool_calls.append(
-                                {
-                                    "id": buffer["id"],
-                                    "type": buffer["type"],
-                                    "function": {
-                                        "name": buffer["function"]["name"],
-                                        "arguments": buffer["function"]["arguments"],
-                                    },
-                                }
-                            )
+                            # 更新 _current_tool_calls 中对应 id 的 arguments
+                            if tc_id in self._current_tool_calls:
+                                self._current_tool_calls[tc_id]["function"]["arguments"] = buffer["function"]["arguments"]
+                            # 标记已完成解析（用于决定是否发送 tool_call_started）
+                            self._current_tool_calls[tc_id]["_args_parsed"] = True
                             self._tool_calls_buffer.pop(tc_id, None)
                         except json.JSONDecodeError:
-                            pass
+                            # JSON 解析失败，记录到等待队列，等待后续 chunk
+                            if tc_id not in self._waiting_tool_params:
+                                self._waiting_tool_params[tc_id] = {
+                                    "buffer": buffer,
+                                    "attempt_count": 0,
+                                    "first_failure_time": time.time(),
+                                }
+                                logger.debug(f"[ToolCall] JSON 解析失败，等待更多内容: tc_id={tc_id[:20]}..., 已等待 {buffer['function']['arguments'][:50]}...")
+                            # 标记已尝试解析（即使失败）
+                            self._waiting_tool_params[tc_id]["attempt_count"] += 1
 
             # 提取 reasoning_content (DeepSeek V4 thinking mode)
             reasoning_delta = getattr(delta, "reasoning_content", None)
@@ -1131,19 +1224,90 @@ class OpenAIChatWorker(QThread):
                 )
                 self._emit_with_callback("content_received", self.content_received, content)
 
-        for tc_id, buffer in list(self._tool_calls_buffer.items()):
-            if buffer["function"]["name"] and buffer["function"]["arguments"]:
-                self._current_tool_calls.append(
-                    {
+        # 处理等待完整参数的 tool_calls（超长 arguments 场景）
+        # 在所有 chunk 接收完成后，再次尝试解析仍处于等待状态的 tool_calls
+        all_pending_ids = set(self._tool_calls_buffer.keys()) | set(self._waiting_tool_params.keys())
+        
+        for tc_id in list(all_pending_ids):
+            buffer = self._tool_calls_buffer.get(tc_id)
+            waiting_info = self._waiting_tool_params.get(tc_id)
+            
+            # 如果 buffer 存在，优先使用 buffer
+            if not buffer and waiting_info:
+                buffer = waiting_info["buffer"]
+            
+            if buffer and buffer["function"]["name"] and buffer["function"]["arguments"]:
+                args_str = buffer["function"]["arguments"]
+                
+                # 跳过已存在的 tc_id（已通过 tool name 添加到字典）
+                if tc_id in self._current_tool_calls:
+                    # 更新 arguments
+                    self._current_tool_calls[tc_id]["function"]["arguments"] = args_str
+                    self._waiting_tool_params.pop(tc_id, None)
+                    self._tool_calls_buffer.pop(tc_id, None)
+                    logger.debug(f"[ToolCall] 更新已有 tc_id arguments: tc_id={tc_id[:20]}...")
+                    continue
+                
+                try:
+                    # 尝试 JSON 解析
+                    parsed_args = json.loads(args_str)
+                    self._current_tool_calls[tc_id] = {
                         "id": buffer["id"],
-                        "type": buffer["type"],
+                        "type": buffer.get("type", "function"),
                         "function": {
                             "name": buffer["function"]["name"],
-                            "arguments": buffer["function"]["arguments"],
+                            "arguments": args_str,
                         },
+                        "_args_parsed": True,
                     }
-                )
-                self._tool_calls_buffer.pop(tc_id, None)
+                    # 从等待队列中移除
+                    self._waiting_tool_params.pop(tc_id, None)
+                    self._tool_calls_buffer.pop(tc_id, None)
+                    logger.debug(f"[ToolCall] JSON 解析成功: tc_id={tc_id[:20]}...")
+                except json.JSONDecodeError as e:
+                    # JSON 仍然解析失败，记录详细错误信息
+                    if tc_id in self._tool_calls_buffer:
+                        self._tool_calls_buffer.pop(tc_id, None)
+                    
+                    # 检查是否超过最大重试次数
+                    attempt_count = waiting_info.get("attempt_count", 0) if waiting_info else 0
+                    first_time = waiting_info.get("first_failure_time", 0) if waiting_info else 0
+                    wait_duration = time.time() - first_time if first_time else 0
+                    
+                    # 超过 60 秒或超过 10 次尝试，放弃解析
+                    if wait_duration > 60 or attempt_count >= self._max_param_retry_count:
+                        logger.warning(
+                            f"[ToolCall] ⚠️ JSON 解析超时/超限，保留原始 arguments: "
+                            f"tool={buffer['function']['name']}, "
+                            f"args_len={len(args_str)}, "
+                            f"attempt_count={attempt_count}, "
+                            f"wait_duration={wait_duration:.1f}s, "
+                            f"error={str(e)}, "
+                            f"preview='{args_str[:100]}...'"
+                        )
+                        # 保留原始 arguments 字符串，让后续处理决定如何处理
+                        if tc_id not in self._current_tool_calls:
+                            self._current_tool_calls[tc_id] = {
+                                "id": buffer["id"],
+                                "type": buffer.get("type", "function"),
+                                "function": {
+                                    "name": buffer["function"]["name"],
+                                    "arguments": args_str,  # 保留原始字符串
+                                },
+                            }
+                        self._waiting_tool_params.pop(tc_id, None)
+                    else:
+                        # 还在等待中，保持在等待队列
+                        if tc_id not in self._waiting_tool_params:
+                            self._waiting_tool_params[tc_id] = {
+                                "buffer": buffer,
+                                "attempt_count": attempt_count + 1,
+                                "first_failure_time": first_time,
+                            }
+                        logger.debug(
+                            f"[ToolCall] JSON 解析仍失败，等待中: tc_id={tc_id[:20]}..., "
+                            f"attempt={attempt_count}, duration={wait_duration:.1f}s"
+                        )
 
         return tool_calls_found
 
@@ -1155,7 +1319,7 @@ class OpenAIChatWorker(QThread):
         self._tool_execution_cancelled = False
 
         results = []
-        for tc in self._current_tool_calls:
+        for tc in self._current_tool_calls.values():
             if self._is_cancelled or self._tool_execution_cancelled:
                 cancelled_tc_id = tc["id"]
                 tool_name = tc["function"]["name"]
@@ -1182,12 +1346,148 @@ class OpenAIChatWorker(QThread):
 
             tool_name = tc["function"]["name"]
             arguments = tc["function"]["arguments"]
+            tool_call_id = tc["id"]
+            raw_args = tc["function"]["arguments"]
+            round_id = f"round_{id(tc)}"
+            self.tool_start_callback(tool_call_id, tool_name, {}, round_id)
+            original_args_str = arguments  # 保存原始字符串用于错误诊断
 
             if isinstance(arguments, str):
                 try:
                     arguments = json.loads(arguments)
-                except:
-                    arguments = {}
+                except json.JSONDecodeError as e:
+                    # JSON 解析失败，尝试智能修复（处理模型生成的不规范 JSON）
+                    fixed_args = _smart_parse_arguments(arguments, tool_name)
+                    if fixed_args is not None:
+                        arguments = fixed_args
+                        logger.info(
+                            f"[ToolCall] ✓ JSON 智能修复成功: tool={tool_name}, "
+                            f"args={list(arguments.keys())}"
+                        )
+                    elif not arguments or not arguments.strip():
+                        # 确实是空字符串
+                        arguments = {}
+                    else:
+                        # 无法修复，检查是否是参数太长
+                        args_len = len(arguments)
+                        if args_len > 10000:
+                            # 参数太长，返回明确的错误提示
+                            logger.warning(
+                                f"[ToolCall] ⚠️ 工具参数过长: tool={tool_name}, "
+                                f"args_len={args_len}, 请减少参数长度"
+                            )
+                            # 检查是否需要发送 tool_call_started 信号（参数在流式传输时未发送）
+                            preview_args = {"_raw_args": raw_args[:500], "_status": "parse_failed"}
+
+                            error_result = {
+                                "success": False,
+                                "content": None,
+                                "error": f"[参数过长] 工具参数长度 {args_len} 字符，超过限制。\n"
+                                         f"工具: {tool_name}\n"
+                                         f"建议: 请减少参数长度（建议不超过 5000 字符），"
+                                         f"可以将内容拆分为多次工具调用，例如先 write 文件头，"
+                                         f"再用 edit 追加内容，或使用其他方式分批处理。",
+                            }
+                            self._emit_with_callback(
+                                "tool_result_received",
+                                self.tool_result_received,
+                                tool_call_id, tool_name, preview_args,
+                                error_result
+                            )
+                            if not self._direct_callbacks:
+                                QApplication.processEvents()
+                            results.append({
+                                "role": "tool",
+                                "tool_call_id": tool_call_id,
+                                "name": tool_name,
+                                "arguments": {"_raw_args": raw_args[:500]},
+                                "content": error_result["error"],
+                                "success": False,
+                                "round_id": round_id,
+                            })
+                            continue
+                        else:
+                            # 其他 JSON 解析错误
+                            logger.warning(
+                                f"[ToolCall] ⚠️ JSON 解析失败且无法修复，tool={tool_name}, "
+                                f"error={str(e)}, "
+                                f"raw_args='{arguments[:300]}...'"
+                            )
+                            tool_call_id = tc["id"]
+                            raw_args = tc["function"]["arguments"]
+                            round_id = f"round_{id(tc)}"
+                            
+                            # 检查是否需要发送 tool_call_started 信号
+                            preview_args = {"_raw_args": raw_args[:500], "_status": "parse_failed"}
+                            if self.tool_start_callback:
+                                self.tool_start_callback(tool_call_id, tool_name, preview_args, round_id)
+                            else:
+                                self._emit_with_callback(
+                                    "tool_call_started",
+                                    self.tool_call_started,
+                                    tool_call_id, tool_name, preview_args, round_id
+                                )
+                            
+                            error_result = {
+                                "success": False,
+                                "content": None,
+                                "error": f"[参数错误] JSON 格式无效: {str(e)}\n"
+                                         f"工具: {tool_name}\n"
+                                         f"原始内容(前500字): {arguments[:500]}...",
+                            }
+                            self._emit_with_callback(
+                                "tool_result_received",
+                                self.tool_result_received,
+                                tool_call_id, tool_name, preview_args,
+                                error_result
+                            )
+                            if not self._direct_callbacks:
+                                QApplication.processEvents()
+                            results.append({
+                                "role": "tool",
+                                "tool_call_id": tool_call_id,
+                                "name": tool_name,
+                                "arguments": {"_raw_args": raw_args[:500]},
+                                "content": error_result["error"],
+                                "success": False,
+                                "round_id": round_id,
+                            })
+                            continue
+
+            # 检查必需参数
+            required_args = self.tool_executor.REQUIRED_ARGS.get(tool_name, [])
+            missing_args = [p for p in required_args if not arguments.get(p)]
+            if missing_args:
+                logger.warning(
+                    f"[ToolCall] ⚠️ 缺少必需参数: tool={tool_name}, missing={missing_args}, "
+                    f"raw_args='{original_args_str[:200] if isinstance(original_args_str, str) else str(original_args_str)[:200]}...'"
+                )
+                tool_call_id = tc["id"]
+                round_id = f"round_{id(tc)}"
+                error_result = {
+                    "success": False,
+                    "content": None,
+                    "error": f"[参数缺失] 缺少必需参数: {missing_args}\n"
+                             f"工具: {tool_name}",
+                }
+                self._emit_with_callback(
+                    "tool_result_received",
+                    self.tool_result_received,
+                    tool_call_id, tool_name, arguments,
+                    error_result
+                )
+                if not self._direct_callbacks:
+                    QApplication.processEvents()
+                results.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call_id,
+                    "name": tool_name,
+                    "arguments": arguments,
+                    "content": error_result["error"],
+                    "success": False,
+                    "round_id": round_id,
+                })
+                continue
 
             tool_call_id = tc["id"]
 
@@ -1309,6 +1609,24 @@ class OpenAIChatWorker(QThread):
             else:
                 result_content = str(result) if result else ""
                 success = bool(getattr(result, "success", True)) if result else False
+            
+            # 截断过长的 tool_result content，避免 API 超时
+            # API 对单条消息的 content 长度有限制，过长的内容会导致超时
+            MAX_TOOL_RESULT_LENGTH = 8000
+            if len(result_content) > MAX_TOOL_RESULT_LENGTH:
+                logger.info(
+                    f"[ToolCall] ⚠️ Tool result 过长，已截断: "
+                    f"tool={tool_name}, original_len={len(result_content)}, "
+                    f"truncated_len={MAX_TOOL_RESULT_LENGTH}"
+                )
+                # 首尾保留策略，保留关键信息
+                head_len = int(MAX_TOOL_RESULT_LENGTH * 0.6)
+                tail_len = MAX_TOOL_RESULT_LENGTH - head_len
+                result_content = (
+                    result_content[:head_len]
+                    + f"\n\n... [内容已截断，原始长度 {len(result_content)} 字符] ...\n\n"
+                    + result_content[-tail_len:]
+                )
 
             if self._is_cancelled or self._tool_execution_cancelled:
                 # 创建取消结果对象（直接使用 dict 简化，避免循环导入）

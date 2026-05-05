@@ -2,7 +2,7 @@
 """
 聊天引擎模块 - 处理 LLM 对话的核心逻辑
 """
-
+import json
 from datetime import datetime
 from typing import Dict, List, Optional, Any, Callable
 
@@ -57,24 +57,17 @@ class ChatEngine:
         self,
         session_manager: SessionManager,
         get_model_config: Callable[[], Dict[str, Any]],
-        get_context_provider: Any,
         tool_executor: Optional[Any] = None,
         agent_manager: Any = None,
         get_chat_cards: Callable[[], List[Any]] = None,
         get_memory_context: Optional[Callable[[], str]] = None,
         worker_callbacks: Optional[Dict[str, Callable]] = None,
         api_mode: bool = False,
-        # 新增参数
-        event_bus: Any = None,
-        context_manager: Any = None,
     ):
         self._session_manager = session_manager
         self._get_model_config = get_model_config
-        self._get_context_provider = get_context_provider
         self._tool_executor = tool_executor
         self._agent_manager = agent_manager
-
-        self._setup_canvas_tools()
         self._get_chat_cards = get_chat_cards
         self._get_memory_context = get_memory_context
 
@@ -86,17 +79,6 @@ class ChatEngine:
         # API 模式专用：直接回调（绕过 Qt 信号-槽，避免跨线程事件循环问题）
         self._worker_callbacks = worker_callbacks or {}
         self._api_mode = api_mode
-        
-        # 新增：EventBus 和 ContextManager
-        self._event_bus = event_bus
-        self._context_manager = context_manager
-        
-        # 如果提供了 ContextManager，使用它初始化压缩状态
-        if self._context_manager:
-            self._compaction_state = self._make_compaction_state(
-                active=False,
-                source="context_manager"
-            )
 
     def _make_compaction_state(
         self,
@@ -148,10 +130,10 @@ class ChatEngine:
         }
 
     def _get_compaction_soft_limit(self, history_budget: int) -> int:
-        return max(1, int(history_budget * 0.75))
+        return max(1, int(history_budget * 0.7))
 
     def _get_compaction_target_limit(self, history_budget: int) -> int:
-        return max(1, int(history_budget * 0.65))
+        return max(1, int(history_budget * 0.5))
 
     def _get_agent_manager(self):
         return self._agent_manager
@@ -159,40 +141,6 @@ class ChatEngine:
     def set_session_manager(self, session_manager):
         """Update the session manager reference (used when session is archived)."""
         self._session_manager = session_manager
-
-    def set_event_bus(self, event_bus):
-        """设置事件总线"""
-        self._event_bus = event_bus
-        
-    def set_context_manager(self, context_manager):
-        """设置上下文管理器"""
-        self._context_manager = context_manager
-        if self._context_manager:
-            self._compaction_state = self._make_compaction_state(
-                active=False,
-                source="context_manager"
-            )
-            
-    def get_event_bus(self):
-        """获取事件总线"""
-        return self._event_bus
-        
-    def get_context_manager(self):
-        """获取上下文管理器"""
-        return self._context_manager
-
-    def _get_canvas_tools(self):
-        context_provider = self._get_context_provider()
-        if context_provider and hasattr(context_provider, "get_canvas_tools_schema"):
-            return context_provider.get_canvas_tools_schema()
-        return []
-
-    def _setup_canvas_tools(self):
-        context_provider = self._get_context_provider()
-        if context_provider and hasattr(context_provider, "get_canvas_tools_executor"):
-            canvas_executor = context_provider.get_canvas_tools_executor()
-            if canvas_executor and self._tool_executor:
-                self._tool_executor.set_canvas_tools_executor(canvas_executor)
 
     def _check_tool_permission(self, tool_name: str, arguments: dict) -> str:
         agent_manager = self._get_agent_manager()
@@ -255,39 +203,113 @@ class ChatEngine:
         if self._current_worker:
             self._current_worker.deny_permission(tool_call_id)
 
-    def _smart_trim_messages(self, cards: List[Any], max_tokens: int) -> List[Any]:
-        if not cards:
-            return []
-        available_tokens = max_tokens - 200
-        if available_tokens <= 0:
-            return []
-        selected = []
-        total_tokens = 0
-        recent_cards = list(cards[-20:])
-        for i, card in enumerate(recent_cards):
-            role = getattr(card, "role", None)
-            if not role or role == "system":
-                continue
-            content = ""
-            if hasattr(card, "viewer") and hasattr(card.viewer, "get_plain_text"):
-                content = card.viewer.get_plain_text()
-            if not content:
-                continue
-            card_tokens = estimate_tokens(content) + 20
-            if total_tokens + card_tokens <= available_tokens:
-                selected.append(card)
-                total_tokens += card_tokens
-            elif i < 3:
-                truncated = content[: available_tokens - total_tokens * 4]
-                if truncated:
-                    selected.append(card)
-                    break
-        return selected
+    def _truncate_with_head_tail(self, content: str, max_length: int) -> str:
+        """
+        首尾保留截断：保留内容开头和结尾，中间截断。
+        适用于工具返回等长内容，保留关键结果。
+        """
+        if len(content) <= max_length:
+            return content
+
+        # 头尾各保留 40%，中间截断
+        head_length = int(max_length * 0.4)
+        tail_length = int(max_length * 0.4)
+
+        # 确保头尾不重叠
+        if head_length + tail_length >= max_length:
+            return content[:max_length]
+
+        head = content[:head_length]
+        tail = content[-tail_length:]
+        return f"{head}...[{len(content)}字截断]...{tail}"
+
+    def _adaptive_truncate_content(
+        self,
+        content: str,
+        position: int,
+        total: int,
+        target_total_length: Optional[int] = None,
+        min_keep_ratio: float = 0.2,
+        max_keep_ratio: float = 0.7,
+        max_keep_length: int = 1000,
+        content_ratios: Optional[List[float]] = None,
+    ) -> str:
+        """
+        根据消息位置自适应截断内容。
+
+        遗忘曲线模型：越久远的消息截断越多，保留越少；
+        越近的消息截断越少，保留越多。
+
+        Args:
+            content: 原始内容
+            position: 消息在列表中的索引（0=最旧）
+            total: 消息总数
+            target_total_length: 目标总长度（上下文限制的60%-70%）
+            min_keep_ratio: 最旧消息的最小保留比例（默认15%）
+            max_keep_ratio: 最新消息的最大保留比例（默认65%）
+            max_keep_length: 最大保留长度（默认1000，防止工具结果过长）
+            content_ratios: 预计算的内容比例列表（用于整体调整）
+
+        Returns:
+            截断后的内容，保留首尾关键信息
+        """
+        content_len = len(content)
+
+        # 如果内容本身就小于等于 max_keep_length，不截断
+        if content_len <= max_keep_length:
+            return content
+
+        keep_length: int
+
+        # 自适应模式：根据目标总长度分配每条消息的配额
+        # 每条消息的配额需要根据位置和内容比例调整
+
+        # 计算基础配额
+        base_quota = target_total_length / total
+
+        # 根据位置计算权重（遗忘曲线，指数衰减）
+        position_ratio = position / max(total - 1, 1)
+        # 使用平方根让曲线更平滑，避免极端值
+        weight = min_keep_ratio + (max_keep_ratio - min_keep_ratio) * (position_ratio ** 0.5)
+
+        # 计算该消息的目标配额
+        target_quota = base_quota * weight
+
+        # 如果有内容比例参考，进行调整
+        if content_ratios and len(content_ratios) == total:
+            # 长内容多分配，短内容少分配（按比例）
+            msg_ratio = content_ratios[position]
+            avg_ratio = 1.0 / total
+            # 调整系数：长内容适当多给，短内容适当少给
+            ratio_factor = 0.5 + 0.5 * (msg_ratio / max(avg_ratio, 0.001))
+            target_quota *= ratio_factor
+        keep_length = int(target_quota)
+
+        # 应用 max_keep_length 限制
+        keep_length = min(keep_length, max_keep_length)
+
+        # 最少保留 20 字符
+        keep_length = max(keep_length, 20)
+
+        # 如果计算出的保留长度大于等于内容长度，不截断
+        if keep_length >= content_len:
+            return content
+
+        # 首尾保留策略：保留前40%和后40%
+        head_ratio = 0.4
+        head_length = int(keep_length * head_ratio)
+        tail_length = int(keep_length * head_ratio)
+
+        head = content[:head_length]
+        tail = content[-tail_length:] if tail_length > 0 else ""
+
+        return f"{head}...[{keep_length}字]...{tail}"
 
     def _summarize_compacted_messages(
         self,
         messages: List[Dict[str, str]],
         allow_llm_summary: bool = False,
+        history_budget: Optional[int] = None,
     ) -> str:
         if not messages:
             return ""
@@ -303,39 +325,58 @@ class ChatEngine:
             "以下是为节省上下文窗口而压缩的较早对话，请把它当作已确认的历史上下文继续工作。",
         ]
 
-        user_points = []
-        assistant_points = []
-        tool_points = []
+        total_messages = len(messages)
+
+        # 预计算每条消息内容的长度比例，用于智能分配配额
+        contents = []
         for msg in messages:
-            role = msg.get("role")
             content = _normalize_message_content(msg.get("content", ""))
             if not content:
-                continue
+                content = ""
             single_line = " ".join(content.split())
-            if len(single_line) > 1000:
-                single_line = f"{single_line[:500]}...{single_line[-500:]}"
+            contents.append(single_line)
+
+        total_content_length = sum(len(c) for c in contents)
+        content_ratios = [
+            len(c) / total_content_length if total_content_length > 0 else 1 / total_messages
+            for c in contents
+        ]
+
+        # 计算目标总长度（上下文限制的60%-70%）
+        target_total_length: Optional[int] = None
+        if history_budget is not None and history_budget > 0:
+            target_total_length = int(history_budget * 0.6)
+
+        for idx, msg in enumerate(messages):
+            role = msg.get("role")
+            content = contents[idx] if idx < len(contents) else ""
+
+            # 自适应截断：越旧的消息截断越多
+            content = self._adaptive_truncate_content(
+                content,
+                position=idx,
+                total=total_messages,
+                target_total_length=target_total_length,
+                content_ratios=content_ratios if total_content_length > 1000 else None,
+            )
+
             if role == "user":
-                user_points.append(single_line)
+                summary_lines.append("# User")
+                summary_lines.append(f"{content}")
             elif role == "assistant":
-                assistant_points.append(single_line)
+                summary_lines.append("# Assistant")
+                summary_lines.append(f"{content}")
             elif role == "tool":
-                tool_name = msg.get("name") or msg.get("tool_call_id") or "tool"
-                tool_points.append(f"{tool_name}: {single_line}")
-
-        if user_points:
-            summary_lines.append("### User Requests")
-            for idx, item in enumerate(user_points[-6:], 1):
-                summary_lines.append(f"{idx}. {item}")
-
-        if assistant_points:
-            summary_lines.append("### Assistant Progress")
-            for idx, item in enumerate(assistant_points[-6:], 1):
-                summary_lines.append(f"{idx}. {item}")
-
-        if tool_points:
-            summary_lines.append("### Tool Results")
-            for idx, item in enumerate(tool_points[-6:], 1):
-                summary_lines.append(f"{idx}. {item}")
+                tool_name = msg.get("name", "")
+                summary_lines.append("# Tool")
+                args = self._adaptive_truncate_content(
+                    json.dumps(msg.get("arguments", "")),
+                    position=idx,
+                    total=total_messages,
+                    target_total_length=target_total_length,
+                    content_ratios=content_ratios if total_content_length > 1000 else None,
+                )
+                summary_lines.append(f"{tool_name}:\n args:{args}\nresult:{content}")
 
         summary_lines.append(
             "### Compression Note\n如果后续细节与当前上下文冲突，以最近保留的原始消息和最新任务状态为准。"
@@ -467,30 +508,69 @@ class ChatEngine:
                 self._make_compaction_cache(),
             )
 
+        # 从后向前收集 recent_messages，确保不拆分 tool_calls 配对
         recent_messages: List[Dict[str, Any]] = []
         recent_tokens = 0
-        include_open_tool_exchange = False
 
-        for msg in reversed(history_messages):
+        # 跟踪当前未完成的 tool 响应（assistant 的 tool_result）
+        pending_tool_results: set = set()
+
+        i = len(history_messages) - 1
+        while i >= 0:
+            msg = history_messages[i]
             msg_tokens = estimate_tokens_from_messages([msg])
             role = msg.get("role")
-            has_tool_calls = role == "assistant" and bool(msg.get("tool_calls"))
-            force_include = include_open_tool_exchange or role == "tool"
 
-            if (
+            # 构建当前消息的完整配对集合
+            # 这个消息涉及的 tool_call_ids（包括它自己发起的和它响应的）
+            msg_tool_ids = set()
+
+            if role == "assistant":
+                # 收集这个 assistant 消息发起的 tool_calls
+                tool_calls = msg.get("tool_calls", [])
+                for tc in tool_calls:
+                    msg_tool_ids.add(tc.get("id"))
+
+            elif role == "tool":
+                msg_tool_ids.add(msg.get("tool_call_id"))
+
+            # 检查是否会导致拆分配对
+            would_split_pair = False
+            if msg_tool_ids:
+                # 如果这些 tool_call_ids 中的任何一个已经在 recent 中（pending），
+                # 说明把这个消息加入 recent 会导致它在 compacted 中
+                # 或者如果这个消息是某个 pending 的 tool_call 的响应
+                for tid in msg_tool_ids:
+                    if tid in pending_tool_results:
+                        would_split_pair = True
+                        break
+
+            # 检查 token 限制
+            token_exceeded = (
                 recent_messages
                 and recent_tokens + msg_tokens > target_limit
-                and not force_include
-            ):
+            )
+
+            # 如果 token 超限且不会拆分配对，则停止
+            if token_exceeded and not would_split_pair:
                 break
 
+            # 把消息加入 recent（从后向前插入）
             recent_messages.insert(0, msg)
             recent_tokens += msg_tokens
 
-            if role == "tool":
-                include_open_tool_exchange = True
-            elif include_open_tool_exchange and has_tool_calls:
-                include_open_tool_exchange = False
+            # 更新 pending 集合
+            if role == "assistant":
+                for tc in msg.get("tool_calls", []):
+                    tool_id = tc.get("id")
+                    if tool_id in pending_tool_results:
+                        pending_tool_results.discard(tool_id)
+            elif role == "tool":
+                # tool 消息被消费了，从 pending 移除
+                tool_id = msg.get("tool_call_id")
+                pending_tool_results.add(tool_id)
+
+            i -= 1
 
         if len(recent_messages) == len(history_messages):
             return (
@@ -503,8 +583,12 @@ class ChatEngine:
             )
 
         compacted = history_messages[: len(history_messages) - len(recent_messages)]
+
+        # 计算 summary 可用的空间 = budget - recent_tokens - summary_message 开销
+        summary_budget = history_budget - recent_tokens - 500  # 500 是基础开销
+
         compact_summary = self._summarize_compacted_messages(
-            compacted, allow_llm_summary=allow_llm_summary
+            compacted, allow_llm_summary=allow_llm_summary, history_budget=summary_budget
         )
         if not compact_summary:
             return (
@@ -518,18 +602,11 @@ class ChatEngine:
 
         summary_message = {"role": "assistant", "content": compact_summary}
         result_messages = [summary_message] + recent_messages
-
-        while (
-            len(result_messages) > 1
-            and estimate_tokens_from_messages(result_messages) > target_limit
-        ):
-            if len(recent_messages) > 1:
-                recent_messages.pop(0)
-                result_messages = [summary_message] + recent_messages
-                continue
-
-            result_messages = [summary_message]
-            break
+        print(f"原消息长度：{estimate_tokens_from_messages(history_messages)}")
+        print(f"未压缩长度：{estimate_tokens_from_messages(compacted)}")
+        print(f"压缩后长度：{estimate_tokens_from_messages([summary_message])}")
+        print(f"最近消息长度: {estimate_tokens_from_messages(recent_messages)}")
+        print(f"压缩后消息长度: {estimate_tokens_from_messages(result_messages)}")
 
         return (
             result_messages,
@@ -540,7 +617,7 @@ class ChatEngine:
                 original_count=len(history_messages),
                 summarized_count=len(compacted),
                 kept_count=len(recent_messages),
-                summary_count=1,
+                summary_count=estimate_tokens_from_messages(compacted) - estimate_tokens_from_messages([summary_message]),
                 note=f"已压缩 {len(compacted)} 条含工具历史消息",
             ),
             self._make_compaction_cache(
@@ -652,8 +729,12 @@ class ChatEngine:
             )
 
         compacted = normalized[: len(normalized) - len(recent_messages)]
+
+        # 计算 summary 可用的空间 = budget - recent_tokens - summary_message 开销
+        summary_budget = history_budget - recent_tokens - 500
+
         compact_summary = self._summarize_compacted_messages(
-            compacted, allow_llm_summary=allow_llm_summary
+            compacted, allow_llm_summary=allow_llm_summary, history_budget=summary_budget
         )
         if not compact_summary:
             return (
@@ -682,7 +763,7 @@ class ChatEngine:
 
             result_messages = [summary_message]
             break
-
+        print(f"压缩长度：{estimate_tokens_from_messages(compacted) - estimate_tokens_from_messages([summary_message])}")
         return (
             result_messages,
             self._make_compaction_state(
@@ -692,7 +773,7 @@ class ChatEngine:
                 original_count=len(normalized),
                 summarized_count=len(compacted),
                 kept_count=len(recent_messages),
-                summary_count=1,
+                summary_count=estimate_tokens_from_messages(compacted) - estimate_tokens_from_messages([summary_message]),
                 note=f"已压缩 {len(compacted)} 条较早消息",
             ),
             self._make_compaction_cache(
@@ -798,6 +879,7 @@ class ChatEngine:
             full_system_prompt = self._get_agent_manager().get_unified_system_prompt()
 
         prompt_parts = [
+            f"# 当前系统时间\n{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
             full_system_prompt,
         ]
 
@@ -809,7 +891,6 @@ class ChatEngine:
             if skills_content:
                 prompt_parts.append(skills_content)
         custom_prompt = llm_config.get("系统提示", "").strip()
-        context_provider = self._get_context_provider()
         if custom_prompt:
             prompt_parts.append(custom_prompt)
 
@@ -850,7 +931,6 @@ class ChatEngine:
                 messages[0]["content"] = (
                     messages[0]["content"] + "\n\n" + memory_context
                 )
-        supports_vision = provider_supports_vision(llm_config)
         available_history_budget = (
             max_context_tokens - estimate_tokens(latest_user_message) - 200
         )
@@ -867,19 +947,6 @@ class ChatEngine:
 
         filtered_history = [m for m in history_for_api if m.get("role") != "system"]
         messages.extend(filtered_history)
-
-        if supports_vision and context_provider:
-            has_image = any(
-                item[-1] for item in getattr(context_provider, "_context_cache", [])
-            )
-            if has_image:
-                user_content = context_provider.get_multimodal_context_items()
-                user_content.append({"type": "text", "text": latest_user_message})
-                user_msg = {"role": "user", "content": user_content, "params": params}
-                if latest_user_timestamp:
-                    user_msg["timestamp"] = latest_user_timestamp
-                messages.append(user_msg)
-                return messages
 
         user_msg = {"role": "user", "content": latest_user_message, "params": params}
         if latest_user_timestamp:
@@ -1036,9 +1103,6 @@ class ChatEngine:
 
     def _on_worker_messages_updated(self, messages: List[Dict]):
         self._emit("messages_updated", consolidate_messages(messages or []))
-
-    def _on_worker_compaction_status_changed(self, state: Dict[str, Any]):
-        return
 
     def _on_error(self, error: str):
         self._is_streaming = False

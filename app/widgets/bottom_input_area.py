@@ -488,6 +488,14 @@ class SendableTextEdit(QTextEdit):
         self._completer_popup.skillSelected.connect(self._on_skill_selected)
         self._at_trigger_pos = -1  # @ 触发位置
 
+        # 使用 QTimer.singleShot(0, ...) 在事件循环启动后重置初始化标志
+        # 这样可以避免在构造函数期间触发高度调整，同时确保初始化完成后正常工作
+        QTimer.singleShot(0, self._finish_initialization)
+
+    def _finish_initialization(self):
+        """初始化完成后重置标志，允许高度调整"""
+        self._initializing = False
+
     def _on_at_trigger_check(self):
         """检测 @ 触发"""
         cursor = self.textCursor()
