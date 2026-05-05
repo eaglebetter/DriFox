@@ -602,7 +602,7 @@ class OpenAIChatWorker(QThread):
                 self._check_and_notify_stage_change()
 
                 QCoreApplication.processEvents()
-                time.sleep(0.2)
+                time.sleep(0.01)
 
         except Exception as e:
             logger.exception("请求失败!")
@@ -832,7 +832,7 @@ class OpenAIChatWorker(QThread):
                         too_call_template["id"] = tc_id
                         too_call_template["function"]["name"] = name
                         tool_calls.append(too_call_template)
-                        logger.warning(f"[ToolCall修复] 发现孤立 tool result: id={tool_call_id[:20]}...")
+                        logger.warning(f"[ToolCall修复] 发现孤立 tool result: id={tc_id[:20]}...")
                         modified = True
                 msg["tool_calls"] = tool_calls
                 fixed_messages.append(msg)

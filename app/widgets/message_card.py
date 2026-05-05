@@ -5,12 +5,10 @@ import json
 import math
 import re
 import urllib.parse
-from functools import lru_cache
 from datetime import datetime
+from functools import lru_cache
 from html import escape
 from typing import List, Dict, Any, Optional
-
-from loguru import logger
 
 from PyQt5.QtCore import (
     Qt,
@@ -40,6 +38,7 @@ from PyQt5.QtWidgets import (
     QSizePolicy,
     QTextEdit,
 )
+from loguru import logger
 from markdown import Markdown
 from pygments import highlight
 from pygments.formatters import HtmlFormatter
@@ -60,10 +59,10 @@ from app.utils.message_content import (
     content_to_text,
     ensure_content_blocks, make_tool_result_block,
 )
+from app.utils.utils import get_font_family_css, get_icon
 from app.widgets.render_helpers import (
     render_tool_block,
 )
-from app.utils.utils import get_font_family_css, get_icon
 
 # ======== Markdown 实例 ========
 _md_instance = None
@@ -315,8 +314,7 @@ def _render_tool_block_content(content: str) -> str:
     tool_call_id: xxx
     </tool>
     """
-    from loguru import logger
-    
+
     tool_name = ""
     tool_args_str = ""
     tool_result = ""
@@ -363,7 +361,6 @@ def _render_tool_block_content(content: str) -> str:
             line = content[args_start:].split("\n")[0]
             tool_args_str = line[args_start + 5:].strip()
             result_search_start = args_start + len(line)
-
     # ========== 解析 success ==========
     success_match = re.search(r"^success:\s*(.+?)\s*$", content, re.MULTILINE)
     if success_match:
@@ -384,6 +381,9 @@ def _render_tool_block_content(content: str) -> str:
             tool_result = (result_content + remaining[:next_field_match.start()]).strip()
         else:
             tool_result = result_content.strip()
+    
+    # 转义 result 中的换行符（参数预览和表格不支持多行显示）
+    tool_result = tool_result.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\\n")
 
     # ========== 解析 args JSON 为字典 ==========
     args_dict = {}
@@ -398,6 +398,11 @@ def _render_tool_block_content(content: str) -> str:
     else:
         # 没有 args，尝试从整个 content 中提取参数
         args_dict = _extract_args_by_regex(content)
+    
+    # 转义参数中的换行符（参数预览和表格不支持多行显示）
+    for key in args_dict:
+        if isinstance(args_dict[key], str):
+            args_dict[key] = args_dict[key].replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\\n")
 
     return render_tool_block(
         tool_name, args_dict, tool_result, tool_success, collapsed=True,
@@ -408,12 +413,12 @@ def _render_tool_block_content(content: str) -> str:
 def _extract_args_by_regex(content: str) -> dict:
     """
     当 JSON 解析失败时，使用正则表达式提取参数。
-    处理包含大量转义字符和被截断的字符串的情况。
+    处理包含未转义引号、换行符等复杂情况。
     """
     args = {}
     
     # 提取常见的字符串参数
-    string_params = ["path", "oldString", "newString", "command", "url", "pattern", "query", "name"]
+    string_params = ["path", "oldString", "newString", "command", "url", "pattern", "query", "name", "_raw_args", ""]
     
     for param in string_params:
         # 查找 "param": " 后面开始的位置
@@ -421,25 +426,41 @@ def _extract_args_by_regex(content: str) -> dict:
         match = re.search(pattern, content)
         if match:
             start = match.end()
-            # 从 start 开始，找到第一个未转义的引号 "
+            # 从 start 开始，找到字符串真正的结束位置
+            # 策略：找到最后一个 " 后面紧跟 , 或 } 的位置
             i = start
+            last_valid_end = -1  # 最后一个有效的字符串结束位置
+            
             while i < len(content):
-                if content[i] == '"':
-                    # 找到结束引号
-                    value = content[start:i]
-                    # 清理截断标记
-                    value = value.replace('\n... [内容已截断]', '').replace('... [内容已截断]', '')
-                    # 解码转义字符
-                    try:
-                        args[param] = value.encode().decode('unicode_escape')
-                    except:
-                        args[param] = value
-                    break
-                elif content[i] == '\\':
+                c = content[i]
+                if c == '\\':
                     # 转义字符，跳过下一个字符
                     i += 2
+                    continue
+                elif c == '"':
+                    # 检查这是否是真正的字符串结束
+                    next_i = i + 1
+                    while next_i < len(content) and content[next_i] in ' \t\n\r':
+                        next_i += 1
+                    if next_i < len(content) and content[next_i] in ',}':
+                        # 这是有效的结束位置，记录下来
+                        last_valid_end = i
+                    i += 1
                 else:
                     i += 1
+            
+            # 提取到最后一个有效结束位置的内容
+            if last_valid_end > 0:
+                value = content[start:last_valid_end]
+            else:
+                # 没找到有效结束，取到文件末尾（去掉最后的 }）
+                value = content[start:].rstrip().rstrip('}')
+            
+            # 清理截断标记
+            value = value.replace('... [内容已截断]', '')
+            # 替换真实换行为转义的 \n（用于显示）
+            value = value.replace('\r\n', '\\n').replace('\r', '\\n').replace('\n', '\\n')
+            args[param] = value
     
     return args
 

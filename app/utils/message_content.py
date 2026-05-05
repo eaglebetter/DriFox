@@ -208,11 +208,11 @@ def content_to_markdown(content: Any) -> str:
                 for k, v in args.items():
                     if isinstance(v, str) and len(v) > 100:
                         # 截断长字符串但保留格式
-                        truncated = v[:80] + "..."
+                        truncated = v
                         args_parts.append(f'"{k}": "{truncated}"')
                     elif isinstance(v, str):
                         # 转义字符串中的引号和换行
-                        safe_v = v.replace('"', '\\"').replace('\n', '\\n')[:100]
+                        safe_v = v.replace('"', '\\"').replace('\n', '\\n')
                         args_parts.append(f'"{k}": "{safe_v}"')
                     else:
                         args_parts.append(f'"{k}": {json.dumps(v, ensure_ascii=False)[:50]}')
