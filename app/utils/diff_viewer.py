@@ -449,7 +449,7 @@ class DiffHtmlGenerator:
     @classmethod
     def generate_html_report(cls, diff_output: str, session_id: str = "", lazy_load: bool = True) -> str:
         """生成完整的 HTML diff 报告
-        
+
         Args:
             diff_output: diff 文本
             session_id: 会话 ID
@@ -472,14 +472,14 @@ class DiffHtmlGenerator:
 
         # 预渲染前 3 个文件用于首屏快速显示
         preload_count = 3 if lazy_load and total_files > 3 else total_files
-        
+
         # 生成所有文件的懒加载数据
         files_json = cls._generate_file_data_json(files)
-        
+
         for i, file_info in enumerate(files):
             file_id = f"file-{i}"
             file_tree_html += cls._generate_file_tree_item(file_info, file_id, i)
-            
+
             # 只预渲染前 preload_count 个文件
             if i < preload_count:
                 file_blocks_html += cls._generate_file_block(file_info, file_id, i)
@@ -537,17 +537,17 @@ class DiffHtmlGenerator:
         window._diffFiles = {files_json};
         window._loadedFiles = new Set({list(range(preload_count))});
         window._preloadCount = {preload_count};
-        
+
         function loadFileContent(fileId, index) {{
             if (window._loadedFiles.has(index)) return;
             window._loadedFiles.add(index);
-            
+
             const fileInfo = window._diffFiles[index];
             if (!fileInfo) return;
-            
+
             const container = document.getElementById('diff-content');
             const placeholder = document.getElementById('placeholder-' + fileId);
-            
+
             if (placeholder) {{
                 placeholder.outerHTML = fileInfo.html;
             }} else {{
@@ -559,21 +559,21 @@ class DiffHtmlGenerator:
                 container.appendChild(div);
             }}
         }}
-        
+
         // 点击文件列表项时加载并滚动
         document.querySelectorAll('.file-item').forEach(item => {{
             item.addEventListener('click', function(e) {{
                 e.preventDefault();
                 const targetId = this.getAttribute('data-target');
                 const index = parseInt(targetId.replace('file-', ''));
-                
+
                 // 加载文件内容
                 loadFileContent(targetId, index);
-                
+
                 // 更新激活状态
                 document.querySelectorAll('.file-item').forEach(el => el.classList.remove('active'));
                 this.classList.add('active');
-                
+
                 // 滚动到目标位置
                 const target = document.getElementById(targetId);
                 if (target) {{
@@ -589,7 +589,7 @@ class DiffHtmlGenerator:
                     const id = entry.target.id;
                     const index = parseInt(id.replace('file-', ''));
                     loadFileContent(id, index);
-                    
+
                     // 更新激活状态
                     const correspondingItem = document.querySelector(`.file-item[data-target="${{id}}"]`);
                     if (correspondingItem) {{
@@ -697,26 +697,26 @@ class DiffHtmlGenerator:
             {badges}
         </a>
         '''
-    
+
     @classmethod
     def _generate_file_data_json(cls, files: List[Dict]) -> str:
         """生成文件数据 JSON（用于懒加载），包含每个文件的完整 HTML"""
         import json
-        
+
         files_data = []
         for i, file_info in enumerate(files):
             file_id = f"file-{i}"
             rows_html = cls._generate_file_block_rows(file_info)
             header_html = cls._generate_file_block_header(file_info, file_id)
-            
+
             files_data.append({
                 "id": file_id,
                 "header": header_html,
                 "rows": rows_html
             })
-        
+
         return json.dumps(files_data, ensure_ascii=False)
-    
+
     @classmethod
     def _generate_file_block_header(cls, file_info: Dict, file_id: str) -> str:
         """生成文件块头部 HTML"""
@@ -724,7 +724,7 @@ class DiffHtmlGenerator:
         additions = file_info["additions"]
         deletions = file_info["deletions"]
         icon = cls._get_file_icon(path)
-        
+
         return f'''<div class="file-header">
             <span class="file-icon">{icon}</span>
             <span class="file-path">{cls.escape_html(path)}</span>
@@ -733,7 +733,7 @@ class DiffHtmlGenerator:
                 {f'<span class="del-stat">-{deletions}</span>' if deletions > 0 else ""}
             </div>
         </div>'''
-    
+
     @classmethod
     def _generate_file_block_rows(cls, file_info: Dict) -> str:
         """生成文件块的行内容 HTML（不含外层容器）"""
@@ -797,7 +797,7 @@ class DiffHtmlGenerator:
                     <span class="line-code">{cls.escape_html(line)}</span>
                 </div>
                 """
-        
+
         return diff_rows_html
 
     @classmethod
@@ -805,7 +805,7 @@ class DiffHtmlGenerator:
         """生成文件块 HTML（包含头部和内容）"""
         header_html = cls._generate_file_block_header(file_info, file_id)
         rows_html = cls._generate_file_block_rows(file_info)
-        
+
         return f'''
         <div class="file-block" id="{file_id}">
             {header_html}
@@ -870,11 +870,11 @@ class DiffHtmlGenerator:
 
                     # 读取文件内容
                     with open(
-                        backup_path, "r", encoding="utf-8", errors="replace"
+                            backup_path, "r", encoding="utf-8", errors="replace"
                     ) as f:
                         old_content = f.read()
                     with open(
-                        current_path, "r", encoding="utf-8", errors="replace"
+                            current_path, "r", encoding="utf-8", errors="replace"
                     ) as f:
                         new_content = f.read()
 
@@ -888,11 +888,12 @@ class DiffHtmlGenerator:
                     old_lines = normalize_lines(old_content)
                     new_lines = normalize_lines(new_content)
 
+                    abs_path = str(Path(current_path).resolve())
                     diff = difflib.unified_diff(
                         old_lines,
                         new_lines,
-                        fromfile=filename,
-                        tofile=filename,
+                        fromfile=abs_path,
+                        tofile=abs_path,
                         lineterm="\n",
                     )
 
@@ -917,7 +918,7 @@ class DiffHtmlGenerator:
 
     @classmethod
     def generate_report_for_files(
-        cls, file_paths: List[str], session_id: str = ""
+            cls, file_paths: List[str], session_id: str = ""
     ) -> str:
         """为指定文件生成 diff 报告"""
         diff_output = cls.get_diff_for_files(file_paths, session_id)
