@@ -10,11 +10,11 @@ from PyQt5.QtWidgets import (
     QLabel,
     QScrollArea,
 )
-from qfluentwidgets import CardWidget, StrongBodyLabel, TransparentToolButton
+from qfluentwidgets import CardWidget, StrongBodyLabel, TransparentToolButton, SimpleCardWidget
 from app.utils.utils import get_unified_font, get_icon
 
 
-class BaseSettingsCard(CardWidget):
+class BaseSettingsCard(SimpleCardWidget):
     """通用设置卡片基类"""
 
     closed = pyqtSignal()
@@ -26,6 +26,18 @@ class BaseSettingsCard(CardWidget):
         self._icon = icon
         self._current_tab = "main"  # 支持标签切换
         self._setup_base_ui()
+
+    def set_title(self, title: str):
+        """动态设置卡片标题"""
+        self._title = title
+        if hasattr(self, 'title_label') and self.title_label:
+            # 如果标题包含图标（格式如 "☁️ 添加服务商"），分离图标和文字
+            parts = title.split(' ', 1)
+            if len(parts) > 1:
+                self.icon_label.setText(parts[0])
+                self.title_label.setText(parts[1])
+            else:
+                self.title_label.setText(title)
 
     def _setup_base_ui(self):
         self.setSizePolicy(1, 0)  # 水平方向可扩展

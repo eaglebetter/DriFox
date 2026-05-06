@@ -73,12 +73,7 @@ def fetch_provider_models(
     headers = {"Authorization": f"Bearer {api_key}"} if auth_type == "bearer" else {}
 
     urls_to_try = []
-    if provider_name == "MiniMax (月之暗面)":
-        urls_to_try = [
-            f"{api_url.rstrip('/')}/v1/models",
-            f"{api_url.rstrip('/')}/api/models",
-        ]
-    elif provider_name == "DeepSeek":
+    if provider_name == "DeepSeek":
         urls_to_try = [f"{api_url.rstrip('/')}/models"]
     else:
         urls_to_try = [
@@ -740,6 +735,9 @@ class ProviderEditDialog(QDialog):
 class ProviderListSettingCard(ExpandSettingCard):
     providerChanged = pyqtSignal(dict)
     defaultProviderChanged = pyqtSignal(str)
+    # 新增信号：用于触发卡片显示
+    showAddProviderCard = pyqtSignal()  # 显示添加服务商卡片
+    showEditProviderCard = pyqtSignal(str, dict)  # 显示编辑服务商卡片
 
     def __init__(
         self,
@@ -799,32 +797,12 @@ class ProviderListSettingCard(ExpandSettingCard):
         self._adjustViewSize()
 
     def _show_add_dialog(self):
-        dialog = ProviderEditDialog("", {}, True, self.home)
-        if dialog.exec():
-            name, info = dialog.get_result()
-            if name and name not in self.providers:
-                self.providers[name] = info
-                qconfig.set(self.configItem, self.providers)
-                self._add_provider_item(name, info, False)
-                self.providerChanged.emit(self.providers)
+        # 发送信号，让主窗口处理卡片显示
+        self.showAddProviderCard.emit()
 
     def _show_edit_dialog(self, name: str, info: dict, item: ProviderItem):
-        self.providers = (
-            qconfig.get(self.configItem).copy()
-            if isinstance(qconfig.get(self.configItem), dict)
-            else {}
-        )
-        current_info = self.providers.get(name, {})
-        if not current_info:
-            current_info = info
-        dialog = ProviderEditDialog(name, current_info, False, self.home)
-        if dialog.exec():
-            new_name, new_info = dialog.get_result()
-            if new_name in self.providers:
-                self.providers[new_name] = new_info
-                qconfig.set(self.configItem, self.providers)
-                item.update_info(new_name, new_info)
-                self.providerChanged.emit(self.providers)
+        # 发送信号，让主窗口处理卡片显示
+        self.showEditProviderCard.emit(name, info)
 
     def _show_confirm_dialog(self, item: ProviderItem):
         title = self.tr("确定要删除这个服务商吗?")

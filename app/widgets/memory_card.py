@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """
 记忆管理卡片 - 复刻 memory_manager.py 弹窗完整样式
-"""from PyQt5.QtCore import pyqtSignal
+"""
+from PyQt5.QtCore import pyqtSignal
 from PyQt5.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -19,7 +20,7 @@ from qfluentwidgets import (
     ListWidget,
     SegmentedWidget,
 )
-from qfluentwidgets.components.widgets.card_widget import CardSeparator
+from qfluentwidgets.components.widgets.card_widget import CardSeparator, SimpleCardWidget
 
 from app.utils.utils import get_font_family_css
 

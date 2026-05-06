@@ -96,6 +96,9 @@ from app.widgets.llm_settings_card import (
 from app.widgets.memory_card import (
     MemoryCardContent,
 )
+from app.widgets.provider_edit_card import (
+    ProviderEditCard,
+)
 from app.widgets.message_card import (
     MessageCard,
     create_welcome_card,
@@ -643,6 +646,9 @@ class OpenAIChatToolWindow(ToolWindow):
         # 更新问题悬浮框
         if self._question_floating_widget:
             self._question_floating_widget.set_opacity(opacity)
+        # 更新服务商编辑卡片
+        if self._provider_edit_card:
+            self._provider_edit_card.set_opacity(opacity)
 
     def _restore_latest_or_create_session(self):
         # 如果是新复制的窗口，跳过历史会话恢复
@@ -840,6 +846,20 @@ class OpenAIChatToolWindow(ToolWindow):
         self._settings_popup.setVisible(False)
         self._settings_popup.closed.connect(self._on_settings_closed)
         self._settings_popup.configChanged.connect(self._load_model_configs)
+
+        # 连接服务商添加/编辑信号
+        self._settings_popup.llmProviderCard.showAddProviderCard.connect(self._show_provider_add_card)
+        self._settings_popup.llmProviderCard.showEditProviderCard.connect(self._show_provider_edit_card)
+
+        # 服务商编辑卡片
+        self._provider_edit_card = BaseSettingsCard("服务商配置", parent=self)
+        self._provider_edit_card.setFixedHeight(500)
+        self._provider_edit_popup = ProviderEditCard(parent=self)
+        self._provider_edit_popup.saved.connect(self._on_provider_edit_saved)
+        self._provider_edit_popup.closed.connect(self._on_provider_edit_closed)
+        self._provider_edit_card.content_layout.addWidget(self._provider_edit_popup)
+        self._provider_edit_card.setVisible(False)
+        layout.addWidget(self._provider_edit_card)
 
         self._todo_floating_widget = TodoFloatingWidget(self)
         self._todo_floating_widget.setVisible(False)
@@ -1101,32 +1121,16 @@ class OpenAIChatToolWindow(ToolWindow):
         self._model_selector_popup.show_at(self.current_model_btn)
 
     def _on_add_provider_from_popup(self):
-        """从模型选择弹窗点击「添加」按钮 - 弹出添加服务商窗口"""
+        """从模型选择弹窗点击「添加」按钮 - 显示添加服务商卡片"""
         self._model_selector_popup.close()
-        from app.widgets.provider_setting_card import ProviderEditDialog
-        dialog = ProviderEditDialog("", {}, True, self)
-        if dialog.exec():
-            name, info = dialog.get_result()
-            if name and info:
-                # 关键修复：将新添加的服务商写入配置
-                setting = Settings.get_instance()
-                saved_providers = setting.llm_saved_providers.value or {}
-                saved_providers[name] = info
-                setting.set(setting.llm_saved_providers, saved_providers, save=True)
-            # 刷新配置并重新加载弹窗
-            self._load_model_configs()
-            # 如果添加的服务商有模型，自动选中它
-            if name and info.get("模型名称"):
-                self._on_model_selected_from_popup(name, info.get("模型名称", ""))
+        self._show_provider_add_card()
 
     def _on_configure_providers_from_popup(self):
-        """从模型选择弹窗点击「配置」按钮 - 显示设置卡片并展开服务商配置"""
+        """从模型选择弹窗点击「配置」按钮 - 显示设置卡片"""
         self._model_selector_popup.close()
-        # 打开设置卡片
+        # 显示设置卡片（不展开下拉，因为下拉会挡住卡片）
         self._settings_popup.show()
         self._settings_popup.raise_()
-        # 展开「已保存的服务商」下拉
-        self._settings_popup.llmProviderCard.setExpand(True)
         # 滚动到顶部
         QTimer.singleShot(100, self._scroll_settings_to_top)
 
@@ -1240,6 +1244,74 @@ class OpenAIChatToolWindow(ToolWindow):
         # 可以在这里添加一些清理逻辑
         pass
 
+    def _on_provider_edit_saved(self, provider_name: str, provider_info: dict):
+        """服务商编辑保存后的回调"""
+        from app.utils.config import Settings
+        setting = Settings.get_instance()
+        saved_providers = setting.llm_saved_providers.value or {}
+        saved_providers[provider_name] = provider_info
+        setting.llm_saved_providers.value = saved_providers
+
+        # 隐藏服务商编辑卡片，显示设置卡片
+        self._provider_edit_card.hide()
+        self._settings_popup.show()
+
+        # 关闭模型选择器popup，下次打开会重新加载数据
+        if hasattr(self, '_model_selector_popup') and self._model_selector_popup:
+            self._model_selector_popup.close()
+
+        # 刷新配置
+        self._load_model_configs()
+        from qfluentwidgets import InfoBar, InfoBarPosition
+        InfoBar.success("已保存", f"服务商 '{provider_name}' 已保存", parent=self, duration=2000)
+
+    def _on_provider_edit_closed(self):
+        """服务商编辑关闭后的回调"""
+        # 隐藏服务商编辑卡片，显示设置卡片
+        self._provider_edit_card.hide()
+        self._settings_popup.show()
+        # 关闭模型选择器popup，确保下次打开重新加载数据
+        if hasattr(self, '_model_selector_popup') and self._model_selector_popup:
+            self._model_selector_popup.close()
+
+    def _show_provider_add_card(self):
+        """显示添加服务商卡片"""
+        # 隐藏设置卡片，显示服务商编辑卡片
+        self._settings_popup.hide()
+        # 设置卡片标题
+        self._provider_edit_card.set_title("☁️ 添加服务商")
+        # 重新创建 ProviderEditCard 用于添加
+        self._provider_edit_popup = ProviderEditCard(provider_name="", provider_info={}, is_new=True, parent=self)
+        self._provider_edit_popup.saved.connect(self._on_provider_edit_saved)
+        self._provider_edit_popup.closed.connect(self._on_provider_edit_closed)
+        # 替换卡片内容
+        while self._provider_edit_card.content_layout.count():
+            item = self._provider_edit_card.content_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        self._provider_edit_card.content_layout.addWidget(self._provider_edit_popup)
+        self._provider_edit_card.show()
+
+    def _show_provider_edit_card(self, provider_name: str, provider_info: dict):
+        """显示编辑服务商卡片"""
+        # 隐藏设置卡片，显示服务商编辑卡片
+        self._settings_popup.hide()
+        # 设置卡片标题
+        self._provider_edit_card.set_title(f"☁️ 编辑: {provider_name}")
+        # 重新创建 ProviderEditCard 用于编辑
+        self._provider_edit_popup = ProviderEditCard(
+            provider_name=provider_name, provider_info=provider_info, is_new=False, parent=self
+        )
+        self._provider_edit_popup.saved.connect(self._on_provider_edit_saved)
+        self._provider_edit_popup.closed.connect(self._on_provider_edit_closed)
+        # 替换卡片内容
+        while self._provider_edit_card.content_layout.count():
+            item = self._provider_edit_card.content_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        self._provider_edit_card.content_layout.addWidget(self._provider_edit_popup)
+        self._provider_edit_card.show()
+
     def _hide_main_popups(self):
         """隐藏主要的悬浮面板（互斥显示）
         
@@ -1250,6 +1322,7 @@ class OpenAIChatToolWindow(ToolWindow):
         self._history_card.hide()
         self._settings_popup.hide()
         self._memory_card.hide()
+        self._provider_edit_card.hide()
 
     def _toggle_model_config_card(self):
         """切换模型配置卡片的显示"""
