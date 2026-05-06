@@ -1035,14 +1035,6 @@ class OpenAIChatWorker(QThread):
         """
         fixed_messages: List[Dict] = []
         modified = False
-        too_call_template = {
-          "id": "",
-          "type": "function",
-          "function": {
-            "name": "",
-            "arguments": ""
-          }
-        }
         # 记录所有尚未匹配的 tool_call_id（用于处理并行 tool_calls）
         pending_tool_call_ids: set = set()
         
@@ -1058,10 +1050,16 @@ class OpenAIChatWorker(QThread):
                 tool_calls_ids = [tc.get("id") for tc in tool_calls]
                 for tc_id, name in pending_tool_call_ids:
                     if tc_id not in tool_calls_ids:
-                        # 添加一个空的 tool_call，用于占位
-                        too_call_template["id"] = tc_id
-                        too_call_template["function"]["name"] = name
-                        tool_calls.append(too_call_template)
+                        # BUG 修复: 每次添加时创建新的字典对象，避免所有 tool_call 指向同一引用
+                        new_tool_call = {
+                            "id": tc_id,
+                            "type": "function",
+                            "function": {
+                                "name": name,
+                                "arguments": ""
+                            }
+                        }
+                        tool_calls.append(new_tool_call)
                         logger.warning(f"[ToolCall修复] 发现孤立 tool result: id={tc_id[:20]}...")
                         modified = True
                 msg["tool_calls"] = tool_calls
@@ -1629,7 +1627,7 @@ class OpenAIChatWorker(QThread):
             if missing_args:
                 logger.warning(
                     f"[ToolCall] ⚠️ 缺少必需参数: tool={tool_name}, missing={missing_args}, "
-                    f"raw_args='{original_args_str[:200] if isinstance(original_args_str, str) else str(original_args_str)[:200]}...'"
+                    f"raw_args='{original_args_str if isinstance(original_args_str, str) else str(original_args_str)}'"
                 )
                 tool_call_id = tc["id"]
                 round_id = f"round_{id(tc)}"

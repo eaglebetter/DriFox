@@ -126,8 +126,8 @@ class BaseSettingsCard(SimpleCardWidget):
         self.content_widget = QWidget()
         self.content_widget.setStyleSheet("background: transparent;")
         self.content_layout = QVBoxLayout(self.content_widget)
-        self.content_layout.setContentsMargins(0, 4, 0, 4)
-        self.content_layout.setSpacing(6)
+        self.content_layout.setContentsMargins(4, 2, 4, 2)
+        self.content_layout.setSpacing(4)
 
         self.scroll_area.setWidget(self.content_widget)
         main_layout.addWidget(self.scroll_area, 1)

@@ -853,7 +853,7 @@ class OpenAIChatToolWindow(ToolWindow):
 
         # 服务商编辑卡片
         self._provider_edit_card = BaseSettingsCard("服务商配置", parent=self)
-        self._provider_edit_card.setFixedHeight(500)
+        self._provider_edit_card.setFixedHeight(380)
         self._provider_edit_popup = ProviderEditCard(parent=self)
         self._provider_edit_popup.saved.connect(self._on_provider_edit_saved)
         self._provider_edit_popup.closed.connect(self._on_provider_edit_closed)
@@ -1148,18 +1148,22 @@ class OpenAIChatToolWindow(ToolWindow):
         """从弹窗选中模型后切换"""
         self._current_provider_name = provider_name
         self._current_model_name = model_name
-        if provider_name in self._valid_configs:
-            self._valid_configs[provider_name]["模型名称"] = model_name
         setting = Settings.get_instance()
         setting.set(setting.llm_selected_model, provider_name, save=True)
-        
-        # 关键修复：同步更新 saved_providers 中的模型名称，
-        # 确保 ChatEngine 的 _get_current_model_config 能读到正确的模型名
+
+        # 更新 saved_providers 中的模型名称
         saved_providers = setting.llm_saved_providers.value or {}
         if provider_name in saved_providers:
             saved_providers[provider_name]["模型名称"] = model_name
             setting.set(setting.llm_saved_providers, saved_providers, save=True)
-        
+
+        # 更新 _valid_configs 确保 ChatEngine 能读到最新配置
+        self._valid_configs[provider_name] = saved_providers.get(provider_name, {}).copy()
+        self._valid_configs[provider_name]["模型名称"] = model_name
+
+        # 重新加载模型配置确保所有组件同步
+        self._load_model_configs()
+
         self._update_model_selector_btn()
         self._refresh_context_usage_indicator()
         self._update_balance_display()

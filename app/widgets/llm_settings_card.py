@@ -403,6 +403,9 @@ class LLMSettingsCard(SimpleCardWidget):
             self.llmApiEnabledCard.setContent(f"http://localhost:{port}/docs")
 
     def show(self):
+        # 刷新服务商列表
+        if hasattr(self, 'llmProviderCard'):
+            self.llmProviderCard._refresh_items()
         self.setVisible(True)
         self.raise_()
 

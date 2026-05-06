@@ -11,13 +11,13 @@ from PyQt5.QtWidgets import (
     QHBoxLayout,
     QFrame,
     QLineEdit,
-    QDoubleSpinBox,
+    QDoubleSpinBox, QLabel,
 )
 from qfluentwidgets import (
     BodyLabel,
     LineEdit,
     PrimaryPushButton,
-    PushButton,
+    PushButton, IconWidget,
 )
 
 from app.constants import (
@@ -109,20 +109,18 @@ class ProviderEditCard(QWidget):
         """)
 
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(8, 4, 8, 8)
-        main_layout.setSpacing(6)
+        main_layout.setContentsMargins(8, 4, 8, 4)
+        main_layout.setSpacing(4)
 
         # 连接配置区域
         connection_frame = QFrame()
         connection_layout = QVBoxLayout(connection_frame)
-        connection_layout.setContentsMargins(10, 6, 10, 6)
-        connection_layout.setSpacing(6)
-
+        connection_layout.setContentsMargins(10, 4, 10, 4)
+        connection_layout.setSpacing(4)
+        name_row = QHBoxLayout()
+        name_row.addWidget(BodyLabel("服务商: "))
         # 服务商名称行
         if self.is_new:
-            name_row = QHBoxLayout()
-            name_row.addWidget(BodyLabel("服务商: "))
-
             self.nameCombo = SearchableEditableComboBox()
             for provider_name in FREE_PROVIDERS.keys():
                 icon_name = PROVIDER_ICONS.get(provider_name, "大模型")
@@ -134,6 +132,7 @@ class ProviderEditCard(QWidget):
             name_row.addWidget(self.nameCombo, 1)
 
             self.getKeyBtn = PrimaryPushButton("获取Key")
+            self.getKeyBtn.setFixedHeight(24)
             self.getKeyBtn.clicked.connect(lambda: self._open_help_url(self.nameCombo.currentText()))
             name_row.addWidget(self.getKeyBtn)
 
@@ -145,12 +144,25 @@ class ProviderEditCard(QWidget):
                 template = FREE_PROVIDERS[self.provider_name]
             else:
                 template = self.provider_info
-            name_row = QHBoxLayout()
-            name_row.addWidget(BodyLabel("服务商: "))
+            # 服务商图标
+            icon_name = PROVIDER_ICONS.get(self.provider_name, "大模型")
+            icon = get_icon(icon_name)
+            icon_label = IconWidget(icon)
+            name_row.addWidget(icon_label)
+
             name_value = BodyLabel(self.provider_name)
             name_value.setStyleSheet(f"color: #ffffff; font-weight: bold; {get_font_family_css()} font-size: 12px;")
             name_row.addWidget(name_value, 1)
-            name_row.addStretch()
+
+            # 获取 Key 按钮（如果有的话）
+            if self.provider_name in FREE_PROVIDERS and FREE_PROVIDERS[self.provider_name].get("获取地址"):
+                getKeyBtn = PrimaryPushButton("获取Key")
+                getKeyBtn.setFixedHeight(24)
+                getKeyBtn.clicked.connect(lambda: self._open_help_url(self.provider_name))
+                name_row.addWidget(getKeyBtn)
+            else:
+                name_row.addStretch()
+
             connection_layout.addLayout(name_row)
 
         # API URL 行
@@ -187,8 +199,8 @@ class ProviderEditCard(QWidget):
         # 模型配置区域
         model_frame = QFrame()
         model_layout = QVBoxLayout(model_frame)
-        model_layout.setContentsMargins(10, 6, 10, 6)
-        model_layout.setSpacing(6)
+        model_layout.setContentsMargins(10, 4, 10, 4)
+        model_layout.setSpacing(4)
 
         model_row = QHBoxLayout()
         model_row.addWidget(BodyLabel("模型列表: "))
@@ -234,8 +246,8 @@ class ProviderEditCard(QWidget):
         # 参数配置区域
         param_frame = QFrame()
         param_layout = QVBoxLayout(param_frame)
-        param_layout.setContentsMargins(10, 6, 10, 6)
-        param_layout.setSpacing(6)
+        param_layout.setContentsMargins(10, 4, 10, 4)
+        param_layout.setSpacing(4)
 
         temp_row = QHBoxLayout()
         temp_row.addWidget(BodyLabel("模型温度: "))
@@ -263,34 +275,14 @@ class ProviderEditCard(QWidget):
 
         main_layout.addWidget(param_frame)
 
-        # 按钮区域
-        btn_layout = QHBoxLayout()
-        btn_layout.addStretch()
-
-        cancel_btn = PushButton("取消")
-        cancel_btn.setFixedSize(55, 26)
-        cancel_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: rgba(85, 85, 85, 180);
-                color: white;
-                border: none;
-                border-radius: 4px;
-                font-size: 11px;
-                {get_font_family_css()}
-            }}
-            QPushButton:hover {{
-                background-color: rgba(100, 100, 100, 200);
-            }}
-        """)
-        cancel_btn.clicked.connect(self._on_cancel)
-        btn_layout.addWidget(cancel_btn)
-
+        # 保存按钮（右上角）
+        save_layout = QHBoxLayout()
+        save_layout.addStretch()
         save_btn = PrimaryPushButton("保存")
-        save_btn.setFixedSize(55, 26)
+        save_btn.setFixedHeight(28)
         save_btn.clicked.connect(self._on_save)
-        btn_layout.addWidget(save_btn)
-
-        main_layout.addLayout(btn_layout)
+        save_layout.addWidget(save_btn)
+        main_layout.addLayout(save_layout)
 
     def _load_preset_urls(self):
         """加载预设端点"""
