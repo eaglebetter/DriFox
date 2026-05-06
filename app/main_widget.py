@@ -1011,6 +1011,12 @@ class OpenAIChatToolWindow(ToolWindow):
         dialog = ProviderEditDialog("", {}, True, self)
         if dialog.exec():
             name, info = dialog.get_result()
+            if name and info:
+                # 关键修复：将新添加的服务商写入配置
+                setting = Settings.get_instance()
+                saved_providers = setting.llm_saved_providers.value or {}
+                saved_providers[name] = info
+                setting.set(setting.llm_saved_providers, saved_providers, save=True)
             # 刷新配置并重新加载弹窗
             self._load_model_configs()
             # 如果添加的服务商有模型，自动选中它

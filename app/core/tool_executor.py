@@ -22,7 +22,6 @@ class ToolExecutor:
     def __init__(self, homepage=None, workdir: str = None):
         self._homepage = homepage
         self._builtin_tools: Optional[BuiltinTools] = None
-        self._canvas_tools_executor = None
         self._workdir = workdir
         self._custom_tools: Dict[str, Callable] = {}
         self._session_id: Optional[str] = None
@@ -210,24 +209,6 @@ class ToolExecutor:
             # 记录失败不阻塞主流程
             logger.warning(f"[ToolExecutor] 编辑后备份失败: {e}")
 
-    def cancel_tool(self, tool_name: str = None):
-        """取消正在执行的工具
-        
-        Args:
-            tool_name: 要取消的工具名称，None 表示取消所有
-        """
-        if self._builtin_tools:
-            # 取消文件工具（如 grep）
-            if self._builtin_tools._file_tools:
-                self._builtin_tools._file_tools.cancel()
-        
-        logger.info(f"[ToolExecutor] Tool cancelled: {tool_name or 'all'}")
-
-    def register_custom_tool(self, name: str, handler: Callable):
-        """注册自定义工具"""
-        self._custom_tools[name] = handler
-        logger.info(f"[ToolExecutor] Registered custom tool: {name}")
-
     def set_memory_manager(self, memory_manager):
         if self._builtin_tools:
             self._builtin_tools.set_memory_manager(memory_manager)
@@ -237,10 +218,6 @@ class ToolExecutor:
         if self._builtin_tools:
             self._builtin_tools.set_llm_config_getter(getter)
             logger.info("[ToolExecutor] LLM config getter attached to BuiltinTools")
-
-    def set_canvas_tools_executor(self, executor):
-        self._canvas_tools_executor = executor
-        logger.info("[ToolExecutor] Canvas tools executor attached")
 
     def set_session_messages_getter(self, getter: Callable):
         if self._builtin_tools:
@@ -688,11 +665,6 @@ class ToolExecutor:
                 return {"error": str(e)}
         return {"error": "Skill execution not available"}
 
-    def reload_workdir(self, workdir: str):
-        """重新加载工作目录"""
-        self._workdir = workdir
-        self._initialize_builtin_tools()
-
     def set_sub_agent_manager(self, sub_agent_manager):
         """设置子智能体管理器"""
         if self._builtin_tools:
@@ -702,15 +674,4 @@ class ToolExecutor:
                 "[ToolExecutor] SubAgentManager attached to BuiltinTools and TaskTools"
             )
 
-    def set_stage_callback(self, callback):
-        """设置 stage 切换回调"""
-        if self._builtin_tools:
-            self._builtin_tools._set_stage_callback = callback
-            logger.info("[ToolExecutor] Stage callback attached to BuiltinTools")
 
-    @property
-    def file_modified_signal(self):
-        """获取文件修改信号，用于连接"""
-        if self._builtin_tools:
-            return self._builtin_tools.fileModified
-        return None

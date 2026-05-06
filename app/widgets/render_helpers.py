@@ -56,12 +56,13 @@ def _escape_text_for_plain(text: str) -> str:
     text = re.sub(r"<[^>]+>", "", text)
     # 5. 移除可能造成渲染问题的特殊空白字符
     text = text.replace("\x00", "")  # 移除 null 字符
-    # 6. 规范化换行符
+    # 6. 规范化换行符并转义为字面量（用于不支持多行的显示）
     text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = text.replace("\n", "\\n")  # 换行符转为字面量 \n
     return text.strip()
 
 
-def _truncate_value(v, max_len: int = 50) -> str:
+def _truncate_value(v, max_len: int = 80) -> str:
     """截断单个参数值"""
     if isinstance(v, dict):
         s = json.dumps(v, ensure_ascii=False)
@@ -80,18 +81,24 @@ def _format_args_preview(tool_args: dict, max_total_len: int = 80) -> str:
     """
     格式化参数预览为 '参数1=值1; 参数2=值2' 格式。
     限制总字数，超过则截断并添加 '...'。
+    
+    优化：优先显示简短的参数值，长内容进行截断。
     """
     if not tool_args:
         return ""
     
+    # 按值的长度排序（短的优先），确保重要的简短参数优先显示
+    sorted_args = sorted(tool_args.items(), key=lambda x: len(str(x[1])))
+    
     parts = []
     total_len = 0
     
-    for key, value in tool_args.items():
+    for key, value in sorted_args:
         # 清理值中的特殊字符
         value_str = _truncate_value(value)
         value_str = _escape_text_for_plain(value_str)
-        
+        # 参数预览也不支持多行，确保换行符被转义
+        value_str = value_str.replace("\n", "\\n")
         # 构建参数片段
         part = f"{key}={value_str}"
         

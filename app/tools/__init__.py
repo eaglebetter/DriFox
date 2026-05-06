@@ -421,7 +421,7 @@ def get_builtin_tools_schema() -> List[Dict]:
             "type": "function",
             "function": {
                 "name": "write",
-                "description": "创建新文件或覆盖现有文件。会自动创建不存在的目录。",
+                "description": "创建新文件或覆盖现有文件,会自动创建不存在的目录，避免一次性写入超大型文件，超大型文件采用多次工具编辑实现。",
                 "parameters": {
                     "type": "object",
                     "properties": {
