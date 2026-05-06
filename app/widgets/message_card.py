@@ -314,7 +314,6 @@ def _render_tool_block_content(content: str) -> str:
     tool_call_id: xxx
     </tool>
     """
-    print(content)
     tool_name = ""
     tool_args_str = ""
     tool_result = ""
@@ -403,7 +402,6 @@ def _render_tool_block_content(content: str) -> str:
     for key in args_dict:
         if isinstance(args_dict[key], str):
             args_dict[key] = args_dict[key].replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\\n")
-
     return render_tool_block(
         tool_name, args_dict, tool_result, tool_success, collapsed=True,
         tool_call_id=tool_call_id
