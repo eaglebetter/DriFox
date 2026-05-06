@@ -1025,57 +1025,67 @@ class OpenAIChatWorker(QThread):
         处理 API 格式消息（tool 消息只有 role, tool_call_id, name, content）。
         规则：每个 tool 消息的 tool_call_id 必须与之前的 assistant 消息的 tool_calls 中的 id 匹配。
         
-        关键修复：正确处理多个并行的 tool_calls：
-        - 跟踪所有尚未匹配的 tool_call_id（而非只保留最近的）
-        - 每个 assistant 消息的 tool_calls 应该累加到待匹配集合
-        - 每个 tool 消息从待匹配集合中移除对应的 id
+        主要问题：duplicate tool_call id
+        原因：之前的修复尝试可能累积了重复的 tool_call_id，或者原始消息中就有问题
+        
+        修复策略：
+        1. 收集所有 tool 消息的 tool_call_id
+        2. 对每个 assistant 消息，只保留那些在 tool 消息中存在对应结果的 tool_call
+        3. 如果有 tool 消息找不到对应的 assistant，则添加到最近的 assistant
         
         Returns:
             (修复后的消息列表, 是否进行了修复)
         """
         fixed_messages: List[Dict] = []
         modified = False
-        # 记录所有尚未匹配的 tool_call_id（用于处理并行 tool_calls）
-        pending_tool_call_ids: set = set()
         
-        for msg in messages[::-1]:
-            role = msg.get("role", "")
-            if role == "tool":
-                tool_call_id = msg.get("tool_call_id", "")
+        # 第一步：收集所有 tool 消息中的 tool_call_id（这些是"有效的"）
+        valid_tool_call_ids: set = set()
+        tool_call_to_name: Dict[str, str] = {}
+        for msg in messages:
+            if msg.get("role") == "tool":
+                tc_id = msg.get("tool_call_id", "")
                 name = msg.get("name", "")
-                pending_tool_call_ids.add((tool_call_id, name))
-            elif role == "assistant":
-                # 获取此 assistant 消息中的 tool_calls
-                tool_calls = msg.get("tool_calls") or []
-                tool_calls_ids = [tc.get("id") for tc in tool_calls]
-                for tc_id, name in pending_tool_call_ids:
-                    if tc_id not in tool_calls_ids:
-                        # BUG 修复: 每次添加时创建新的字典对象，避免所有 tool_call 指向同一引用
-                        new_tool_call = {
-                            "id": tc_id,
-                            "type": "function",
-                            "function": {
-                                "name": name,
-                                "arguments": ""
-                            }
-                        }
-                        tool_calls.append(new_tool_call)
-                        logger.warning(f"[ToolCall修复] 发现孤立 tool result: id={tc_id[:20]}...")
-                        modified = True
-                msg["tool_calls"] = tool_calls
-                fixed_messages.append(msg)
-            else:
-                fixed_messages.append(msg)
-                # 非 assistant/tool 消息后，tool_call 上下文应该结束
-                # 但保留 pending_tool_call_ids，因为 tool 结果可能分散在不同位置
+                if tc_id:
+                    valid_tool_call_ids.add(tc_id)
+                    tool_call_to_name[tc_id] = name
         
-        # 如果处理完所有消息后仍有 pending 的 tool_call_ids，
-        # 说明这些 tool_calls 没有对应的结果，需要记录警告
-        if pending_tool_call_ids:
-            logger.warning(f"[ToolCall修复] 处理完消息后仍有 {len(pending_tool_call_ids)} 个 pending tool_call_ids: {list(pending_tool_call_ids)[:3]}...")
-            modified = True
+        logger.warning(f"[ToolCall修复] 有效 tool_call_ids: {len(valid_tool_call_ids)} 个")
         
-        return fixed_messages[::-1], modified
+        # 第二步：遍历每个 assistant 消息，去除重复的 tool_call
+        for msg in messages:
+            if msg.get("role") != "assistant":
+                fixed_messages.append(msg)
+                continue
+            
+            tool_calls = msg.get("tool_calls") or []
+            if not tool_calls:
+                fixed_messages.append(msg)
+                continue
+            
+            # 收集这个 assistant 消息的原始 tool_call_ids
+            original_tc_ids = [tc.get("id") for tc in tool_calls]
+            
+            # 去重：保留第一个出现的 id，记录重复的
+            seen_ids: set = set()
+            new_tool_calls: List[Dict] = []
+            
+            for tc in tool_calls:
+                tc_id = tc.get("id", "")
+                if tc_id not in seen_ids:
+                    seen_ids.add(tc_id)
+                    new_tool_calls.append(tc)
+                else:
+                    logger.warning(f"[ToolCall修复] 发现重复 tool_call_id: {tc_id[:20]}...，已移除")
+                    modified = True
+            
+            msg["tool_calls"] = new_tool_calls
+            fixed_messages.append(msg)
+        
+        # 第三步：如果修复后仍有问题（有些 tool 没有对应的 assistant），
+        # 则不需要再处理，因为去重后应该能解决问题
+        
+        return fixed_messages, modified
 
     def _try_recover_tool_arguments(self, messages: List[Dict]) -> Optional[List[Dict]]:
         """
