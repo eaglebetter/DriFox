@@ -1,8 +1,8 @@
-from typing import Any
+from typing import Any, Optional
 
 
 class ToolResult:
-    def __init__(self, success: bool, content: Any = None, error: str = None):
+    def __init__(self, success: bool, content: Any = None, error: Optional[str] = None):
         self.success = success
         self.content = content
         # 存储错误信息

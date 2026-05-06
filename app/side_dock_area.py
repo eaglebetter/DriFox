@@ -531,6 +531,22 @@ class ToolPopupDialog(QDialog):
         if self._lock_btn_widget:
             self._lock_btn_widget.hide()
         Settings.get_instance().save()
+        
+        # 通知父窗口移除引用，防止内存泄漏
+        # 使用更健壮的检查，确保 tool_instance 有效
+        try:
+            from PyQt5 import sip
+            if (self.tool_instance and 
+                hasattr(self.tool_instance, '_popup_refs') and
+                not sip.isdeleted(self.tool_instance)):
+                # 使用 try-except 防止迭代时引用被修改
+                refs = list(self.tool_instance._popup_refs)
+                if self in refs:
+                    refs.remove(self)
+                    self.tool_instance._popup_refs = refs
+        except Exception:
+            pass
+        
         self.deleteLater()
         super().closeEvent(event)
 

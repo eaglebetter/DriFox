@@ -132,20 +132,21 @@ class _HistoryItemCard(SimpleCardWidget):
         self.title_label = BodyLabel(title[:100], self)
         self.title_label.setWordWrap(True)
         self.title_label.setStyleSheet(
-            "color: white; font-weight: bold;" if is_current else "color: white;"
+            f"color: white; font-weight: bold; {get_font_family_css()}" if is_current else f"color: white; {get_font_family_css()}"
         )
         top_row.addWidget(self.title_label, 1)
 
         self.title_edit = QLineEdit(title[:100], self)
         self.title_edit.setStyleSheet(
-            """
-            QLineEdit {
+            f"""
+            QLineEdit {{
                 background-color: rgba(0, 0, 0, 0.3);
                 border: 1px solid rgba(102, 198, 255, 0.5);
                 border-radius: 4px;
                 color: white;
                 padding: 2px 6px;
-            }
+                {get_font_family_css()}
+            }}
             """
         )
         self.title_edit.hide()
@@ -156,7 +157,7 @@ class _HistoryItemCard(SimpleCardWidget):
 
         self.current_indicator = CaptionLabel("🔥 活跃中", self)
         self.current_indicator.setStyleSheet(
-            "color: #fff; font-weight: bold; background-color: rgba(102, 198, 255, 0.35); border-radius: 4px; padding: 2px 8px;"
+            f"color: #fff; font-weight: bold; background-color: rgba(102, 198, 255, 0.35); border-radius: 4px; padding: 2px 8px; {get_font_family_css()}"
         )
         self.current_indicator.setVisible(is_current)
         top_row.addWidget(self.current_indicator, 0, Qt.AlignTop)
@@ -187,7 +188,7 @@ class _HistoryItemCard(SimpleCardWidget):
         meta_text = f"{rel_time} · {message_count} 轮对话 · "
         self.meta_label = CaptionLabel(meta_text, self)
         self.meta_label.setStyleSheet(
-            "color: #ffb65c;" if is_current else "color: rgba(255, 255, 255, 0.5);"
+            f"color: #ffb65c; {get_font_family_css()}" if is_current else f"color: rgba(255, 255, 255, 0.5); {get_font_family_css()}"
         )
         bottom_row.addWidget(self.meta_label)
 
@@ -196,7 +197,7 @@ class _HistoryItemCard(SimpleCardWidget):
         if preview:
             self.preview_label = CaptionLabel(preview, self)
             self.preview_label.setStyleSheet(
-                "color: rgba(255, 255, 255, 0.4); font-style: italic;"
+                f"color: rgba(255, 255, 255, 0.4); font-style: italic; {get_font_family_css()}"
             )
             self.preview_label.setWordWrap(True)
             bottom_row.addSpacing(25)
@@ -287,19 +288,20 @@ class _ArchivedItemCard(CardWidget):
 
         self.title_label = BodyLabel(title[:100], self)
         self.title_label.setWordWrap(True)
-        self.title_label.setStyleSheet("color: white;")
+        self.title_label.setStyleSheet(f"color: white; {get_font_family_css()}")
         top_row.addWidget(self.title_label, 1)
 
         self.title_edit = QLineEdit(title[:100], self)
         self.title_edit.setStyleSheet(
-            """
-            QLineEdit {
+            f"""
+            QLineEdit {{
                 background-color: rgba(0, 0, 0, 0.3);
                 border: 1px solid rgba(255, 180, 100, 0.5);
                 border-radius: 4px;
                 color: white;
                 padding: 2px 6px;
-            }
+                {get_font_family_css()}
+            }}
             """
         )
         self.title_edit.hide()
@@ -349,7 +351,7 @@ class _ArchivedItemCard(CardWidget):
         if message_count > 0:
             meta_text += f" · {message_count} 轮对话"
         self.meta_label = CaptionLabel(meta_text, self)
-        self.meta_label.setStyleSheet("color: rgba(255, 255, 255, 0.5);")
+        self.meta_label.setStyleSheet(f"color: rgba(255, 255, 255, 0.5); {get_font_family_css()}")
         bottom_row.addWidget(self.meta_label)
 
         bottom_row.addStretch()
@@ -357,7 +359,7 @@ class _ArchivedItemCard(CardWidget):
         if preview:
             self.preview_label = CaptionLabel(preview, self)
             self.preview_label.setStyleSheet(
-                "color: rgba(255, 255, 255, 0.4); font-style: italic;"
+                f"color: rgba(255, 255, 255, 0.4); font-style: italic; {get_font_family_css()}"
             )
             self.preview_label.setWordWrap(True)
             bottom_row.addSpacing(25)

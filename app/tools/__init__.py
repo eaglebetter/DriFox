@@ -141,9 +141,6 @@ class BuiltinTools(QObject):
     def execute_bash(self, command: str, timeout: int = 120,):
         return self._terminal_tools.execute_bash(command, timeout)
 
-    def run_verify(self, command: str = "", timeout: int = 120):
-        return self._terminal_tools.run_verify(command, timeout)
-
     def fetch_web(self, url: str, format: str = "markdown", max_chars: int = 26000, callback=None, cancelled_ref: list = None):
         return self._web_tools.fetch_web(url, format, max_chars, callback, cancelled_ref)
 
@@ -163,6 +160,27 @@ class BuiltinTools(QObject):
         """Reset session-scoped state when switching sessions"""
         self._todo_list = []
         self._task_tools.reset_session_state()
+    
+    def cleanup(self):
+        """
+        彻底清理 BuiltinTools 的所有缓存，防止内存泄漏。
+        应该在对话结束后或切换会话时调用。
+        """
+        # 清理待办事项
+        self._todo_list = []
+        if hasattr(self._task_tools, 'cleanup'):
+            self._task_tools.cleanup()
+        
+        # 清理加载的技能
+        self._loaded_skills = {}
+        self._skill_workspaces = {}
+        
+        # 清理子智能体管理器
+        self._sub_agent_manager = None
+        
+        # 清理文件工具的缓存
+        if hasattr(self._file_tools, 'cleanup'):
+            self._file_tools.cleanup()
 
     def todo_read(self):
         return self._task_tools.todo_read()
@@ -582,20 +600,6 @@ def get_builtin_tools_schema() -> List[Dict]:
                         "timeout": {"type": "integer", "description": "超时秒数"},
                     },
                     "required": ["command"],
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "run_verify",
-                "description": "运行针对当前任务的验证命令，默认尝试项目测试或语法检查",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "command": {"type": "string", "description": "验证命令"},
-                        "timeout": {"type": "integer", "description": "超时时间"},
-                    },
                 },
             },
         },

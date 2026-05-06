@@ -25,12 +25,11 @@ from PyQt5.QtWidgets import (
     QButtonGroup, QFrame, QScrollArea,
 )
 from loguru import logger
+from qfluentwidgets import InfoBar, InfoBarPosition
 from qfluentwidgets import (
     setFont,
     FluentIcon,
     SingleDirectionScrollArea,
-    InfoBar,
-    InfoBarPosition,
     TransparentToolButton, StrongBodyLabel,
 )
 
@@ -45,10 +44,16 @@ from app.core import (
     MemoryManagerCore,
 )
 from app.core.agent import AgentManager
+from app.tool_window import (
+    ToolWindow,
+    DockPosition,
+    DockCategory,
+)
 from app.utils.chat_session import (
     SessionManager,
     ChatSession,
 )
+from app.utils.config import Settings
 from app.utils.diff_viewer import (
     DiffHtmlGenerator,
     DiffViewerWindow,
@@ -62,6 +67,7 @@ from app.utils.message_content import (
     get_user_round_ranges,
     group_messages_for_display,
 )
+from app.utils.utils import get_icon, get_font_family_css
 from app.utils.worker import (
     TopicSummaryTask,
 )
@@ -87,8 +93,11 @@ from app.widgets.history_card import (
 from app.widgets.llm_settings_card import (
     LLMSettingsCard,
 )
-from app.widgets.memory_manager import (
-    MemoryManagerDialog,
+from app.widgets.memory_card import (
+    MemoryCardContent,
+)
+from app.widgets.provider_edit_card import (
+    ProviderEditCard,
 )
 from app.widgets.message_card import (
     MessageCard,
@@ -100,7 +109,6 @@ from app.widgets.model_config_card import (
 from app.widgets.question_floating_widget import (
     QuestionFloatingWidget,
 )
-from qfluentwidgets import InfoBar, InfoBarPosition
 from app.widgets.sub_agent_floating_widget import (
     SubAgentFloatingWidget,
 )
@@ -118,13 +126,6 @@ from app.widgets.ui_helpers import add_message_to_layout, refresh_history_card_i
     build_node_preview_from_session, calculate_scroll_progress, find_user_card_at_index, truncate_and_remove_round, \
     log_deletion_stats, restore_input_from_card, find_last_tool_call_id_after_round, get_first_file_operation, \
     show_diff_viewer, render_batch_to_assistant_card
-from app.tool_window import (
-    ToolWindow,
-    DockPosition,
-    DockCategory,
-)
-from app.utils.config import Settings
-from app.utils.utils import get_icon, get_font_family_css
 
 
 class OpenAIChatToolWindow(ToolWindow):
@@ -224,8 +225,16 @@ class OpenAIChatToolWindow(ToolWindow):
         )
         self.homepage = homepage
         self._is_streaming = False
-        homepage.installEventFilter(self)
-        self._window_active = homepage.isActiveWindow()
+        # 使用 try-except 保护 homepage 操作，防止 C++ 对象已删除错误
+        try:
+            from PyQt5 import sip
+            if not sip.isdeleted(homepage):
+                homepage.installEventFilter(self)
+                self._window_active = homepage.isActiveWindow()
+            else:
+                self._window_active = False
+        except Exception:
+            self._window_active = False
         # 问题修复：初始化未定义的属性
         self._pending_permission_tool_call_id: Optional[str] = None
         self._question_tool_call_id: Optional[str] = None
@@ -395,6 +404,7 @@ class OpenAIChatToolWindow(ToolWindow):
         if self._settings_popup.isVisible():
             self._settings_popup.hide()
         else:
+            self._hide_main_popups()  # 隐藏其他主面板
             self._settings_popup.show()
 
     def _open_api_docs(self):
@@ -409,8 +419,35 @@ class OpenAIChatToolWindow(ToolWindow):
             branch: 如果为 True，则复制当前会话的消息到新窗口
         """
         try:
+            # 清理已关闭的弹窗引用，防止内存泄漏
+            # 使用 sip.isdeleted 检查对象是否仍然有效
+            from PyQt5 import sip
+            if hasattr(self, '_popup_refs'):
+                valid_refs = []
+                for ref in self._popup_refs:
+                    try:
+                        if ref is not None and not sip.isdeleted(ref) and ref.isVisible():
+                            valid_refs.append(ref)
+                    except Exception:
+                        pass  # 忽略检查失败的引用
+                self._popup_refs = valid_refs
+            
+            # 验证 self 和 homepage 是否有效
+            try:
+                if sip.isdeleted(self) or sip.isdeleted(self.homepage):
+                    from qfluentwidgets import InfoBar
+                    InfoBar.error("窗口错误", "主窗口已关闭，无法创建新窗口", parent=self)
+                    return
+            except Exception:
+                pass  # 忽略检查失败
+            
+            # 确保 homepage 有效后再使用
+            valid_homepage = self.homepage
+            if valid_homepage is None:
+                return
+            
             # 创建新的窗口实例
-            new_instance = OpenAIChatToolWindow(self.homepage, None)
+            new_instance = OpenAIChatToolWindow(valid_homepage, None)
 
             # 如果是分支模式，传递当前会话的消息
             if branch:
@@ -455,10 +492,33 @@ class OpenAIChatToolWindow(ToolWindow):
             else:
                 popup.setWindowTitle(f"{self.name} - 副本")
             popup.resize(600, 900)
+            
             # 保存引用防止被垃圾回收
             if not hasattr(self, '_popup_refs'):
                 self._popup_refs = []
+            
+            # 使用更健壮的方式清理已关闭的弹窗引用
+            valid_refs = []
+            for ref in self._popup_refs:
+                try:
+                    if ref is not None and not sip.isdeleted(ref) and ref.isVisible():
+                        valid_refs.append(ref)
+                except Exception:
+                    pass
+            self._popup_refs = valid_refs
+            
+            # 限制最大引用数量，防止无限增长
+            if len(self._popup_refs) >= 10:
+                self._popup_refs = self._popup_refs[-10:]
+            
             self._popup_refs.append(popup)
+            
+            # 在 show() 之前再次检查 popup 是否仍然有效
+            if sip.isdeleted(popup):
+                from qfluentwidgets import InfoBar
+                InfoBar.error("复制失败", "窗口创建失败，请重试", parent=self)
+                return
+            
             popup.show()
         except Exception as e:
             from qfluentwidgets import InfoBar
@@ -571,6 +631,9 @@ class OpenAIChatToolWindow(ToolWindow):
         # 更新历史会话卡片
         if self._history_card:
             self._history_card.set_opacity(opacity)
+        # 更新记忆管理卡片
+        if self._memory_card:
+            self._memory_card.set_opacity(opacity)
         # 更新设置卡片
         if self._settings_popup:
             self._settings_popup.set_opacity(opacity)
@@ -583,6 +646,9 @@ class OpenAIChatToolWindow(ToolWindow):
         # 更新问题悬浮框
         if self._question_floating_widget:
             self._question_floating_widget.set_opacity(opacity)
+        # 更新服务商编辑卡片
+        if self._provider_edit_card:
+            self._provider_edit_card.set_opacity(opacity)
 
     def _restore_latest_or_create_session(self):
         # 如果是新复制的窗口，跳过历史会话恢复
@@ -610,12 +676,20 @@ class OpenAIChatToolWindow(ToolWindow):
         """创建分支会话并渲染消息"""
         logger.info("[Branch] 开始创建分支会话")
         
+        # 停止当前对话并清理
         if self._is_streaming and self._chat_engine:
             self._chat_engine.stop()
             self._is_streaming = False
             self._toggle_send_stop(False)
+        elif self._chat_engine:
+            # 即使不在流式输出，也要清理 worker
+            self._chat_engine.cleanup_worker()
 
+        # 切换会话前彻底清理卡片
         self._cache_current_session_cards()
+        # 只重置会话状态，保留 tool_executor（分支后还需要执行工具）
+        if self._tool_executor:
+            self._tool_executor.reset_session_state()
         session = self.session_manager.create_new_session()
         session.messages = messages
         session.name = name
@@ -640,10 +714,14 @@ class OpenAIChatToolWindow(ToolWindow):
         QTimer.singleShot(150, self._scroll_to_bottom)
 
     def _create_new_session(self):
+        # 停止当前对话并清理
         if self._is_streaming and self._chat_engine:
             self._chat_engine.stop()
             self._is_streaming = False
             self._toggle_send_stop(False)
+        elif self._chat_engine:
+            # 即使不在流式输出，也要清理 worker
+            self._chat_engine.cleanup_worker()
 
         try:
             self._auto_save_current_session()
@@ -651,12 +729,28 @@ class OpenAIChatToolWindow(ToolWindow):
             logger.exception(
                 "Failed to auto-save current session before creating a new one"
             )
-
+        
+        # 保存后清理旧会话的内存（messages 列表是主要内存消耗）
+        old_session = self.session_manager.get_current_session()
+        old_session_id = self._current_session_id
+        
+        # 切换会话前彻底清理卡片
         self._cache_current_session_cards()
+        # 只重置会话状态，保留 tool_executor
+        if self._tool_executor:
+            self._tool_executor.reset_session_state()
+        
         session = self.session_manager.create_new_session()
         self._current_session_id = session.session_id
         self._history_preview_messages = None
         self._clear_chat_area()
+        
+        # 清理旧会话的消息数据，释放内存（会话已保存到历史记录）
+        if old_session and old_session_id:
+            old_session.messages = []
+            old_session.compaction_state = {}
+            old_session.compaction_cache = {}
+        
         self.title_edit.setText("新对话")
         self.node_preview.clear_nodes()
         if self._todo_floating_widget:
@@ -753,6 +847,20 @@ class OpenAIChatToolWindow(ToolWindow):
         self._settings_popup.closed.connect(self._on_settings_closed)
         self._settings_popup.configChanged.connect(self._load_model_configs)
 
+        # 连接服务商添加/编辑信号
+        self._settings_popup.llmProviderCard.showAddProviderCard.connect(self._show_provider_add_card)
+        self._settings_popup.llmProviderCard.showEditProviderCard.connect(self._show_provider_edit_card)
+
+        # 服务商编辑卡片
+        self._provider_edit_card = BaseSettingsCard("服务商配置", "⚙️", parent=self)
+        self._provider_edit_card.setFixedHeight(380)
+        self._provider_edit_popup = ProviderEditCard(parent=self)
+        self._provider_edit_popup.saved.connect(self._on_provider_edit_saved)
+        self._provider_edit_popup.closed.connect(self._on_provider_edit_closed)
+        self._provider_edit_card.content_layout.addWidget(self._provider_edit_popup)
+        self._provider_edit_card.setVisible(False)
+        layout.addWidget(self._provider_edit_card)
+
         self._todo_floating_widget = TodoFloatingWidget(self)
         self._todo_floating_widget.setVisible(False)
         layout.addWidget(self._todo_floating_widget)
@@ -802,7 +910,6 @@ class OpenAIChatToolWindow(ToolWindow):
 
         # 模型配置卡片 - 在消息列表下方，和工具卡片同位置
         self._model_config_card = BaseSettingsCard("模型配置", "🔧", self)
-        self._model_config_card.setMaximumHeight(120)
         self._model_config_popup = ModelConfigCard()
         self._model_config_popup.configApplied.connect(self._on_config_applied)
         self._model_config_card.content_layout.addWidget(self._model_config_popup)
@@ -838,6 +945,15 @@ class OpenAIChatToolWindow(ToolWindow):
         self._history_card.content_layout.addWidget(self._history_popup_card)
         self._history_card.setVisible(False)
         layout.addWidget(self._history_card)
+
+        # 记忆管理卡片 - 和历史会话卡片同位置
+        self._memory_card = BaseSettingsCard("记忆管理", "🧠", self)
+        self._memory_card.setFixedHeight(400)
+        self._memory_card_popup = MemoryCardContent(self._memory_manager, self)
+        self._memory_card_popup.memorySaved.connect(self._on_memory_card_saved)
+        self._memory_card.content_layout.addWidget(self._memory_card_popup)
+        self._memory_card.setVisible(False)
+        layout.addWidget(self._memory_card)
 
         self.node_preview = ConversationNodePreview(self)
         self.node_preview.nodeClicked.connect(self._on_node_preview_clicked)
@@ -987,9 +1103,7 @@ class OpenAIChatToolWindow(ToolWindow):
 
         if not hasattr(self, "_model_selector_popup") or not self._model_selector_popup:
             from app.widgets.model_selector_popup import (
-                ModelSelectorPopup, ProviderConfigListDialog,
-            )
-            from app.widgets.provider_setting_card import ProviderEditDialog
+                ModelSelectorPopup, )
             self._model_selector_popup = ModelSelectorPopup(self)
             self._model_selector_popup.modelSelected.connect(self._on_model_selected_from_popup)
             self._model_selector_popup.addProviderClicked.connect(
@@ -1005,34 +1119,20 @@ class OpenAIChatToolWindow(ToolWindow):
         self._model_selector_popup.show_at(self.current_model_btn)
 
     def _on_add_provider_from_popup(self):
-        """从模型选择弹窗点击「添加」按钮 - 弹出添加服务商窗口"""
+        """从模型选择弹窗点击「添加」按钮 - 显示添加服务商卡片"""
         self._model_selector_popup.close()
-        from app.widgets.provider_setting_card import ProviderEditDialog
-        dialog = ProviderEditDialog("", {}, True, self)
-        if dialog.exec():
-            name, info = dialog.get_result()
-            if name and info:
-                # 关键修复：将新添加的服务商写入配置
-                setting = Settings.get_instance()
-                saved_providers = setting.llm_saved_providers.value or {}
-                saved_providers[name] = info
-                setting.set(setting.llm_saved_providers, saved_providers, save=True)
-            # 刷新配置并重新加载弹窗
-            self._load_model_configs()
-            # 如果添加的服务商有模型，自动选中它
-            if name and info.get("模型名称"):
-                self._on_model_selected_from_popup(name, info.get("模型名称", ""))
+        self._show_provider_add_card()
 
     def _on_configure_providers_from_popup(self):
-        """从模型选择弹窗点击「配置」按钮 - 显示设置卡片并展开服务商配置"""
+        """从模型选择弹窗点击「配置」按钮 - 显示设置卡片并展开服务商下拉"""
         self._model_selector_popup.close()
-        # 打开设置卡片
+        # 显示设置卡片
         self._settings_popup.show()
         self._settings_popup.raise_()
-        # 展开「已保存的服务商」下拉
-        self._settings_popup.llmProviderCard.setExpand(True)
-        # 滚动到顶部
+        # 滚动设置卡片内容到顶部
         QTimer.singleShot(100, self._scroll_settings_to_top)
+        # 展开服务商下拉
+        QTimer.singleShot(200, lambda: self._expand_provider_list_card())
 
     def _scroll_settings_to_top(self):
         """滚动设置卡片内容到顶部"""
@@ -1044,22 +1144,34 @@ class OpenAIChatToolWindow(ToolWindow):
         except Exception:
             pass
 
+    def _expand_provider_list_card(self):
+        """展开服务商列表卡片"""
+        try:
+            if hasattr(self._settings_popup, 'llmProviderCard'):
+                self._settings_popup.llmProviderCard.toggleExpand()
+        except Exception:
+            pass
+
     def _on_model_selected_from_popup(self, provider_name: str, model_name: str):
         """从弹窗选中模型后切换"""
         self._current_provider_name = provider_name
         self._current_model_name = model_name
-        if provider_name in self._valid_configs:
-            self._valid_configs[provider_name]["模型名称"] = model_name
         setting = Settings.get_instance()
         setting.set(setting.llm_selected_model, provider_name, save=True)
-        
-        # 关键修复：同步更新 saved_providers 中的模型名称，
-        # 确保 ChatEngine 的 _get_current_model_config 能读到正确的模型名
+
+        # 更新 saved_providers 中的模型名称
         saved_providers = setting.llm_saved_providers.value or {}
         if provider_name in saved_providers:
             saved_providers[provider_name]["模型名称"] = model_name
             setting.set(setting.llm_saved_providers, saved_providers, save=True)
-        
+
+        # 更新 _valid_configs 确保 ChatEngine 能读到最新配置
+        self._valid_configs[provider_name] = saved_providers.get(provider_name, {}).copy()
+        self._valid_configs[provider_name]["模型名称"] = model_name
+
+        # 重新加载模型配置确保所有组件同步
+        self._load_model_configs()
+
         self._update_model_selector_btn()
         self._refresh_context_usage_indicator()
         self._update_balance_display()
@@ -1144,15 +1256,85 @@ class OpenAIChatToolWindow(ToolWindow):
         # 可以在这里添加一些清理逻辑
         pass
 
+    def _on_provider_edit_saved(self, provider_name: str, provider_info: dict):
+        """服务商编辑保存后的回调"""
+        from app.utils.config import Settings
+        setting = Settings.get_instance()
+        saved_providers = setting.llm_saved_providers.value or {}
+        saved_providers[provider_name] = provider_info
+        setting.llm_saved_providers.value = saved_providers
+
+        # 隐藏服务商编辑卡片，显示设置卡片
+        self._provider_edit_card.hide()
+        self._settings_popup.show()
+
+        # 关闭模型选择器popup，下次打开会重新加载数据
+        if hasattr(self, '_model_selector_popup') and self._model_selector_popup:
+            self._model_selector_popup.close()
+
+        # 刷新配置
+        self._load_model_configs()
+        from qfluentwidgets import InfoBar, InfoBarPosition
+        InfoBar.success("已保存", f"服务商 '{provider_name}' 已保存", parent=self, duration=2000)
+
+    def _on_provider_edit_closed(self):
+        """服务商编辑关闭后的回调"""
+        # 隐藏服务商编辑卡片，显示设置卡片
+        self._provider_edit_card.hide()
+        self._settings_popup.show()
+        # 关闭模型选择器popup，确保下次打开重新加载数据
+        if hasattr(self, '_model_selector_popup') and self._model_selector_popup:
+            self._model_selector_popup.close()
+
+    def _show_provider_add_card(self):
+        """显示添加服务商卡片"""
+        # 隐藏设置卡片，显示服务商编辑卡片
+        self._settings_popup.hide()
+        # 设置卡片标题
+        self._provider_edit_card.set_title("☁️ 添加服务商")
+        # 重新创建 ProviderEditCard 用于添加
+        self._provider_edit_popup = ProviderEditCard(provider_name="", provider_info={}, is_new=True, parent=self)
+        self._provider_edit_popup.saved.connect(self._on_provider_edit_saved)
+        self._provider_edit_popup.closed.connect(self._on_provider_edit_closed)
+        # 替换卡片内容
+        while self._provider_edit_card.content_layout.count():
+            item = self._provider_edit_card.content_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        self._provider_edit_card.content_layout.addWidget(self._provider_edit_popup)
+        self._provider_edit_card.show()
+
+    def _show_provider_edit_card(self, provider_name: str, provider_info: dict):
+        """显示编辑服务商卡片"""
+        # 隐藏设置卡片，显示服务商编辑卡片
+        self._settings_popup.hide()
+        # 设置卡片标题
+        self._provider_edit_card.set_title(f"☁️ 编辑: {provider_name}")
+        # 重新创建 ProviderEditCard 用于编辑
+        self._provider_edit_popup = ProviderEditCard(
+            provider_name=provider_name, provider_info=provider_info, is_new=False, parent=self
+        )
+        self._provider_edit_popup.saved.connect(self._on_provider_edit_saved)
+        self._provider_edit_popup.closed.connect(self._on_provider_edit_closed)
+        # 替换卡片内容
+        while self._provider_edit_card.content_layout.count():
+            item = self._provider_edit_card.content_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        self._provider_edit_card.content_layout.addWidget(self._provider_edit_popup)
+        self._provider_edit_card.show()
+
     def _hide_main_popups(self):
         """隐藏主要的悬浮面板（互斥显示）
         
-        包括：系统设置、模型配置、历史会话
+        包括：系统设置、模型配置、历史会话、记忆管理
         不包括：工具悬浮、Todo、子智能体等工具类浮窗
         """
         self._model_config_card.hide()
         self._history_card.hide()
         self._settings_popup.hide()
+        self._memory_card.hide()
+        self._provider_edit_card.hide()
 
     def _toggle_model_config_card(self):
         """切换模型配置卡片的显示"""
@@ -1977,6 +2159,7 @@ class OpenAIChatToolWindow(ToolWindow):
                     item.widget().hide()
 
     def _take_chat_widgets(self) -> List[QWidget]:
+        """从布局中取出所有 widgets，返回列表（不删除，由调用方负责删除）"""
         widgets: List[QWidget] = []
         self._current_assistant_card = None
         self._displayed_session_id = None
@@ -1988,25 +2171,37 @@ class OpenAIChatToolWindow(ToolWindow):
         return widgets
 
     def _cache_current_session_cards(self):
-        session = self.session_manager.get_current_session()
+        """
+        切换会话时彻底清理当前会话的卡片，不再缓存。
+        直接删除卡片，释放内存。
+        """
+        # 从布局中取出所有 widgets
         widgets = self._take_chat_widgets()
-        if not session or not session.messages:
-            return
-
-        message_cards = [
-            w
-            for w in widgets
-            if isinstance(w, MessageCard) and self._is_widget_alive(w)
-        ]
-        if message_cards:
-            self._session_card_cache[session.session_id] = {
-                "cards": message_cards,
-                "visible_batch_start": self._visible_batch_start,
-                "visible_batch_end": self._visible_batch_end,
-                "batch_count": len(group_messages_for_display(session.messages)),
-            }
-
-        self._cleanup_session_card_cache()
+        
+        # 彻底删除所有卡片及其子资源
+        for widget in widgets:
+            if isinstance(widget, MessageCard) and self._is_widget_alive(widget):
+                # 调用卡片自己的 cleanup 方法
+                widget.cleanup()
+            widget.deleteLater()
+        
+        # 清理可能残留的卡片缓存，并清理卡片对象
+        session = self.session_manager.get_current_session()
+        if session:
+            cache_entry = self._session_card_cache.pop(session.session_id, None)
+            if cache_entry and isinstance(cache_entry, dict):
+                cards = cache_entry.get("cards", [])
+                for card in cards:
+                    if hasattr(card, 'cleanup'):
+                        try:
+                            card.cleanup()
+                        except Exception:
+                            pass
+                    if hasattr(card, 'deleteLater'):
+                        try:
+                            card.deleteLater()
+                        except Exception:
+                            pass
 
     def _cleanup_session_card_cache(self):
         from app.constants import (
@@ -3126,7 +3321,8 @@ class OpenAIChatToolWindow(ToolWindow):
                         widgets_to_remove.append(w)
                 
                 from app.widgets.ui_helpers import delete_widgets_from_layout
-                deleted_count = delete_widgets_from_layout(widgets_to_remove, self.chat_layout)
+                # 注意：不调用 cleanup，因为撤销操作需要在删除后仍能访问卡片数据
+                deleted_count = delete_widgets_from_layout(widgets_to_remove, self.chat_layout, call_cleanup=False)
                 logger.info(f"[UNDO] Removed {deleted_count} cards from UI")
             else:
                 logger.warning("[UNDO] Card not found in layout, UI cards not deleted")
@@ -3663,6 +3859,19 @@ class OpenAIChatToolWindow(ToolWindow):
         """根据 session_id 切换到对应会话"""
         if not session_id:
             return
+        
+        # 切换前先清理当前会话的资源
+        if self._is_streaming and self._chat_engine:
+            self._chat_engine.stop()
+            self._is_streaming = False
+        elif self._chat_engine:
+            self._chat_engine.cleanup_worker()
+        
+        # 清理旧会话的卡片
+        self._cache_current_session_cards()
+        # 只重置会话状态，保留 tool_executor
+        if self._tool_executor:
+            self._tool_executor.reset_session_state()
         
         # 先在当前 session_manager 中查找
         for i, session in enumerate(self.session_manager.get_all_sessions()):
@@ -4396,13 +4605,27 @@ class OpenAIChatToolWindow(ToolWindow):
         self._create_new_session()
 
     def _show_soul_memory(self):
+        """切换记忆管理卡片的显示"""
+        self._toggle_memory_card()
+
+    def _toggle_memory_card(self):
+        """切换记忆管理卡片的显示"""
+        if self._memory_card.isVisible():
+            self._memory_card.hide()
+        else:
+            self._hide_main_popups()  # 隐藏其他主面板
+            self._memory_card.show()
+            # 刷新数据
+            self._memory_card_popup.load_memories()
+
+    def _on_memory_card_saved(self, memories: list):
+        """记忆卡片保存后的回调"""
         if not self._memory_manager:
             return
-        user_memories = self._memory_manager.get_user_memories()
-
-        dialog = MemoryManagerDialog(user_memories, self)
-        dialog.memoryUpdated.connect(self._on_memory_updated)
-        dialog.exec_()
+        # 数据已经在 MemoryCardContent 中通过 memory_manager 保存
+        # 这里只显示提示信息
+        from qfluentwidgets import InfoBar
+        InfoBar.success("已保存", "长期记忆已更新", parent=self, duration=1500)
 
     def _on_memory_updated(self, memories: list):
         if not self._memory_manager:

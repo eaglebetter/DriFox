@@ -77,6 +77,11 @@ def _get_content_to_text() -> Callable:
     return _content_to_text_getter
 
 
+# ========== 性能优化：预编译正则表达式 ==========
+_CLASS_PATTERN = re.compile(r'class\s+(\w+)')
+_FUNC_PATTERN = re.compile(r'def\s+(\w+)|function\s+(\w+)')
+
+
 # ==================== 代码保存辅助 ====================
 
 LANG_EXT_MAP = {
@@ -143,8 +148,8 @@ def get_language_extension(lang: str) -> str:
 
 def extract_code_suggested_filename(code: str, ext: str) -> str:
     """从代码中提取建议的文件名"""
-    class_match = re.search(r'class\s+(\w+)', code)
-    func_match = re.search(r'def\s+(\w+)|function\s+(\w+)', code)
+    class_match = _CLASS_PATTERN.search(code)
+    func_match = _FUNC_PATTERN.search(code)
     if class_match:
         return class_match.group(1) + ext
     elif func_match:
@@ -362,10 +367,24 @@ def cleanup_stale_card_cache(
         all_session_ids: 所有有效的会话 ID 集合
         max_size: 最大缓存数量
     """
-    # 移除不存在的会话缓存
+    # 移除不存在的会话缓存，并清理卡片对象
     stale_ids = set(session_card_cache.keys()) - all_session_ids
     for sid in stale_ids:
-        session_card_cache.pop(sid, None)
+        cache_entry = session_card_cache.pop(sid, None)
+        # 清理缓存中的卡片对象
+        if cache_entry and isinstance(cache_entry, dict):
+            cards = cache_entry.get("cards", [])
+            for card in cards:
+                if hasattr(card, 'cleanup'):
+                    try:
+                        card.cleanup()
+                    except Exception:
+                        pass
+                if hasattr(card, 'deleteLater'):
+                    try:
+                        card.deleteLater()
+                    except Exception:
+                        pass
 
     # 如果缓存过大，移除最旧的缓存
     if len(session_card_cache) <= max_size:
@@ -374,7 +393,21 @@ def cleanup_stale_card_cache(
     current_ids = all_session_ids & set(session_card_cache.keys())
     for sid in list(session_card_cache.keys()):
         if sid not in current_ids:
-            session_card_cache.pop(sid, None)
+            cache_entry = session_card_cache.pop(sid, None)
+            # 清理缓存中的卡片对象
+            if cache_entry and isinstance(cache_entry, dict):
+                cards = cache_entry.get("cards", [])
+                for card in cards:
+                    if hasattr(card, 'cleanup'):
+                        try:
+                            card.cleanup()
+                        except Exception:
+                            pass
+                    if hasattr(card, 'deleteLater'):
+                        try:
+                            card.deleteLater()
+                        except Exception:
+                            pass
             if len(session_card_cache) <= max_size:
                 break
 
@@ -1411,13 +1444,15 @@ def refresh_history_card_if_visible(history_card, refresh_func=None) -> None:
         refresh_func()
 
 
-def delete_widgets_from_layout(widgets_to_remove: list, chat_layout) -> int:
+def delete_widgets_from_layout(widgets_to_remove: list, chat_layout, call_cleanup: bool = True) -> int:
     """
     从布局中删除指定的 widgets
     
     Args:
         widgets_to_remove: 要删除的 widget 列表
         chat_layout: 聊天布局
+        call_cleanup: 是否在删除前调用 cleanup 方法（默认 True，
+                      但在需要保留卡片数据用于恢复的场景下设为 False）
         
     Returns:
         删除的数量
@@ -1427,6 +1462,13 @@ def delete_widgets_from_layout(widgets_to_remove: list, chat_layout) -> int:
         if not is_widget_alive(widget):
             logger.warning(f"[DELETE] Widget already deleted: {widget}")
             continue
+        
+        # 调用清理方法（如果有的话）
+        if call_cleanup and hasattr(widget, 'cleanup'):
+            try:
+                widget.cleanup()
+            except Exception as e:
+                logger.warning(f"[DELETE] Widget cleanup failed: {e}")
         
         # 从 layout 移除
         layout_removed = False

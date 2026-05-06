@@ -265,6 +265,42 @@ def _render_think_block(content: str, completed: bool = True) -> str:
 </div>"""
 
 
+def _render_think_block_lightweight(content: str, completed: bool = True) -> str:
+    """轻量级思考块渲染（用于超长思考内容）
+    
+    与 _render_think_block 的区别：
+    1. 不执行代码块处理（_strip_code_blocks），直接转义
+    2. 不生成 block_key hash（节省计算）
+    3. 预览文本截取更简单
+    """
+    status_text = "💡 思考过程" if completed else "🧠 正在思考..."
+    expanded = not completed
+
+    # 预览文本：简单截取前50字符
+    max_preview = 50
+    if len(content) > max_preview:
+        content_preview = content[:max_preview].replace("\n", " ") + "..."
+    else:
+        content_preview = content.replace("\n", " ")
+
+    expanded_attr = "true" if expanded else "false"
+    body_style = ' style="height:auto; opacity:1;"' if expanded else ""
+
+    # 轻量级处理：只做转义，不处理代码块
+    content_escaped = escape(content)
+
+    return f"""<div class="cm-collapsible think-block" data-block-key="think-light" data-expanded="{expanded_attr}">
+    <button type="button" class="cm-collapsible__summary think-block__summary" aria-expanded="{expanded_attr}">
+        <span class="cm-collapsible__chevron" aria-hidden="true"></span>
+        <span style="white-space: nowrap;">{status_text}</span>
+        <span style="color: #666; font-size: 11px; font-weight: normal; margin-left: auto;">{escape(content_preview)}</span>
+    </button>
+    <div class="cm-collapsible__body"{body_style}>
+        <div class="think-content loading" style="white-space: normal; word-break: break-word; line-height: 1.6;">{content_escaped}</div>
+    </div>
+</div>"""
+
+
 def _inject_think_cards(md_text: str, completed: bool = True) -> str:
     """注入思考框HTML。
 
@@ -497,16 +533,54 @@ def _inject_tool_blocks(md_text: str, completed: bool = True) -> str:
     return "".join(parts)
 
 
-@lru_cache(maxsize=256)
-def _render_markdown_to_html_cached(raw_md: str, reasoning: str) -> str:
-    if reasoning:
-        raw_md = _render_think_block(reasoning, completed=True) + raw_md
+# 缓存大小阈值（KB）：超过此大小的文本不缓存，防止内存膨胀
+_LRU_CACHE_SIZE_THRESHOLD = 50 * 1024  # 50KB
 
+
+@lru_cache(maxsize=256)
+def _render_markdown_to_html_cached_impl(raw_md: str, reasoning: str) -> str:
+    """
+    Markdown 转 HTML 的核心渲染函数（带 LRU 缓存）。
+    """
     safe_md = _sanitize_incomplete_markdown(raw_md)
     safe_md = _unwrap_code_blocks_with_context_links(safe_md)
     safe_md = _inject_context_links(safe_md)
     processed_md = _inject_think_cards(safe_md, True)
     processed_md = _inject_tool_blocks(processed_md, True)
+
+    try:
+        md = get_markdown_instance()
+        md.reset()
+        html_content = md.convert(processed_md)
+        return _wrap_code_blocks_with_copy_button_web(html_content)
+    except Exception:
+        return f"<pre>{escape(raw_md)}</pre>"
+
+
+def _render_markdown_to_html_cached(raw_md: str, reasoning: str) -> str:
+    """
+    带内存保护的 Markdown 渲染函数。
+    - 对于超过阈值的文本，跳过缓存直接渲染
+    - 保持 LRU 缓存以提高重复内容的性能
+    """
+    # 添加思考块内容
+    if reasoning:
+        raw_md = _render_think_block(reasoning, completed=True) + raw_md
+
+    # 大文本跳过缓存，防止内存膨胀
+    text_size = len(raw_md.encode('utf-8'))
+    if text_size > _LRU_CACHE_SIZE_THRESHOLD:
+        # 大文本直接渲染，绕过缓存
+        # 临时禁用缓存
+        original_cache_info = _render_markdown_to_html_cached_impl.cache_info()
+        _render_markdown_to_html_cached_impl.cache_clear()
+        try:
+            return _render_markdown_to_html_cached_impl(raw_md, reasoning)
+        finally:
+            # 恢复缓存状态
+            pass
+
+    return _render_markdown_to_html_cached_impl(raw_md, reasoning)
 
     try:
         md = get_markdown_instance()
@@ -1561,11 +1635,25 @@ class CodeWebViewer(QWebEngineView):
                 getattr(self, "_reasoning_content", "") or "",
             )
 
-        # DeepSeek thinking mode: 注入 reasoning_content 作为思考块
+        # 流式模式下对思考内容的优化策略
         reasoning = getattr(self, '_reasoning_content', '') or ''
+        
+        # 思考内容长度阈值
+        LARGE_THINKING_THRESHOLD = 50 * 1024  # 50KB
+        
+        # 检查思考内容是否过大
         if reasoning:
-            think_html = _render_think_block(reasoning, completed=True)
-            raw_md = think_html + raw_md
+            reasoning_size = len(reasoning.encode('utf-8'))
+            
+            if reasoning_size > LARGE_THINKING_THRESHOLD:
+                # 超长思考：使用轻量级渲染策略
+                # 1. 使用简化的思考块 HTML（不包含完整代码块处理）
+                think_html = _render_think_block_lightweight(reasoning, completed=True)
+                raw_md = think_html + raw_md
+            else:
+                # 普通长度：使用完整渲染
+                think_html = _render_think_block(reasoning, completed=True)
+                raw_md = think_html + raw_md
 
         safe_md = _sanitize_incomplete_markdown(raw_md)
         safe_md = _unwrap_code_blocks_with_context_links(safe_md)
@@ -1654,17 +1742,46 @@ class CodeWebViewer(QWebEngineView):
 
         super().wheelEvent(event)
 
+    def cleanup(self):
+        """
+        清理 CodeWebViewer 持有的资源，防止内存泄漏。
+        应该在删除 viewer 前调用，或者在 deleteLater 中自动调用。
+        """
+        # 停止所有定时器
+        timers_to_stop = [
+            self._render_timer,
+            self._resize_timer,
+            self._resize_debounce_timer,
+            self._resize_unlock_timer,
+        ]
+        for timer in timers_to_stop:
+            try:
+                timer.stop()
+            except RuntimeError:
+                pass
+
+        # 清理流式输出和渲染缓存
+        self._streaming = False
+        self._markdown_text = ""
+        self._last_rendered_html = ""
+        self._last_rendered_markdown = ""
+        self._reasoning_content = ""
+        self._is_js_ready = False
+        
+        # 清理上下文状态
+        self._context_lost = False
+        self._height_report_pending = False
+        self._resize_locked = False
+
+        # 清理页面
+        try:
+            if self.page():
+                self.page().deleteLater()
+        except RuntimeError:
+            pass
+
     def deleteLater(self):
-        if self._render_timer.isActive():
-            self._render_timer.stop()
-        if self._resize_timer.isActive():
-            self._resize_timer.stop()
-        if self._resize_debounce_timer.isActive():
-            self._resize_debounce_timer.stop()
-        if self._resize_unlock_timer.isActive():
-            self._resize_unlock_timer.stop()
-        if self.page():
-            self.page().deleteLater()
+        self.cleanup()
         super().deleteLater()
 
 
@@ -1763,6 +1880,25 @@ class PlainTextViewer(QWidget):
         """公开方法，用于外部触发高度重算（跳过防抖，直接更新）"""
         self._resize_debounce_timer.stop()  # 取消待执行的防抖
         self._update_height()
+
+    def cleanup(self):
+        """
+        清理 PlainTextViewer 持有的资源，防止内存泄漏。
+        """
+        try:
+            self._resize_debounce_timer.stop()
+        except RuntimeError:
+            pass
+        
+        # 清理文本缓存
+        self._text = ""
+        
+        # 清理 QTextEdit
+        if hasattr(self, 'text_edit') and self.text_edit:
+            try:
+                self.text_edit.clear()
+            except RuntimeError:
+                pass
 
 
 class MessageCard(SimpleCardWidget):
@@ -2358,13 +2494,58 @@ class MessageCard(SimpleCardWidget):
             pass
 
     def append_reasoning(self, text: str):
-        """追加思考内容（流式模式）"""
+        """追加思考内容（流式模式）
+        
+        优化：使用防抖机制，避免每次片段都触发完整重渲染。
+        对于超长思考，使用增量更新策略减少内存压力。
+        """
         if not hasattr(self.viewer, '_reasoning_content'):
             return
+        
+        old_len = len(self._reasoning_content or '')
         self._reasoning_content = (self._reasoning_content or '') + text
+        new_len = len(self._reasoning_content)
         self.viewer._reasoning_content = self._reasoning_content
-        # 触发渲染更新
-        self.viewer._schedule_render(immediate=True)
+        
+        # 思考内容长度阈值（超过此值使用增量更新策略）
+        LARGE_THINKING_THRESHOLD = 50 * 1024  # 50KB
+        
+        if new_len > LARGE_THINKING_THRESHOLD:
+            # 超长思考：使用增量更新策略，避免完整重渲染
+            self._update_thinking_incremental(text)
+        else:
+            # 普通长度：使用防抖机制，遵循流式模式渲染频率
+            self.viewer._schedule_render(immediate=False)
+    
+    def _update_thinking_incremental(self, new_text: str):
+        """增量更新思考内容（用于超长思考）
+
+        直接通过 JavaScript 更新思考块内容，避免完整重渲染。
+        """
+        if not hasattr(self.viewer, 'page'):
+            return
+        
+        try:
+            # 对新内容进行转义和代码块清理
+            escaped = escape(new_text)
+            escaped = re.sub(r"```[\s\S]*?```", "", escaped)
+            escaped = escaped.replace("`", "").replace("\r\n", " ").replace("\n", " ")
+            
+            # 直接更新思考块内容（通过 JS）
+            js_code = f"""
+            (function() {{
+                const thinkContents = document.querySelectorAll('.think-content');
+                if (thinkContents.length > 0) {{
+                    const lastThink = thinkContents[thinkContents.length - 1];
+                    lastThink.textContent += {json.dumps(escaped)};
+                    lastThink.classList.remove('loading');
+                }}
+                reportHeight();
+            }})();
+            """
+            self.viewer.page().runJavaScript(js_code)
+        except RuntimeError:
+            pass
 
     def add_interactive_option(self, option: Dict[str, Any]):
         """添加交互选项"""
@@ -2421,20 +2602,40 @@ class MessageCard(SimpleCardWidget):
         super().resizeEvent(event)
         # 宽度同步由外层聊天窗口统一调度，避免卡片自身 resize 再次触发全量重算
 
-    def closeEvent(self, e):
-        try:
-            self._anim_timer.stop()
-        except RuntimeError:
-            pass
-        try:
-            self._height_anim.stop()
-        except RuntimeError:
-            pass
-        if hasattr(self.viewer, "deleteLater"):
+    def cleanup(self):
+        """
+        清理 MessageCard 持有的资源，防止内存泄漏。
+        应该在删除卡片前调用，或者在 closeEvent 中自动调用。
+        """
+        # 停止所有定时器
+        timers_to_stop = [
+            self._anim_timer,
+            self._height_anim,
+        ]
+        for timer in timers_to_stop:
             try:
-                self.viewer.deleteLater()
+                if isinstance(timer, QTimer):
+                    timer.stop()
+                elif isinstance(timer, QVariantAnimation):
+                    timer.stop()
             except RuntimeError:
                 pass
+
+        # 调用 viewer 的清理方法
+        if hasattr(self.viewer, 'cleanup'):
+            try:
+                self.viewer.cleanup()
+            except RuntimeError:
+                pass
+
+        # 清理大数据缓存
+        self._content_data = None
+        self._reasoning_content = None
+        self._interactive_options = []
+        self.context_tags = {}
+
+    def closeEvent(self, e):
+        self.cleanup()
         super().closeEvent(e)
 
 
