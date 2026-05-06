@@ -149,7 +149,7 @@ from app.core.memory_manager import MEMORY_CATEGORIES
 from app.core.provider_profile import (
     get_provider_profile,
 )
-from app.utils.message_content import consolidate_messages, append_text_block, messages_to_api
+from app.utils.message_content import consolidate_messages, append_text_block, messages_to_api, to_api_message
 
 
 class TopicSummaryTask(QRunnable):
@@ -424,8 +424,51 @@ class OpenAIChatWorker(QThread):
             "note": "",
         }
         self._current_session_messages = list(self.session_messages)
+        
+        # ========== 性能优化：API 消息缓存 ==========
+        # 缓存已转换的 API 消息，避免每次 API 调用都重新处理所有消息
+        # 只在首次构建，之后增量追加
+        self._api_messages_cache: Optional[List[Dict[str, Any]]] = None
+        self._api_messages_built = False  # 是否已完成初始构建
+        
         # API 模式专用：直接回调（绕过 Qt 信号-槽）
         self._direct_callbacks: Dict[str, Callable] = {}
+    
+    def _build_api_messages_cache(self) -> List[Dict[str, Any]]:
+        """
+        构建 API 消息缓存。
+        只在首次调用时处理所有消息，之后增量追加。
+        
+        Returns:
+            转换后的 API 消息列表
+        """
+        if self._api_messages_cache is not None:
+            return self._api_messages_cache
+        
+        # 首次构建：处理所有历史消息
+        self._api_messages_cache = messages_to_api(self.messages)
+        self._api_messages_built = True
+        return self._api_messages_cache
+    
+    def _append_to_api_cache(self, new_messages: List[Dict[str, Any]]) -> None:
+        """
+        将新消息追加到 API 缓存。
+        只转换新消息并追加，避免重新处理整个列表。
+        
+        Args:
+            new_messages: 新增的消息列表
+        """
+        if self._api_messages_cache is None:
+            self._api_messages_cache = messages_to_api(new_messages)
+            return
+        
+        # 只转换新消息并追加
+        for msg in new_messages:
+            api_msg = to_api_message(msg)
+            if api_msg:
+                if api_msg.get("role") == "user" and not api_msg.get("content"):
+                    continue
+                self._api_messages_cache.append(api_msg)
 
     def set_direct_callbacks(self, callbacks: Dict[str, Callable]) -> None:
         """设置直接回调（API 模式专用，绕过 Qt 信号-槽）
@@ -536,6 +579,10 @@ class OpenAIChatWorker(QThread):
         self._waiting_tool_params = {}
         self._previewed_tool_call_ids = set()
         
+        # 清理 API 消息缓存
+        self._api_messages_cache = None
+        self._api_messages_built = False
+        
         # 清理工具列表引用
         self.tools = []
         
@@ -580,8 +627,10 @@ class OpenAIChatWorker(QThread):
             self._emit_compaction_status(self._last_compaction_state)
             self.full_response = ""
             self._reasoning_content = ""
-            # 开始新对话时，清理所有中间状态
+            # 开始新对话时，清理所有中间状态，重建 API 消息缓存
             self._clear_pending_response_state()
+            self._api_messages_cache = None  # 重置缓存，下次 API 调用时重建
+            self._api_messages_built = False
 
             while not self._is_cancelled:
                 if self._is_cancelled:
@@ -590,7 +639,8 @@ class OpenAIChatWorker(QThread):
                 # 每次 API 调用前，清理上一轮的中间状态
                 self._clear_pending_response_state()
                 
-                tool_calls_found, tool_args_pending = self._make_api_call(current_messages)
+                # 使用 API 消息缓存（首次会重建，后续复用）
+                tool_calls_found, tool_args_pending = self._make_api_call(current_messages, use_cache=True)
                 if tool_calls_found and tool_args_pending:
                     continue
                 if self._is_cancelled:
@@ -601,6 +651,8 @@ class OpenAIChatWorker(QThread):
                     current_messages.extend(response_sequence)
                     current_session_messages.extend(response_sequence)
                     self._current_session_messages = list(current_session_messages)
+                    # 更新 API 消息缓存：追加响应消息
+                    self._append_to_api_cache(response_sequence)
                     self._emit_with_callback("finished_with_messages", self.finished_with_messages, current_session_messages)
                     self._clear_pending_response_state()
                     self._emit_with_callback("finished_with_content", self.finished_with_content, self.full_response)
@@ -629,6 +681,8 @@ class OpenAIChatWorker(QThread):
                     current_messages.append(question_result)
                     current_session_messages.append(question_result)
                     self._current_session_messages = list(current_session_messages)
+                    # 更新 API 消息缓存
+                    self._append_to_api_cache(response_sequence + [question_result])
                     self._emit_with_callback("finished_with_messages", self.finished_with_messages, current_session_messages)
                     self._question_pending = None
                     self._pending_answer = None
@@ -638,6 +692,8 @@ class OpenAIChatWorker(QThread):
                 current_messages.extend(response_sequence)
                 current_session_messages.extend(response_sequence)
                 self._current_session_messages = list(current_session_messages)
+                # 更新 API 消息缓存
+                self._append_to_api_cache(response_sequence)
                 self._emit_with_callback("finished_with_messages", self.finished_with_messages, current_session_messages)
 
                 self._check_and_notify_stage_change()
@@ -929,12 +985,23 @@ class OpenAIChatWorker(QThread):
             logger.warning(f"[ToolCall恢复] 尝试恢复工具参数时出错: {e}")
             return None
 
-    def _make_api_call(self, messages: List[Dict]) -> bool:
+    def _make_api_call(self, messages: List[Dict], use_cache: bool = True) -> bool:
         api_key = self.llm_config.get("API_KEY", "").strip()
         base_url = self.llm_config.get("API_URL") or None
         model = str(self.llm_config.get("模型名称", "gpt-4o"))
 
-        sanitized = messages_to_api(messages)
+        # 性能优化：使用缓存的 API 消息，避免每次都重新处理所有消息
+        if use_cache and self._api_messages_cache is not None:
+            # 使用缓存，只追加新消息
+            sanitized = self._api_messages_cache
+        else:
+            # 首次调用或禁用缓存时，重新处理所有消息
+            sanitized = messages_to_api(messages)
+            print(f"首次处理: {len(sanitized)}")
+            if use_cache:
+                self._api_messages_cache = sanitized
+                self._api_messages_built = True
+        
         req_kwargs: Dict[str, Any] = {
             "model": model,
             "messages": sanitized,

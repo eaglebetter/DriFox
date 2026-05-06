@@ -224,8 +224,16 @@ class OpenAIChatToolWindow(ToolWindow):
         )
         self.homepage = homepage
         self._is_streaming = False
-        homepage.installEventFilter(self)
-        self._window_active = homepage.isActiveWindow()
+        # 使用 try-except 保护 homepage 操作，防止 C++ 对象已删除错误
+        try:
+            from PyQt5 import sip
+            if not sip.isdeleted(homepage):
+                homepage.installEventFilter(self)
+                self._window_active = homepage.isActiveWindow()
+            else:
+                self._window_active = False
+        except Exception:
+            self._window_active = False
         # 问题修复：初始化未定义的属性
         self._pending_permission_tool_call_id: Optional[str] = None
         self._question_tool_call_id: Optional[str] = None
@@ -409,8 +417,35 @@ class OpenAIChatToolWindow(ToolWindow):
             branch: 如果为 True，则复制当前会话的消息到新窗口
         """
         try:
+            # 清理已关闭的弹窗引用，防止内存泄漏
+            # 使用 sip.isdeleted 检查对象是否仍然有效
+            from PyQt5 import sip
+            if hasattr(self, '_popup_refs'):
+                valid_refs = []
+                for ref in self._popup_refs:
+                    try:
+                        if ref is not None and not sip.isdeleted(ref) and ref.isVisible():
+                            valid_refs.append(ref)
+                    except Exception:
+                        pass  # 忽略检查失败的引用
+                self._popup_refs = valid_refs
+            
+            # 验证 self 和 homepage 是否有效
+            try:
+                if sip.isdeleted(self) or sip.isdeleted(self.homepage):
+                    from qfluentwidgets import InfoBar
+                    InfoBar.error("窗口错误", "主窗口已关闭，无法创建新窗口", parent=self)
+                    return
+            except Exception:
+                pass  # 忽略检查失败
+            
+            # 确保 homepage 有效后再使用
+            valid_homepage = self.homepage
+            if valid_homepage is None:
+                return
+            
             # 创建新的窗口实例
-            new_instance = OpenAIChatToolWindow(self.homepage, None)
+            new_instance = OpenAIChatToolWindow(valid_homepage, None)
 
             # 如果是分支模式，传递当前会话的消息
             if branch:
@@ -460,15 +495,28 @@ class OpenAIChatToolWindow(ToolWindow):
             if not hasattr(self, '_popup_refs'):
                 self._popup_refs = []
             
-            # 清理已关闭的弹窗引用，防止内存泄漏
-            self._popup_refs = [ref for ref in self._popup_refs if ref is not None and ref.isVisible()]
+            # 使用更健壮的方式清理已关闭的弹窗引用
+            valid_refs = []
+            for ref in self._popup_refs:
+                try:
+                    if ref is not None and not sip.isdeleted(ref) and ref.isVisible():
+                        valid_refs.append(ref)
+                except Exception:
+                    pass
+            self._popup_refs = valid_refs
             
             # 限制最大引用数量，防止无限增长
             if len(self._popup_refs) >= 10:
-                # 移除最早的引用
                 self._popup_refs = self._popup_refs[-10:]
             
             self._popup_refs.append(popup)
+            
+            # 在 show() 之前再次检查 popup 是否仍然有效
+            if sip.isdeleted(popup):
+                from qfluentwidgets import InfoBar
+                InfoBar.error("复制失败", "窗口创建失败，请重试", parent=self)
+                return
+            
             popup.show()
         except Exception as e:
             from qfluentwidgets import InfoBar

@@ -602,11 +602,6 @@ class ChatEngine:
 
         summary_message = {"role": "assistant", "content": compact_summary}
         result_messages = [summary_message] + recent_messages
-        print(f"原消息长度：{estimate_tokens_from_messages(history_messages)}")
-        print(f"未压缩长度：{estimate_tokens_from_messages(compacted)}")
-        print(f"压缩后长度：{estimate_tokens_from_messages([summary_message])}")
-        print(f"最近消息长度: {estimate_tokens_from_messages(recent_messages)}")
-        print(f"压缩后消息长度: {estimate_tokens_from_messages(result_messages)}")
 
         return (
             result_messages,
@@ -763,7 +758,6 @@ class ChatEngine:
 
             result_messages = [summary_message]
             break
-        print(f"压缩长度：{estimate_tokens_from_messages(compacted) - estimate_tokens_from_messages([summary_message])}")
         return (
             result_messages,
             self._make_compaction_state(
