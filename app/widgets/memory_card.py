@@ -131,25 +131,26 @@ class MemoryCardContent(QWidget):
         return None
 
     def _init_ui(self):
-        self.setStyleSheet("""
-            QWidget {
+        self.setStyleSheet(f"""
+            QWidget {{
                 background: transparent;
-            }
-            QListWidget {
+            }}
+            QListWidget {{
                 background-color: rgba(37, 37, 38, 180);
                 border: 1px solid rgba(62, 62, 66, 150);
                 color: #e0e0e0;
                 border-radius: 6px;
-            }
-            QListWidget::item {
+            }}
+            QListWidget::item {{
                 padding: 0;
-            }
-            QListWidget::item:selected {
+            }}
+            QListWidget::item:selected {{
                 background-color: rgba(9, 71, 113, 150);
-            }
-            BodyLabel {
+            }}
+            BodyLabel {{
                 color: #e0e0e0;
-            }
+                {get_font_family_css()}
+            }}
         """)
 
         main_layout = QVBoxLayout(self)
@@ -174,20 +175,21 @@ class MemoryCardContent(QWidget):
 
         # 记忆列表
         self.list_widget = ListWidget(self)
-        self.list_widget.setStyleSheet("""
-            QListWidget {
+        self.list_widget.setStyleSheet(f"""
+            QListWidget {{
                 background-color: rgba(37, 37, 38, 180);
                 border: 1px solid rgba(62, 62, 66, 150);
                 color: #e0e0e0;
                 border-radius: 6px;
-            }
-            QListWidget::item {
+                {get_font_family_css()}
+            }}
+            QListWidget::item {{
                 padding: 0;
                 border-bottom: 1px solid rgba(62, 62, 66, 80);
-            }
-            QListWidget::item:selected {
+            }}
+            QListWidget::item:selected {{
                 background-color: rgba(9, 71, 113, 150);
-            }
+            }}
         """)
         main_layout.addWidget(self.list_widget, 1)
 
@@ -233,52 +235,55 @@ class MemoryCardContent(QWidget):
 
         select_all_btn = PushButton("全部启用", self)
         select_all_btn.setFixedHeight(26)
-        select_all_btn.setStyleSheet("""
-            QPushButton {
+        select_all_btn.setStyleSheet(f"""
+            QPushButton {{
                 background-color: rgba(14, 99, 156, 180);
                 color: white;
                 border: none;
                 border-radius: 4px;
                 font-size: 11px;
                 padding: 0 10px;
-            }
-            QPushButton:hover {
+                {get_font_family_css()}
+            }}
+            QPushButton:hover {{
                 background-color: #1177bb;
-            }
+            }}
         """)
         select_all_btn.clicked.connect(self._select_all)
 
         deselect_all_btn = PushButton("全部关闭", self)
         deselect_all_btn.setFixedHeight(26)
-        deselect_all_btn.setStyleSheet("""
-            QPushButton {
+        deselect_all_btn.setStyleSheet(f"""
+            QPushButton {{
                 background-color: rgba(14, 99, 156, 180);
                 color: white;
                 border: none;
                 border-radius: 4px;
                 font-size: 11px;
                 padding: 0 10px;
-            }
-            QPushButton:hover {
+                {get_font_family_css()}
+            }}
+            QPushButton:hover {{
                 background-color: #1177bb;
-            }
+            }}
         """)
         deselect_all_btn.clicked.connect(self._deselect_all)
 
         clear_disabled_btn = PushButton("删除未选", self)
         clear_disabled_btn.setFixedHeight(26)
-        clear_disabled_btn.setStyleSheet("""
-            QPushButton {
+        clear_disabled_btn.setStyleSheet(f"""
+            QPushButton {{
                 background-color: rgba(196, 43, 28, 180);
                 color: white;
                 border: none;
                 border-radius: 4px;
                 font-size: 11px;
                 padding: 0 10px;
-            }
-            QPushButton:hover {
+                {get_font_family_css()}
+            }}
+            QPushButton:hover {{
                 background-color: #d43d2a;
-            }
+            }}
         """)
         clear_disabled_btn.clicked.connect(self._clear_disabled)
 
@@ -290,18 +295,19 @@ class MemoryCardContent(QWidget):
         # 保存按钮
         self.save_btn = PrimaryPushButton("保存", self)
         self.save_btn.setFixedHeight(26)
-        self.save_btn.setStyleSheet("""
-            QPushButton {
+        self.save_btn.setStyleSheet(f"""
+            QPushButton {{
                 background-color: #0e639c;
                 color: white;
                 border: none;
                 border-radius: 4px;
                 font-size: 12px;
                 padding: 0 12px;
-            }
-            QPushButton:hover {
+                {get_font_family_css()}
+            }}
+            QPushButton:hover {{
                 background-color: #1177bb;
-            }
+            }}
         """)
         self.save_btn.clicked.connect(self._save_memories)
         btn_layout.addWidget(self.save_btn)

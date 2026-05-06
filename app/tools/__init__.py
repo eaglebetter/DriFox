@@ -141,9 +141,6 @@ class BuiltinTools(QObject):
     def execute_bash(self, command: str, timeout: int = 120,):
         return self._terminal_tools.execute_bash(command, timeout)
 
-    def run_verify(self, command: str = "", timeout: int = 120):
-        return self._terminal_tools.run_verify(command, timeout)
-
     def fetch_web(self, url: str, format: str = "markdown", max_chars: int = 26000, callback=None, cancelled_ref: list = None):
         return self._web_tools.fetch_web(url, format, max_chars, callback, cancelled_ref)
 
@@ -603,20 +600,6 @@ def get_builtin_tools_schema() -> List[Dict]:
                         "timeout": {"type": "integer", "description": "超时秒数"},
                     },
                     "required": ["command"],
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "run_verify",
-                "description": "运行针对当前任务的验证命令，默认尝试项目测试或语法检查",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "command": {"type": "string", "description": "验证命令"},
-                        "timeout": {"type": "integer", "description": "超时时间"},
-                    },
                 },
             },
         },

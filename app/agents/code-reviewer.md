@@ -10,6 +10,7 @@ permission:
   bash: ask
   write: deny
   patch: deny
+  get_diagnostics: allow
   read: allow
   glob: allow
   grep: allow

@@ -261,7 +261,6 @@ class ToolExecutor:
         "websearch": ["query"],
         "scan_repo": [],
         "stage_files": ["files"],
-        "run_verify": [],
         "git_status": [],
         "git_log": [],
         "git_diff": [],
@@ -383,9 +382,6 @@ class ToolExecutor:
             ),
             "stage_files": lambda: self._builtin_tools.stage_files(
                 args.get("files", [])
-            ),
-            "run_verify": lambda: self._builtin_tools.run_verify(
-                args.get("command", ""), args.get("timeout", 120)
             ),
             "get_diagnostics": lambda: self._builtin_tools.get_diagnostics(
                 args.get("file_path", ""), args.get("language")
@@ -606,86 +602,6 @@ class ToolExecutor:
         
         return result_holder[0] if result_holder[0] else ToolResult(False, error="WebSearch failed")
 
-    def _execute_canvas_tool(self, tool_name: str, args: dict):
-        if not self._canvas_tools_executor:
-            return ToolResult(False, error="Canvas tools executor not available")
-
-        canvas_tool_map = {
-            "canvas_get_variables": lambda: self._canvas_tools_executor.canvas_get_variables(
-                var_type=args.get("var_type"),
-                include_values=args.get("include_values", True),
-            ),
-            "canvas_set_variable": lambda: self._canvas_tools_executor.canvas_set_variable(
-                var_name=args.get("var_name", ""),
-                value=args.get("value"),
-                var_type=args.get("var_type", "custom"),
-                from_node=args.get("from_node"),
-                from_port=args.get("from_port"),
-            ),
-            "canvas_run_node": lambda: self._canvas_tools_executor.canvas_run_node(
-                mode=args.get("mode", "node"), node_name=args.get("node_name")
-            ),
-            "canvas_get_logs": lambda: self._canvas_tools_executor.canvas_get_logs(
-                node_name=args.get("node_name", ""),
-                log_type=args.get("log_type", "historical"),
-            ),
-            # "canvas_edit_run": lambda: self._canvas_tools_executor.canvas_edit_run(
-            #     node_name=args.get("node_name", ""), code=args.get("code", "")
-            # ),
-            "canvas_nodes": lambda: self._canvas_tools_executor.canvas_nodes(),
-            "canvas_exec_state": lambda: self._canvas_tools_executor.canvas_exec_state(
-                task_id=args.get("task_id"),
-                include_nodes=args.get("include_nodes", True),
-                include_logs=args.get("include_logs", False),
-                log_tail_chars=args.get("log_tail_chars", 2000),
-                recent_limit=args.get("recent_limit", 5),
-            ),
-            "canvas_snapshot": lambda: self._canvas_tools_executor.canvas_snapshot(
-                node_names=args.get("node_names"),
-                include_logs=args.get("include_logs", True),
-                log_type=args.get("log_type", "historical"),
-                log_tail_chars=args.get("log_tail_chars", 4000),
-                include_code=args.get("include_code", False),
-                include_input_data=args.get("include_input_data", False),
-                include_output_data=args.get("include_output_data", False),
-                data_truncation=args.get("data_truncation", 2000),
-            ),
-            "canvas_set_prop": lambda: self._canvas_tools_executor.canvas_set_prop(
-                node_name=args.get("node_name", ""),
-                properties=args.get("properties", {}),
-                target=args.get("target"),
-            ),
-            "canvas_create_node": lambda: self._canvas_tools_executor.canvas_create_node(
-                node_name=args.get("node_name"),
-                position=args.get("position"),
-            ),
-            "canvas_connect_nodes": lambda: self._canvas_tools_executor.canvas_connect_nodes(
-                connections=args.get("connections", []),
-            ),
-            "canvas_edit_prop": lambda: self._canvas_tools_executor.canvas_edit_prop(
-                node_name=args.get("node_name", ""),
-                edits=args.get("edits", []),
-            ),
-        }
-
-        executor = canvas_tool_map.get(tool_name)
-        if executor:
-            try:
-                return executor()
-            except Exception as e:
-                return ToolResult(False, error=f"Canvas tool execution error: {str(e)}")
-        return ToolResult(False, error=f"Unknown canvas tool: {tool_name}")
-
-    def execute_skill(self, method: str, params: dict) -> dict:
-        """执行技能"""
-        if hasattr(self._homepage, "execute_skill"):
-            try:
-                return self._homepage.execute_skill(method, params)
-            except Exception as e:
-                logger.error(f"[ToolExecutor] Skill execution failed: {e}")
-                return {"error": str(e)}
-        return {"error": "Skill execution not available"}
-
     def set_sub_agent_manager(self, sub_agent_manager):
         """设置子智能体管理器"""
         if self._builtin_tools:
@@ -694,5 +610,3 @@ class ToolExecutor:
             logger.info(
                 "[ToolExecutor] SubAgentManager attached to BuiltinTools and TaskTools"
             )
-
-

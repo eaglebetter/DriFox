@@ -19,6 +19,7 @@ permission:
   task: allow
   webfetch: allow
   websearch: allow
+  get_diagnostics: allow
 ---
 
 # Role

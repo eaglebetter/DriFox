@@ -1631,7 +1631,7 @@ class OpenAIChatWorker(QThread):
 
             # 检查必需参数
             required_args = self.tool_executor.REQUIRED_ARGS.get(tool_name, [])
-            missing_args = [p for p in required_args if not arguments.get(p)]
+            missing_args = [p for p in required_args if p not in arguments]
             if missing_args:
                 logger.warning(
                     f"[ToolCall] ⚠️ 缺少必需参数: tool={tool_name}, missing={missing_args}, "

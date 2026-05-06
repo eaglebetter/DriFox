@@ -533,10 +533,87 @@ class DiffHtmlGenerator:
     </div>
 
     <script>
-        // 文件数据存储（用于懒加载）
+        // 文件数据存储（用于懒加载）- 只存储diff行数据，前端按需生成HTML
         window._diffFiles = {files_json};
         window._loadedFiles = new Set({list(range(preload_count))});
         window._preloadCount = {preload_count};
+
+        // HTML转义函数
+        function escapeHtml(text) {{
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }}
+
+        // 从diff行数据生成HTML行
+        function generateDiffRowsHtml(lines) {{
+            let html = '';
+            let oldLineNum = 1;
+            let newLineNum = 1;
+
+            for (const line of lines) {{
+                // @@ hunk header
+                if (line.startsWith('@@')) {{
+                    const match = line.match(/@@ -(\\d+),?\\d* \\+(\\d+),?\\d* @@/);
+                    if (match) {{
+                        oldLineNum = parseInt(match[1]);
+                        newLineNum = parseInt(match[2]);
+                    }}
+                    html += `<div class="diff-line hunk-header">
+                        <span class="line-num"></span>
+                        <span class="line-num"></span>
+                        <span class="line-sign"></span>
+                        <span class="line-code">${{escapeHtml(line)}}</span>
+                    </div>`;
+                }}
+                // deleted line
+                else if (line.startsWith('-')) {{
+                    html += `<div class="diff-line deleted">
+                        <span class="line-num old">${{oldLineNum}}</span>
+                        <span class="line-num"></span>
+                        <span class="line-sign">-</span>
+                        <span class="line-code">${{escapeHtml(line.substring(1))}}</span>
+                    </div>`;
+                    oldLineNum++;
+                }}
+                // added line
+                else if (line.startsWith('+')) {{
+                    html += `<div class="diff-line added">
+                        <span class="line-num"></span>
+                        <span class="line-num new">${{newLineNum}}</span>
+                        <span class="line-sign">+</span>
+                        <span class="line-code">${{escapeHtml(line.substring(1))}}</span>
+                    </div>`;
+                    newLineNum++;
+                }}
+                // context line
+                else {{
+                    const content = line.startsWith(' ') ? line.substring(1) : line;
+                    html += `<div class="diff-line context">
+                        <span class="line-num">${{oldLineNum}}</span>
+                        <span class="line-num">${{newLineNum}}</span>
+                        <span class="line-sign"></span>
+                        <span class="line-code">${{escapeHtml(content)}}</span>
+                    </div>`;
+                    oldLineNum++;
+                    newLineNum++;
+                }}
+            }}
+            return html;
+        }}
+
+        // 生成文件块HTML（从数据按需生成）
+        function generateFileBlockHtml(fileInfo) {{
+            const addStat = fileInfo.additions > 0 ? `<span class="add-stat">+${{fileInfo.additions}}</span>` : '';
+            const delStat = fileInfo.deletions > 0 ? `<span class="del-stat">-${{fileInfo.deletions}}</span>` : '';
+            const headerHtml = `<div class="file-header">
+                <span class="file-icon">${{fileInfo.icon}}</span>
+                <span class="file-path">${{escapeHtml(fileInfo.path)}}</span>
+                <div class="file-stats">${{addStat}}${{delStat}}</div>
+            </div>`;
+            const rowsHtml = generateDiffRowsHtml(fileInfo.lines);
+            return headerHtml + `<div class="diff-table">${{rowsHtml}}</div>`;
+        }}
 
         function loadFileContent(fileId, index) {{
             if (window._loadedFiles.has(index)) return;
@@ -547,15 +624,15 @@ class DiffHtmlGenerator:
 
             const container = document.getElementById('diff-content');
             const placeholder = document.getElementById('placeholder-' + fileId);
+            const blockHtml = generateFileBlockHtml(fileInfo);
 
             if (placeholder) {{
-                placeholder.outerHTML = fileInfo.html;
+                placeholder.outerHTML = `<div class="file-block" id="${{fileId}}">${{blockHtml}}</div>`;
             }} else {{
-                // 直接追加
                 const div = document.createElement('div');
                 div.id = fileId;
                 div.className = 'file-block';
-                div.innerHTML = fileInfo.header + '<div class="diff-table">' + fileInfo.rows + '</div>';
+                div.innerHTML = blockHtml;
                 container.appendChild(div);
             }}
         }}
@@ -700,19 +777,25 @@ class DiffHtmlGenerator:
 
     @classmethod
     def _generate_file_data_json(cls, files: List[Dict]) -> str:
-        """生成文件数据 JSON（用于懒加载），包含每个文件的完整 HTML"""
+        """生成文件数据 JSON（用于懒加载），只存储 diff 行数据，前端按需生成 HTML"""
         import json
 
         files_data = []
         for i, file_info in enumerate(files):
             file_id = f"file-{i}"
-            rows_html = cls._generate_file_block_rows(file_info)
-            header_html = cls._generate_file_block_header(file_info, file_id)
+            path = file_info["path"]
+            additions = file_info["additions"]
+            deletions = file_info["deletions"]
+            icon = cls._get_file_icon(path)
 
+            # 只存储元数据和 diff 行，不生成 HTML
             files_data.append({
                 "id": file_id,
-                "header": header_html,
-                "rows": rows_html
+                "path": path,
+                "icon": icon,
+                "additions": additions,
+                "deletions": deletions,
+                "lines": file_info["lines"]
             })
 
         return json.dumps(files_data, ensure_ascii=False)
@@ -969,12 +1052,25 @@ class DiffViewerWindow:
 
     def _on_closed(self):
         """窗口关闭回调"""
+        # 释放 WebEngineView 中的 HTML 和 JS 内存
+        page = self._webview.page()
+        if page:
+            try:
+                page.runJavaScript("delete window._diffFiles; delete window._loadedFiles;")
+            except Exception:
+                pass
+        try:
+            self._webview.setHtml("")
+        except Exception:
+            pass
+        self._current_html = None
         if self in self._instances:
             self._instances.remove(self)
 
     def load_html(self, html_content: str):
-        """加载 HTML 内容"""
-        self._webview.setHtml(html_content)
+        """加载 HTML 内容（先清空再加载，避免内存累积）"""
+        self._webview.setHtml(html_content or "")
+        self._current_html = html_content
 
     def show(self):
         """显示窗口"""
@@ -983,7 +1079,17 @@ class DiffViewerWindow:
         self._window.activateWindow()
 
     def close(self):
-        """关闭窗口"""
+        """关闭窗口并释放资源"""
+        # 清空 WebEngineView 释放 HTML 和 JS 内存
+        page = self._webview.page()
+        if page:
+            try:
+                page.runJavaScript("delete window._diffFiles; delete window._loadedFiles;")
+            except Exception:
+                pass
+        
+        self._webview.setHtml("")
+        self._current_html = None
         self._window.close()
 
     @property
