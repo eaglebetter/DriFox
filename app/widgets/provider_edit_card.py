@@ -5,7 +5,7 @@
 import threading
 
 import requests
-from PyQt5.QtCore import pyqtSignal
+from PyQt5.QtCore import pyqtSignal, Qt
 from PyQt5.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -160,14 +160,17 @@ class ProviderEditCard(QWidget):
         """)
 
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(8, 4, 8, 4)
-        main_layout.setSpacing(5)
+        main_layout.setContentsMargins(4, 2, 4, 2)
+        main_layout.setSpacing(4)
 
         # 连接配置区域
         # 服务商名称行
         if self.is_new:
             name_row = QHBoxLayout()
-            name_row.addWidget(BodyLabel("服务商:"))
+            # 服务商名称标签 - 固定宽度右对齐
+            name_label = BodyLabel("服务商:")
+            name_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            name_row.addWidget(name_label)
             self.nameCombo = SearchableEditableComboBox()
             for provider_name in FREE_PROVIDERS.keys():
                 icon_name = PROVIDER_ICONS.get(provider_name, "大模型")
@@ -178,7 +181,7 @@ class ProviderEditCard(QWidget):
             self.nameCombo.currentTextChanged.connect(self._on_provider_changed)
             name_row.addWidget(self.nameCombo, 1)
 
-            self.getKeyBtn = PrimaryPushButton("获取 API Key")
+            self.getKeyBtn = PrimaryPushButton("获取 API KEY")
             self.getKeyBtn.clicked.connect(lambda: self._open_help_url(self.nameCombo.currentText()))
             name_row.addWidget(self.getKeyBtn)
 
@@ -194,15 +197,17 @@ class ProviderEditCard(QWidget):
             name_row.addWidget(BodyLabel("服务商:"))
             name_row.addWidget(ProviderIconWidget(self.provider_name, 24))
             name_row.addWidget(BodyLabel(self.provider_name))
-            name_row.addStretch()
-            getKeyBtn = PrimaryPushButton("获取 API Key")
+            name_row.addStretch(1)
+            getKeyBtn = PrimaryPushButton("获取 API KEY")
             getKeyBtn.clicked.connect(lambda: self._open_help_url(self.provider_name))
             name_row.addWidget(getKeyBtn)
             main_layout.addLayout(name_row)
 
         # API URL 行
         url_row = QHBoxLayout()
-        url_row.addWidget(BodyLabel("API URL:"))
+        url_label = BodyLabel("API URL:")
+        url_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        url_row.addWidget(url_label)
         self.apiUrlCombo = SearchableEditableComboBox()
         self._load_preset_urls()
         current_url = self.provider_info.get("API_URL", template.get("API_URL", ""))
@@ -220,7 +225,9 @@ class ProviderEditCard(QWidget):
 
         # API Key 行
         key_row = QHBoxLayout()
-        key_row.addWidget(BodyLabel("API Key:"))
+        key_label = BodyLabel("API Key:")
+        key_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        key_row.addWidget(key_label)
         self.apiKeyEdit = LineEdit()
         self.apiKeyEdit.setEchoMode(QLineEdit.Password)
         current_key = self.provider_info.get("API_KEY", template.get("API_KEY", ""))
@@ -271,7 +278,9 @@ class ProviderEditCard(QWidget):
         main_layout.addLayout(model_row)
 
         temp_row = QHBoxLayout()
-        temp_row.addWidget(BodyLabel("模型温度:"))
+        temp_label = BodyLabel("模型温度:")
+        temp_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        temp_row.addWidget(temp_label)
         self.tempSpin = QDoubleSpinBox()
         self.tempSpin.setRange(0, 2)
         self.tempSpin.setSingleStep(0.1)
@@ -282,7 +291,9 @@ class ProviderEditCard(QWidget):
         main_layout.addLayout(temp_row)
 
         context_row = QHBoxLayout()
-        context_row.addWidget(BodyLabel("最大上下文长度:"))
+        context_label = BodyLabel("最大上下文:")
+        context_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        context_row.addWidget(context_label)
         self.contextLengthSpin = QDoubleSpinBox()
         self.contextLengthSpin.setRange(1, 99999999)
         self.contextLengthSpin.setSingleStep(1000)
@@ -294,13 +305,7 @@ class ProviderEditCard(QWidget):
         context_row.addWidget(self.contextLengthSpin, 1)
         main_layout.addLayout(context_row)
 
-        # 保存按钮（右上角）
-        save_layout = QHBoxLayout()
-        save_layout.addStretch()
-        save_btn = PrimaryPushButton("保存")
-        save_btn.clicked.connect(self._on_save)
-        save_layout.addWidget(save_btn)
-        main_layout.addLayout(save_layout)
+        # 保存按钮已移到 BaseSettingsCard 标题栏，信号由外部连接
 
         # 新建时调用一次初始化
         if self.is_new:
@@ -471,3 +476,7 @@ class ProviderEditCard(QWidget):
         if self.is_new:
             return self.nameCombo.currentText(), self.provider_info
         return self.provider_name, self.provider_info
+
+    def get_save_button(self):
+        """获取保存按钮，供父组件移到关闭按钮旁边"""
+        return self.save_btn

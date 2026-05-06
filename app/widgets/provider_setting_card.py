@@ -30,6 +30,7 @@ from qfluentwidgets import (
 )
 
 from app.widgets.searchable_editable_combobox import SearchableEditableComboBox
+from app.utils.design_tokens import CardStyles, ItemStyles, Colors, Sizes
 from app.utils.utils import get_icon, get_unified_font
 from app.constants import (
     PROVIDER_ICONS,
@@ -213,14 +214,14 @@ class ProviderItem(QWidget):
     def _setup_ui(self):
         self.setFixedHeight(56)
         self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-        self.setStyleSheet("""
-            ProviderItem {
+        self.setStyleSheet(f"""
+            ProviderItem {{
                 background-color: transparent;
                 border-radius: 8px;
-            }
-            ProviderItem:hover {
-                background-color: #3d3d3d;
-            }
+            }}
+            ProviderItem:hover {{
+                background-color: {Colors.HOVER_BG};
+            }}
         """)
 
         main_layout = QHBoxLayout(self)
@@ -253,10 +254,10 @@ class ProviderItem(QWidget):
         info_layout.setSpacing(2)
         self.nameLabel = QLabel(self.provider_name)
         self.nameLabel.setStyleSheet(
-            "color: #ffffff; font-size: 14px; font-weight: 500;"
+            f"color: {Colors.TEXT_PRIMARY}; font-size: 14px; font-weight: 500;"
         )
         self.modelLabel = QLabel(self.provider_info.get("模型名称", ""))
-        self.modelLabel.setStyleSheet("color: #888888; font-size: 12px;")
+        self.modelLabel.setStyleSheet(f"color: {Colors.TEXT_MUTED}; font-size: 12px;")
 
         info_layout.addWidget(self.nameLabel)
         info_layout.addWidget(self.modelLabel)
@@ -337,6 +338,7 @@ class ProviderListSettingCard(ExpandSettingCard):
         self.__initWidget()
 
     def __initWidget(self):
+        # 先添加按钮（会在 expand 按钮之前显示），然后设置布局
         self.addWidget(self.addProviderButton)
         self.viewLayout.setSpacing(0)
         self.viewLayout.setAlignment(Qt.AlignTop)
@@ -344,6 +346,30 @@ class ProviderListSettingCard(ExpandSettingCard):
         self.view.setStyleSheet("background-color: transparent;")
         self._refresh_items()
         self.addProviderButton.clicked.connect(self._show_add_dialog)
+        
+        # 更新展开按钮位置：将按钮放到关闭按钮旁边
+        self._update_button_position()
+    
+    def _update_button_position(self):
+        """将添加按钮移到关闭按钮旁边"""
+        # 展开卡片的 card 是 HeaderSettingCard，包含 hBoxLayout
+        card = self.card
+        if hasattr(card, 'hBoxLayout'):
+            # 从布局中移除按钮
+            self.card.hBoxLayout.removeWidget(self.addProviderButton)
+            # 在关闭按钮之前插入按钮
+            # hBoxLayout 结构: icon, titleLabel, contentLabel, expandButton, spacing
+            # 找到 expandButton 的位置，在其前面插入
+            for i in range(card.hBoxLayout.count()):
+                item = card.hBoxLayout.itemAt(i)
+                if item.widget() == card.expandButton:
+                    # 找到 expandButton，在其前一个 spacing 之前插入按钮
+                    # 先移除最后一个 spacing（19px）
+                    card.hBoxLayout.removeItem(card.hBoxLayout.itemAt(i - 1))
+                    # 添加按钮和较小的间距
+                    card.hBoxLayout.insertWidget(i - 1, self.addProviderButton, 0, Qt.AlignRight)
+                    card.hBoxLayout.insertSpacing(i, 4)  # 恢复较小的间距
+                    break
 
     def _refresh_items(self):
         self.providers = (

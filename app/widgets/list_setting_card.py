@@ -28,6 +28,7 @@ from qfluentwidgets import (
     ComboBox,
     PrimaryPushButton,
 )
+from app.utils.design_tokens import ItemStyles
 
 
 class ListValidator(ConfigValidator):
@@ -71,19 +72,7 @@ class FontItem(QWidget):
         self.fontLabel.setObjectName("titleLabel")
         self.radioButton.setChecked(is_selected)
 
-        self.radioButton.setStyleSheet("""
-            QRadioButton::indicator {
-                width: 16px;
-                height: 16px;
-                border-radius: 8px;
-                border: 2px solid #8e8e8e;
-                background-color: transparent;
-            }
-            QRadioButton::indicator:checked {
-                border: 2px solid #0078d4;
-                background-color: #0078d4;
-            }
-        """)
+        self.radioButton.setStyleSheet(ItemStyles.radio_button())
 
         self.removeButton.clicked.connect(lambda: self.removed.emit(self))
         self.radioButton.toggled.connect(

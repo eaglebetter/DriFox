@@ -10,7 +10,10 @@ from PyQt5.QtWidgets import (
     QLabel,
     QScrollArea,
 )
-from qfluentwidgets import CardWidget, StrongBodyLabel, TransparentToolButton, SimpleCardWidget
+from qfluentwidgets import StrongBodyLabel, TransparentToolButton, SimpleCardWidget, FluentIcon, \
+    PrimaryToolButton
+
+from app.utils.design_tokens import CardStyles, TabStyles
 from app.utils.utils import get_unified_font, get_icon
 
 
@@ -25,7 +28,13 @@ class BaseSettingsCard(SimpleCardWidget):
         self._title = title
         self._icon = icon
         self._current_tab = "main"  # 支持标签切换
+        self._content_layout = None  # 初始化为 None
         self._setup_base_ui()
+
+    @property
+    def content_layout(self):
+        """提供 content_layout 属性以便兼容"""
+        return self._content_layout
 
     def set_title(self, title: str):
         """动态设置卡片标题"""
@@ -39,34 +48,58 @@ class BaseSettingsCard(SimpleCardWidget):
             else:
                 self.title_label.setText(title)
 
+    def set_count(self, count: int, limit: int = None):
+        """设置标题右侧的统计数量
+        
+        Args:
+            count: 当前数量
+            limit: 可选的限制数量，格式化为 "count/limit"
+        """
+        if hasattr(self, '_count_label') and self._count_label:
+            if limit and limit > 0:
+                self._count_label.setText(f"({count}/{limit})")
+            elif count > 0:
+                self._count_label.setText(f"({count})")
+            else:
+                self._count_label.setText("")
+            self._count_label.setVisible(count > 0 or (limit and limit > 0))
+
+    def set_count_label(self, text: str):
+        """设置标题右侧的统计文本（自定义格式）"""
+        if hasattr(self, '_count_label') and self._count_label:
+            self._count_label.setText(f"({text})")
+            self._count_label.setVisible(bool(text))
+            self._count_label.setVisible(bool(text))
+
     def _setup_base_ui(self):
         self.setSizePolicy(1, 0)  # 水平方向可扩展
         self.setFixedHeight(180)  # 固定高度，超出滚动
-        self.setStyleSheet("""
-            CardWidget {
-                background-color: rgba(33, 33, 38, 250);
-                border: 1px solid #3d3d3d;
-                border-radius: 8px;
-            }
-        """)
+        self.setStyleSheet(CardStyles.card())
 
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(12, 8, 12, 8)
+        main_layout.setContentsMargins(8, 6, 8, 6)
         main_layout.setSpacing(4)
 
         # 头部
         header = QHBoxLayout()
-        header.setSpacing(8)
+        header.setSpacing(4)
 
         self.icon_label = QLabel(self._icon, self)
-        self.icon_label.setFont(get_unified_font(12))
+        self.icon_label.setFont(get_unified_font(11))
 
         self.title_label = StrongBodyLabel(self._title, self)
-        self.title_label.setFont(get_unified_font(11, True))
-        self.title_label.setStyleSheet("color: #f59e0b;")
+        self.title_label.setFont(get_unified_font(10, True))
+        self.title_label.setStyleSheet(CardStyles.title_label())
 
         header.addWidget(self.icon_label)
         header.addWidget(self.title_label)
+
+        # 数量统计标签
+        self._count_label = QLabel("", self)
+        self._count_label.setFont(get_unified_font(10))
+        self._count_label.setStyleSheet("color: rgba(255, 255, 255, 0.5); padding-left: 2px;")
+        self._count_label.setVisible(False)
+        header.addWidget(self._count_label)
 
         # 标签切换按钮容器
         self._tab_buttons_container = QHBoxLayout()
@@ -83,7 +116,7 @@ class BaseSettingsCard(SimpleCardWidget):
         # 关闭按钮
         self.close_btn = QLabel("✕", self)
         self.close_btn.setFont(get_unified_font(11))
-        self.close_btn.setStyleSheet("color: #888888; cursor: pointer; padding: 4px;")
+        self.close_btn.setStyleSheet(CardStyles.close_button())
         self.close_btn.mousePressEvent = lambda e: self._on_close()
         header.addWidget(self.close_btn)
 
@@ -125,9 +158,9 @@ class BaseSettingsCard(SimpleCardWidget):
 
         self.content_widget = QWidget()
         self.content_widget.setStyleSheet("background: transparent;")
-        self.content_layout = QVBoxLayout(self.content_widget)
-        self.content_layout.setContentsMargins(4, 2, 4, 2)
-        self.content_layout.setSpacing(4)
+        self._content_layout = QVBoxLayout(self.content_widget)
+        self._content_layout.setContentsMargins(4, 2, 4, 2)
+        self._content_layout.setSpacing(4)
 
         self.scroll_area.setWidget(self.content_widget)
         main_layout.addWidget(self.scroll_area, 1)
@@ -153,13 +186,7 @@ class BaseSettingsCard(SimpleCardWidget):
     def set_opacity(self, opacity: float):
         """设置透明度，用于响应全局透明度变化"""
         alpha = int(250 * opacity)
-        self.setStyleSheet(f"""
-            CardWidget {{
-                background-color: rgba(33, 33, 38, {alpha});
-                border: 1px solid #3d3d3d;
-                border-radius: 8px;
-            }}
-        """)
+        self.setStyleSheet(CardStyles.card(alpha))
 
     def set_extra_button_handler(self, handler):
         """
@@ -168,7 +195,6 @@ class BaseSettingsCard(SimpleCardWidget):
         Args:
             handler: 可调用的函数，点击按钮时触发
         """
-        from qfluentwidgets import TransparentToolButton
 
         # 移除已有按钮
         while self._extra_buttons_container.count():
@@ -179,9 +205,21 @@ class BaseSettingsCard(SimpleCardWidget):
         # 添加导入按钮
         import_btn = TransparentToolButton(get_icon("导入"), self)
         import_btn.setToolTip("导入会话")
-        import_btn.setFixedSize(24, 24)
         import_btn.clicked.connect(handler)
         self._extra_buttons_container.addWidget(import_btn)
+
+    def set_save_button_handler(self, handler):
+        """在标题栏添加保存按钮（关闭按钮旁边）"""
+        # 移除已有按钮
+        while self._extra_buttons_container.count():
+            item = self._extra_buttons_container.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        save_btn = PrimaryToolButton(FluentIcon.SAVE, self)
+        save_btn.setFixedSize(30, 30)
+        save_btn.clicked.connect(handler)
+        self._extra_buttons_container.addWidget(save_btn)
 
     def setup_tabs(self, tabs: list, default_tab: str = None):
         """
@@ -191,7 +229,6 @@ class BaseSettingsCard(SimpleCardWidget):
             tabs: 标签列表，每项为 (tab_id: str, tab_name: str)
             default_tab: 默认选中的标签
         """
-        from qfluentwidgets import TransparentToolButton
 
         # 清除现有标签按钮
         while self._tab_buttons_container.count():
@@ -238,27 +275,6 @@ class BaseSettingsCard(SimpleCardWidget):
         """更新标签样式"""
         for tab_id, btn in self._tab_buttons.items():
             if tab_id == self._current_tab:
-                btn.setStyleSheet("""
-                    QLabel {
-                        color: #fff;
-                        font-size: 11px;
-                        font-weight: bold;
-                        padding: 3px 8px;
-                        border-radius: 4px;
-                        background-color: rgba(102, 198, 255, 0.3);
-                    }
-                """)
+                btn.setStyleSheet(TabStyles.active())
             else:
-                btn.setStyleSheet("""
-                    QLabel {
-                        color: rgba(255, 255, 255, 0.5);
-                        font-size: 11px;
-                        padding: 3px 8px;
-                        border-radius: 4px;
-                        cursor: pointer;
-                    }
-                    QLabel:hover {
-                        color: rgba(255, 255, 255, 0.8);
-                        background-color: rgba(255, 255, 255, 0.1);
-                    }
-                """)
+                btn.setStyleSheet(TabStyles.inactive())

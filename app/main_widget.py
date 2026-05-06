@@ -858,6 +858,10 @@ class OpenAIChatToolWindow(ToolWindow):
         self._provider_edit_popup.saved.connect(self._on_provider_edit_saved)
         self._provider_edit_popup.closed.connect(self._on_provider_edit_closed)
         self._provider_edit_card.content_layout.addWidget(self._provider_edit_popup)
+        # 照抄历史卡片的导入按钮模式：在标题栏加保存按钮，信号连到内容组件
+        # 获取 ProviderEditCard 实例的保存方法
+        save_handler = self._provider_edit_popup._on_save
+        self._provider_edit_card.set_save_button_handler(save_handler)
         self._provider_edit_card.setVisible(False)
         layout.addWidget(self._provider_edit_card)
 
@@ -1302,8 +1306,12 @@ class OpenAIChatToolWindow(ToolWindow):
             if item.widget():
                 item.widget().deleteLater()
         self._provider_edit_card.content_layout.addWidget(self._provider_edit_popup)
+        # 重新绑定保存按钮
+        self._provider_edit_card.set_save_button_handler(
+            lambda: self._provider_edit_popup._on_save()
+        )
         self._provider_edit_card.show()
-
+        
     def _show_provider_edit_card(self, provider_name: str, provider_info: dict):
         """显示编辑服务商卡片"""
         # 隐藏设置卡片，显示服务商编辑卡片
@@ -1322,6 +1330,10 @@ class OpenAIChatToolWindow(ToolWindow):
             if item.widget():
                 item.widget().deleteLater()
         self._provider_edit_card.content_layout.addWidget(self._provider_edit_popup)
+        # 重新绑定保存按钮
+        self._provider_edit_card.set_save_button_handler(
+            lambda: self._provider_edit_popup._on_save()
+        )
         self._provider_edit_card.show()
 
     def _hide_main_popups(self):
