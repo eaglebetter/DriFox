@@ -590,8 +590,9 @@ class OpenAIChatWorker(QThread):
                 # 每次 API 调用前，清理上一轮的中间状态
                 self._clear_pending_response_state()
                 
-                tool_calls_found = self._make_api_call(current_messages)
-
+                tool_calls_found, tool_args_pending = self._make_api_call(current_messages)
+                if tool_calls_found and tool_args_pending:
+                    continue
                 if self._is_cancelled:
                     return
 
@@ -629,7 +630,6 @@ class OpenAIChatWorker(QThread):
                     current_session_messages.append(question_result)
                     self._current_session_messages = list(current_session_messages)
                     self._emit_with_callback("finished_with_messages", self.finished_with_messages, current_session_messages)
-                    self._clear_pending_response_state()
                     self._question_pending = None
                     self._pending_answer = None
                     self._answer_event.clear()
@@ -639,7 +639,6 @@ class OpenAIChatWorker(QThread):
                 current_session_messages.extend(response_sequence)
                 self._current_session_messages = list(current_session_messages)
                 self._emit_with_callback("finished_with_messages", self.finished_with_messages, current_session_messages)
-                self._clear_pending_response_state()
 
                 self._check_and_notify_stage_change()
 
@@ -1138,7 +1137,7 @@ class OpenAIChatWorker(QThread):
         self._current_tool_calls = {}  # 改成字典，key 是 tool_call_id
         self._tool_calls_buffer = {}
         tool_calls_found = False
-
+        tool_args_pending = True
         for chunk in response:
             if self._is_cancelled:
                 return False
@@ -1210,6 +1209,7 @@ class OpenAIChatWorker(QThread):
                     if buffer["function"]["name"] and buffer["function"]["arguments"]:
                         try:
                             parsed_args = json.loads(buffer["function"]["arguments"])
+                            tool_args_pending = False
                             # 更新 _current_tool_calls 中对应 id 的 arguments
                             if tc_id in self._current_tool_calls:
                                 self._current_tool_calls[tc_id]["function"]["arguments"] = buffer["function"]["arguments"]
@@ -1224,7 +1224,6 @@ class OpenAIChatWorker(QThread):
                                     "attempt_count": 0,
                                     "first_failure_time": time.time(),
                                 }
-                                logger.debug(f"[ToolCall] JSON 解析失败，等待更多内容: tc_id={tc_id[:20]}..., 已等待 {buffer['function']['arguments'][:50]}...")
                             # 标记已尝试解析（即使失败）
                             self._waiting_tool_params[tc_id]["attempt_count"] += 1
 
@@ -1262,12 +1261,12 @@ class OpenAIChatWorker(QThread):
                     self._current_tool_calls[tc_id]["function"]["arguments"] = args_str
                     self._waiting_tool_params.pop(tc_id, None)
                     self._tool_calls_buffer.pop(tc_id, None)
-                    logger.debug(f"[ToolCall] 更新已有 tc_id arguments: tc_id={tc_id[:20]}...")
                     continue
                 
                 try:
                     # 尝试 JSON 解析
                     parsed_args = json.loads(args_str)
+                    tool_args_pending = False
                     self._current_tool_calls[tc_id] = {
                         "id": buffer["id"],
                         "type": buffer.get("type", "function"),
@@ -1280,7 +1279,6 @@ class OpenAIChatWorker(QThread):
                     # 从等待队列中移除
                     self._waiting_tool_params.pop(tc_id, None)
                     self._tool_calls_buffer.pop(tc_id, None)
-                    logger.debug(f"[ToolCall] JSON 解析成功: tc_id={tc_id[:20]}...")
                 except json.JSONDecodeError as e:
                     # JSON 仍然解析失败，记录详细错误信息
                     if tc_id in self._tool_calls_buffer:
@@ -1321,12 +1319,8 @@ class OpenAIChatWorker(QThread):
                                 "attempt_count": attempt_count + 1,
                                 "first_failure_time": first_time,
                             }
-                        logger.debug(
-                            f"[ToolCall] JSON 解析仍失败，等待中: tc_id={tc_id[:20]}..., "
-                            f"attempt={attempt_count}, duration={wait_duration:.1f}s"
-                        )
 
-        return tool_calls_found
+        return tool_calls_found, tool_args_pending
 
     def _execute_all_tools(self):
         if not self._current_tool_calls or not self.tool_executor:

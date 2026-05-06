@@ -673,7 +673,11 @@ class OpenAIChatToolWindow(ToolWindow):
             logger.exception(
                 "Failed to auto-save current session before creating a new one"
             )
-
+        
+        # 保存后清理旧会话的内存（messages 列表是主要内存消耗）
+        old_session = self.session_manager.get_current_session()
+        old_session_id = self._current_session_id
+        
         # 切换会话前彻底清理卡片
         self._cache_current_session_cards()
         # 只重置会话状态，保留 tool_executor
@@ -684,6 +688,13 @@ class OpenAIChatToolWindow(ToolWindow):
         self._current_session_id = session.session_id
         self._history_preview_messages = None
         self._clear_chat_area()
+        
+        # 清理旧会话的消息数据，释放内存（会话已保存到历史记录）
+        if old_session and old_session_id:
+            old_session.messages = []
+            old_session.compaction_state = {}
+            old_session.compaction_cache = {}
+        
         self.title_edit.setText("新对话")
         self.node_preview.clear_nodes()
         if self._todo_floating_widget:
@@ -2030,10 +2041,23 @@ class OpenAIChatToolWindow(ToolWindow):
                 widget.cleanup()
             widget.deleteLater()
         
-        # 清理可能残留的卡片缓存
+        # 清理可能残留的卡片缓存，并清理卡片对象
         session = self.session_manager.get_current_session()
         if session:
-            self._session_card_cache.pop(session.session_id, None)
+            cache_entry = self._session_card_cache.pop(session.session_id, None)
+            if cache_entry and isinstance(cache_entry, dict):
+                cards = cache_entry.get("cards", [])
+                for card in cards:
+                    if hasattr(card, 'cleanup'):
+                        try:
+                            card.cleanup()
+                        except Exception:
+                            pass
+                    if hasattr(card, 'deleteLater'):
+                        try:
+                            card.deleteLater()
+                        except Exception:
+                            pass
 
     def _cleanup_session_card_cache(self):
         from app.constants import (
@@ -3153,7 +3177,8 @@ class OpenAIChatToolWindow(ToolWindow):
                         widgets_to_remove.append(w)
                 
                 from app.widgets.ui_helpers import delete_widgets_from_layout
-                deleted_count = delete_widgets_from_layout(widgets_to_remove, self.chat_layout)
+                # 注意：不调用 cleanup，因为撤销操作需要在删除后仍能访问卡片数据
+                deleted_count = delete_widgets_from_layout(widgets_to_remove, self.chat_layout, call_cleanup=False)
                 logger.info(f"[UNDO] Removed {deleted_count} cards from UI")
             else:
                 logger.warning("[UNDO] Card not found in layout, UI cards not deleted")
