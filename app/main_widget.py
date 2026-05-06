@@ -629,10 +629,11 @@ class OpenAIChatToolWindow(ToolWindow):
             # 即使不在流式输出，也要清理 worker
             self._chat_engine.cleanup_worker()
 
-        # 切换会话前彻底清理卡片和 tool_executor
+        # 切换会话前彻底清理卡片
         self._cache_current_session_cards()
+        # 只重置会话状态，保留 tool_executor（分支后还需要执行工具）
         if self._tool_executor:
-            self._tool_executor.cleanup()
+            self._tool_executor.reset_session_state()
         session = self.session_manager.create_new_session()
         session.messages = messages
         session.name = name
@@ -673,10 +674,11 @@ class OpenAIChatToolWindow(ToolWindow):
                 "Failed to auto-save current session before creating a new one"
             )
 
-        # 切换会话前彻底清理卡片和 tool_executor
+        # 切换会话前彻底清理卡片
         self._cache_current_session_cards()
+        # 只重置会话状态，保留 tool_executor
         if self._tool_executor:
-            self._tool_executor.cleanup()
+            self._tool_executor.reset_session_state()
         
         session = self.session_manager.create_new_session()
         self._current_session_id = session.session_id
@@ -3698,6 +3700,9 @@ class OpenAIChatToolWindow(ToolWindow):
         
         # 清理旧会话的卡片
         self._cache_current_session_cards()
+        # 只重置会话状态，保留 tool_executor
+        if self._tool_executor:
+            self._tool_executor.reset_session_state()
         
         # 先在当前 session_manager 中查找
         for i, session in enumerate(self.session_manager.get_all_sessions()):

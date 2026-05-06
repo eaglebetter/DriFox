@@ -506,6 +506,20 @@ class OpenAIChatWorker(QThread):
         彻底清理 worker 的所有缓存数据，防止内存泄漏。
         应该在对话结束后调用。
         """
+        import sys
+        from loguru import logger
+        
+        # 计算清理前的内存占用估算
+        msg_count = len(self.messages) + len(self.session_messages) + len(self._current_session_messages or [])
+        full_resp_len = len(self.full_response or "")
+        reasoning_len = len(self._reasoning_content or "")
+        blocks_count = len(self._response_content_blocks or [])
+        
+        # 记录清理的概况
+        if full_resp_len > 100000 or reasoning_len > 100000:
+            logger.info(f"[Worker] 清理大量缓存: full_response={full_resp_len/1024:.1f}KB, "
+                       f"reasoning={reasoning_len/1024:.1f}KB, messages={msg_count}, blocks={blocks_count}")
+        
         # 清理消息引用
         self.messages = []
         self.session_messages = []
