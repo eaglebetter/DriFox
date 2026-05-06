@@ -77,6 +77,11 @@ def _get_content_to_text() -> Callable:
     return _content_to_text_getter
 
 
+# ========== 性能优化：预编译正则表达式 ==========
+_CLASS_PATTERN = re.compile(r'class\s+(\w+)')
+_FUNC_PATTERN = re.compile(r'def\s+(\w+)|function\s+(\w+)')
+
+
 # ==================== 代码保存辅助 ====================
 
 LANG_EXT_MAP = {
@@ -143,8 +148,8 @@ def get_language_extension(lang: str) -> str:
 
 def extract_code_suggested_filename(code: str, ext: str) -> str:
     """从代码中提取建议的文件名"""
-    class_match = re.search(r'class\s+(\w+)', code)
-    func_match = re.search(r'def\s+(\w+)|function\s+(\w+)', code)
+    class_match = _CLASS_PATTERN.search(code)
+    func_match = _FUNC_PATTERN.search(code)
     if class_match:
         return class_match.group(1) + ext
     elif func_match:

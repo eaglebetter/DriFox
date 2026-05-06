@@ -22,6 +22,7 @@ from app.widgets.bottom_input_area import SendableTextEdit
 from app.widgets.context_usage_ring import ContextUsageRing
 from app.widgets.conversation_node_preview import ConversationNodePreview
 from app.widgets.memory_manager import MemoryManagerDialog, MemoryItemWidget
+from app.widgets.memory_card import MemoryCardContent
 
 # 对话框
 from app.widgets.file_undo_dialog import FileUndoPreviewDialog
@@ -47,6 +48,7 @@ __all__ = [
     "ConversationNodePreview",
     "MemoryManagerDialog",
     "MemoryItemWidget",
+    "MemoryCardContent",
     # 对话框
     "FileUndoPreviewDialog",
 ]

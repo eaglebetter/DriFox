@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import json
 import re
+from functools import lru_cache
 from typing import Any, Dict, List, Optional
 
 
@@ -8,12 +9,15 @@ VALID_MESSAGE_ROLES = {"system", "user", "assistant", "tool"}
 
 # 渲染敏感标记（按长度降序排列，避免部分匹配）
 _SENSITIVE_MARKERS = [
-    "<think>",
+    "",
     "</think>",
     "</tool>",
     "<tool>",
     "```",
 ]
+
+# 性能优化：预编译正则表达式用于一次性替换所有敏感标记
+_SANITIZE_PATTERN = re.compile('|'.join(re.escape(marker) for marker in _SENSITIVE_MARKERS))
 
 
 def _sanitize_rendering_string(text: str) -> str:
@@ -22,15 +26,13 @@ def _sanitize_rendering_string(text: str) -> str:
     在字符串进入渲染流程前调用，防止标记被错误解析。
     
     注意：只清理完整的工具块标记，不要清理参数中的子串！
+    
+    性能优化：使用预编译的正则表达式一次性替换所有标记。
     """
     if not text or not isinstance(text, str):
         return str(text) if text is not None else ""
 
-    result = text
-    for marker in _SENSITIVE_MARKERS:
-        result = result.replace(marker, "")
-
-    return result
+    return _SANITIZE_PATTERN.sub("", text)
 
 
 def _sanitize_tool_args(args: Any) -> Any:
@@ -94,6 +96,11 @@ def make_tool_result_block(
 
 
 def ensure_content_blocks(content: Any) -> List[Dict[str, Any]]:
+    """
+    将任意格式的内容转换为标准 blocks 列表。
+    
+    性能优化：简化类型检查逻辑，减少重复代码。
+    """
     if content is None:
         return []
 
@@ -117,6 +124,7 @@ def ensure_content_blocks(content: Any) -> List[Dict[str, Any]]:
                         )
                     )
                 else:
+                    # 其他类型也当作文本处理
                     text = str(item.get("text", ""))
                     if text:
                         blocks.append({"type": "text", "text": text})

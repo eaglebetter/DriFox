@@ -90,6 +90,9 @@ from app.widgets.llm_settings_card import (
 from app.widgets.memory_manager import (
     MemoryManagerDialog,
 )
+from app.widgets.memory_card import (
+    MemoryCardContent,
+)
 from app.widgets.message_card import (
     MessageCard,
     create_welcome_card,
@@ -924,6 +927,15 @@ class OpenAIChatToolWindow(ToolWindow):
         self._history_card.content_layout.addWidget(self._history_popup_card)
         self._history_card.setVisible(False)
         layout.addWidget(self._history_card)
+
+        # 记忆管理卡片 - 和历史会话卡片同位置
+        self._memory_card = BaseSettingsCard("记忆管理", "🧠", self)
+        self._memory_card.setFixedHeight(550)
+        self._memory_card_popup = MemoryCardContent(self._memory_manager, self)
+        self._memory_card_popup.memorySaved.connect(self._on_memory_card_saved)
+        self._memory_card.content_layout.addWidget(self._memory_card_popup)
+        self._memory_card.setVisible(False)
+        layout.addWidget(self._memory_card)
 
         self.node_preview = ConversationNodePreview(self)
         self.node_preview.nodeClicked.connect(self._on_node_preview_clicked)
@@ -4509,13 +4521,27 @@ class OpenAIChatToolWindow(ToolWindow):
         self._create_new_session()
 
     def _show_soul_memory(self):
+        """切换记忆管理卡片的显示"""
+        self._toggle_memory_card()
+
+    def _toggle_memory_card(self):
+        """切换记忆管理卡片的显示"""
+        if self._memory_card.isVisible():
+            self._memory_card.hide()
+        else:
+            self._hide_main_popups()  # 隐藏其他主面板
+            self._memory_card.show()
+            # 刷新数据
+            self._memory_card_popup.load_memories()
+
+    def _on_memory_card_saved(self, memories: list):
+        """记忆卡片保存后的回调"""
         if not self._memory_manager:
             return
-        user_memories = self._memory_manager.get_user_memories()
-
-        dialog = MemoryManagerDialog(user_memories, self)
-        dialog.memoryUpdated.connect(self._on_memory_updated)
-        dialog.exec_()
+        # 数据已经在 MemoryCardContent 中通过 memory_manager 保存
+        # 这里只显示提示信息
+        from qfluentwidgets import InfoBar, InfoBarPosition
+        InfoBar.success("已保存", "长期记忆已更新", parent=self, duration=1500)
 
     def _on_memory_updated(self, memories: list):
         if not self._memory_manager:

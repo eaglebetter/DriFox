@@ -12,6 +12,14 @@ from app.tools.result import ToolResult
 from app.utils.config import Settings
 
 
+# ========== 性能优化：预编译正则表达式 ==========
+_NEWLINE_PATTERN = re.compile(r"\n+")
+_MULTI_NEWLINE_PATTERN = re.compile(r"\n{3,}")
+_TITLE_PATTERN = re.compile(r'class="result__title"[^>]*>.*?<a[^>]*href="([^"]+)"[^>]*>(.*?)</a>', re.DOTALL)
+_SNIPPET_PATTERN = re.compile(r'class="result__snippet"[^>]*>(.*?)</div>', re.DOTALL)
+_HTML_TAG_PATTERN = re.compile(r"<[^>]+>")
+
+
 class WebFetchTask(QRunnable):
     """异步网页抓取任务"""
 
@@ -70,7 +78,7 @@ class WebFetchTask(QRunnable):
 
             if self.format == "text":
                 text = soup.get_text(separator="\n")
-                clean_text = re.sub(r"\n+", "\n", text).strip()
+                clean_text = _NEWLINE_PATTERN.sub("\n", text).strip()
                 return ToolResult(True, content=clean_text[: self.max_chars])
 
             # markdown 格式
@@ -80,7 +88,7 @@ class WebFetchTask(QRunnable):
             h.body_width = 0
             h.ignore_emphasis = False
             markdown_text = h.handle(str(soup))
-            markdown_text = re.sub(r"\n{3,}", "\n\n", markdown_text)
+            markdown_text = _MULTI_NEWLINE_PATTERN.sub("\n\n", markdown_text)
             return ToolResult(True, content=markdown_text[: self.max_chars])
 
         except httpx.HTTPStatusError as e:
@@ -188,19 +196,13 @@ class WebSearchTask(QRunnable):
                 timeout=30,
                 follow_redirects=True,
             )
-            titles = re.findall(
-                r'class="result__title"[^>]*>.*?<a[^>]*href="([^"]+)"[^>]*>(.*?)</a>',
-                r.text,
-                re.DOTALL,
-            )
-            snippets = re.findall(
-                r'class="result__snippet"[^>]*>(.*?)</div>', r.text, re.DOTALL
-            )
+            titles = _TITLE_PATTERN.findall(r.text)
+            snippets = _SNIPPET_PATTERN.findall(r.text)
             results = []
             for i, (link, title) in enumerate(titles[: self.num_results]):
-                t = re.sub(r"<[^>]+>", "", title).strip()
+                t = _HTML_TAG_PATTERN.sub("", title).strip()
                 s = (
-                    re.sub(r"<[^>]+>", "", snippets[i]).strip()
+                    _HTML_TAG_PATTERN.sub("", snippets[i]).strip()
                     if i < len(snippets)
                     else ""
                 )
@@ -281,7 +283,7 @@ class WebTools:
 
             if format == "text":
                 text = soup.get_text(separator="\n")
-                clean_text = re.sub(r"\n+", "\n", text).strip()
+                clean_text = _NEWLINE_PATTERN.sub("\n", text).strip()
                 return ToolResult(True, content=clean_text[:max_chars])
 
             h = html2text.HTML2Text()
@@ -290,7 +292,7 @@ class WebTools:
             h.body_width = 0
             h.ignore_emphasis = False
             markdown_text = h.handle(str(soup))
-            markdown_text = re.sub(r"\n{3,}", "\n\n", markdown_text)
+            markdown_text = _MULTI_NEWLINE_PATTERN.sub("\n\n", markdown_text)
             return ToolResult(True, content=markdown_text[:max_chars])
 
         except httpx.HTTPStatusError as e:
@@ -415,19 +417,13 @@ class WebTools:
                 timeout=30,
                 follow_redirects=True,
             )
-            titles = re.findall(
-                r'class="result__title"[^>]*>.*?<a[^>]*href="([^"]+)"[^>]*>(.*?)</a>',
-                r.text,
-                re.DOTALL,
-            )
-            snippets = re.findall(
-                r'class="result__snippet"[^>]*>(.*?)</div>', r.text, re.DOTALL
-            )
+            titles = _TITLE_PATTERN.findall(r.text)
+            snippets = _SNIPPET_PATTERN.findall(r.text)
             results = []
             for i, (link, title) in enumerate(titles[:num_results]):
-                t = re.sub(r"<[^>]+>", "", title).strip()
+                t = _HTML_TAG_PATTERN.sub("", title).strip()
                 s = (
-                    re.sub(r"<[^>]+>", "", snippets[i]).strip()
+                    _HTML_TAG_PATTERN.sub("", snippets[i]).strip()
                     if i < len(snippets)
                     else ""
                 )

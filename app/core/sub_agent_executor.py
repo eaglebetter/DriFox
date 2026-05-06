@@ -19,6 +19,10 @@ from openai import OpenAI
 from app.core.provider_profile import get_provider_profile
 
 
+# ========== 性能优化：预编译正则表达式 ==========
+_THINKING_PATTERN = re.compile(r"<think>[\s\S]*?")  # 过滤思考内容
+
+
 class SubAgentExecutor(QThread):
     """子智能体执行器 - 独立线程运行子智能体任务"""
 
