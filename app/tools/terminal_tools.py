@@ -13,8 +13,7 @@ class TerminalTools:
     def execute_bash(self, command: str, timeout: int = 120) -> ToolResult:
         """执行 shell 命令，支持可靠的 timeout
         
-        注意：使用 Popen + wait() 替代 run()，因为 run() 的 timeout
-        在 shell=True 时对后台进程无效。
+        使用 communicate(timeout) 避免管道死锁，同时在超时时杀死进程。
         """
         import platform
 
@@ -37,36 +36,44 @@ class TerminalTools:
 
             start_time = time.time()
 
-            def wait_for_process():
-                """在线程中等待进程完成"""
-                nonlocal process_finished
+            # 使用子线程执行 communicate，避免阻塞主线程
+            result_holder = {"stdout": None, "stderr": None, "error": None}
+            
+            def communicate_in_thread():
+                """在子线程中执行 communicate，同时读取 stdout 和 stderr"""
                 try:
-                    process.wait()
-                    process_finished = True
-                except Exception:
-                    pass
+                    stdout, stderr = process.communicate()
+                    result_holder["stdout"] = stdout
+                    result_holder["stderr"] = stderr
+                except Exception as e:
+                    result_holder["error"] = str(e)
 
-            process_finished = False
-            wait_thread = threading.Thread(target=wait_for_process, daemon=True)
-            wait_thread.start()
+            comm_thread = threading.Thread(target=communicate_in_thread, daemon=True)
+            comm_thread.start()
 
-            # 等待进程完成或超时
-            wait_thread.join(timeout=timeout)
+            # 等待线程完成或超时
+            comm_thread.join(timeout=timeout)
 
-            if not process_finished:
-                # 超时：杀死进程树
+            if comm_thread.is_alive():
+                # 超时：杀死进程
                 try:
                     process.kill()
-                    # 等待进程真正退出
-                    process.wait(timeout=5)
+                    # 等待线程结束（进程被杀后 communicate 会立即返回）
+                    comm_thread.join(timeout=5)
                 except Exception:
                     pass
 
                 elapsed = time.time() - start_time
                 return ToolResult(False, error=f"Command timeout after {elapsed:.1f}s (killed)")
 
+            # 检查是否有错误
+            if result_holder["error"]:
+                return ToolResult(False, error=f"Execution error: {result_holder['error']}")
+
             # 进程正常完成
-            stdout, stderr = process.communicate()
+            stdout = result_holder["stdout"] or ""
+            stderr = result_holder["stderr"] or ""
+            
             output = stdout.strip() if stdout else ""
             error_out = stderr.strip() if stderr else ""
             combined = "\n".join(filter(None, [output, error_out]))
