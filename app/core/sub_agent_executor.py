@@ -580,11 +580,26 @@ class SubAgentManager(QObject):
         executor_ref: Dict = None,
     ) -> bool:
         """执行子智能体任务"""
-        # 从 agent 管理器动态获取允许的子智能体类型
-        allowed_agents = self._agent_manager.list_subagent_names(include_hidden=False)
-        if agent_name not in allowed_agents:
-            error_msg = f"不支持的子智能体类型: {agent_name}，允许的类型: {allowed_agents}"
+        # 验证 agent 是否存在且是有效的子智能体类型
+        agent = self._agent_manager.get_agent(agent_name)
+        if not agent:
+            error_msg = f"Agent not found: {agent_name}"
             logger.error(f"[SubAgentManager] {error_msg}")
+            # 立即触发完成信号，让任务不卡在 running 状态
+            self._finished_tasks[task_id] = {"result": "", "error": error_msg, "agent_name": agent_name}
+            if on_finished:
+                on_finished(error_msg)
+            if on_error:
+                on_error(error_msg)
+            return False
+        
+        # 只允许 mode 为 subagent 或 all 的 agent 作为子智能体
+        if not agent.is_subagent():
+            error_msg = f"Agent '{agent_name}' cannot be used as subagent (mode: {agent.mode})"
+            logger.error(f"[SubAgentManager] {error_msg}")
+            self._finished_tasks[task_id] = {"result": "", "error": error_msg, "agent_name": agent_name}
+            if on_finished:
+                on_finished(error_msg)
             if on_error:
                 on_error(error_msg)
             return False

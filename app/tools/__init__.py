@@ -783,7 +783,7 @@ def get_builtin_tools_schema() -> List[Dict]:
                     "properties": {
                         "tasks": {
                             "type": "array",
-                            "description": "任务列表，每个任务包含 agent/description/context。agent 可选：code-reviewer、explorer。",
+                            "description": "任务列表，每个任务包含 agent/description/context。agent 可选：build、summary、code-reviewer、explorer。",
                             "items": {
                                 "type": "object",
                                 "properties": {
