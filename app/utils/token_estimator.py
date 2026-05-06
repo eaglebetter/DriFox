@@ -104,6 +104,7 @@ def _encode_with_tiktoken(text: str, model: str = "gpt-4") -> List[int]:
     return None
 
 
+@lru_cache(maxsize=1024)
 def estimate_tokens(text: str, model: str = "gpt-4") -> int:
     """
     估算文本的 token 数量
@@ -114,6 +115,10 @@ def estimate_tokens(text: str, model: str = "gpt-4") -> int:
     
     Returns:
         token 数量
+    
+    Note:
+        使用 lru_cache 缓存结果，相同文本只需计算一次。
+        对于长文本或重复调用的场景效果显著。
     """
     if not text:
         return 0

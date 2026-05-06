@@ -79,6 +79,10 @@ class ChatEngine:
         # API 模式专用：直接回调（绕过 Qt 信号-槽，避免跨线程事件循环问题）
         self._worker_callbacks = worker_callbacks or {}
         self._api_mode = api_mode
+        
+        # ========== 性能优化：HTTP 客户端和配置缓存 ==========
+        self._compaction_http_client: Optional[OpenAI] = None  # 压缩摘要专用客户端
+        self._compaction_cache_config: Optional[str] = None  # 缓存配置标识
 
     def _make_compaction_state(
         self,
@@ -443,11 +447,9 @@ class ChatEngine:
         model = str(
             compaction_config.get("model") or llm_config.get("模型名称", "gpt-4o")
         )
-        client = OpenAI(
-            api_key=api_key if api_key and auth_type != "none" else "dummy",
-            base_url=base_url,
-            timeout=60.0,
-        )
+        
+        # 性能优化：复用 HTTP 客户端
+        client = self._get_compaction_http_client(api_key, base_url, auth_type)
 
         req_kwargs: Dict[str, Any] = {
             "model": model,
@@ -475,6 +477,22 @@ class ChatEngine:
                 f"[Compaction] Agent summarization failed, fallback to heuristic: {exc}"
             )
             return ""
+    
+    def _get_compaction_http_client(self, api_key: str, base_url: str, auth_type: str) -> OpenAI:
+        """获取或创建压缩摘要专用的 HTTP 客户端（复用）"""
+        config_key = f"{auth_type}:{api_key[:8]}:{base_url}"
+        
+        if (self._compaction_http_client is not None and 
+            self._compaction_cache_config == config_key):
+            return self._compaction_http_client
+        
+        self._compaction_http_client = OpenAI(
+            api_key=api_key if api_key and auth_type != "none" else "dummy",
+            base_url=base_url,
+            timeout=60.0,
+        )
+        self._compaction_cache_config = config_key
+        return self._compaction_http_client
 
     def _has_structured_tool_history(
         self, history_messages: List[Dict[str, Any]]
@@ -872,10 +890,10 @@ class ChatEngine:
         else:
             full_system_prompt = self._get_agent_manager().get_unified_system_prompt()
 
-        prompt_parts = [
-            f"# 当前系统时间\n{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-            full_system_prompt,
-        ]
+        prompt_parts = [full_system_prompt]
+        
+        # 性能优化：时间放最后，避免每次都重复构建
+        time_part = f"# 当前系统时间\n{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
 
         enabled_skills = Settings.get_instance().llm_enabled_skills.value
         if enabled_skills and self._agent_manager:
@@ -887,8 +905,12 @@ class ChatEngine:
         custom_prompt = llm_config.get("系统提示", "").strip()
         if custom_prompt:
             prompt_parts.append(custom_prompt)
-
-        full_system_content = "\n\n".join(part for part in prompt_parts if part)
+        
+        # 最后添加时间
+        prompt_parts.append(time_part)
+        
+        # 性能优化：使用单一 join 操作
+        full_system_content = "\n\n".join(prompt_parts)
 
         if messages and messages[0].get("role") == "system":
             messages[0]["content"] = full_system_content
@@ -1150,6 +1172,10 @@ class ChatEngine:
                 worker.cleanup()
             except Exception as exc:
                 logger.warning(f"[ChatEngine] Failed to cleanup worker: {exc}")
+        
+        # 清理 HTTP 客户端缓存
+        self._compaction_http_client = None
+        self._compaction_cache_config = None
 
     def provide_question_answer(self, answer: str):
         if self._current_worker and hasattr(self._current_worker, "provide_answer"):

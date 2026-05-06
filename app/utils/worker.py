@@ -2,6 +2,7 @@
 import json
 import re
 import time
+from collections import deque
 from datetime import datetime
 from threading import Event
 from typing import Any, Dict, List, Callable, Optional, Tuple
@@ -405,7 +406,7 @@ class OpenAIChatWorker(QThread):
         self.compaction_prompt = compaction_prompt
         self.compaction_config = compaction_config or {}
         self.full_response = ""
-        self._response_chunks: List[str] = []  # 性能优化：累积响应片段
+        self._response_chunks: deque = deque()  # 性能优化：deque 比 list 的 append 更快
         self._is_cancelled = False
         self._question_pending = None
         self._pending_answer = None
@@ -421,7 +422,7 @@ class OpenAIChatWorker(QThread):
         # ========== 性能优化：HTTP 客户端和参数缓存 ==========
         self._http_client: Optional[Any] = None  # 复用的 HTTP 客户端
         self._cached_api_config: Optional[Dict[str, Any]] = None  # 缓存的 API 配置
-        self._reasoning_chunks: List[str] = []  # 性能优化：累积思考片段
+        self._reasoning_chunks: deque = deque()  # 性能优化：deque 比 list 的 append 更快
         self._response_content_blocks = []
         self._tool_execution_cancelled = False
         # 等待完整参数的 tool_calls（用于处理超长 arguments 流式传输场景）
@@ -532,10 +533,11 @@ class OpenAIChatWorker(QThread):
             self._permission_pending = None
 
     def get_interrupted_messages(self) -> List[Dict]:
+        # 性能优化：使用 extend 代替 + 操作
         snapshot = list(self._current_session_messages or self.session_messages or [])
         partial_sequence = self._build_response_message_sequence()
         if partial_sequence:
-            snapshot = snapshot + partial_sequence
+            snapshot.extend(partial_sequence)
         return consolidate_messages(snapshot)
 
     def _clear_pending_response_state(self):
@@ -830,130 +832,138 @@ class OpenAIChatWorker(QThread):
 
     def _build_response_message_sequence(self, tool_results=None) -> List[Dict]:
         now_ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        # 性能优化：缓存 reasoning_content，避免重复 join
+        reasoning_content = self._get_reasoning_content()
+        
         tool_call_map = {}
         # 从 _current_tool_calls 字典获取 tool_calls
-        for tc in (self._current_tool_calls or {}).values():
-            if not isinstance(tc, dict):
-                continue
-            tool_call_id = str(tc.get("id") or "")
-            if not tool_call_id:
-                continue
-            function = tc.get("function", {}) or {}
-            normalized_tc = {
-                "id": tool_call_id,
-                "type": tc.get("type", "function"),
-                "function": {
-                    "name": function.get("name"),
-                    "arguments": function.get("arguments", "{}"),
-                },
-            }
-            tool_call_map[tool_call_id] = normalized_tc
+        current_tcs = self._current_tool_calls
+        if current_tcs:
+            for tc in current_tcs.values():
+                if not isinstance(tc, dict):
+                    continue
+                tool_call_id = str(tc.get("id") or "")
+                if not tool_call_id:
+                    continue
+                function = tc.get("function") or {}
+                normalized_tc = {
+                    "id": tool_call_id,
+                    "type": tc.get("type", "function"),
+                    "function": {
+                        "name": function.get("name"),
+                        "arguments": function.get("arguments", "{}"),
+                    },
+                }
+                tool_call_map[tool_call_id] = normalized_tc
         
         # 从 _tool_calls_buffer 获取未解析完成的 tool_calls
-        for tc_id, buffer in (self._tool_calls_buffer or {}).items():
-            if tc_id in tool_call_map:
-                continue
-            function = buffer.get("function", {}) or {}
-            tool_call_map[tc_id] = {
-                "id": tc_id,
-                "type": buffer.get("type", "function"),
-                "function": {
-                    "name": function.get("name", ""),
-                    "arguments": function.get("arguments", "{}"),
-                },
-            }
+        tool_calls_buffer = self._tool_calls_buffer
+        if tool_calls_buffer:
+            for tc_id, buffer in tool_calls_buffer.items():
+                if tc_id in tool_call_map:
+                    continue
+                function = buffer.get("function") or {}
+                tool_call_map[tc_id] = {
+                    "id": tc_id,
+                    "type": buffer.get("type", "function"),
+                    "function": {
+                        "name": function.get("name", ""),
+                        "arguments": function.get("arguments", "{}"),
+                    },
+                }
         
-        # 也从 tool_results 中的 _tool_call 字段获取（处理残留的 tool_calls）
-        for item in tool_results or []:
-            if isinstance(item, dict) and "tool_call_id" in item:
-                tc_id = item["tool_call_id"]
-                if tc_id and tc_id not in tool_call_map:
-                    tool_call_map[tc_id] = {
-                        "id": tc_id,
-                        "type": "function",
-                        "function": {
-                            "name": item.get("name", ""),
-                            "arguments": item.get("arguments", "{}"),
-                        },
-                    }
+        # 也从 tool_results 中的 _tool_call 字段获取
+        if tool_results:
+            for item in tool_results:
+                if isinstance(item, dict) and "tool_call_id" in item:
+                    tc_id = item["tool_call_id"]
+                    if tc_id and tc_id not in tool_call_map:
+                        tool_call_map[tc_id] = {
+                            "id": tc_id,
+                            "type": "function",
+                            "function": {
+                                "name": item.get("name", ""),
+                                "arguments": item.get("arguments", "{}"),
+                            },
+                        }
 
         tool_result_map = {}
-        for item in tool_results or []:
-            if not isinstance(item, dict):
-                continue
-            tool_call_id = str(item.get("tool_call_id") or "")
-            if not tool_call_id:
-                continue
-            
-            # 获取 content 并进行安全处理
-            content = item.get("content", "")
-            # 截断过长的 content，避免 API 处理超时或 JSON 格式错误
-            MAX_CONTENT_LENGTH = 6000
-            if len(content) > MAX_CONTENT_LENGTH:
-                head_len = int(MAX_CONTENT_LENGTH * 0.6)
-                tail_len = MAX_CONTENT_LENGTH - head_len
-                content = (
-                    content[:head_len]
-                    + f"\n\n... [已截断，原始长度 {len(content)}] ...\n\n"
-                    + content[-tail_len:]
-                )
-            
-            tool_result_map[tool_call_id] = {
-                "role": "tool",
-                "tool_call_id": tool_call_id,
-                "name": item.get("name", "tool"),
-                "arguments": item.get("arguments", {}),
-                "content": content,
-                "success": item.get("success", True),
-                "round_id": item.get("round_id"),
-                "timestamp": item.get("timestamp", now_ts),
-            }
+        MAX_CONTENT_LENGTH = 6000
+        if tool_results:
+            for item in tool_results:
+                if not isinstance(item, dict):
+                    continue
+                tool_call_id = str(item.get("tool_call_id") or "")
+                if not tool_call_id:
+                    continue
+                
+                content = item.get("content", "")
+                if len(content) > MAX_CONTENT_LENGTH:
+                    head_len = int(MAX_CONTENT_LENGTH * 0.6)
+                    tail_len = MAX_CONTENT_LENGTH - head_len
+                    content = (
+                        content[:head_len]
+                        + f"\n\n... [已截断，原始长度 {len(content)}] ...\n\n"
+                        + content[-tail_len:]
+                    )
+                
+                tool_result_map[tool_call_id] = {
+                    "role": "tool",
+                    "tool_call_id": tool_call_id,
+                    "name": item.get("name", "tool"),
+                    "arguments": item.get("arguments", {}),
+                    "content": content,
+                    "success": item.get("success", True),
+                    "round_id": item.get("round_id"),
+                    "timestamp": item.get("timestamp", now_ts),
+                }
 
         sequence: List[Dict] = []
         pending_text_blocks = []
-        for block in self._response_content_blocks or []:
-            if not isinstance(block, dict):
-                continue
-            block_type = block.get("type")
-            if block_type == "text":
-                text = str(block.get("text", ""))
-                if text:
-                    pending_text_blocks = append_text_block(pending_text_blocks, text)
-                continue
+        response_blocks = self._response_content_blocks
+        if response_blocks:
+            for block in response_blocks:
+                if not isinstance(block, dict):
+                    continue
+                block_type = block.get("type")
+                if block_type == "text":
+                    text = str(block.get("text", ""))
+                    if text:
+                        pending_text_blocks = append_text_block(pending_text_blocks, text)
+                    continue
 
-            if block_type != "tool_call_marker":
-                continue
+                if block_type != "tool_call_marker":
+                    continue
 
-            tool_call_id = str(block.get("tool_call_id") or "")
-            assistant_msg: Dict[str, Any] = {
-                "role": "assistant",
-                "timestamp": now_ts,
-            }
-            if pending_text_blocks:
-                assistant_msg["content"] = pending_text_blocks[0].get("text")
-            tool_call = tool_call_map.get(tool_call_id)
-            if tool_call:
-                assistant_msg["tool_calls"] = [tool_call]
-            # DeepSeek V4 thinking mode: 添加 reasoning_content
-            if self._get_reasoning_content():
-                assistant_msg["reasoning_content"] = self._get_reasoning_content()
-            if assistant_msg.get("content") or assistant_msg.get("tool_calls"):
-                sequence.append(assistant_msg)
+                tool_call_id = str(block.get("tool_call_id") or "")
+                assistant_msg: Dict[str, Any] = {
+                    "role": "assistant",
+                    "timestamp": now_ts,
+                }
+                if pending_text_blocks:
+                    assistant_msg["content"] = pending_text_blocks[0].get("text")
+                tool_call = tool_call_map.get(tool_call_id)
+                if tool_call:
+                    assistant_msg["tool_calls"] = [tool_call]
+                if reasoning_content:
+                    assistant_msg["reasoning_content"] = reasoning_content
+                if assistant_msg.get("content") or assistant_msg.get("tool_calls"):
+                    sequence.append(assistant_msg)
 
-            pending_text_blocks = []
-            tool_result = tool_result_map.get(tool_call_id)
-            if tool_result:
-                sequence.append(tool_result)
+                pending_text_blocks = []
+                tool_result = tool_result_map.get(tool_call_id)
+                if tool_result:
+                    sequence.append(tool_result)
 
-        # 处理没有对应 marker 的 tool_result（解析失败的情况）
+        # 处理没有对应 marker 的 tool_result
         for tool_call_id, tool_result in tool_result_map.items():
-            already_added = any(
-                block.get("tool_call_id") == tool_call_id
-                for block in sequence
-                if block.get("role") == "tool"
-            )
+            already_added = False
+            for block in sequence:
+                if block.get("role") == "tool" and block.get("tool_call_id") == tool_call_id:
+                    already_added = True
+                    break
             if not already_added:
-                # 创建一个 assistant 消息来承载这个 tool_result
                 assistant_msg: Dict[str, Any] = {
                     "role": "assistant",
                     "timestamp": now_ts,
@@ -961,8 +971,8 @@ class OpenAIChatWorker(QThread):
                 tool_call = tool_call_map.get(tool_call_id)
                 if tool_call:
                     assistant_msg["tool_calls"] = [tool_call]
-                if self._get_reasoning_content():
-                    assistant_msg["reasoning_content"] = self._get_reasoning_content()
+                if reasoning_content:
+                    assistant_msg["reasoning_content"] = reasoning_content
                 if assistant_msg.get("tool_calls"):
                     sequence.append(assistant_msg)
                 sequence.append(tool_result)
@@ -973,9 +983,8 @@ class OpenAIChatWorker(QThread):
                 "content": pending_text_blocks[0].get("text"),
                 "timestamp": now_ts,
             }
-            # DeepSeek V4 thinking mode: 添加 reasoning_content
-            if self._get_reasoning_content():
-                assistant_msg["reasoning_content"] = self._get_reasoning_content()
+            if reasoning_content:
+                assistant_msg["reasoning_content"] = reasoning_content
             sequence.append(assistant_msg)
         elif not sequence and self.full_response:
             assistant_msg = {
@@ -983,25 +992,26 @@ class OpenAIChatWorker(QThread):
                 "content": append_text_block([], self.full_response)[0].get("text"),
                 "timestamp": now_ts,
             }
-            # DeepSeek V4 thinking mode: 添加 reasoning_content
-            if self._get_reasoning_content():
-                assistant_msg["reasoning_content"] = self._get_reasoning_content()
+            if reasoning_content:
+                assistant_msg["reasoning_content"] = reasoning_content
             sequence.append(assistant_msg)
-        elif not sequence and not self._response_content_blocks:
+        elif not sequence and not response_blocks:
             sequence.append({"role": "assistant", "content": [], "timestamp": now_ts})
 
         return sequence
 
     def _emit_compaction_status(self, state: Dict):
+        # 性能优化：减少重复的 dict.get 调用
+        state = state or {}
         normalized = {
-            "active": bool((state or {}).get("active", False)),
-            "source": (state or {}).get("source", "worker"),
-            "kind": (state or {}).get("kind", ""),
-            "original_count": int((state or {}).get("original_count", 0) or 0),
-            "summarized_count": int((state or {}).get("summarized_count", 0) or 0),
-            "kept_count": int((state or {}).get("kept_count", 0) or 0),
-            "summary_count": int((state or {}).get("summary_count", 0) or 0),
-            "note": str((state or {}).get("note", "") or ""),
+            "active": bool(state.get("active", False)),
+            "source": state.get("source", "worker"),
+            "kind": state.get("kind", ""),
+            "original_count": int(state.get("original_count", 0) or 0),
+            "summarized_count": int(state.get("summarized_count", 0) or 0),
+            "kept_count": int(state.get("kept_count", 0) or 0),
+            "summary_count": int(state.get("summary_count", 0) or 0),
+            "note": str(state.get("note", "") or ""),
         }
         if normalized == self._last_compaction_state:
             return
@@ -1389,7 +1399,9 @@ class OpenAIChatWorker(QThread):
 
         # 处理等待完整参数的 tool_calls（超长 arguments 场景）
         # 在所有 chunk 接收完成后，再次尝试解析仍处于等待状态的 tool_calls
-        all_pending_ids = set(self._tool_calls_buffer.keys()) | set(self._waiting_tool_params.keys())
+        # 性能优化：使用 update 代替创建临时集合
+        all_pending_ids = set(self._tool_calls_buffer.keys())
+        all_pending_ids.update(self._waiting_tool_params.keys())
         
         for tc_id in list(all_pending_ids):
             buffer = self._tool_calls_buffer.get(tc_id)
