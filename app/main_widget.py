@@ -25,12 +25,11 @@ from PyQt5.QtWidgets import (
     QButtonGroup, QFrame, QScrollArea,
 )
 from loguru import logger
+from qfluentwidgets import InfoBar, InfoBarPosition
 from qfluentwidgets import (
     setFont,
     FluentIcon,
     SingleDirectionScrollArea,
-    InfoBar,
-    InfoBarPosition,
     TransparentToolButton, StrongBodyLabel,
 )
 
@@ -45,10 +44,16 @@ from app.core import (
     MemoryManagerCore,
 )
 from app.core.agent import AgentManager
+from app.tool_window import (
+    ToolWindow,
+    DockPosition,
+    DockCategory,
+)
 from app.utils.chat_session import (
     SessionManager,
     ChatSession,
 )
+from app.utils.config import Settings
 from app.utils.diff_viewer import (
     DiffHtmlGenerator,
     DiffViewerWindow,
@@ -62,6 +67,7 @@ from app.utils.message_content import (
     get_user_round_ranges,
     group_messages_for_display,
 )
+from app.utils.utils import get_icon, get_font_family_css
 from app.utils.worker import (
     TopicSummaryTask,
 )
@@ -87,9 +93,6 @@ from app.widgets.history_card import (
 from app.widgets.llm_settings_card import (
     LLMSettingsCard,
 )
-from app.widgets.memory_manager import (
-    MemoryManagerDialog,
-)
 from app.widgets.memory_card import (
     MemoryCardContent,
 )
@@ -103,7 +106,6 @@ from app.widgets.model_config_card import (
 from app.widgets.question_floating_widget import (
     QuestionFloatingWidget,
 )
-from qfluentwidgets import InfoBar, InfoBarPosition
 from app.widgets.sub_agent_floating_widget import (
     SubAgentFloatingWidget,
 )
@@ -121,13 +123,6 @@ from app.widgets.ui_helpers import add_message_to_layout, refresh_history_card_i
     build_node_preview_from_session, calculate_scroll_progress, find_user_card_at_index, truncate_and_remove_round, \
     log_deletion_stats, restore_input_from_card, find_last_tool_call_id_after_round, get_first_file_operation, \
     show_diff_viewer, render_batch_to_assistant_card
-from app.tool_window import (
-    ToolWindow,
-    DockPosition,
-    DockCategory,
-)
-from app.utils.config import Settings
-from app.utils.utils import get_icon, get_font_family_css
 
 
 class OpenAIChatToolWindow(ToolWindow):
@@ -1089,8 +1084,7 @@ class OpenAIChatToolWindow(ToolWindow):
 
         if not hasattr(self, "_model_selector_popup") or not self._model_selector_popup:
             from app.widgets.model_selector_popup import (
-                ModelSelectorPopup, ProviderConfigListDialog,
-            )
+                ModelSelectorPopup, )
             from app.widgets.provider_setting_card import ProviderEditDialog
             self._model_selector_popup = ModelSelectorPopup(self)
             self._model_selector_popup.modelSelected.connect(self._on_model_selected_from_popup)
@@ -4545,7 +4539,7 @@ class OpenAIChatToolWindow(ToolWindow):
             return
         # 数据已经在 MemoryCardContent 中通过 memory_manager 保存
         # 这里只显示提示信息
-        from qfluentwidgets import InfoBar, InfoBarPosition
+        from qfluentwidgets import InfoBar
         InfoBar.success("已保存", "长期记忆已更新", parent=self, duration=1500)
 
     def _on_memory_updated(self, memories: list):
