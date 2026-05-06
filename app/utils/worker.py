@@ -482,10 +482,58 @@ class OpenAIChatWorker(QThread):
         return consolidate_messages(snapshot)
 
     def _clear_pending_response_state(self):
-        self._current_tool_calls = {}  # 改成字典
+        """
+        清理单轮对话结束后的中间状态。
+        在每次 API 调用前和工具执行完成后调用，释放内存。
+        """
+        # 清理工具调用相关的缓存
+        self._current_tool_calls = {}
         self._tool_calls_buffer = {}
-        self._response_content_blocks = []
+        self._waiting_tool_params = {}
         self._previewed_tool_call_ids = set()
+        
+        # 清理本轮响应内容（但保留 full_response 用于最终输出）
+        self._response_content_blocks = []
+        
+        # 清理本轮的 reasoning_content（下一轮会有新的）
+        self._reasoning_content = ""
+        
+        # 清理权限缓存（每轮独立）
+        self._round_permission_cache = {}
+
+    def cleanup(self):
+        """
+        彻底清理 worker 的所有缓存数据，防止内存泄漏。
+        应该在对话结束后调用。
+        """
+        # 清理消息引用
+        self.messages = []
+        self.session_messages = []
+        self._current_session_messages = []
+        
+        # 清理响应缓存
+        self.full_response = ""
+        self._reasoning_content = ""
+        self._response_content_blocks = []
+        
+        # 清理工具调用缓存
+        self._current_tool_calls = {}
+        self._tool_calls_buffer = {}
+        self._waiting_tool_params = {}
+        self._previewed_tool_call_ids = set()
+        
+        # 清理工具列表引用
+        self.tools = []
+        
+        # 清理回调
+        self._direct_callbacks = {}
+        
+        # 清理问题/回答状态
+        self._pending_answer = None
+        self._question_pending = None
+        
+        # 清理会话缓存
+        self._session_messages = []
 
     def provide_answer(self, answer: str):
         self._pending_answer = answer
@@ -518,10 +566,16 @@ class OpenAIChatWorker(QThread):
             self._emit_compaction_status(self._last_compaction_state)
             self.full_response = ""
             self._reasoning_content = ""
+            # 开始新对话时，清理所有中间状态
+            self._clear_pending_response_state()
 
             while not self._is_cancelled:
                 if self._is_cancelled:
                     return
+                
+                # 每次 API 调用前，清理上一轮的中间状态
+                self._clear_pending_response_state()
+                
                 tool_calls_found = self._make_api_call(current_messages)
 
                 if self._is_cancelled:
@@ -1557,24 +1611,6 @@ class OpenAIChatWorker(QThread):
             else:
                 result_content = str(result) if result else ""
                 success = bool(getattr(result, "success", True)) if result else False
-            
-            # 截断过长的 tool_result content，避免 API 超时
-            # API 对单条消息的 content 长度有限制，过长的内容会导致超时
-            MAX_TOOL_RESULT_LENGTH = 8000
-            if len(result_content) > MAX_TOOL_RESULT_LENGTH:
-                logger.info(
-                    f"[ToolCall] ⚠️ Tool result 过长，已截断: "
-                    f"tool={tool_name}, original_len={len(result_content)}, "
-                    f"truncated_len={MAX_TOOL_RESULT_LENGTH}"
-                )
-                # 首尾保留策略，保留关键信息
-                head_len = int(MAX_TOOL_RESULT_LENGTH * 0.6)
-                tail_len = MAX_TOOL_RESULT_LENGTH - head_len
-                result_content = (
-                    result_content[:head_len]
-                    + f"\n\n... [内容已截断，原始长度 {len(result_content)} 字符] ...\n\n"
-                    + result_content[-tail_len:]
-                )
 
             if self._is_cancelled or self._tool_execution_cancelled:
                 # 创建取消结果对象（直接使用 dict 简化，避免循环导入）

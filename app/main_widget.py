@@ -455,9 +455,19 @@ class OpenAIChatToolWindow(ToolWindow):
             else:
                 popup.setWindowTitle(f"{self.name} - 副本")
             popup.resize(600, 900)
+            
             # 保存引用防止被垃圾回收
             if not hasattr(self, '_popup_refs'):
                 self._popup_refs = []
+            
+            # 清理已关闭的弹窗引用，防止内存泄漏
+            self._popup_refs = [ref for ref in self._popup_refs if ref is not None and ref.isVisible()]
+            
+            # 限制最大引用数量，防止无限增长
+            if len(self._popup_refs) >= 10:
+                # 移除最早的引用
+                self._popup_refs = self._popup_refs[-10:]
+            
             self._popup_refs.append(popup)
             popup.show()
         except Exception as e:
@@ -610,12 +620,19 @@ class OpenAIChatToolWindow(ToolWindow):
         """创建分支会话并渲染消息"""
         logger.info("[Branch] 开始创建分支会话")
         
+        # 停止当前对话并清理
         if self._is_streaming and self._chat_engine:
             self._chat_engine.stop()
             self._is_streaming = False
             self._toggle_send_stop(False)
+        elif self._chat_engine:
+            # 即使不在流式输出，也要清理 worker
+            self._chat_engine.cleanup_worker()
 
+        # 切换会话前彻底清理卡片和 tool_executor
         self._cache_current_session_cards()
+        if self._tool_executor:
+            self._tool_executor.cleanup()
         session = self.session_manager.create_new_session()
         session.messages = messages
         session.name = name
@@ -640,10 +657,14 @@ class OpenAIChatToolWindow(ToolWindow):
         QTimer.singleShot(150, self._scroll_to_bottom)
 
     def _create_new_session(self):
+        # 停止当前对话并清理
         if self._is_streaming and self._chat_engine:
             self._chat_engine.stop()
             self._is_streaming = False
             self._toggle_send_stop(False)
+        elif self._chat_engine:
+            # 即使不在流式输出，也要清理 worker
+            self._chat_engine.cleanup_worker()
 
         try:
             self._auto_save_current_session()
@@ -652,7 +673,11 @@ class OpenAIChatToolWindow(ToolWindow):
                 "Failed to auto-save current session before creating a new one"
             )
 
+        # 切换会话前彻底清理卡片和 tool_executor
         self._cache_current_session_cards()
+        if self._tool_executor:
+            self._tool_executor.cleanup()
+        
         session = self.session_manager.create_new_session()
         self._current_session_id = session.session_id
         self._history_preview_messages = None
@@ -1977,6 +2002,7 @@ class OpenAIChatToolWindow(ToolWindow):
                     item.widget().hide()
 
     def _take_chat_widgets(self) -> List[QWidget]:
+        """从布局中取出所有 widgets，返回列表（不删除，由调用方负责删除）"""
         widgets: List[QWidget] = []
         self._current_assistant_card = None
         self._displayed_session_id = None
@@ -1988,25 +2014,24 @@ class OpenAIChatToolWindow(ToolWindow):
         return widgets
 
     def _cache_current_session_cards(self):
-        session = self.session_manager.get_current_session()
+        """
+        切换会话时彻底清理当前会话的卡片，不再缓存。
+        直接删除卡片，释放内存。
+        """
+        # 从布局中取出所有 widgets
         widgets = self._take_chat_widgets()
-        if not session or not session.messages:
-            return
-
-        message_cards = [
-            w
-            for w in widgets
-            if isinstance(w, MessageCard) and self._is_widget_alive(w)
-        ]
-        if message_cards:
-            self._session_card_cache[session.session_id] = {
-                "cards": message_cards,
-                "visible_batch_start": self._visible_batch_start,
-                "visible_batch_end": self._visible_batch_end,
-                "batch_count": len(group_messages_for_display(session.messages)),
-            }
-
-        self._cleanup_session_card_cache()
+        
+        # 彻底删除所有卡片及其子资源
+        for widget in widgets:
+            if isinstance(widget, MessageCard) and self._is_widget_alive(widget):
+                # 调用卡片自己的 cleanup 方法
+                widget.cleanup()
+            widget.deleteLater()
+        
+        # 清理可能残留的卡片缓存
+        session = self.session_manager.get_current_session()
+        if session:
+            self._session_card_cache.pop(session.session_id, None)
 
     def _cleanup_session_card_cache(self):
         from app.constants import (
@@ -3663,6 +3688,16 @@ class OpenAIChatToolWindow(ToolWindow):
         """根据 session_id 切换到对应会话"""
         if not session_id:
             return
+        
+        # 切换前先清理当前会话的资源
+        if self._is_streaming and self._chat_engine:
+            self._chat_engine.stop()
+            self._is_streaming = False
+        elif self._chat_engine:
+            self._chat_engine.cleanup_worker()
+        
+        # 清理旧会话的卡片
+        self._cache_current_session_cards()
         
         # 先在当前 session_manager 中查找
         for i, session in enumerate(self.session_manager.get_all_sessions()):

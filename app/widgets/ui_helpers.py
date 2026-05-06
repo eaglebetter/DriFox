@@ -1428,6 +1428,13 @@ def delete_widgets_from_layout(widgets_to_remove: list, chat_layout) -> int:
             logger.warning(f"[DELETE] Widget already deleted: {widget}")
             continue
         
+        # 调用清理方法（如果有的话）
+        if hasattr(widget, 'cleanup'):
+            try:
+                widget.cleanup()
+            except Exception as e:
+                logger.warning(f"[DELETE] Widget cleanup failed: {e}")
+        
         # 从 layout 移除
         layout_removed = False
         for i in range(chat_layout.count()):

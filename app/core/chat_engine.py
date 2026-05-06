@@ -1031,6 +1031,10 @@ class ChatEngine:
         llm_config: Dict,
         tools: List[Dict],
     ):
+        # 启动新 worker 前，先彻底清理旧的 worker
+        if self._current_worker:
+            self.cleanup_worker()
+        
         compaction_prompt = ""
         compaction_config = {}
         if self._agent_manager and self._agent_manager.get_agent("compaction"):
@@ -1100,6 +1104,8 @@ class ChatEngine:
     def _on_worker_finished(self, response: str):
         self._is_streaming = False
         self._emit("stream_finished", response)
+        # 对话结束后清理 worker，释放内存
+        self.cleanup_worker()
 
     def _on_worker_messages_updated(self, messages: List[Dict]):
         self._emit("messages_updated", consolidate_messages(messages or []))
@@ -1125,8 +1131,31 @@ class ChatEngine:
             worker.cancel()
             if worker.isRunning():
                 worker.quit()
+            # 彻底清理 worker 的所有缓存数据
+            try:
+                worker.cleanup()
+            except Exception as exc:
+                logger.warning(f"[ChatEngine] Failed to cleanup worker: {exc}")
 
         return interrupted_messages
+    
+    def cleanup_worker(self):
+        """
+        清理当前 worker，释放所有缓存。
+        应该在对话结束后或切换会话时调用。
+        """
+        worker = self._current_worker
+        self._current_worker = None
+        self._is_streaming = False
+        
+        if worker:
+            try:
+                worker.cancel()
+                if worker.isRunning():
+                    worker.quit()
+                worker.cleanup()
+            except Exception as exc:
+                logger.warning(f"[ChatEngine] Failed to cleanup worker: {exc}")
 
     def provide_question_answer(self, answer: str):
         if self._current_worker and hasattr(self._current_worker, "provide_answer"):

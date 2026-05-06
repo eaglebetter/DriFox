@@ -86,6 +86,27 @@ class ToolExecutor:
         if self._builtin_tools:
             self._builtin_tools.reset_session_state()
 
+    def cleanup(self):
+        """
+        彻底清理 ToolExecutor 的所有缓存，防止内存泄漏。
+        应该在对话结束后或切换会话时调用。
+        """
+        # 清理 builtin_tools
+        if self._builtin_tools:
+            try:
+                self._builtin_tools.cleanup()
+            except Exception as e:
+                logger.warning(f"[ToolExecutor] Failed to cleanup builtin_tools: {e}")
+            self._builtin_tools = None
+        
+        # 清理文件操作记录器
+        if self._file_recorder:
+            self._file_recorder = None
+        
+        # 清理会话上下文
+        self._session_id = None
+        self._call_id = None
+
     def _init_file_recorder(self):
         """初始化文件操作记录器"""
         if self._file_recorder is None:
