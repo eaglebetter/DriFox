@@ -5,7 +5,7 @@
 """
 from typing import List, Tuple, Dict, Any
 
-from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtCore import Qt, pyqtSignal, QPoint
 from PyQt5.QtWidgets import (
     QWidget,
     QFrame,
@@ -23,6 +23,28 @@ from qfluentwidgets import FluentIcon, TransparentToolButton
 from app.widgets.provider_setting_card import ProviderIconWidget
 
 from app.utils.utils import get_font_family_css, get_icon
+
+
+# item 高度常量
+_ITEM_HEIGHT = 34  # ModelItem 高度
+_HEADER_HEIGHT = 36  # ProviderHeader 高度
+_MIN_ITEMS = 3  # 最少显示 item 数
+_MAX_ITEMS = 7  # 最多显示 item 数
+
+# 滚动区域高度计算
+_MIN_SCROLL_HEIGHT = _MIN_ITEMS * _ITEM_HEIGHT  # 最小高度：约 102px
+_MAX_SCROLL_HEIGHT = _MAX_ITEMS * _ITEM_HEIGHT + _HEADER_HEIGHT  # 最大高度：约 274px
+
+
+def _calculate_scroll_height(total_items: int) -> int:
+    """根据 item 总数计算滚动区域高度"""
+    if total_items <= _MIN_ITEMS:
+        return _MIN_SCROLL_HEIGHT
+    elif total_items >= _MAX_ITEMS:
+        return _MAX_SCROLL_HEIGHT
+    else:
+        ratio = (total_items - _MIN_ITEMS) / (_MAX_ITEMS - _MIN_ITEMS)
+        return int(_MIN_SCROLL_HEIGHT + ratio * (_MAX_SCROLL_HEIGHT - _MIN_SCROLL_HEIGHT))
 
 
 class ProviderHeader(QWidget):
@@ -129,6 +151,9 @@ class ModelSelectorPopup(QWidget):
         self._current_model: str = ""
         self._model_widgets: List[ModelItem] = []
         self._all_model_items: List[Tuple[ModelItem, str, str]] = []  # (widget, provider, model)
+
+        # 安装事件过滤器，用于点击外部关闭弹窗（在 _setup_ui 之前）
+        QApplication.instance().installEventFilter(self)
 
         self._setup_ui()
 
@@ -245,6 +270,9 @@ class ModelSelectorPopup(QWidget):
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
                 height: 0px;
             }
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+                background: none;
+            }
         """)
 
         self.content_widget = QWidget()
@@ -256,7 +284,9 @@ class ModelSelectorPopup(QWidget):
         self.content_layout.addStretch(1)
 
         self.scroll_area.setWidget(self.content_widget)
-        self.scroll_area.setMinimumHeight(50)
+        # 初始化时设置最小高度，后续 set_providers_data 会动态调整
+        self.scroll_area.setMinimumHeight(_MIN_SCROLL_HEIGHT)
+        self.scroll_area.setMaximumHeight(_MAX_SCROLL_HEIGHT)
         layout.addWidget(self.scroll_area, 1)
 
         # 整体窗口布局
@@ -321,6 +351,11 @@ class ModelSelectorPopup(QWidget):
         # 底部弹性空间
         self.content_layout.addStretch(1)
 
+        # 计算实际 item 总数，根据数量动态调整滚动区域高度
+        total_items = len(self._all_model_items)
+        target_height = _calculate_scroll_height(total_items)
+        self.scroll_area.setMinimumHeight(target_height)
+
         # 隐藏时 adjustSize 不生效，改用显式 resize
         self.main_frame.layout().activate()
         QApplication.processEvents()
@@ -354,6 +389,26 @@ class ModelSelectorPopup(QWidget):
         """模型被点击"""
         self.modelSelected.emit(provider_name, model_name)
         self.close()
+
+    def eventFilter(self, obj, event):
+        """检测外部点击，关闭弹窗"""
+        if event.type() == event.MouseButtonPress:
+            global_pos = event.globalPos()
+            popup_geo = self.geometry()
+            if not popup_geo.contains(global_pos):
+                # 检查是否点击在输入框上（输入法需要）
+                focus_widget = QApplication.focusWidget()
+                if focus_widget and isinstance(focus_widget, QLineEdit):
+                    edit_geo = focus_widget.rect().translated(focus_widget.mapToGlobal(QPoint(0, 0)))
+                    if edit_geo.contains(global_pos):
+                        return False
+                self.close()
+        return super().eventFilter(obj, event)
+
+    def close(self):
+        """关闭弹窗时移除事件过滤器"""
+        QApplication.instance().removeEventFilter(self)
+        super().close()
 
     def show_at(self, reference_widget: QWidget):
         """在参考控件上方显示弹窗（向上展开）"""

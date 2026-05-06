@@ -1298,7 +1298,6 @@ class OpenAIChatWorker(QThread):
             tool_call_id = tc["id"]
             raw_args = tc["function"]["arguments"]
             round_id = f"round_{id(tc)}"
-            self.tool_start_callback(tool_call_id, tool_name, {}, round_id)
             original_args_str = arguments  # 保存原始字符串用于错误诊断
 
             if isinstance(arguments, str):

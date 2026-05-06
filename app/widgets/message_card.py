@@ -314,7 +314,7 @@ def _render_tool_block_content(content: str) -> str:
     tool_call_id: xxx
     </tool>
     """
-
+    print(content)
     tool_name = ""
     tool_args_str = ""
     tool_result = ""
@@ -415,10 +415,20 @@ def _extract_args_by_regex(content: str) -> dict:
     当 JSON 解析失败时，使用正则表达式提取参数。
     处理包含未转义引号、换行符等复杂情况。
     """
+    import re
     args = {}
     
-    # 提取常见的字符串参数
-    string_params = ["path", "oldString", "newString", "command", "url", "pattern", "query", "name", "_raw_args", ""]
+    # 1. 先尝试匹配数字类型参数（冒号后无引号）: "limit": 30
+    number_params = ["limit", "offset"]
+    for param in number_params:
+        pattern = rf'"{param}"\s*:\s*(-?\d+(?:\.\d+)?)\s*[,}}]'
+        match = re.search(pattern, content)
+        if match:
+            num_str = match.group(1)
+            args[param] = int(float(num_str)) if '.' not in num_str else float(num_str)
+    
+    # 2. 匹配字符串参数（冒号后有引号）: "path": "xxx"
+    string_params = ["path", "oldString", "newString", "command", "url", "pattern", "query", "name", "_raw_args", "file_path", "old_string", "new_string"]
     
     for param in string_params:
         # 查找 "param": " 后面开始的位置
