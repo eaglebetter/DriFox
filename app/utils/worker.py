@@ -10,6 +10,23 @@ import httpx
 from loguru import logger
 
 
+# ========== 性能优化：预编译正则表达式 ==========
+# 避免在循环中重复编译正则表达式
+_RE_PATH = re.compile(r'"path"\s*:\s*"([^"]*)"')
+_RE_FILE_PATH = re.compile(r'"filePath"\s*:\s*"([^"]*)"')
+_RE_COMMAND = re.compile(r'"command"\s*:\s*"([^"]*)"')
+_RE_CONTENT_KEY = re.compile(r'"content"\s*:\s*"')
+_RE_ARG_PATTERN = {
+    "url": re.compile(r'"url"\s*:\s*"([^"]*)"'),
+    "pattern": re.compile(r'"pattern"\s*:\s*"([^"]*)"'),
+    "query": re.compile(r'"query"\s*:\s*"([^"]*)"'),
+    "name": re.compile(r'"name"\s*:\s*"([^"]*)"'),
+    "question": re.compile(r'"question"\s*:\s*"([^"]*)"'),
+}
+# 用于提取参数的通用模式（用于循环参数）
+_RE_GENERIC_ARG = re.compile(r'"({param})"\s*:\s*"([^"]*)"')
+
+
 def _try_fix_malformed_json_arguments(raw_args: str, tool_name: str) -> Tuple[Optional[Dict], str]:
     """
     尝试修复模型生成的不规范 JSON。
@@ -25,46 +42,37 @@ def _try_fix_malformed_json_arguments(raw_args: str, tool_name: str) -> Tuple[Op
     
     args = {}
     
-    # 策略1: 尝试提取 path 参数（通常在开头，较少出问题）
-    path_match = re.search(r'"path"\s*:\s*"([^"]*)"', raw_args)
+    # 策略1: 尝试提取 path 参数（使用预编译正则）
+    path_match = _RE_PATH.search(raw_args)
     if path_match:
         args["path"] = path_match.group(1)
     
-    # 策略2: 尝试提取 filePath 参数（某些工具使用）
+    # 策略2: 尝试提取 filePath 参数
     if "filePath" not in args:
-        file_path_match = re.search(r'"filePath"\s*:\s*"([^"]*)"', raw_args)
+        file_path_match = _RE_FILE_PATH.search(raw_args)
         if file_path_match:
             args["filePath"] = file_path_match.group(1)
     
-    # 策略3: 尝试提取 command 参数（bash 工具）
-    command_match = re.search(r'"command"\s*:\s*"([^"]*)"', raw_args)
+    # 策略3: 尝试提取 command 参数
+    command_match = _RE_COMMAND.search(raw_args)
     if command_match:
         args["command"] = command_match.group(1)
     
-    # 策略4: 尝试提取其他简单字符串参数
-    for param_name in ["url", "pattern", "query", "name", "question"]:
-        matches = re.finditer(rf'"{param_name}"\s*:\s*"([^"]*)"', raw_args)
+    # 策略4: 尝试提取其他简单字符串参数（使用预编译正则）
+    for param_name, pattern in _RE_ARG_PATTERN.items():
+        matches = pattern.finditer(raw_args)
         for match in matches:
             args[param_name] = match.group(1)
     
-    # 策略5: 智能提取 content 字段（最常见的问题来源）
-    # 思路：如果 JSON 以 {"path": "...", "content": "... 或 {"content": "... 开头，
-    # content 从第一个 " 之后开始，到最后一个 } 或 ", 之前结束
-    
-    # 检查是否是 write 工具的参数格式
+    # 策略5: 智能提取 content 字段（使用预编译正则）
     is_write_format = '"path"' in raw_args and '"content"' in raw_args
     is_content_only = raw_args.strip().startswith('"content"') or '"content"' in raw_args
     
     if is_write_format or is_content_only:
-        # 找到 content 字段的开始位置
-        content_key_match = re.search(r'"content"\s*:\s*"', raw_args)
+        content_key_match = _RE_CONTENT_KEY.search(raw_args)
         if content_key_match:
             content_start = content_key_match.end()
-            
-            # 找到 JSON 对象的结束位置
-            # 从后往前找 } 或 }] 
-            # 同时确保这个 } 确实属于这个 JSON 对象（通过检查前面的内容是否平衡）
-            
+
             # 简单策略：从后往前找到最后一个独立的 }
             last_brace = raw_args.rfind('}')
             last_bracket = raw_args.rfind(']')
@@ -397,6 +405,7 @@ class OpenAIChatWorker(QThread):
         self.compaction_prompt = compaction_prompt
         self.compaction_config = compaction_config or {}
         self.full_response = ""
+        self._response_chunks: List[str] = []  # 性能优化：累积响应片段，避免频繁字符串拼接
         self._is_cancelled = False
         self._question_pending = None
         self._pending_answer = None
@@ -408,6 +417,7 @@ class OpenAIChatWorker(QThread):
         self._current_tool_calls = {}  # 改成字典
         self._tool_calls_buffer = {}
         self._reasoning_content = ""
+        self._reasoning_chunks: List[str] = []  # 性能优化：累积思考片段
         self._response_content_blocks = []
         self._tool_execution_cancelled = False
         # 等待完整参数的 tool_calls（用于处理超长 arguments 流式传输场景）
@@ -540,9 +550,16 @@ class OpenAIChatWorker(QThread):
         
         # 清理本轮的 reasoning_content（下一轮会有新的）
         self._reasoning_content = ""
+        self._reasoning_chunks = []  # 清理思考片段缓存
         
         # 清理权限缓存（每轮独立）
         self._round_permission_cache = {}
+    
+    def _get_reasoning_content(self) -> str:
+        """获取当前的 reasoning_content（从累积的 chunks 合成）"""
+        if self._reasoning_chunks:
+            return ''.join(self._reasoning_chunks)
+        return self._reasoning_content
 
     def cleanup(self):
         """
@@ -571,7 +588,9 @@ class OpenAIChatWorker(QThread):
         # 清理响应缓存
         self.full_response = ""
         self._reasoning_content = ""
+        self._reasoning_chunks = []  # 性能优化：清理思考片段缓存
         self._response_content_blocks = []
+        self._response_chunks = []  # 性能优化：清理响应片段缓存
         
         # 清理工具调用缓存
         self._current_tool_calls = {}
@@ -653,6 +672,8 @@ class OpenAIChatWorker(QThread):
                     self._current_session_messages = list(current_session_messages)
                     # 更新 API 消息缓存：追加响应消息
                     self._append_to_api_cache(response_sequence)
+                    # 性能优化：在发送前才合成完整响应字符串
+                    self.full_response = ''.join(self._response_chunks)
                     self._emit_with_callback("finished_with_messages", self.finished_with_messages, current_session_messages)
                     self._clear_pending_response_state()
                     self._emit_with_callback("finished_with_content", self.finished_with_content, self.full_response)
@@ -812,8 +833,8 @@ class OpenAIChatWorker(QThread):
             if tool_call:
                 assistant_msg["tool_calls"] = [tool_call]
             # DeepSeek V4 thinking mode: 添加 reasoning_content
-            if self._reasoning_content:
-                assistant_msg["reasoning_content"] = self._reasoning_content
+            if self._get_reasoning_content():
+                assistant_msg["reasoning_content"] = self._get_reasoning_content()
             if assistant_msg.get("content") or assistant_msg.get("tool_calls"):
                 sequence.append(assistant_msg)
 
@@ -838,8 +859,8 @@ class OpenAIChatWorker(QThread):
                 tool_call = tool_call_map.get(tool_call_id)
                 if tool_call:
                     assistant_msg["tool_calls"] = [tool_call]
-                if self._reasoning_content:
-                    assistant_msg["reasoning_content"] = self._reasoning_content
+                if self._get_reasoning_content():
+                    assistant_msg["reasoning_content"] = self._get_reasoning_content()
                 if assistant_msg.get("tool_calls"):
                     sequence.append(assistant_msg)
                 sequence.append(tool_result)
@@ -851,8 +872,8 @@ class OpenAIChatWorker(QThread):
                 "timestamp": now_ts,
             }
             # DeepSeek V4 thinking mode: 添加 reasoning_content
-            if self._reasoning_content:
-                assistant_msg["reasoning_content"] = self._reasoning_content
+            if self._get_reasoning_content():
+                assistant_msg["reasoning_content"] = self._get_reasoning_content()
             sequence.append(assistant_msg)
         elif not sequence and self.full_response:
             assistant_msg = {
@@ -861,8 +882,8 @@ class OpenAIChatWorker(QThread):
                 "timestamp": now_ts,
             }
             # DeepSeek V4 thinking mode: 添加 reasoning_content
-            if self._reasoning_content:
-                assistant_msg["reasoning_content"] = self._reasoning_content
+            if self._get_reasoning_content():
+                assistant_msg["reasoning_content"] = self._get_reasoning_content()
             sequence.append(assistant_msg)
         elif not sequence and not self._response_content_blocks:
             sequence.append({"role": "assistant", "content": [], "timestamp": now_ts})
@@ -1207,7 +1228,7 @@ class OpenAIChatWorker(QThread):
         tool_args_pending = True
         for chunk in response:
             if self._is_cancelled:
-                return False
+                return False, False  # 返回元组而不是单个布尔值
 
             delta = chunk.choices[0].delta
             content = getattr(delta, "content", None)
@@ -1297,11 +1318,13 @@ class OpenAIChatWorker(QThread):
             # 提取 reasoning_content (DeepSeek V4 thinking mode)
             reasoning_delta = getattr(delta, "reasoning_content", None)
             if reasoning_delta:
-                self._reasoning_content += reasoning_delta
+                # 性能优化：使用 list append 代替字符串拼接
+                self._reasoning_chunks.append(reasoning_delta)
                 self._emit_with_callback("reasoning_content_received", self.reasoning_content_received, reasoning_delta)
 
             if content:
-                self.full_response += content
+                # 性能优化：使用 list append + join 代替字符串拼接
+                self._response_chunks.append(content)
                 self._response_content_blocks = append_text_block(
                     self._response_content_blocks, content
                 )
