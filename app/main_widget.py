@@ -858,6 +858,10 @@ class OpenAIChatToolWindow(ToolWindow):
         self._provider_edit_popup.saved.connect(self._on_provider_edit_saved)
         self._provider_edit_popup.closed.connect(self._on_provider_edit_closed)
         self._provider_edit_card.content_layout.addWidget(self._provider_edit_popup)
+        # 照抄历史卡片的导入按钮模式：在标题栏加保存按钮，信号连到内容组件
+        # 获取 ProviderEditCard 实例的保存方法
+        save_handler = self._provider_edit_popup._on_save
+        self._provider_edit_card.set_save_button_handler(save_handler)
         self._provider_edit_card.setVisible(False)
         layout.addWidget(self._provider_edit_card)
 
@@ -1291,7 +1295,7 @@ class OpenAIChatToolWindow(ToolWindow):
         # 隐藏设置卡片，显示服务商编辑卡片
         self._settings_popup.hide()
         # 设置卡片标题
-        self._provider_edit_card.set_title("☁️ 添加服务商")
+        self._provider_edit_card.set_title("⚙️ 添加服务商")
         # 重新创建 ProviderEditCard 用于添加
         self._provider_edit_popup = ProviderEditCard(provider_name="", provider_info={}, is_new=True, parent=self)
         self._provider_edit_popup.saved.connect(self._on_provider_edit_saved)
@@ -1302,14 +1306,18 @@ class OpenAIChatToolWindow(ToolWindow):
             if item.widget():
                 item.widget().deleteLater()
         self._provider_edit_card.content_layout.addWidget(self._provider_edit_popup)
+        # 重新绑定保存按钮
+        self._provider_edit_card.set_save_button_handler(
+            lambda: self._provider_edit_popup._on_save()
+        )
         self._provider_edit_card.show()
-
+        
     def _show_provider_edit_card(self, provider_name: str, provider_info: dict):
         """显示编辑服务商卡片"""
         # 隐藏设置卡片，显示服务商编辑卡片
         self._settings_popup.hide()
         # 设置卡片标题
-        self._provider_edit_card.set_title(f"☁️ 编辑: {provider_name}")
+        self._provider_edit_card.set_title(f"⚙️ 编辑: {provider_name}")
         # 重新创建 ProviderEditCard 用于编辑
         self._provider_edit_popup = ProviderEditCard(
             provider_name=provider_name, provider_info=provider_info, is_new=False, parent=self
@@ -1322,6 +1330,10 @@ class OpenAIChatToolWindow(ToolWindow):
             if item.widget():
                 item.widget().deleteLater()
         self._provider_edit_card.content_layout.addWidget(self._provider_edit_popup)
+        # 重新绑定保存按钮
+        self._provider_edit_card.set_save_button_handler(
+            lambda: self._provider_edit_popup._on_save()
+        )
         self._provider_edit_card.show()
 
     def _hide_main_popups(self):
@@ -4038,6 +4050,32 @@ class OpenAIChatToolWindow(ToolWindow):
         else:
             agent_name = ""
         sub_agent_mgr._finished_tasks[task_id] = {"result": result, "error": execution_error or "", "agent_name": agent_name}
+
+        # 批次完成检查：只有当所有任务都完成时才触发回调
+        sub_agent_mgr._batch_completed += 1
+        if sub_agent_mgr._batch_completed >= sub_agent_mgr._batch_total and sub_agent_mgr._batch_total > 0:
+            # 全部任务完成，发送回调通知
+            self._do_trigger_callback(sub_agent_mgr)
+            # 重置计数器
+            sub_agent_mgr._batch_total = 0
+            sub_agent_mgr._batch_completed = 0
+
+    def _do_trigger_callback(self, sub_agent_mgr):
+        """执行回调触发"""
+        total = len(sub_agent_mgr._finished_tasks)
+        failed = sum(1 for t in sub_agent_mgr._finished_tasks.values() if t.get("error") and t.get("error") != "")
+        
+        callback_text = f"""[后台任务状态]
+所有子智能体任务执行完成。
+- 总任务数: {total}
+- 已完成: {total - failed}
+- 失败: {failed}
+
+请使用 task_status 工具获取详细结果。"""
+        
+        # 绕过 streaming 检查直接发送
+        self._chat_engine._is_streaming = False
+        self._chat_engine.send_message(callback_text, {"source": "subagent_callback"})
 
     def _on_sub_agent_finished(self, task_id: str, result: str):
         """单个子智能体执行完成"""

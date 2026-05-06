@@ -378,7 +378,15 @@ Use the tools available to you based on your permissions.
         return """# LLM Chatter
 你是一个智能编程助手，基于大语言模型。
 使用工具来帮助用户完成编程任务。
-""".strip()
+
+## 后台任务回调消息
+当收到格式为 `[后台任务状态]` 的用户消息时，表示子智能体任务已全部完成。
+你应该：
+1. 使用 task_status 工具获取任务详情
+2. 根据结果评估完成情况
+3. 输出总结或后续建议（如有需要）
+
+不要在回复中重复消息内容，直接给出检查结果和建议。""".strip()
 
     def get_enabled_skills_content(self, enabled_skills: List[str]) -> str:
         if not enabled_skills:

@@ -15,6 +15,7 @@ from PyQt5.QtWidgets import (
 )
 
 from app.widgets.provider_setting_card import ProviderListSettingCard
+from app.utils.design_tokens import CardStyles, Colors
 
 
 class NoWheelFontComboBox(QFontComboBox):
@@ -54,13 +55,7 @@ class LLMSettingsCard(SimpleCardWidget):
     def _setup_ui(self):
         self.setSizePolicy(1, 0)  # 水平方向可扩展
         self.setFixedHeight(350)  # 固定高度，超出滚动
-        self.setStyleSheet("""
-            CardWidget {
-                background-color: rgba(33, 33, 38, 250);
-                border: 1px solid #3d3d3d;
-                border-radius: 8px;
-            }
-        """)
+        self.setStyleSheet(CardStyles.card())
 
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(12, 8, 12, 8)
@@ -75,7 +70,7 @@ class LLMSettingsCard(SimpleCardWidget):
 
         title_label = StrongBodyLabel("系统设置", self)
         title_label.setFont(get_unified_font(11, True))
-        title_label.setStyleSheet("color: #f59e0b;")
+        title_label.setStyleSheet(CardStyles.title_label())
 
         header.addWidget(icon_label)
         header.addWidget(title_label)
@@ -84,7 +79,7 @@ class LLMSettingsCard(SimpleCardWidget):
         # 关闭按钮
         self.close_btn = QLabel("✕", self)
         self.close_btn.setFont(get_unified_font(11))
-        self.close_btn.setStyleSheet("color: #888888; cursor: pointer; padding: 4px;")
+        self.close_btn.setStyleSheet(CardStyles.close_button())
         self.close_btn.mousePressEvent = lambda e: self._on_close()
         header.addWidget(self.close_btn)
 
@@ -412,10 +407,4 @@ class LLMSettingsCard(SimpleCardWidget):
     def set_opacity(self, opacity: float):
         """设置透明度，用于响应全局透明度变化"""
         alpha = int(250 * opacity)
-        self.setStyleSheet(f"""
-            CardWidget {{
-                background-color: rgba(33, 33, 38, {alpha});
-                border: 1px solid #3d3d3d;
-                border-radius: 8px;
-            }}
-        """)
+        self.setStyleSheet(CardStyles.card(alpha))

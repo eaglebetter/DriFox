@@ -413,11 +413,6 @@ class ToolExecutor:
             "task_batch": lambda: self._builtin_tools.task_execute_batch(
                 args.get("tasks", [])
             ),
-            "task_wait": lambda: self._builtin_tools.task_wait(
-                args.get("task_ids", []),
-                args.get("timeout", 1800),
-                args.get("poll_interval", 0.1),
-            ),
             "task_status": lambda: self._builtin_tools.task_status(
                 args.get("task_ids"),
                 args.get("with_log", False),

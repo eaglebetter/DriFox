@@ -166,13 +166,6 @@ class MemoryCardContent(QWidget):
         self.segmented_widget.currentItemChanged.connect(self._on_category_changed)
         main_layout.addWidget(self.segmented_widget)
 
-        # 统计标签
-        self.category_count_label = BodyLabel(self)
-        self.category_count_label.setStyleSheet(
-            f"color: #8c99ad; {get_font_family_css()} font-size: 11px; padding: 2px 4px;"
-        )
-        main_layout.addWidget(self.category_count_label)
-
         # 记忆列表
         self.list_widget = ListWidget(self)
         self.list_widget.setStyleSheet(f"""
@@ -337,7 +330,25 @@ class MemoryCardContent(QWidget):
         from app.core.memory_manager import MEMORY_CATEGORY_LIMITS
 
         limit = MEMORY_CATEGORY_LIMITS.get(self._current_category, 20)
-        self.category_count_label.setText(f"{current_count}/{limit} | 总: {total}")
+
+        # 更新父 BaseSettingsCard 的标题数量：总:xx|当前: xx/xx
+        self._update_parent_title_count(total, current_count, limit)
+
+    def _update_parent_title_count(self, total: int, current_count: int, limit: int):
+        """更新父卡片的标题数量统计
+        
+        Args:
+            total: 总记忆数量
+            current_count: 当前分类记忆数量
+            limit: 当前分类限制数量
+        """
+        parent = self.parent()
+        while parent:
+            if hasattr(parent, 'set_count_label'):
+                # 格式：总:xxx|当前:xxx/xxx
+                parent.set_count_label(f"总:{total}|当前:{current_count}/{limit}")
+                break
+            parent = parent.parent()
 
     def _load_memories(self):
         """加载记忆数据"""

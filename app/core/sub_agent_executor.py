@@ -533,6 +533,7 @@ class SubAgentManager(QObject):
 
     task_started = pyqtSignal(str, str, str)  # task_id, agent_name, task_description
     task_finished = pyqtSignal(str, str)  # task_id, result
+    batch_finished = pyqtSignal()  # 批次内所有任务都完成时触发
 
     def __init__(self, agent_manager, tool_executor, get_llm_config: Callable):
         super().__init__()
@@ -542,6 +543,11 @@ class SubAgentManager(QObject):
         self._running_tasks: Dict[str, SubAgentExecutor] = {}
         self._finished_tasks: Dict[str, Dict] = {}  # task_id -> {"result": str, "error": str}
         self._log_store: Optional[SubAgentLogStore] = None
+        # 批次计数：本次启动的任务总数
+        self._batch_total = 0
+        self._batch_completed = 0
+        # 已查询过的任务ID集合，避免重复返回结果浪费上下文
+        self._queried_tasks: set = set()
 
     def set_log_store(self, log_store: SubAgentLogStore):
         """设置日志存储"""
@@ -576,6 +582,30 @@ class SubAgentManager(QObject):
         executor_ref: Dict = None,
     ) -> bool:
         """执行子智能体任务"""
+        # 验证 agent 是否存在且是有效的子智能体类型
+        agent = self._agent_manager.get_agent(agent_name)
+        if not agent:
+            error_msg = f"Agent not found: {agent_name}"
+            logger.error(f"[SubAgentManager] {error_msg}")
+            # 立即触发完成信号，让任务不卡在 running 状态
+            self._finished_tasks[task_id] = {"result": "", "error": error_msg, "agent_name": agent_name}
+            if on_finished:
+                on_finished(error_msg)
+            if on_error:
+                on_error(error_msg)
+            return False
+        
+        # 只允许 mode 为 subagent 或 all 的 agent 作为子智能体
+        if not agent.is_subagent():
+            error_msg = f"Agent '{agent_name}' cannot be used as subagent (mode: {agent.mode})"
+            logger.error(f"[SubAgentManager] {error_msg}")
+            self._finished_tasks[task_id] = {"result": "", "error": error_msg, "agent_name": agent_name}
+            if on_finished:
+                on_finished(error_msg)
+            if on_error:
+                on_error(error_msg)
+            return False
+
         try:
             llm_config = self._get_llm_config()
             if not llm_config:
@@ -609,6 +639,9 @@ class SubAgentManager(QObject):
 
             self._running_tasks[task_id] = executor
             executor.start()
+
+            # 批次计数：本次启动的任务数
+            self._batch_total += 1
 
             # 保存到数据库
             self._save_task_to_store(task_id, agent_name, task_description, "running")
@@ -853,11 +886,21 @@ class SubAgentManager(QObject):
                 })
                 continue
 
+            status = task_data.get("status", "unknown")
             task_info = {
                 "task_id": tid,
-                "status": task_data.get("status", "unknown"),
+                "status": status,
                 "agent": task_data.get("summary", {}).get("agent_name", task_data.get("agent_name", "")),
             }
+
+            # running 状态可以反复查，完成或失败只能查一次
+            if status not in ("running", "unknown"):
+                if tid in self._queried_tasks:
+                    task_info["_already_queried"] = True
+                    task_info["_message"] = "已查询过结果，可通过 id 再次查询"
+                    tasks_info.append(task_info)
+                    continue
+                self._queried_tasks.add(tid)
 
             # 是否包含结果
             if with_result:
@@ -879,64 +922,42 @@ class SubAgentManager(QObject):
         return ToolResult(True, content={"tasks": tasks_info})
 
     def get_all_active_tasks_with_details(self, with_log: bool = False, with_result: bool = True) -> ToolResult:
-        """获取所有活跃任务的详细状态（从 SQLite 查询）"""
+        """获取所有已完成任务的详细状态（避免重复返回）"""
         tasks_info = []
 
-        # 优先从 SQLite 查询活跃任务（running 状态）
-        if self._log_store:
-            all_tasks = self._log_store.get_all_tasks(limit=500)
-            for db_task in all_tasks:
-                status = db_task.get("status", "")
-                # 活跃任务：running 或 finishing（刚完成但还没清理的）
-                if status not in ("running", "finishing"):
-                    continue
-
-                task_id = db_task.get("task_id", "")
-                task_info = {
-                    "task_id": task_id,
-                    "status": status,
-                    "agent": db_task.get("agent_name", ""),
-                    "task_description": db_task.get("task_description", ""),
-                }
-
-                if with_result:
-                    result = db_task.get("result", "") or ""
-                    error = db_task.get("error", "") or ""
-                    if result:
-                        task_info["result"] = result
-                    if error:
-                        task_info["error"] = error
-
-                if with_log:
-                    logs = db_task.get("logs", [])
-                    if logs:
-                        task_info["logs"] = logs
-
-                tasks_info.append(task_info)
-
-        # 同时补充检查内存中正在运行的任务（可能还没同步到DB的）
-        for task_id, executor in self._running_tasks.items():
-            # 跳过已经在列表中的（通过task_id去重）
-            if any(t["task_id"] == task_id for t in tasks_info):
+        for task_id, task_info in self._finished_tasks.items():
+            if any(t.get("agent") == task_info.get("agent_name", "") for t in tasks_info):
                 continue
 
-            task_info = {
+            task_entry = {
                 "task_id": task_id,
-                "status": "running" if executor.isRunning() else "finishing",
-                "agent": getattr(executor, "agent_name", ""),
+                "status": "finished",
+                "agent": task_info.get("agent_name", ""),
+                "task_description": task_info.get("task_description", ""),
             }
 
+            # 完成或失败只能查一次
+            if task_id in self._queried_tasks:
+                task_entry["_already_queried"] = True
+                task_entry["_message"] = "已查询过结果，可通过 id 再次查询"
+                tasks_info.append(task_entry)
+                continue
+
+            self._queried_tasks.add(task_id)
+
             if with_result:
-                result = getattr(executor, "_last_result", "") or ""
+                result = task_info.get("result", "") or ""
+                error = task_info.get("error", "") or ""
                 if result:
-                    task_info["result"] = result
-
+                    task_entry["result"] = result
+                if error:
+                    task_entry["error"] = error
             if with_log:
-                logs = executor.get_logs()
+                logs = task_info.get("logs", [])
                 if logs:
-                    task_info["logs"] = logs
+                    task_entry["logs"] = logs
 
-            tasks_info.append(task_info)
+            tasks_info.append(task_entry)
 
         return ToolResult(True, content={"tasks": tasks_info})
 

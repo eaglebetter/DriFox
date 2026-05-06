@@ -23,7 +23,8 @@ from qfluentwidgets import (
     SimpleCardWidget,
 )
 
-from app.utils.utils import get_icon, get_font_family_css
+from app.utils.utils import get_icon, get_unified_font
+from app.utils.design_tokens import ItemStyles, Colors, get_font_family_css
 
 
 def format_relative_time(time_str: str) -> str:
@@ -156,9 +157,7 @@ class _HistoryItemCard(SimpleCardWidget):
         top_row.addWidget(self.title_edit, 1, Qt.AlignLeft)
 
         self.current_indicator = CaptionLabel("🔥 活跃中", self)
-        self.current_indicator.setStyleSheet(
-            f"color: #fff; font-weight: bold; background-color: rgba(102, 198, 255, 0.35); border-radius: 4px; padding: 2px 8px; {get_font_family_css()}"
-        )
+        self.current_indicator.setStyleSheet(ItemStyles.tag() + get_font_family_css())
         self.current_indicator.setVisible(is_current)
         top_row.addWidget(self.current_indicator, 0, Qt.AlignTop)
 
