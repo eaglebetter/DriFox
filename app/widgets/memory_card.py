@@ -63,29 +63,29 @@ class MemoryItemWidget(QWidget):
         self._init_ui(enabled)
 
     def _init_ui(self, enabled):
-        self.setFixedHeight(80)
+        self.setFixedHeight(60)
         self.setSizePolicy(1, 0)  # 水平扩展，垂直固定
 
         main_layout = QHBoxLayout(self)
-        main_layout.setContentsMargins(5, 8, 5, 8)
+        main_layout.setContentsMargins(8, 4, 8, 4)
         main_layout.setSpacing(0)
 
         text_wrap = QWidget(self)
         text_wrap.setSizePolicy(1, 0)  # 水平扩展，垂直固定
         text_layout = QVBoxLayout(text_wrap)
         text_layout.setContentsMargins(0, 0, 0, 0)
-        text_layout.setSpacing(2)
+        text_layout.setSpacing(1)
 
         self.label = BodyLabel(self.content, self)
         self.label.setWordWrap(True)
-        self.label.setStyleSheet("padding: 5px 10px 0 10px;")
+        self.label.setStyleSheet(f"padding: 2px 8px 0 8px; {get_font_family_css()} font-size: 12px;")
         text_layout.addWidget(self.label)
 
         if self.meta_text:
             self.meta_label = BodyLabel(self.meta_text, self)
             self.meta_label.setWordWrap(True)
             self.meta_label.setStyleSheet(
-                f"padding: 0 10px 5px 10px; color: #8c99ad; {get_font_family_css()} font-size: 11px;"
+                f"padding: 0 8px 2px 8px; color: #8c99ad; {get_font_family_css()} font-size: 10px;"
             )
             text_layout.addWidget(self.meta_label)
 
@@ -137,17 +137,16 @@ class MemoryCardContent(QWidget):
                 background: transparent;
             }
             QListWidget {
-                background-color: #252526;
-                border: 1px solid #3e3e42;
+                background-color: rgba(37, 37, 38, 180);
+                border: 1px solid rgba(62, 62, 66, 150);
                 color: #e0e0e0;
-                border-radius: 0;
+                border-radius: 6px;
             }
             QListWidget::item {
                 padding: 0;
-                border-bottom: 1px solid #3e3e42;
             }
             QListWidget::item:selected {
-                background-color: #094771;
+                background-color: rgba(9, 71, 113, 150);
             }
             BodyLabel {
                 color: #e0e0e0;
@@ -156,9 +155,9 @@ class MemoryCardContent(QWidget):
 
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.setSpacing(10)
+        main_layout.setSpacing(6)
 
-        # 分类切换 - 使用 SegmentedWidget，和弹窗一致
+        # 分类切换 - 使用 SegmentedWidget，紧凑设计
         self.segmented_widget = SegmentedWidget(self)
         segment_keys = list(MEMORY_CATEGORIES_WIDGET.keys())
         for k in segment_keys:
@@ -167,70 +166,60 @@ class MemoryCardContent(QWidget):
         self.segmented_widget.currentItemChanged.connect(self._on_category_changed)
         main_layout.addWidget(self.segmented_widget)
 
-        # 分类标题和统计
-        header_layout = QHBoxLayout()
-        header_layout.setSpacing(10)
-
-        self.category_header = BodyLabel(self)
-        self.category_header.setStyleSheet(
-            f"font-weight: bold; {get_font_family_css()} font-size: 14px;"
-        )
+        # 统计标签
         self.category_count_label = BodyLabel(self)
         self.category_count_label.setStyleSheet(
-            f"color: #888; {get_font_family_css()} font-size: 12px;"
+            f"color: #8c99ad; {get_font_family_css()} font-size: 11px; padding: 2px 4px;"
         )
-
-        header_layout.addWidget(self.category_header, 1)
-        header_layout.addWidget(
-            self.category_count_label, 0, Qt.AlignVCenter | Qt.AlignRight
-        )
-        main_layout.addLayout(header_layout)
+        main_layout.addWidget(self.category_count_label)
 
         # 记忆列表
         self.list_widget = ListWidget(self)
         self.list_widget.setStyleSheet("""
             QListWidget {
-                background-color: #252526;
-                border: 1px solid #3e3e42;
+                background-color: rgba(37, 37, 38, 180);
+                border: 1px solid rgba(62, 62, 66, 150);
                 color: #e0e0e0;
-                border-radius: 0;
+                border-radius: 6px;
             }
             QListWidget::item {
                 padding: 0;
-                border-bottom: 1px solid #3e3e42;
+                border-bottom: 1px solid rgba(62, 62, 66, 80);
             }
             QListWidget::item:selected {
-                background-color: #094771;
+                background-color: rgba(9, 71, 113, 150);
             }
         """)
         main_layout.addWidget(self.list_widget, 1)
 
-        # 添加区域
+        # 添加区域 - 紧凑设计
         input_layout = QHBoxLayout()
+        input_layout.setSpacing(6)
         self.input_edit = LineEdit(self)
+        self.input_edit.setFixedHeight(28)
         self.input_edit.setPlaceholderText("添加新的记忆...")
-        self.input_edit.setStyleSheet("""
-            QLineEdit {
-                background-color: #252526;
-                border: 1px solid #3e3e42;
+        self.input_edit.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: rgba(37, 37, 38, 180);
+                border: 1px solid rgba(62, 62, 66, 150);
                 color: #e0e0e0;
-                padding: 5px;
-            }
+                padding: 4px 8px;
+                border-radius: 4px;
+                {get_font_family_css()} font-size: 12px;
+            }}
         """)
         self.add_btn = PrimaryPushButton("添加", self)
+        self.add_btn.setFixedSize(50, 28)
         self.add_btn.setStyleSheet("""
             QPushButton {
                 background-color: #0e639c;
                 color: white;
                 border: none;
-                padding: 6px 12px;
-                border-radius: 3px;
+                border-radius: 4px;
+                font-size: 12px;
             }
             QPushButton:hover {
                 background-color: #1177bb;
-            }
-            QPushButton:pressed {
-                background-color: #0d5a8f;
             }
         """)
         self.add_btn.clicked.connect(self._add_memory)
@@ -239,17 +228,20 @@ class MemoryCardContent(QWidget):
         input_layout.addWidget(self.add_btn)
         main_layout.addLayout(input_layout)
 
-        # 操作按钮行
+        # 操作按钮行 - 紧凑设计
         btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(6)
 
         select_all_btn = PushButton("全部启用", self)
+        select_all_btn.setFixedHeight(26)
         select_all_btn.setStyleSheet("""
             QPushButton {
-                background-color: #0e639c;
+                background-color: rgba(14, 99, 156, 180);
                 color: white;
                 border: none;
-                padding: 6px 12px;
-                border-radius: 3px;
+                border-radius: 4px;
+                font-size: 11px;
+                padding: 0 10px;
             }
             QPushButton:hover {
                 background-color: #1177bb;
@@ -258,13 +250,15 @@ class MemoryCardContent(QWidget):
         select_all_btn.clicked.connect(self._select_all)
 
         deselect_all_btn = PushButton("全部关闭", self)
+        deselect_all_btn.setFixedHeight(26)
         deselect_all_btn.setStyleSheet("""
             QPushButton {
-                background-color: #0e639c;
+                background-color: rgba(14, 99, 156, 180);
                 color: white;
                 border: none;
-                padding: 6px 12px;
-                border-radius: 3px;
+                border-radius: 4px;
+                font-size: 11px;
+                padding: 0 10px;
             }
             QPushButton:hover {
                 background-color: #1177bb;
@@ -272,14 +266,16 @@ class MemoryCardContent(QWidget):
         """)
         deselect_all_btn.clicked.connect(self._deselect_all)
 
-        clear_disabled_btn = PushButton("删除未启用", self)
+        clear_disabled_btn = PushButton("删除未选", self)
+        clear_disabled_btn.setFixedHeight(26)
         clear_disabled_btn.setStyleSheet("""
             QPushButton {
-                background-color: #c42b1c;
+                background-color: rgba(196, 43, 28, 180);
                 color: white;
                 border: none;
-                padding: 6px 12px;
-                border-radius: 3px;
+                border-radius: 4px;
+                font-size: 11px;
+                padding: 0 10px;
             }
             QPushButton:hover {
                 background-color: #d43d2a;
@@ -294,19 +290,18 @@ class MemoryCardContent(QWidget):
 
         # 保存按钮
         self.save_btn = PrimaryPushButton("保存", self)
+        self.save_btn.setFixedHeight(26)
         self.save_btn.setStyleSheet("""
             QPushButton {
                 background-color: #0e639c;
                 color: white;
                 border: none;
-                padding: 6px 16px;
-                border-radius: 3px;
+                border-radius: 4px;
+                font-size: 12px;
+                padding: 0 12px;
             }
             QPushButton:hover {
                 background-color: #1177bb;
-            }
-            QPushButton:pressed {
-                background-color: #0d5a8f;
             }
         """)
         self.save_btn.clicked.connect(self._save_memories)
@@ -314,17 +309,10 @@ class MemoryCardContent(QWidget):
 
         main_layout.addLayout(btn_layout)
 
-        # 更新标题
-        self.category_header.setText(MEMORY_CATEGORIES_WIDGET[self._current_category])
-
-        # 注意：不在这里加载数据，等外部调用 load_memories() 时再加载
-        # 这样可以确保 _memory_manager 已经正确初始化
-
     def _on_category_changed(self, key: str):
         """切换分类"""
         if key in MEMORY_CATEGORIES_WIDGET:
             self._current_category = key
-            self.category_header.setText(MEMORY_CATEGORIES_WIDGET[key])
             self._load_memories()
 
     def _update_category_count_label(self):
@@ -425,7 +413,7 @@ class MemoryCardContent(QWidget):
         width = self.list_widget.size().width()
         if width <= 0:
             width = 400  # 默认宽度
-        return QSize(width, 80)
+        return QSize(width, 60)
 
     def _get_memory_index_from_item_id(self, item_id: int) -> int:
         """根据 item_id (显示索引) 找到真实的 memory 索引"""

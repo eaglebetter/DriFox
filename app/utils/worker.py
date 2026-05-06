@@ -2,13 +2,25 @@
 import json
 import re
 import time
+import httpcore
+import httpx
+
+from loguru import logger
 from collections import deque
 from datetime import datetime
 from threading import Event
 from typing import Any, Dict, List, Callable, Optional, Tuple
+from PyQt5.QtCore import QRunnable, pyqtSlot, QThread, pyqtSignal, QCoreApplication
+from PyQt5.QtWidgets import QApplication
+from openai import (
+    OpenAI, BadRequestError, RateLimitError, APIError, APIConnectionError,
+)
 
-import httpx
-from loguru import logger
+from app.core.memory_manager import MEMORY_CATEGORIES
+from app.core.provider_profile import (
+    get_provider_profile,
+)
+from app.utils.message_content import consolidate_messages, append_text_block, messages_to_api, to_api_message
 
 
 # ========== 性能优化：预编译正则表达式 ==========
@@ -147,18 +159,6 @@ def _smart_parse_arguments(raw_args: str, tool_name: str) -> Optional[Dict]:
         return fixed_args
     
     return None
-
-from PyQt5.QtCore import QRunnable, pyqtSlot, QThread, pyqtSignal, QCoreApplication
-from PyQt5.QtWidgets import QApplication
-from openai import (
-    OpenAI,
-)
-
-from app.core.memory_manager import MEMORY_CATEGORIES
-from app.core.provider_profile import (
-    get_provider_profile,
-)
-from app.utils.message_content import consolidate_messages, append_text_block, messages_to_api, to_api_message
 
 
 class TopicSummaryTask(QRunnable):
@@ -1232,11 +1232,11 @@ class OpenAIChatWorker(QThread):
                 # - NetworkError: 连接失败、协议错误等
                 # - TimeoutException: 所有超时（Read/Write/Connect）
                 # - ProtocolError: 协议层错误（RemoteProtocolError, LocalProtocolError）
-                import httpx as httpx_err
-                
-                is_retryable_network = isinstance(e, (httpx_err.NetworkError, httpcore.NetworkError))
-                is_retryable_timeout = isinstance(e, (httpx_err.TimeoutException, httpcore.TimeoutException))
-                is_retryable_protocol = isinstance(e, (httpx_err.ProtocolError, httpcore.ProtocolError))
+
+
+                is_retryable_network = isinstance(e, (httpx.NetworkError, httpcore.NetworkError))
+                is_retryable_timeout = isinstance(e, (httpx.TimeoutException, httpcore.TimeoutException))
+                is_retryable_protocol = isinstance(e, (httpx.ProtocolError, httpcore.ProtocolError))
                 is_rate_limit = isinstance(e, RateLimitError)
                 is_server_overload = isinstance(e, APIError) and ("2064" in error_str or "overload" in error_str.lower())
                 is_conn_error = isinstance(e, APIConnectionError)

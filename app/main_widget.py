@@ -406,6 +406,7 @@ class OpenAIChatToolWindow(ToolWindow):
         if self._settings_popup.isVisible():
             self._settings_popup.hide()
         else:
+            self._hide_main_popups()  # 隐藏其他主面板
             self._settings_popup.show()
 
     def _open_api_docs(self):
@@ -632,6 +633,9 @@ class OpenAIChatToolWindow(ToolWindow):
         # 更新历史会话卡片
         if self._history_card:
             self._history_card.set_opacity(opacity)
+        # 更新记忆管理卡片
+        if self._memory_card:
+            self._memory_card.set_opacity(opacity)
         # 更新设置卡片
         if self._settings_popup:
             self._settings_popup.set_opacity(opacity)
@@ -930,7 +934,7 @@ class OpenAIChatToolWindow(ToolWindow):
 
         # 记忆管理卡片 - 和历史会话卡片同位置
         self._memory_card = BaseSettingsCard("记忆管理", "🧠", self)
-        self._memory_card.setFixedHeight(550)
+        self._memory_card.setFixedHeight(350)
         self._memory_card_popup = MemoryCardContent(self._memory_manager, self)
         self._memory_card_popup.memorySaved.connect(self._on_memory_card_saved)
         self._memory_card.content_layout.addWidget(self._memory_card_popup)
@@ -1245,12 +1249,13 @@ class OpenAIChatToolWindow(ToolWindow):
     def _hide_main_popups(self):
         """隐藏主要的悬浮面板（互斥显示）
         
-        包括：系统设置、模型配置、历史会话
+        包括：系统设置、模型配置、历史会话、记忆管理
         不包括：工具悬浮、Todo、子智能体等工具类浮窗
         """
         self._model_config_card.hide()
         self._history_card.hide()
         self._settings_popup.hide()
+        self._memory_card.hide()
 
     def _toggle_model_config_card(self):
         """切换模型配置卡片的显示"""
