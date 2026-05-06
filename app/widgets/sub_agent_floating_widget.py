@@ -426,14 +426,13 @@ class SubAgentFloatingWidget(SimpleCardWidget):
 
         # 如果有最终结果（只有已完成的任务才有）
         if result:
-            success = not (error or "error" in str(result).lower())
-            task_widget.finish_task(result, success)
+            task_widget.finish_task(result, success=True)
         elif error:
             task_widget.finish_task(error, success=False)
 
         # 调用父方法更新 Segment 标签（只调用一次，避免重复）
         if result:
-            self.finish_task(task_id, result, not (error or "error" in str(result).lower()))
+            self.finish_task(task_id, result, True)
         elif error:
             self.finish_task(task_id, error, False)
 

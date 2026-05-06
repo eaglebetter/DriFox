@@ -4051,6 +4051,37 @@ class OpenAIChatToolWindow(ToolWindow):
             agent_name = ""
         sub_agent_mgr._finished_tasks[task_id] = {"result": result, "error": execution_error or "", "agent_name": agent_name}
 
+        # 批次完成检查：只有当所有任务都完成时才触发回调
+        sub_agent_mgr._batch_completed += 1
+        if sub_agent_mgr._batch_completed >= sub_agent_mgr._batch_total and sub_agent_mgr._batch_total > 0:
+            # 全部任务完成，发送回调通知
+            self._trigger_subagent_batch_callback(sub_agent_mgr)
+            # 重置计数器
+            sub_agent_mgr._batch_total = 0
+            sub_agent_mgr._batch_completed = 0
+
+    def _trigger_subagent_batch_callback(self, sub_agent_mgr):
+        """触发子智能体批次完成回调"""
+        logger.info("[DEBUG] _trigger_subagent_batch_callback called")
+        self._do_trigger_callback(sub_agent_mgr)
+
+    def _do_trigger_callback(self, sub_agent_mgr):
+        """执行回调触发"""
+        total = len(sub_agent_mgr._finished_tasks)
+        failed = sum(1 for t in sub_agent_mgr._finished_tasks.values() if t.get("error") and t.get("error") != "")
+        
+        callback_text = f"""[后台任务状态]
+所有子智能体任务执行完成。
+- 总任务数: {total}
+- 已完成: {total - failed}
+- 失败: {failed}
+
+请使用 task_status 工具获取详细结果。"""
+        
+        # 绕过 streaming 检查直接发送
+        self._chat_engine._is_streaming = False
+        self._chat_engine.send_message(callback_text, {"source": "subagent_callback"})
+
     def _on_sub_agent_finished(self, task_id: str, result: str):
         """单个子智能体执行完成"""
         self._sub_agent_manager.task_finished.emit(task_id, result)

@@ -126,23 +126,16 @@ class TaskTools:
             logger.error(f"[Task] task_execute_batch exception: {e}")
             return ToolResult(False, error=f"批量任务启动失败: {str(e)}")
 
-    def task_wait(
-        self,
-        task_ids: List[str],
-        timeout: int = 1800,
-        poll_interval: float = 0.1,
-    ) -> ToolResult:
-        """
-        等待指定任务完成并收集结果（轮询方式）。
-
-        Args:
-            task_ids: 要等待的任务ID列表
-            timeout: 超时秒数（默认30分钟）
-            poll_interval: 轮询间隔秒数
-
-        Returns:
-            ToolResult: success=True, content={"results": [{"task_id": str, "result": str, "error": str}]}
-        """
+    # def task_wait(
+    #     self,
+    #     task_ids: List[str],
+    #     timeout: int = 1800,
+    #     poll_interval: float = 0.1,
+    # ) -> ToolResult:
+    #     """
+    #     【已禁用】请使用自动回调机制。
+    #     任务完成后系统会自动发送 `[后台任务状态]` 消息。
+    #     """
         if not hasattr(self, "_sub_agent_manager") or not self._sub_agent_manager:
             return ToolResult(False, error="子智能体管理器未初始化")
 

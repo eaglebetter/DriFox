@@ -533,6 +533,7 @@ class SubAgentManager(QObject):
 
     task_started = pyqtSignal(str, str, str)  # task_id, agent_name, task_description
     task_finished = pyqtSignal(str, str)  # task_id, result
+    batch_finished = pyqtSignal()  # 批次内所有任务都完成时触发
 
     def __init__(self, agent_manager, tool_executor, get_llm_config: Callable):
         super().__init__()
@@ -542,6 +543,9 @@ class SubAgentManager(QObject):
         self._running_tasks: Dict[str, SubAgentExecutor] = {}
         self._finished_tasks: Dict[str, Dict] = {}  # task_id -> {"result": str, "error": str}
         self._log_store: Optional[SubAgentLogStore] = None
+        # 批次计数：本次启动的任务总数
+        self._batch_total = 0
+        self._batch_completed = 0
 
     def set_log_store(self, log_store: SubAgentLogStore):
         """设置日志存储"""
@@ -576,6 +580,15 @@ class SubAgentManager(QObject):
         executor_ref: Dict = None,
     ) -> bool:
         """执行子智能体任务"""
+        # 从 agent 管理器动态获取允许的子智能体类型
+        allowed_agents = self._agent_manager.list_subagent_names(include_hidden=False)
+        if agent_name not in allowed_agents:
+            error_msg = f"不支持的子智能体类型: {agent_name}，允许的类型: {allowed_agents}"
+            logger.error(f"[SubAgentManager] {error_msg}")
+            if on_error:
+                on_error(error_msg)
+            return False
+
         try:
             llm_config = self._get_llm_config()
             if not llm_config:
@@ -609,6 +622,9 @@ class SubAgentManager(QObject):
 
             self._running_tasks[task_id] = executor
             executor.start()
+
+            # 批次计数：本次启动的任务数
+            self._batch_total += 1
 
             # 保存到数据库
             self._save_task_to_store(task_id, agent_name, task_description, "running")

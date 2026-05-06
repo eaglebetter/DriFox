@@ -188,8 +188,9 @@ class BuiltinTools(QObject):
     def task_execute_batch(self, tasks: List[Dict]):
         return self._task_tools.task_execute_batch(tasks)
 
-    def task_wait(self, task_ids: List[str], timeout: int = 1800, poll_interval: float = 0.1):
-        return self._task_tools.task_wait(task_ids, timeout, poll_interval)
+    # def task_wait(self, task_ids: List[str], timeout: int = 1800, poll_interval: float = 0.1):
+    #     # 已禁用，改为自动回调机制
+    #     pass
 
     def task_status(self, task_ids: str = None, with_log: bool = False, with_result: bool = True):
         return self._task_tools.task_status(task_ids, with_log, with_result)
@@ -776,19 +777,19 @@ def get_builtin_tools_schema() -> List[Dict]:
             "type": "function",
             "function": {
                 "name": "task_batch",
-                "description": "批量分发多个子智能体任务（并行执行）。适用于需要多个子智能体同时工作、独立完成的场景。可通过 task_wait 等待结果，task_status 查询状态。",
+                "description": "批量分发多个子智能体任务（并行执行）。任务完成后系统会自动发送 `[后台任务状态]` 消息通知。收到通知后使用 task_status 获取结果。",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "tasks": {
                             "type": "array",
-                            "description": "任务列表，每个任务包含 agent/description/context。agent 可选：build(代码构建)、plan(任务规划)、explore(代码探索)等。",
+                            "description": "任务列表，每个任务包含 agent/description/context。agent 可选：code-reviewer、explorer。",
                             "items": {
                                 "type": "object",
                                 "properties": {
                                     "agent": {
                                         "type": "string", 
-                                        "description": "子智能体名称（如 build, plan, explore, summary, code-reviewer 等）",
+                                        "description": "子智能体名称（code-reviewer/explorer）",
                                     },
                                     "description": {"type": "string", "description": "任务描述"},
                                     "context": {"type": "string", "description": "详细上下文信息（可选）"},
@@ -798,29 +799,6 @@ def get_builtin_tools_schema() -> List[Dict]:
                         },
                     },
                     "required": ["tasks"],
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "task_wait",
-                "description": "等待指定的子智能体任务完成并收集结果（轮询方式）。",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "task_ids": {
-                            "type": "array",
-                            "description": "要等待的任务ID列表（来自 task_batch 返回）",
-                            "items": {"type": "string"},
-                        },
-                        "timeout": {
-                            "type": "integer",
-                            "description": "超时秒数，默认 1800（30分钟）",
-                            "default": 1800,
-                        },
-                    },
-                    "required": ["task_ids"],
                 },
             },
         },
