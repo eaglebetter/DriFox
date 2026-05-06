@@ -783,13 +783,13 @@ def get_builtin_tools_schema() -> List[Dict]:
                     "properties": {
                         "tasks": {
                             "type": "array",
-                            "description": "任务列表，每个任务包含 agent/description/context。agent 可选：build、summary、code-reviewer、explorer。",
+                            "description": "任务列表，每个任务包含 agent/description/context。agent 可选：build、summary、code-reviewer、explore。",
                             "items": {
                                 "type": "object",
                                 "properties": {
                                     "agent": {
                                         "type": "string", 
-                                        "description": "子智能体名称（code-reviewer/explorer）",
+                                        "description": "子智能体名称（build、summary、code-reviewer、explore）",
                                     },
                                     "description": {"type": "string", "description": "任务描述"},
                                     "context": {"type": "string", "description": "详细上下文信息（可选）"},
@@ -806,13 +806,13 @@ def get_builtin_tools_schema() -> List[Dict]:
             "type": "function",
             "function": {
                 "name": "task_status",
-                "description": "查询子智能体任务状态，可查看活跃任务或指定任务的状态。",
+                "description": "查询子智能体任务状态。task_ids 不传时只能查一次刚完成的任务；指定 task_id 始终能查到。",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "task_ids": {
                             "type": "array",
-                            "description": "任务ID列表（不传则查询所有活跃任务，不包括已成功或超时任务）",
+                            "description": "任务ID列表（不传则查刚完成的任务，只能查一次）",
                             "items": {"type": "string"},
                         },
                         "with_log": {

@@ -1295,7 +1295,7 @@ class OpenAIChatToolWindow(ToolWindow):
         # 隐藏设置卡片，显示服务商编辑卡片
         self._settings_popup.hide()
         # 设置卡片标题
-        self._provider_edit_card.set_title("☁️ 添加服务商")
+        self._provider_edit_card.set_title("⚙️ 添加服务商")
         # 重新创建 ProviderEditCard 用于添加
         self._provider_edit_popup = ProviderEditCard(provider_name="", provider_info={}, is_new=True, parent=self)
         self._provider_edit_popup.saved.connect(self._on_provider_edit_saved)
@@ -1317,7 +1317,7 @@ class OpenAIChatToolWindow(ToolWindow):
         # 隐藏设置卡片，显示服务商编辑卡片
         self._settings_popup.hide()
         # 设置卡片标题
-        self._provider_edit_card.set_title(f"☁️ 编辑: {provider_name}")
+        self._provider_edit_card.set_title(f"⚙️ 编辑: {provider_name}")
         # 重新创建 ProviderEditCard 用于编辑
         self._provider_edit_popup = ProviderEditCard(
             provider_name=provider_name, provider_info=provider_info, is_new=False, parent=self
@@ -4055,15 +4055,10 @@ class OpenAIChatToolWindow(ToolWindow):
         sub_agent_mgr._batch_completed += 1
         if sub_agent_mgr._batch_completed >= sub_agent_mgr._batch_total and sub_agent_mgr._batch_total > 0:
             # 全部任务完成，发送回调通知
-            self._trigger_subagent_batch_callback(sub_agent_mgr)
+            self._do_trigger_callback(sub_agent_mgr)
             # 重置计数器
             sub_agent_mgr._batch_total = 0
             sub_agent_mgr._batch_completed = 0
-
-    def _trigger_subagent_batch_callback(self, sub_agent_mgr):
-        """触发子智能体批次完成回调"""
-        logger.info("[DEBUG] _trigger_subagent_batch_callback called")
-        self._do_trigger_callback(sub_agent_mgr)
 
     def _do_trigger_callback(self, sub_agent_mgr):
         """执行回调触发"""
