@@ -852,7 +852,7 @@ class OpenAIChatToolWindow(ToolWindow):
         self._settings_popup.llmProviderCard.showEditProviderCard.connect(self._show_provider_edit_card)
 
         # 服务商编辑卡片
-        self._provider_edit_card = BaseSettingsCard("服务商配置", parent=self)
+        self._provider_edit_card = BaseSettingsCard("服务商配置", "⚙️", parent=self)
         self._provider_edit_card.setFixedHeight(380)
         self._provider_edit_popup = ProviderEditCard(parent=self)
         self._provider_edit_popup.saved.connect(self._on_provider_edit_saved)
@@ -910,7 +910,6 @@ class OpenAIChatToolWindow(ToolWindow):
 
         # 模型配置卡片 - 在消息列表下方，和工具卡片同位置
         self._model_config_card = BaseSettingsCard("模型配置", "🔧", self)
-        self._model_config_card.setMaximumHeight(120)
         self._model_config_popup = ModelConfigCard()
         self._model_config_popup.configApplied.connect(self._on_config_applied)
         self._model_config_card.content_layout.addWidget(self._model_config_popup)
@@ -949,7 +948,7 @@ class OpenAIChatToolWindow(ToolWindow):
 
         # 记忆管理卡片 - 和历史会话卡片同位置
         self._memory_card = BaseSettingsCard("记忆管理", "🧠", self)
-        self._memory_card.setFixedHeight(350)
+        self._memory_card.setFixedHeight(400)
         self._memory_card_popup = MemoryCardContent(self._memory_manager, self)
         self._memory_card_popup.memorySaved.connect(self._on_memory_card_saved)
         self._memory_card.content_layout.addWidget(self._memory_card_popup)
@@ -1105,7 +1104,6 @@ class OpenAIChatToolWindow(ToolWindow):
         if not hasattr(self, "_model_selector_popup") or not self._model_selector_popup:
             from app.widgets.model_selector_popup import (
                 ModelSelectorPopup, )
-            from app.widgets.provider_setting_card import ProviderEditDialog
             self._model_selector_popup = ModelSelectorPopup(self)
             self._model_selector_popup.modelSelected.connect(self._on_model_selected_from_popup)
             self._model_selector_popup.addProviderClicked.connect(
@@ -1126,13 +1124,15 @@ class OpenAIChatToolWindow(ToolWindow):
         self._show_provider_add_card()
 
     def _on_configure_providers_from_popup(self):
-        """从模型选择弹窗点击「配置」按钮 - 显示设置卡片"""
+        """从模型选择弹窗点击「配置」按钮 - 显示设置卡片并展开服务商下拉"""
         self._model_selector_popup.close()
-        # 显示设置卡片（不展开下拉，因为下拉会挡住卡片）
+        # 显示设置卡片
         self._settings_popup.show()
         self._settings_popup.raise_()
-        # 滚动到顶部
+        # 滚动设置卡片内容到顶部
         QTimer.singleShot(100, self._scroll_settings_to_top)
+        # 展开服务商下拉
+        QTimer.singleShot(200, lambda: self._expand_provider_list_card())
 
     def _scroll_settings_to_top(self):
         """滚动设置卡片内容到顶部"""
@@ -1141,6 +1141,14 @@ class OpenAIChatToolWindow(ToolWindow):
             scroll_areas = self._settings_popup.findChildren(QScrollArea)
             if scroll_areas:
                 scroll_areas[0].verticalScrollBar().setValue(0)
+        except Exception:
+            pass
+
+    def _expand_provider_list_card(self):
+        """展开服务商列表卡片"""
+        try:
+            if hasattr(self._settings_popup, 'llmProviderCard'):
+                self._settings_popup.llmProviderCard.toggleExpand()
         except Exception:
             pass
 

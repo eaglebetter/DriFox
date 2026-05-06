@@ -1183,7 +1183,7 @@ class OpenAIChatWorker(QThread):
                 break
             except BadRequestError as e:
                 error_str = str(e)
-                
+                print(req_kwargs["messages"])
                 # 检测 tool call result 错误码 2013
                 is_tool_call_order_error = "2013" in error_str or "tool call result does not follow tool call" in error_str.lower()
                 
@@ -1196,8 +1196,8 @@ class OpenAIChatWorker(QThread):
                     for i, msg in enumerate(recent_msgs):
                         role = msg.get("role", "?")
                         has_tc = "tool_calls" in msg
-                        tc_ids = [tc.get("id", "")[:15] for tc in msg.get("tool_calls", [])] if has_tc else []
-                        tc_id = msg.get("tool_call_id", "")[:15] if role == "tool" else ""
+                        tc_ids = [tc.get("id", "") for tc in msg.get("tool_calls", [])] if has_tc else []
+                        tc_id = msg.get("tool_call_id", "") if role == "tool" else ""
                         logger.warning(f"[API] Msg[{i}]: role={role}, has_tool_calls={has_tc}, tc_ids={tc_ids}, tool_call_id={tc_id}")
                     
                     fixed_messages, was_fixed = self._fix_tool_result_order(req_kwargs["messages"])
@@ -1240,8 +1240,6 @@ class OpenAIChatWorker(QThread):
                 # - NetworkError: 连接失败、协议错误等
                 # - TimeoutException: 所有超时（Read/Write/Connect）
                 # - ProtocolError: 协议层错误（RemoteProtocolError, LocalProtocolError）
-
-
                 is_retryable_network = isinstance(e, (httpx.NetworkError, httpcore.NetworkError))
                 is_retryable_timeout = isinstance(e, (httpx.TimeoutException, httpcore.TimeoutException))
                 is_retryable_protocol = isinstance(e, (httpx.ProtocolError, httpcore.ProtocolError))

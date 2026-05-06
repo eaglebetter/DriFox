@@ -10,12 +10,13 @@ from PyQt5.QtWidgets import (
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
-    QFrame,
     QLineEdit,
-    QDoubleSpinBox, QLabel,
+    QDoubleSpinBox,
 )
 from qfluentwidgets import (
     BodyLabel,
+)
+from qfluentwidgets import (
     LineEdit,
     PrimaryPushButton,
 )
@@ -26,6 +27,7 @@ from app.constants import (
     FREE_PROVIDERS,
 )
 from app.utils.utils import get_icon, get_font_family_css
+from app.widgets.provider_setting_card import ProviderIconWidget
 from app.widgets.searchable_editable_combobox import SearchableEditableComboBox
 
 
@@ -126,12 +128,6 @@ class ProviderEditCard(QWidget):
             QWidget {{
                 background: transparent;
             }}
-            QLabel {{
-                color: #cccccc;
-                background: transparent;
-                {get_font_family_css()}
-                font-size: 12px;
-            }}
             QDoubleSpinBox {{
                 background-color: rgba(61, 61, 61, 180);
                 color: #ffffff;
@@ -149,11 +145,6 @@ class ProviderEditCard(QWidget):
                 border: none;
                 width: 16px;
             }}
-            QFrame {{
-                background-color: rgba(45, 45, 45, 180);
-                border-radius: 6px;
-                border: none;
-            }}
             QLineEdit {{
                 background-color: rgba(61, 61, 61, 180);
                 color: #ffffff;
@@ -166,22 +157,6 @@ class ProviderEditCard(QWidget):
             QLineEdit:focus {{
                 border-color: rgba(0, 120, 212, 200);
             }}
-            QPushButton {{
-                background-color: rgba(0, 120, 212, 180);
-                color: white;
-                border: none;
-                border-radius: 4px;
-                padding: 4px 10px;
-                font-size: 11px;
-                {get_font_family_css()}
-            }}
-            QPushButton:hover {{
-                background-color: rgba(0, 140, 240, 200);
-            }}
-            QPushButton:disabled {{
-                background-color: rgba(85, 85, 85, 180);
-                color: #888888;
-            }}
         """)
 
         main_layout = QVBoxLayout(self)
@@ -192,7 +167,7 @@ class ProviderEditCard(QWidget):
         # 服务商名称行
         if self.is_new:
             name_row = QHBoxLayout()
-            name_row.addWidget(QLabel("服务商:"))
+            name_row.addWidget(BodyLabel("服务商:"))
             self.nameCombo = SearchableEditableComboBox()
             for provider_name in FREE_PROVIDERS.keys():
                 icon_name = PROVIDER_ICONS.get(provider_name, "大模型")
@@ -203,8 +178,7 @@ class ProviderEditCard(QWidget):
             self.nameCombo.currentTextChanged.connect(self._on_provider_changed)
             name_row.addWidget(self.nameCombo, 1)
 
-            self.getKeyBtn = PrimaryPushButton("获取Key")
-            self.getKeyBtn.setFixedHeight(24)
+            self.getKeyBtn = PrimaryPushButton("获取 API Key")
             self.getKeyBtn.clicked.connect(lambda: self._open_help_url(self.nameCombo.currentText()))
             name_row.addWidget(self.getKeyBtn)
 
@@ -217,18 +191,18 @@ class ProviderEditCard(QWidget):
             else:
                 template = self.provider_info
             name_row = QHBoxLayout()
-            name_row.addWidget(QLabel("服务商:"))
-            name_row.addWidget(QLabel(self.provider_name))
+            name_row.addWidget(BodyLabel("服务商:"))
+            name_row.addWidget(ProviderIconWidget(self.provider_name, 24))
+            name_row.addWidget(BodyLabel(self.provider_name))
             name_row.addStretch()
-            getKeyBtn = PrimaryPushButton("获取Key")
-            getKeyBtn.setFixedHeight(24)
+            getKeyBtn = PrimaryPushButton("获取 API Key")
             getKeyBtn.clicked.connect(lambda: self._open_help_url(self.provider_name))
             name_row.addWidget(getKeyBtn)
             main_layout.addLayout(name_row)
 
         # API URL 行
         url_row = QHBoxLayout()
-        url_row.addWidget(QLabel("API URL:"))
+        url_row.addWidget(BodyLabel("API URL:"))
         self.apiUrlCombo = SearchableEditableComboBox()
         self._load_preset_urls()
         current_url = self.provider_info.get("API_URL", template.get("API_URL", ""))
@@ -246,7 +220,7 @@ class ProviderEditCard(QWidget):
 
         # API Key 行
         key_row = QHBoxLayout()
-        key_row.addWidget(QLabel("API Key:"))
+        key_row.addWidget(BodyLabel("API Key:"))
         self.apiKeyEdit = LineEdit()
         self.apiKeyEdit.setEchoMode(QLineEdit.Password)
         current_key = self.provider_info.get("API_KEY", template.get("API_KEY", ""))
@@ -257,11 +231,10 @@ class ProviderEditCard(QWidget):
 
         # 获取按钮行
         self.fetchBtn = PrimaryPushButton("获取模型列表")
-        self.fetchBtn.setFixedHeight(24)
         self.fetchBtn.clicked.connect(self._on_fetch_models)
 
         model_row = QHBoxLayout()
-        model_row.addWidget(QLabel("默认模型:"))
+        model_row.addWidget(BodyLabel("默认模型:"))
         self.modelCombo = SearchableEditableComboBox()
         self.modelCombo.setDisabled(False)
         current_model = self.provider_info.get("模型名称", template.get("模型名称", ""))
@@ -298,7 +271,7 @@ class ProviderEditCard(QWidget):
         main_layout.addLayout(model_row)
 
         temp_row = QHBoxLayout()
-        temp_row.addWidget(QLabel("温度:"))
+        temp_row.addWidget(BodyLabel("模型温度:"))
         self.tempSpin = QDoubleSpinBox()
         self.tempSpin.setRange(0, 2)
         self.tempSpin.setSingleStep(0.1)
@@ -309,7 +282,7 @@ class ProviderEditCard(QWidget):
         main_layout.addLayout(temp_row)
 
         context_row = QHBoxLayout()
-        context_row.addWidget(QLabel("上下文长度:"))
+        context_row.addWidget(BodyLabel("最大上下文长度:"))
         self.contextLengthSpin = QDoubleSpinBox()
         self.contextLengthSpin.setRange(1, 99999999)
         self.contextLengthSpin.setSingleStep(1000)
@@ -325,7 +298,6 @@ class ProviderEditCard(QWidget):
         save_layout = QHBoxLayout()
         save_layout.addStretch()
         save_btn = PrimaryPushButton("保存")
-        save_btn.setFixedHeight(28)
         save_btn.clicked.connect(self._on_save)
         save_layout.addWidget(save_btn)
         main_layout.addLayout(save_layout)

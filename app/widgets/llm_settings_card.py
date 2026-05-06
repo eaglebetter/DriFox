@@ -14,6 +14,8 @@ from PyQt5.QtWidgets import (
     QFontComboBox,
 )
 
+from app.widgets.provider_setting_card import ProviderListSettingCard
+
 
 class NoWheelFontComboBox(QFontComboBox):
     """禁用滚轮切换的字体下拉框"""
@@ -124,11 +126,6 @@ class LLMSettingsCard(SimpleCardWidget):
         content_layout = QVBoxLayout(content_widget)
         content_layout.setContentsMargins(0, 4, 0, 4)
         content_layout.setSpacing(6)
-
-        # 已保存的服务商
-        from app.widgets.provider_setting_card import (
-            ProviderListSettingCard,
-        )
 
         self.llmProviderCard = ProviderListSettingCard(
             icon=get_icon("大模型"),
