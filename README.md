@@ -20,8 +20,6 @@
 
 ![对话框界面](images/上下文压缩.png)
 
-
-
 ---
 
 ## 设计理念
@@ -35,6 +33,7 @@
 | 🧠 **长记忆** | 越用越懂你的偏好、习惯、禁忌 |
 | 🛠️ **代码工具** | 30+ 工具：读、写、搜索、执行、diff |
 | 🔌 **多模型** | OpenAI / Claude / DeepSeek / 通义 等随时切换 |
+| 🛡️ **穿透模式** | 悬浮窗口可穿透点击，不阻断其他应用 |
 
 ---
 
@@ -82,57 +81,189 @@ python main.py
 | 拖拽标题栏 | 移动窗口位置 |
 | `Ctrl+L` | 清除当前会话 |
 
+### 浮动窗口特性
+- **穿透模式**：鼠标可穿透窗口到达下层应用
+- **透明度调节**：0-100% 可调
+- **锁定按钮**：在穿透模式下仍可交互的独立控制点
+
 ---
 
-## 架构一览
+## 核心架构
 
 ```
 ┌─────────────────────────────────────────────────────────┐
 │                     DriFox 架构                         │
 ├─────────────────────────────────────────────────────────┤
 │  UI 层                                                  │
-│  ├── 悬浮对话框（消息卡片、输入框、工具浮窗）            │
-│  ├── 分支/复制窗口机制                                   │
-│  └── 上下文用量环                                       │
+│  ├── ToolPopupDialog – 浮动窗口容器（穿透/透明）         │
+│  ├── OpenAIChatToolWindow – 主聊天窗口                  │
+│  ├── MessageCard – 消息卡片渲染                         │
+│  ├── DiffViewer – 代码差异对比视图                      │
+│  ├── SegmentWidget – 分段任务窗口                       │
+│  └── BottomInputArea – 底部输入区                      │
 ├─────────────────────────────────────────────────────────┤
 │  引擎层                                                  │
-│  ├── ChatEngine – 对话上下文组装                         │
+│  ├── ChatEngine – 对话上下文组装与 LLM 调用              │
 │  ├── ToolExecutor – 工具执行（文件/终端/网络）          │
-│  └── AgentManager – Agent 定义与权限控制                │
+│  ├── AgentManager – Agent 定义加载与切换                │
+│  ├── ContextManager – Token 预算控制与压缩              │
+│  └── SubAgentExecutor – 子智能体并行执行                │
 ├─────────────────────────────────────────────────────────┤
 │  存储层                                                  │
 │  ├── SessionManager – 会话管理                          │
 │  ├── MemoryManager – 长期记忆（SQLite）                 │
-│  └── HistoryManager – 归档与检索                        │
+│  ├── HistoryManager – 归档与检索                        │
+│  └── SessionStore – SQLite 持久化                       │
 └─────────────────────────────────────────────────────────┘
 ```
 
-### Agent 系统
+---
 
-采用 Primary / Subagent / Hidden 三层设计：
+## Agent 系统
 
-| 类型 | Agent | 用途 |
+采用 **Primary / Subagent / Hidden** 三层设计，通过 Markdown + YAML frontmatter 定义：
+
+| 类型 | Agent | 说明 |
 |------|-------|------|
-| **Primary** | `plan` | 任务规划（只读，不改文件）|
-| **Primary** | `build` | 代码编写（全工具权限）|
+| **Primary** | `plan` | 任务规划与分解（只读）|
+| **Primary** | `build` | 代码构建（全工具权限）|
+| **Primary** | `code-reviewer` | 代码审查 |
 | **Subagent** | `explore` | 代码库探索 |
 | **Subagent** | `general` | 通用任务并行执行 |
-| **Hidden** | `summary/compaction/title` | 自动调用：摘要/压缩/标题 |
+| **Hidden** | `summary` | 信息总结 |
+| **Hidden** | `compaction` | 上下文压缩 |
+| **Hidden** | `title` | 会话标题生成 |
 
-### 工具系统（30+）
+### Agent 定义示例
+
+```markdown
+---
+name: build
+mode: all
+temperature: 0.3
+permission:
+  "*": allow
+---
+
+# Role
+你是一个专业的 coding builder...
+```
+
+---
+
+## 工具系统（30+）
+
+### 内置工具 (BuiltinTools)
 
 | 类别 | 工具 |
 |------|------|
-| 文件 | read / write / edit / multiedit / patch / grep / glob / list / diff |
-| 执行 | bash / run_verify |
-| 网络 | webfetch / websearch |
-| 代码 | get_diagnostics |
-| 记忆 | memory_save / memory_search / memory_list |
-| 任务 | todowrite / todoread / ask_question / task / skill |
+| **文件** | read, write, edit, multiedit, patch, grep, glob, list, diff |
+| **执行** | bash, run_verify |
+| **网络** | webfetch, websearch |
+| **代码** | get_diagnostics |
+| **记忆** | memory_save, memory_search, memory_list |
+| **任务** | todowrite, todoread, task, task_batch, task_wait, skill |
+| **其他** | scan_repo, stage_files, ask_question |
 
-### 记忆系统
+---
 
-自动学习用户偏好，支持置信度评分、冲突管理、分类组织（偏好/约束/习惯）。
+## Skills 系统
+
+Skills 是扩展 AI 能力的可安装模块，每个 Skill 包含 `SKILL.md` 定义工作流程：
+
+### 内置 Skills (18个)
+
+| Skill | 功能 | 触发条件 |
+|-------|------|----------|
+| **brainstorming** | 头脑风暴与创意发散 | 用户表达创意需求 |
+| **caveman** | 极简压缩沟通（减少75% token）| 用户说 "caveman mode" |
+| **diagnose** | 硬 bug 与性能回归诊断 | 用户报告 bug |
+| **find-skills** | 发现和安装新技能 | 用户询问如何做某事 |
+| **tdd** | 测试驱动开发（红-绿-重构）| 用户要求 TDD 开发 |
+| **to-issues** | 将计划转换为 Issue 清单 | 用户需要拆解任务 |
+| **write-a-skill** | 创建新的 Skill | 用户要创建技能 |
+| **writing-plans** | 计划文档编写 | 用户有需求要规划 |
+| **git-commit** | 智能 git 提交 | 用户要求提交代码 |
+| **grill-me** | 挑战性提问评审 | 用户需要挑战性反馈 |
+| **grill-with-docs** | 基于文档的问答评审 | 用户提供文档审查 |
+| **triage** | 任务分类与优先级排序 | 用户需要任务分诊 |
+| **improve-codebase-architecture** | 代码架构改进 | 用户要重构代码 |
+| **setup-matt-pocock-skills** | Matt Pocock 学习路径 | 用户想学习技能 |
+| **minimax-image-understanding** | MiniMax 图片理解 | 用户发送截图 |
+| **zoom-out** | 宏观视角分析 | 用户需要全局视野 |
+| **to-prd** | 需求文档生成 | 用户需要 PRD |
+| **skill-creator** | Skill 创建指南 | 用户要创建技能 |
+
+### Skill 标准结构
+
+```
+skill-name/
+├── SKILL.md              # 主文件 (必需)
+├── REFERENCES.md         # 参考文档 (可选)
+├── scripts/              # 工具脚本 (可选)
+├── references/           # 参考资料 (可选)
+└── assets/               # 资源文件 (可选)
+```
+
+### SKILL.md 格式
+
+```yaml
+---
+name: skill-name
+description: "功能描述。Use when [触发条件]"
+---
+
+# 内容...
+```
+
+### 自定义 Skill
+
+在 `.drifox/skills/<name>/` 下添加 Skill：
+
+```bash
+.drifox/skills/my-skill/
+├── SKILL.md          # 必填，技能定义
+└── references/       # 可选，参考文档
+```
+
+使用 `@技能名` 触发，如 `@brainstorming`
+
+---
+
+## 记忆系统
+
+自动学习用户偏好，支持：
+- **置信度评分**：每条记忆有 0-1 的置信度
+- **冲突管理**：相同组的新记忆压制旧记忆
+- **分类组织**：偏好/约束/习惯分类存储
+
+### SQLite 数据库结构
+
+数据库文件：`.drifox/sessions.db`
+
+| 表名 | 用途 | 主要字段 |
+|------|------|----------|
+| `sessions` | 会话历史 | session_id, canvas_id, title, messages(JSON), system_prompt, compaction_state, created_at, updated_at |
+| `memories` | 长期记忆 | memory_id, canvas_id, content, enabled, confidence, category, source, last_accessed |
+| `file_operations` | 文件操作撤销 | id, session_id, call_id, tool_name, file_path, backup_path |
+
+### 数据目录结构
+
+```
+.drifox/
+├── sessions.db            # SQLite 数据库
+├── skills/                # 用户自定义 skills
+├── issues/               # Issue 追踪 (0001_xxx.md)
+├── tasks/                # 定时任务 (.task.md)
+├── backups/             # 增量备份 (UUID命名)
+└── archived/            # 会话归档 (JSON格式)
+```
+
+### 归档策略
+
+- **会话归档**：`.drifox/archived/*.json` - 压缩后的会话历史
+- **文件备份**：`.drifox/backups/<UUID>/` - 文件修改前后备份
+- **文件操作撤销**：通过 `file_operations` 表记录，支持回滚
 
 ---
 
@@ -141,19 +272,72 @@ python main.py
 ```
 DriFox/
 ├── main.py                    # 运行入口
-├── requirements.txt          # 依赖
+├── requirements.txt           # 依赖
 ├── app/
-│   ├── llm_chatter/          # 核心模块
-│   │   ├── core/             # 引擎（chat/engine, agent, tool, memory）
-│   │   ├── agents/           # Agent 定义
-│   │   ├── skills/           # Skills 技能
-│   │   └── widgets/          # UI 组件
-│   └── widgets/              # 通用组件
-├── .drifox/                  # 应用数据
-│   └── sessions.db           # SQLite 会话与记忆
+│   ├── main_widget.py         # 主窗口
+│   ├── side_dock_area.py      # 浮动窗口管理
+│   ├── agents/                # Agent 定义
+│   │   ├── build.md
+│   │   ├── plan.md
+│   │   ├── explore.md
+│   │   ├── summary.md
+│   │   ├── compaction.md
+│   │   └── ...
+│   ├── skills/                # Skills 定义
+│   │   ├── SKILLS.md
+│   │   ├── brainstorming/
+│   │   ├── tdd/
+│   │   ├── caveman/
+│   │   └── ...
+│   ├── tools/                 # 工具实现
+│   │   ├── __init__.py        # BuiltinTools 注册
+│   │   ├── file_tools.py
+│   │   ├── terminal_tools.py
+│   │   ├── web_tools.py
+│   │   ├── task_tools.py
+│   │   └── diagnostics_tools.py
+│   ├── core/                  # 核心引擎
+│   │   ├── chat_engine.py
+│   │   ├── agent_manager.py
+│   │   ├── memory_manager.py
+│   │   └── context_manager.py
+│   ├── utils/                 # 工具模块
+│   │   ├── chat_session.py
+│   │   ├── session_store.py
+│   │   ├── memory_store.py
+│   │   └── config.py
+│   └── widgets/               # UI 组件
+│       ├── message_card.py
+│       ├── diff_viewer.py
+│       ├── segment_widget.py
+│       ├── context_usage_ring.py
+│       └── ...
+├── .drifox/                   # 应用数据
+│   ├── sessions.db            # SQLite 会话与记忆
+│   ├── skills/                # 用户自定义 skills
+│   ├── issues/               # Issue 追踪
+│   ├── tasks/                # 任务管理
+│   ├── backups/              # 文件备份
+│   └── archived/             # 归档会话
+├── docs/
+│   ├── adr/                  # 架构决策记录
+│   └── superpowers/          # 扩展能力规格
 ├── icons/                    # 图标资源
 └── images/                   # Logo 等图片
 ```
+
+---
+
+## 技术选型
+
+| 技术 | 用途 |
+|------|------|
+| **PyQt5** | GUI 框架 |
+| **PyQt-Fluent-Widgets** | Fluent Design 组件库 |
+| **Loguru** | 日志系统 |
+| **SQLite** | 会话与记忆持久化 |
+| **OpenAI Python Client** | LLM API 调用 |
+| **FastAPI** | 可能的 Web 扩展 |
 
 ---
 
@@ -161,7 +345,7 @@ DriFox/
 
 ### 自定义 Agent
 
-在 `app/llm_chatter/agents/` 创建 `.md` 文件：
+在 `app/agents/` 创建 `.md` 文件：
 
 ```markdown
 ---
@@ -177,7 +361,80 @@ permission:
 
 ### 自定义 Skill
 
-在 `.drifox/skills/<name>/` 下添加 `SKILL.md`。
+使用 `skill-creator` Skill 创建新技能：
+
+```
+.drifox/skills/my-skill/
+├── SKILL.md          # 必填，技能定义
+├── docs/             # 可选，参考文档
+└── references/       # 可选，资源文件
+```
+
+使用 `@skill-creator` 开始创建流程。
+
+### Issue 格式
+
+在 `.drifox/issues/` 创建 `0001_问题名称.md`：
+
+```markdown
+# Issue 标题
+
+## 严重程度: 高/中/低
+## 状态: 待修复/进行中/已解决
+
+## 问题描述
+...
+
+## 建议的修复方向
+...
+
+## 验证建议
+...
+```
+
+### Task 格式
+
+在 `.drifox/tasks/` 创建 `.task.md` 文件，详见 `docs/superpowers/specs/`。
+
+### 工具注册
+
+在 `app/tools/` 的对应模块中添加工具函数：
+
+```python
+# app/tools/file_tools.py
+from app.tools import register_tool
+
+@register_tool
+def my_tool(arg1: str) -> ToolResult:
+    """工具说明"""
+    return ToolResult(success=True, data="result")
+```
+
+---
+
+## 架构决策记录 (ADR)
+
+项目维护架构决策文档，见 `docs/adr/0001-architecture-decisions.md`：
+
+- ADR-0001: 内置工具集中注册
+- ADR-0002: 会话持久化使用 SQLite
+- ADR-0003: 浮动窗口穿透模式使用 Windows API
+- ADR-0004: Agent 定义使用 Markdown + YAML frontmatter
+- ADR-0005: 对话引擎依赖链注入
+- ADR-0006: 测试优先顺序
+
+---
+
+## 未来扩展
+
+### TaskWatcher 系统
+
+计划中的自动任务触发系统，支持：
+- **定时任务**：基于 cron 表达式的自动执行
+- **文件监听**：监控文件夹，检测到新文件自动处理
+- **优先级队列**：任务排队与重试机制
+
+详见 `docs/superpowers/specs/2024-06-09-task-watcher-system.md`
 
 ---
 
