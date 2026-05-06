@@ -405,7 +405,7 @@ class OpenAIChatWorker(QThread):
         self.compaction_prompt = compaction_prompt
         self.compaction_config = compaction_config or {}
         self.full_response = ""
-        self._response_chunks: List[str] = []  # 性能优化：累积响应片段，避免频繁字符串拼接
+        self._response_chunks: List[str] = []  # 性能优化：累积响应片段
         self._is_cancelled = False
         self._question_pending = None
         self._pending_answer = None
@@ -417,6 +417,10 @@ class OpenAIChatWorker(QThread):
         self._current_tool_calls = {}  # 改成字典
         self._tool_calls_buffer = {}
         self._reasoning_content = ""
+        
+        # ========== 性能优化：HTTP 客户端和参数缓存 ==========
+        self._http_client: Optional[Any] = None  # 复用的 HTTP 客户端
+        self._cached_api_config: Optional[Dict[str, Any]] = None  # 缓存的 API 配置
         self._reasoning_chunks: List[str] = []  # 性能优化：累积思考片段
         self._response_content_blocks = []
         self._tool_execution_cancelled = False
@@ -614,7 +618,105 @@ class OpenAIChatWorker(QThread):
         
         # 清理会话缓存
         self._session_messages = []
-
+        
+        # 清理 HTTP 客户端缓存
+        self._http_client = None
+        self._cached_api_config = None
+    
+    def _get_http_client(self) -> Any:
+        """
+        获取或创建复用的 HTTP 客户端。
+        避免每次 API 调用都创建新的客户端。
+        """
+        if self._http_client is None:
+            self._http_client = OpenAI(
+                api_key=self.llm_config.get("API_KEY", "").strip(),
+                base_url=self.llm_config.get("API_URL"),
+                timeout=httpx.Timeout(600.0, connect=60.0),
+            )
+        return self._http_client
+    
+    def _build_api_request_kwargs(self) -> Dict[str, Any]:
+        """
+        预构建 API 请求参数，避免每次调用都重复处理。
+        缓存结果，只在配置变化时重新构建。
+        """
+        # 检查是否需要更新缓存
+        config_key = str(self.llm_config.get("API_KEY", "")) + str(self.llm_config.get("API_URL", ""))
+        
+        if self._cached_api_config is not None and self._cached_api_config.get("_config_key") == config_key:
+            # 缓存有效，返回基础配置（messages 和 tools 每次不同，需要单独设置）
+            return {
+                "model": self._cached_api_config["model"],
+                "stream": self.stream,
+                "extra_body": dict(self._cached_api_config.get("extra_body") or {}),
+                "_auth_headers": self._cached_api_config.get("_auth_headers"),
+                "_is_o1_model": self._cached_api_config.get("_is_o1_model"),
+            }
+        
+        # 构建新的缓存
+        api_key = self.llm_config.get("API_KEY", "").strip()
+        base_url = self.llm_config.get("API_URL") or None
+        model = str(self.llm_config.get("模型名称", "gpt-4o"))
+        
+        extra_body = {}
+        mapping = {
+            "温度": "temperature",
+            "最大Token": "max_tokens",
+            "核采样": "top_p",
+            "频率惩罚": "presence_penalty",
+            "重复惩罚": "frequency_penalty",
+            "思考等级": "reasoning_effort",
+        }
+        
+        skip_params = {"temperature", "top_p", "presence_penalty", "frequency_penalty", "reasoning_effort"}
+        if model and (model.startswith("o1") or model.startswith("o3")):
+            skip_params.update({"temperature", "top_p"})
+        
+        for cn_key, value in self.llm_config.items():
+            if cn_key in ["API_KEY", "API_URL", "模型名称", "系统提示", "启用技能"]:
+                continue
+            en_key = mapping.get(cn_key)
+            if not en_key and re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", cn_key):
+                en_key = cn_key
+            if not en_key or en_key in skip_params:
+                continue
+            if en_key in ["max_tokens"]:
+                continue  # 单独处理
+            extra_body[en_key] = value
+        
+        # 处理 max_tokens
+        max_tokens = self.llm_config.get("最大Token")
+        if max_tokens is not None:
+            extra_body["max_tokens"] = self._cap_max_output_tokens(model, max_tokens)
+        
+        # 处理认证
+        auth_headers = None
+        auth_type = self.llm_config.get("认证方式", "bearer")
+        if auth_type == "bce":
+            import base64
+            auth_str = f"{api_key}:{api_key}"
+            b64_auth = base64.b64encode(auth_str.encode()).decode()
+            auth_headers = {"Authorization": f"Basic {b64_auth}"}
+        
+        is_o1 = model.startswith("o1") or model.startswith("o3")
+        
+        self._cached_api_config = {
+            "_config_key": config_key,
+            "model": model,
+            "extra_body": extra_body,
+            "_auth_headers": auth_headers,
+            "_is_o1_model": is_o1,
+        }
+        
+        return {
+            "model": model,
+            "stream": self.stream,
+            "extra_body": extra_body,
+            "_auth_headers": auth_headers,
+            "_is_o1_model": is_o1,
+        }
+    
     def provide_answer(self, answer: str):
         self._pending_answer = answer
         self._answer_event.set()
@@ -1007,100 +1109,55 @@ class OpenAIChatWorker(QThread):
             return None
 
     def _make_api_call(self, messages: List[Dict], use_cache: bool = True) -> bool:
-        api_key = self.llm_config.get("API_KEY", "").strip()
-        base_url = self.llm_config.get("API_URL") or None
-        model = str(self.llm_config.get("模型名称", "gpt-4o"))
-
-        # 性能优化：使用缓存的 API 消息，避免每次都重新处理所有消息
+        """
+        发起 API 调用。
+        
+        性能优化：
+        1. 使用缓存的 API 消息，避免每次都重新处理所有消息
+        2. 使用缓存的 HTTP 客户端，避免每次都创建新客户端
+        3. 预构建 API 参数，避免每次都重复处理
+        """
+        # 性能优化：使用缓存的 API 消息
         if use_cache and self._api_messages_cache is not None:
-            # 使用缓存，只追加新消息
             sanitized = self._api_messages_cache
         else:
-            # 首次调用或禁用缓存时，重新处理所有消息
             sanitized = messages_to_api(messages)
-            print(f"首次处理: {len(sanitized)}")
             if use_cache:
                 self._api_messages_cache = sanitized
                 self._api_messages_built = True
         
+        # 性能优化：使用预构建的 API 参数
+        cached_config = self._build_api_request_kwargs()
+        
         req_kwargs: Dict[str, Any] = {
-            "model": model,
+            "model": cached_config["model"],
             "messages": sanitized,
-            "stream": self.stream
+            "stream": cached_config["stream"],
         }
-        extra_body = {}
-        mapping = {
-            "温度": "temperature",
-            "最大Token": "max_tokens",
-            "核采样": "top_p",
-            "频率惩罚": "presence_penalty",
-            "重复惩罚": "frequency_penalty",
-            "思考等级": "reasoning_effort",
-        }
-
-        skip_params = {
-            "temperature",
-            "top_p",
-            "presence_penalty",
-            "frequency_penalty",
-            "reasoning_effort",
-        }
-        if model and (model.startswith("o1") or model.startswith("o3")):
-            skip_params.update({"temperature", "top_p"})
-
-        for cn_key, value in self.llm_config.items():
-            if cn_key in ["API_KEY", "API_URL", "模型名称", "系统提示", "启用技能"]:
-                continue
-
-            en_key = mapping.get(cn_key)
-            if not en_key and re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", cn_key):
-                en_key = cn_key
-            if not en_key:
-                continue
-
-            if en_key in skip_params:
-                continue
-            if en_key in ["max_tokens"]:
-                req_kwargs[en_key] = value
-            else:
-                extra_body[en_key] = value
-
-        if "max_tokens" in req_kwargs:
-            req_kwargs["max_tokens"] = self._cap_max_output_tokens(
-                model, req_kwargs["max_tokens"]
-            )
-
-        if extra_body:
-            req_kwargs["extra_body"] = extra_body
-
+        
+        # 添加 extra_body
+        if cached_config.get("extra_body"):
+            req_kwargs["extra_body"] = cached_config["extra_body"]
+        
+        # 添加认证头
+        if cached_config.get("_auth_headers"):
+            req_kwargs["extra_headers"] = cached_config["_auth_headers"]
+        
+        # 添加 tools
         if self.tools:
             req_kwargs["tools"] = self.tools
-
-        auth_type = self.llm_config.get("认证方式", "bearer")
-        if auth_type == "bce":
-            import base64
-
-            auth_str = f"{api_key}:{api_key}"
-            b64_auth = base64.b64encode(auth_str.encode()).decode()
-            req_kwargs["extra_headers"] = {"Authorization": f"Basic {b64_auth}"}
-
-        client = OpenAI(
-            api_key=api_key if api_key and auth_type != "none" else "dummy",
-            base_url=base_url,
-            timeout=httpx.Timeout(600.0, connect=60.0),  # 增加读取超时到 600 秒
-        )
-
-        if "o1-preview" in model or "o1-mini" in model:
+        
+        # 处理 o1 模型
+        if cached_config.get("_is_o1_model"):
             req_kwargs.pop("stream", None)
             self.stream = False
+
+        # 性能优化：使用复用的 HTTP 客户端
+        client = self._get_http_client()
 
         max_retries = 15
         retry_delay = 5
         last_error = None
-
-        # 需要重试的错误类型
-        from openai import RateLimitError, APIError, APIConnectionError, BadRequestError
-        import httpcore
 
         for attempt in range(max_retries):
             try:
