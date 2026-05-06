@@ -886,21 +886,21 @@ class SubAgentManager(QObject):
                 })
                 continue
 
+            status = task_data.get("status", "unknown")
             task_info = {
                 "task_id": tid,
-                "status": task_data.get("status", "unknown"),
+                "status": status,
                 "agent": task_data.get("summary", {}).get("agent_name", task_data.get("agent_name", "")),
             }
 
-            # 检查是否已查询过，已查询过的只返回基本信息，不重复返回结果
-            if tid in self._queried_tasks:
-                task_info["_already_queried"] = True
-                task_info["_message"] = f"任务 {tid} 已查询过结果，可以通过 task_status(task_ids=\"{tid}\") 再次查询详细结果"
-                tasks_info.append(task_info)
-                continue
-
-            # 标记为已查询
-            self._queried_tasks.add(tid)
+            # running 状态可以反复查，完成或失败只能查一次
+            if status not in ("running", "unknown"):
+                if tid in self._queried_tasks:
+                    task_info["_already_queried"] = True
+                    task_info["_message"] = "已查询过结果，可通过 id 再次查询"
+                    tasks_info.append(task_info)
+                    continue
+                self._queried_tasks.add(tid)
 
             # 是否包含结果
             if with_result:
@@ -926,7 +926,7 @@ class SubAgentManager(QObject):
         tasks_info = []
 
         for task_id, task_info in self._finished_tasks.items():
-            if any(t["task_id"] == task_id for t in tasks_info):
+            if any(t.get("agent") == task_info.get("agent_name", "") for t in tasks_info):
                 continue
 
             task_entry = {
@@ -936,14 +936,13 @@ class SubAgentManager(QObject):
                 "task_description": task_info.get("task_description", ""),
             }
 
-            # 检查是否已查询过，已查询过的只返回基本信息，不重复返回结果
+            # 完成或失败只能查一次
             if task_id in self._queried_tasks:
                 task_entry["_already_queried"] = True
-                task_entry["_message"] = f"任务已查询过结果，可以通过 task_status(task_ids='xxx') 再次查询"
+                task_entry["_message"] = "已查询过结果，可通过 id 再次查询"
                 tasks_info.append(task_entry)
                 continue
 
-            # 标记为已查询
             self._queried_tasks.add(task_id)
 
             if with_result:
