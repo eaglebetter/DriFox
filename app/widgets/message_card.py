@@ -1445,9 +1445,14 @@ class CodeWebViewer(QWebEngineView):
                     syncExpandedAttrs(block, expand);
 
                     // 阻止 CSS transition 干扰
+                    const isCollapsing = !expand;
                     body.style.transition = 'none';
                     body.style.height = startHeight + 'px';
                     body.style.opacity = startOpacity;
+                    // 立即设置 overflow 防止内容泄漏
+                    body.style.overflow = 'hidden';
+                    // 折叠时立即设置高度，防止视觉抖动
+                    if (isCollapsing) body.style.height = '0px';
 
                     // 强制重绘
                     void body.offsetHeight;
@@ -1463,7 +1468,10 @@ class CodeWebViewer(QWebEngineView):
                         // 使用 easeOutQuad 缓动
                         const eased = 1 - (1 - progress) * (1 - progress);
 
-                        const currentHeight = startHeight + (endHeight - startHeight) * eased;
+                        // 折叠时 startHeight 已经是0，currentHeight 计算应该从0开始
+                        const currentHeight = isCollapsing 
+                            ? startHeight * (1 - eased)  // 从 startHeight 减少到 0
+                            : startHeight + (endHeight - startHeight) * eased;
                         const currentOpacity = startOpacity + (endOpacity - startOpacity) * eased;
 
                         body.style.height = currentHeight + 'px';
@@ -1475,8 +1483,9 @@ class CodeWebViewer(QWebEngineView):
                             // 动画结束
                             body.style.height = expand ? 'auto' : '0px';
                             body.style.opacity = endOpacity;
-                            // 动画结束后只报告一次高度
-                            setTimeout(() => reportHeight(), 0);
+                            body.style.overflow = '';  // 动画结束后恢复 overflow
+                            // 动画结束后用防抖报告高度，避免频繁更新导致抖动
+                            setTimeout(() => reportHeightDebounced(), 0);
                         }}
                     }}
 
@@ -1545,6 +1554,16 @@ class CodeWebViewer(QWebEngineView):
                     const h = document.documentElement.getBoundingClientRect().height;
                     console.log('pywebview_height:' + h);
                 }}
+                // 防抖报告高度：动画期间合并多个高度变化，只报告最终稳定值
+                let _heightReportPending = false;
+                function reportHeightDebounced() {{
+                    if (_heightReportPending) return;
+                    _heightReportPending = true;
+                    requestAnimationFrame(() => {{
+                        reportHeight();
+                        _heightReportPending = false;
+                    }});
+                }}
                 document.addEventListener('click', e => {{
                     const btn = e.target.closest('button[data-action]');
                     if (btn) {{
@@ -1585,7 +1604,12 @@ class CodeWebViewer(QWebEngineView):
                 document.addEventListener('DOMContentLoaded', () => {{
                     console.log('pywebview_ready');
                     reportHeight();
-                    new ResizeObserver(() => requestAnimationFrame(reportHeight)).observe(document.body);
+                    // 使用防抖的 ResizeObserver，避免频繁触发高度更新
+                    let resizeTimeout = null;
+                    new ResizeObserver(() => {{
+                        if (resizeTimeout) clearTimeout(resizeTimeout);
+                        resizeTimeout = setTimeout(() => requestAnimationFrame(reportHeight), 50);
+                    }}).observe(document.body);
                 }});
                 window.addEventListener('load', () => {{
                     reportHeight();
