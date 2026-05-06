@@ -33,11 +33,11 @@ MEMORY_CATEGORIES_WIDGET = {
 }
 
 MEMORY_CATEGORY_SHORT_NAMES = {
-    "agent_identity": "智能体身份",
-    "user_identity": "用户身份",
-    "task_preference": "任务偏好",
-    "task_taboos": "任务忌讳",
-    "key_knowledge": "关键事实",
+    "agent_identity": "智能体",
+    "user_identity": "用户",
+    "task_preference": "偏好",
+    "task_taboos": "忌讳",
+    "key_knowledge": "知识",
 }
 
 

@@ -540,28 +540,19 @@ class ChatEngine:
             role = msg.get("role")
 
             # 构建当前消息的完整配对集合
-            # 这个消息涉及的 tool_call_ids（包括它自己发起的和它响应的）
-            msg_tool_ids = set()
-
             if role == "assistant":
                 # 收集这个 assistant 消息发起的 tool_calls
                 tool_calls = msg.get("tool_calls", [])
                 for tc in tool_calls:
-                    msg_tool_ids.add(tc.get("id"))
+                    if tc.get("id") in pending_tool_results:
+                        pending_tool_results.discard(tc.get("id"))
 
             elif role == "tool":
-                msg_tool_ids.add(msg.get("tool_call_id"))
+                pending_tool_results.add(msg.get("tool_call_id"))
 
-            # 检查是否会导致拆分配对
-            would_split_pair = False
-            if msg_tool_ids:
-                # 如果这些 tool_call_ids 中的任何一个已经在 recent 中（pending），
-                # 说明把这个消息加入 recent 会导致它在 compacted 中
-                # 或者如果这个消息是某个 pending 的 tool_call 的响应
-                for tid in msg_tool_ids:
-                    if tid in pending_tool_results:
-                        would_split_pair = True
-                        break
+            # 把消息加入 recent（从后向前插入）
+            recent_messages.insert(0, msg)
+            recent_tokens += msg_tokens
 
             # 检查 token 限制
             token_exceeded = (
@@ -570,23 +561,8 @@ class ChatEngine:
             )
 
             # 如果 token 超限且不会拆分配对，则停止
-            if token_exceeded and not would_split_pair:
+            if token_exceeded and not pending_tool_results:
                 break
-
-            # 把消息加入 recent（从后向前插入）
-            recent_messages.insert(0, msg)
-            recent_tokens += msg_tokens
-
-            # 更新 pending 集合
-            if role == "assistant":
-                for tc in msg.get("tool_calls", []):
-                    tool_id = tc.get("id")
-                    if tool_id in pending_tool_results:
-                        pending_tool_results.discard(tool_id)
-            elif role == "tool":
-                # tool 消息被消费了，从 pending 移除
-                tool_id = msg.get("tool_call_id")
-                pending_tool_results.add(tool_id)
 
             i -= 1
 
