@@ -4,7 +4,8 @@ LLM Chatter 核心模块
 提供聊天引擎、工具执行器、记忆管理等核心功能
 """
 
-from app.core.backend import ChatBackend
+from app.core.backend import ChatBackend, BackendCallbacks
+from app.core.api_adapter import APIFrontendAdapter
 from app.core.chat_engine import ChatEngine
 from app.core.tool_executor import (
     ToolExecutor,
@@ -57,6 +58,8 @@ from app.core.chat_session import (
 __all__ = [
     # Backend
     "ChatBackend",
+    "BackendCallbacks",
+    "APIFrontendAdapter",
     # 引擎与执行器
     "ChatEngine",
     "ToolExecutor",

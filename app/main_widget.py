@@ -325,14 +325,7 @@ class OpenAIChatToolWindow(ToolWindow):
         self._initialize_history_manager()
         
         # 初始化后端（前后端分离）
-        self.backend.initialize(
-            get_model_config=self._get_current_model_config,
-            tool_executor=self._tool_executor,
-            agent_manager=self._agent_manager,
-            memory_manager=self._memory_manager,
-            session_manager=self.session_manager,
-            chat_engine=self._chat_engine,
-        )
+        # Backend 作为组件容器，不设置回调（main_widget 直接使用 _chat_engine）
 
     def _init_sub_agent_log_store(self):
         """初始化子智能体日志存储"""
