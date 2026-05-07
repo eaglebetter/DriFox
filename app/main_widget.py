@@ -48,7 +48,10 @@ from app.core import (
     content_to_text,
     content_to_markdown,
     group_messages_for_display,
-    get_user_round_ranges, TopicSummaryTask,
+    get_user_round_ranges,
+    TopicSummaryTask,
+    find_user_round_index,
+    export_messages_to_markdown,
 )
 from app.core.agent import AgentManager
 from app.utils.config import Settings
@@ -2477,62 +2480,7 @@ class OpenAIChatToolWindow(ToolWindow):
         Returns:
             round_index 或 None
         """
-        from app.core import consolidate_messages
-
-        canonical_messages = consolidate_messages(session.messages)
-        user_count_total = sum(1 for msg in canonical_messages if msg.get("role") == "user")
-
-        # 规范化时间戳进行比较（去掉秒）
-        # MessageCard 的 timestamp 格式是 "YYYY-MM-DD HH:MM"（无秒）
-        # session.messages 的 timestamp 格式是 "YYYY-MM-DD HH:MM:SS"（有秒）
-        card_ts_prefix = timestamp[:16] if timestamp else ""
-
-        logger.debug(f"[UNDO] Searching for user message: card_ts={card_ts_prefix}, content_len={len(user_text)}")
-        logger.debug(f"[UNDO] Session has {len(canonical_messages)} messages, {user_count_total} user messages")
-
-        # 在消息列表中查找匹配的 user 消息
-        # 关键修复：同时匹配时间戳+内容，避免多条消息匹配到同一条
-        user_count = 0
-        for msg in canonical_messages:
-            if msg.get("role") == "user":
-                msg_content = msg.get("content", "")
-                msg_timestamp = msg.get("timestamp", "") or ""
-                msg_ts_prefix = msg_timestamp[:16]
-
-                # 同时匹配时间戳和内容，确保唯一性
-                # 时间戳精确到分钟，内容完全匹配
-                if msg_ts_prefix == card_ts_prefix and msg_content == user_text:
-                    logger.info(
-                        f"[UNDO] Matched user message: user_count={user_count}, "
-                        f"ts={card_ts_prefix}, content_len={len(user_text)}"
-                    )
-                    return user_count
-                user_count += 1
-
-        # 兜底：如果时间戳+内容都没匹配到，尝试内容匹配（兼容旧数据）
-        user_count = 0
-        for msg in canonical_messages:
-            if msg.get("role") == "user":
-                msg_content = msg.get("content", "")
-                if msg_content == user_text:
-                    logger.warning(
-                        f"[UNDO] Fallback match by content only: user_count={user_count}, "
-                        f"content_len={len(user_text)}"
-                    )
-                    return user_count
-                user_count += 1
-
-        # 调试：显示所有 user 消息的时间戳，帮助诊断
-        logger.warning(f"[UNDO] No match found for user message. Total user messages: {user_count_total}")
-        if user_count_total > 0:
-            logger.warning("[UNDO] Available user messages in session:")
-            for i, msg in enumerate(canonical_messages):
-                if msg.get("role") == "user":
-                    msg_ts = (msg.get("timestamp", "") or "")[:16]
-                    msg_content_preview = (msg.get("content", "") or "")[:50]
-                    logger.warning(f"[UNDO]   [{i}] ts={msg_ts}, content={msg_content_preview}...")
-
-        return None
+        return find_user_round_index(session, user_text, timestamp)
 
     def _remove_cards_for_round(self, round_index: int) -> bool:
         session = self.session_manager.get_current_session()
@@ -4807,7 +4755,6 @@ class OpenAIChatToolWindow(ToolWindow):
         if not file_path:
             return
         try:
-            # 使用辅助函数导出对话
             content = export_messages_to_markdown(session.messages)
             with open(file_path, "w", encoding="utf-8") as f:
                 f.write(content)
