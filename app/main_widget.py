@@ -269,6 +269,7 @@ class OpenAIChatToolWindow(ToolWindow):
         self._tool_executor.set_session_messages_getter(
             self._get_current_session_messages_for_tools
         )
+        self._tool_executor.set_agent_manager(self._agent_manager)
         # _agent_manager 已在 __init__ 开头初始化，这里只记录日志
         all_agents = self._agent_manager.list_agents()
         primary_agents = self._agent_manager.list_primary_agents()

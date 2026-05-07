@@ -45,7 +45,7 @@ class BuiltinTools(QObject):
         self._loaded_skills = {}
         self._skill_workspaces = {}
         self._sub_agent_manager = None
-        self._agent_manager = None
+        self._agent_manager = None  # AgentManager 实例，用于动态生成工具 schema
         self._set_stage_callback = None
         self._memory_manager = None
         self._get_llm_config = None
@@ -245,6 +245,13 @@ class BuiltinTools(QObject):
     def set_session_messages_getter(self, getter):
         self._get_session_messages = getter
 
+    def set_agent_manager(self, agent_manager):
+        """设置 AgentManager 实例，用于动态生成工具 schema"""
+        self._agent_manager = agent_manager
+        # 同时设置给 task_tools
+        if hasattr(self._task_tools, '_agent_manager'):
+            self._task_tools._agent_manager = agent_manager
+
     def memory_list(
         self,
         limit: int = 10,
@@ -404,8 +411,33 @@ def create_builtin_tools(homepage=None, workdir: str = None) -> BuiltinTools:
     return BuiltinTools(homepage, workdir)
 
 
-def get_builtin_tools_schema() -> List[Dict]:
-    """获取内置工具的 schema 定义（用于给 LLM 调用）"""
+def get_builtin_tools_schema(agent_manager=None) -> List[Dict]:
+    """获取内置工具的 schema 定义（用于给 LLM 调用）
+    
+    Args:
+        agent_manager: AgentManager 实例，用于动态注入可用子智能体列表
+    """
+    # 动态获取子智能体名称列表
+    subagent_names = []
+    if agent_manager and hasattr(agent_manager, 'list_subagent_names'):
+        try:
+            subagent_names = agent_manager.list_subagent_names(include_hidden=True)
+        except Exception:
+            pass
+    # 动态生成 task_batch 工具描述
+    if subagent_names:
+        subagent_list = ", ".join(subagent_names)
+        task_batch_desc = (
+            f"批量分发多个子智能体任务（并行执行）。任务完成后系统会自动发送 `[后台任务状态]` 消息通知。"
+            f"收到通知后使用 task_status 获取结果。\n\n"
+            f"可用子智能体: {subagent_list}"
+        )
+    else:
+        task_batch_desc = (
+            "批量分发多个子智能体任务（并行执行）。任务完成后系统会自动发送 `[后台任务状态]` 消息通知。"
+            "收到通知后使用 task_status 获取结果。"
+        )
+    
     return [
         {
             "type": "function",
@@ -777,19 +809,20 @@ def get_builtin_tools_schema() -> List[Dict]:
             "type": "function",
             "function": {
                 "name": "task_batch",
-                "description": "批量分发多个子智能体任务（并行执行）。任务完成后系统会自动发送 `[后台任务状态]` 消息通知。收到通知后使用 task_status 获取结果。",
+                "description": task_batch_desc,  # 动态描述，包含可用子智能体列表
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "tasks": {
                             "type": "array",
-                            "description": "任务列表，每个任务包含 agent/description/context。agent 可选：build、summary、code-reviewer、explore。",
+                            "description": f"任务列表，每个任务包含 agent/description/context。agent 可选：{', '.join(subagent_names)}。",
                             "items": {
                                 "type": "object",
                                 "properties": {
                                     "agent": {
                                         "type": "string", 
-                                        "description": "子智能体名称（build、summary、code-reviewer、explore）",
+                                        "description": f"子智能体名称。",
+                                        "enum": ', '.join(subagent_names),
                                     },
                                     "description": {"type": "string", "description": "任务描述"},
                                     "context": {"type": "string", "description": "详细上下文信息（可选）"},

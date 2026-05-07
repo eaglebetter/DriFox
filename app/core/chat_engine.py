@@ -11,14 +11,13 @@ from openai import OpenAI
 
 from app.core.provider_profile import (
     get_provider_profile,
-    supports_vision as provider_supports_vision,
 )
 from app.tools import get_builtin_tools_schema
-
 from app.utils.chat_session import (
     ChatSession,
     SessionManager,
 )
+from app.utils.config import Settings
 from app.utils.message_content import (
     consolidate_messages,
     content_to_text,
@@ -31,7 +30,6 @@ from app.utils.token_estimator import (
     count_messages_tokens,
 )
 from app.utils.worker import OpenAIChatWorker
-from app.utils.config import Settings
 
 MAX_HISTORY_SNIPPET_CHARS = 1200
 RECENT_HISTORY_MIN_MESSAGES = 6
@@ -846,7 +844,7 @@ class ChatEngine:
                 self._current_agent
             )
         else:
-            available_tools = get_builtin_tools_schema()
+            available_tools = get_builtin_tools_schema(self._get_agent_manager())
 
         self._start_worker(messages, llm_config, available_tools)
         return True
@@ -861,7 +859,7 @@ class ChatEngine:
 
         if self._current_agent:
             full_system_prompt = self._get_agent_manager().get_agent_system_prompt(
-                self._current_agent
+                self._current_agent, is_subagent_call=False
             )
         else:
             full_system_prompt = self._get_agent_manager().get_unified_system_prompt()

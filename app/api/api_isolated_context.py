@@ -122,6 +122,9 @@ class IsolatedChatContext:
         # 设置隔离的会话消息获取器（使用隔离的 session_manager）
         executor.set_session_messages_getter(self._get_session_messages_for_tools)
         
+        # 设置 AgentManager（用于动态生成工具 schema）
+        executor.set_agent_manager(self._agent_manager)
+        
         return executor
     
     def _get_session_messages_for_tools(self) -> List[Dict[str, Any]]:

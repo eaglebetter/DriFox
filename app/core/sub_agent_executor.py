@@ -41,6 +41,7 @@ class SubAgentExecutor(QThread):
         agent_manager: Any,
         tool_executor: Any = None,
         parent_context: str = "",
+        is_subagent_call: bool = True,  # 标记是否为被主智能体调用（通过 task_batch）
     ):
         super().__init__()
         self.task_id = task_id
@@ -50,6 +51,7 @@ class SubAgentExecutor(QThread):
         self.agent_manager = agent_manager
         self.tool_executor = tool_executor
         self.parent_context = parent_context
+        self.is_subagent_call = is_subagent_call  # 传递给提示词构建
         self._is_cancelled = False
         self._pending_answer = None
         self._last_result = None
@@ -116,7 +118,11 @@ class SubAgentExecutor(QThread):
                 self.error_occurred.emit(self.task_id, f"Agent not found: {self.agent_name}")
                 return
 
-            system_prompt = self.agent_manager.get_agent_system_prompt(self.agent_name)
+            # 子智能体被调用时 is_subagent_call=True，此时应该使用 subagent_constraints
+            # 用于区分"主智能体通过 task_batch 调用子智能体"的情况
+            system_prompt = self.agent_manager.get_agent_system_prompt(
+                self.agent_name, is_subagent_call=self.is_subagent_call
+            )
             tools = self.agent_manager.get_agent_tools_schema(self.agent_name)
 
             messages = [{"role": "system", "content": system_prompt}]
@@ -621,6 +627,7 @@ class SubAgentManager(QObject):
                 agent_manager=self._agent_manager,
                 tool_executor=self._tool_executor,
                 parent_context=parent_context,
+                is_subagent_call=True,  # 标记为被主智能体调用
             )
 
             # 设置日志存储回调

@@ -1727,6 +1727,12 @@ class OpenAIChatWorker(QThread):
             if tool_name == "question":
                 question_text = arguments.get("question", "")
                 options = arguments.get("options", [])
+                # 确保 options 是 list 类型（可能是模型生成时出错导致的字符串）
+                if isinstance(options, str):
+                    try:
+                        options = json.loads(options)
+                    except (json.JSONDecodeError, TypeError):
+                        options = []
                 multiple = arguments.get("multiple", False)
                 self._emit_with_callback("question_asked", self.question_asked, tool_call_id, question_text, options, multiple)
                 self._question_pending = {
