@@ -204,6 +204,7 @@ class SubAgentFloatingWidget(SimpleCardWidget):
         super().__init__(parent)
         self._tasks: Dict[str, SubTaskLogWidget] = {}  # task_id -> widget
         self._task_labels: Dict[str, str] = {}  # task_id -> label text
+        self._segment_items: Dict[str, object] = {}  # task_id -> segment item (用于更新按钮文字)
         self._active_task_id: str = None
         self._batch_started: bool = False  # 当前批次是否已开始
         self._timer: QTimer = None
@@ -336,7 +337,8 @@ class SubAgentFloatingWidget(SimpleCardWidget):
 
         # 更新 Segment，使用 task_id 作为唯一标识
         task_index = len(self._tasks)
-        self.segment_widget.addItem(task_id, f"任务{task_index}")
+        item = self.segment_widget.addItem(task_id, f"任务{task_index}")
+        self._segment_items[task_id] = item
 
         # 同步更新 _task_labels
         self._task_labels[task_id] = f"任务{task_index}"
@@ -403,7 +405,8 @@ class SubAgentFloatingWidget(SimpleCardWidget):
 
         # 更新 Segment（与 add_task 保持一致的命名）
         task_index = len(self._tasks)
-        self.segment_widget.addItem(task_id, f"任务{task_index}")
+        item = self.segment_widget.addItem(task_id, f"任务{task_index}")
+        self._segment_items[task_id] = item
         self._task_labels[task_id] = f"任务{task_index}"
 
         # 只在添加第一个任务时设置当前项
