@@ -31,6 +31,9 @@ class Agent:
     top_p: Optional[float] = None
     prompt: str = ""
     tools: Dict[str, bool] = field(default_factory=dict)
+    inherit_history: bool = False  # 是否继承主智能体历史消息
+    inherit_history_count: Optional[int] = None  # 继承最近 N 条消息，None 表示全部
+    inherit_history_max_chars: Optional[int] = 500  # 每条消息最大字符数
 
     @classmethod
     def from_dict(cls, data: Dict) -> "Agent":
@@ -51,6 +54,9 @@ class Agent:
             top_p=data.get("top_p"),
             prompt=data.get("prompt", ""),
             tools=tools,
+            inherit_history=data.get("inherit_history", False),
+            inherit_history_count=data.get("inherit_history_count"),
+            inherit_history_max_chars=data.get("inherit_history_max_chars", 500),
         )
 
     def to_dict(self) -> Dict:
@@ -78,6 +84,12 @@ class Agent:
             result["prompt"] = self.prompt
         if self.tools:
             result["tools"] = self.tools
+        if self.inherit_history:
+            result["inherit_history"] = True
+        if self.inherit_history_count is not None:
+            result["inherit_history_count"] = self.inherit_history_count
+        if self.inherit_history_max_chars != 500:
+            result["inherit_history_max_chars"] = self.inherit_history_max_chars
         return result
 
     def is_primary(self) -> bool:

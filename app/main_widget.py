@@ -286,6 +286,7 @@ class OpenAIChatToolWindow(ToolWindow):
         )
         self._sub_agent_manager.task_started.connect(self._on_sub_agent_task_started)
         self._sub_agent_manager.task_finished.connect(self._on_sub_agent_task_finished)
+        self._sub_agent_manager.set_history_getter(self._get_current_session_messages_for_tools)
         self._tool_executor.set_sub_agent_manager(self._sub_agent_manager)
 
         self._chat_engine = ChatEngine(

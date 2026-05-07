@@ -61,10 +61,20 @@ class SubAgentExecutor(QThread):
         self._logs: List[Dict] = []
         self._tool_call_count = 0
         self._log_store_callback = None  # 日志存储回调
+        self._get_history_messages = None  # 获取主智能体历史消息的回调
 
     def set_log_store_callback(self, callback):
         """设置日志存储回调"""
         self._log_store_callback = callback
+
+    def set_history_getter(self, getter: callable):
+        """
+        设置获取历史消息的回调。
+        
+        Args:
+            getter: callable, 返回 List[Dict]，每个 dict 包含 role/content
+        """
+        self._get_history_messages = getter
 
     def cancel(self):
         self._is_cancelled = True
@@ -127,15 +137,46 @@ class SubAgentExecutor(QThread):
 
             messages = [{"role": "system", "content": system_prompt}]
 
+            # 【新增】如果 agent 配置了 inherit_history，获取主智能体历史消息
+            history_section = ""
+            if agent.inherit_history and self._get_history_messages:
+                try:
+                    history_messages = self._get_history_messages() or []
+                    if history_messages:
+                        # 根据 inherit_history_count 限制消息数量
+                        if agent.inherit_history_count is not None:
+                            history_messages = history_messages[-agent.inherit_history_count:]
+                        
+                        # 格式化历史消息（每条限制在合理长度内，避免上下文过长）
+                        history_lines = []
+                        max_chars = getattr(agent, 'inherit_history_max_chars', 500) or 500
+                        for msg in history_messages:
+                            role = msg.get("role", "user")
+                            content = msg.get("content", "")
+                            if isinstance(content, list):
+                                content = "".join(
+                                    c.get("text", "") for c in content if isinstance(c, dict)
+                                )
+                            if content:
+                                # 截断过长内容
+                                truncated = content[:max_chars] + ("..." if len(content) > max_chars else "")
+                                history_lines.append(f"**{role}**: {truncated}")
+                        
+                        if history_lines:
+                            history_section = "\n\n## 主智能体历史上下文\n" + "\n".join(history_lines)
+                except Exception as e:
+                    logger.warning(f"[SubAgentExecutor] 获取历史消息失败: {e}")
+
             if self.parent_context:
-                messages.append(
-                    {
-                        "role": "user",
-                        "content": f"## 父任务上下文\n{self.parent_context}\n\n## 子任务\n{self.task_description}",
-                    }
-                )
+                content = f"## 父任务上下文\n{self.parent_context}\n\n## 子任务\n{self.task_description}"
             else:
-                messages.append({"role": "user", "content": self.task_description})
+                content = f"## 子任务\n{self.task_description}"
+            
+            # 追加历史上下文
+            if history_section:
+                content += history_section
+            
+            messages.append({"role": "user", "content": content})
 
             self._add_log("progress", f"开始执行子任务: {self.agent_name}")
             self.progress_updated.emit(self.task_id, f"开始执行子任务: {self.agent_name}")
@@ -554,6 +595,12 @@ class SubAgentManager(QObject):
         self._batch_completed = 0
         # 已查询过的任务ID集合，避免重复返回结果浪费上下文
         self._queried_tasks: set = set()
+        # 获取主智能体历史消息的回调（由外部设置）
+        self._get_history_messages: Optional[Callable[[], List[Dict]]] = None
+
+    def set_history_getter(self, getter: Callable[[], List[Dict]]):
+        """设置获取主智能体历史消息的回调"""
+        self._get_history_messages = getter
 
     def set_log_store(self, log_store: SubAgentLogStore):
         """设置日志存储"""
@@ -633,6 +680,10 @@ class SubAgentManager(QObject):
             # 设置日志存储回调
             if self._log_store:
                 executor.set_log_store_callback(self._save_task_to_store)
+
+            # 【新增】设置历史消息获取回调
+            if self._get_history_messages:
+                executor.set_history_getter(self._get_history_messages)
 
             if executor_ref is not None:
                 executor_ref["executor"] = executor
