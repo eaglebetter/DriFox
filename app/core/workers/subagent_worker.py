@@ -568,11 +568,13 @@ class SubAgentExecutor(QThread):
 
             resp = create_api_call_with_retry(client, create_summary)
 
-            return resp.choices[0].message.content.strip()
+            # 过滤思考内容，避免 LLM 总结时带入思考标签
+            summarized = resp.choices[0].message.content.strip()
+            return self._filter_thinking_content(summarized)
 
         except Exception as e:
             logger.warning(f"Summary failed: {e}")
-            return result[:3000]
+            return self._filter_thinking_content(result[:3000])
 
 
 class SubAgentManager(QObject):
