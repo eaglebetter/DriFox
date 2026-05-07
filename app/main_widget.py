@@ -242,19 +242,39 @@ class OpenAIChatToolWindow(ToolWindow):
         self.session_manager.create_new_session()
         self._current_session_id = self.session_manager.get_current_session().session_id
         
-        # 创建后端（用于前后端分离）
+        # 创建并初始化后端（用于前后端分离）
         self.backend = ChatBackend()
+        self._initialize_managers()
         
+        # 初始化后端 - 将组件注册到 backend
+        self.backend.initialize(
+            get_model_config=self._get_current_model_config,
+            tool_executor=self._tool_executor,
+            agent_manager=self._agent_manager,
+            memory_manager=self._memory_manager,
+            session_manager=self.session_manager,
+            chat_engine=self._chat_engine,
+        )
+        
+        # 代理属性到 backend（保持向后兼容）
+        self.session_manager = self.backend.session_manager
+        self._chat_engine = self.backend.chat_engine
+        self._tool_executor = self.backend.tool_executor
+        self._agent_manager = self.backend.agent_manager
+        self._memory_manager = self.backend.memory_manager
+        
+        # 应用退出时自动保存
         app = QApplication.instance()
         if app is not None:
             try:
                 app.aboutToQuit.connect(self._auto_save_current_session)
             except Exception:
                 pass
+        
+        # 监听全局变量变化
         if hasattr(self.homepage, "global_variables_changed"):
             self.homepage.global_variables_changed.connect(self._load_model_configs)
-        self._initialize_managers()
-
+        
         # 设置文件操作记录的会话上下文
         if self._tool_executor:
             self._tool_executor.set_session_context(self._current_session_id)
@@ -323,9 +343,6 @@ class OpenAIChatToolWindow(ToolWindow):
         self._init_sub_agent_log_store()
 
         self._initialize_history_manager()
-        
-        # 初始化后端（前后端分离）
-        # Backend 作为组件容器，不设置回调（main_widget 直接使用 _chat_engine）
 
     def _init_sub_agent_log_store(self):
         """初始化子智能体日志存储"""
