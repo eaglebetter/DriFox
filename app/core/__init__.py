@@ -20,8 +20,6 @@ from app.core.workers import (
     OpenAIChatWorker,
     SubAgentExecutor,
     SubAgentManager,
-)
-from app.core.tasks import (
     TopicSummaryTask,
     ShellExecutionTask,
 )
