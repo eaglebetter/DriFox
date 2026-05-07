@@ -919,6 +919,18 @@ class OpenAIChatWorker(QThread):
                     "timestamp": item.get("timestamp", now_ts),
                 }
 
+        # 预防性修复：过滤掉没有对应 tool 结果的 tool_call
+        # 只有有结果的 tool_call 才能发送给 API，避免用户中断时产生 2013 错误
+        if tool_result_map:
+            valid_tc_ids = set(tool_result_map.keys())
+            filtered_tool_call_map = {}
+            for tc_id, tc in tool_call_map.items():
+                if tc_id in valid_tc_ids:
+                    filtered_tool_call_map[tc_id] = tc
+                else:
+                    logger.warning(f"[ToolCall预防] 过滤了无结果的 tool_call: {tc_id[:20]}...")
+            tool_call_map = filtered_tool_call_map
+
         sequence: List[Dict] = []
         pending_text_blocks = []
         response_blocks = self._response_content_blocks
@@ -1025,13 +1037,15 @@ class OpenAIChatWorker(QThread):
         处理 API 格式消息（tool 消息只有 role, tool_call_id, name, content）。
         规则：每个 tool 消息的 tool_call_id 必须与之前的 assistant 消息的 tool_calls 中的 id 匹配。
         
-        主要问题：duplicate tool_call id
-        原因：之前的修复尝试可能累积了重复的 tool_call_id，或者原始消息中就有问题
+        主要问题：
+        1. 用户中断时：assistant 消息已包含 tool_calls，但对应的 tool 结果还没有被追加
+        2. 重复的 tool_call_id：之前的修复尝试可能累积了重复的 tool_call_id
         
         修复策略：
-        1. 收集所有 tool 消息的 tool_call_id
+        1. 收集所有 tool 消息的 tool_call_id（这些是"有效的"）
         2. 对每个 assistant 消息，只保留那些在 tool 消息中存在对应结果的 tool_call
-        3. 如果有 tool 消息找不到对应的 assistant，则添加到最近的 assistant
+        3. 如果所有 tool_call 都没有对应结果（用户中断场景），移除 tool_calls 字段
+        4. 如果有重复的 tool_call_id，只保留第一个
         
         Returns:
             (修复后的消息列表, 是否进行了修复)
@@ -1041,49 +1055,81 @@ class OpenAIChatWorker(QThread):
         
         # 第一步：收集所有 tool 消息中的 tool_call_id（这些是"有效的"）
         valid_tool_call_ids: set = set()
-        tool_call_to_name: Dict[str, str] = {}
         for msg in messages:
             if msg.get("role") == "tool":
                 tc_id = msg.get("tool_call_id", "")
-                name = msg.get("name", "")
                 if tc_id:
                     valid_tool_call_ids.add(tc_id)
-                    tool_call_to_name[tc_id] = name
         
         logger.warning(f"[ToolCall修复] 有效 tool_call_ids: {len(valid_tool_call_ids)} 个")
         
-        # 第二步：遍历每个 assistant 消息，去除重复的 tool_call
+        # 如果没有任何 tool 消息，说明是用户中断场景，但没有累积的工具结果
+        # 这种情况下直接返回无需修复
+        if not valid_tool_call_ids:
+            # 检查是否有 assistant 消息包含 tool_calls
+            has_tool_calls = any(
+                msg.get("role") == "assistant" and msg.get("tool_calls")
+                for msg in messages
+            )
+            if has_tool_calls:
+                logger.warning("[ToolCall修复] 检测到用户中断场景：assistant 有 tool_calls 但无任何 tool 结果")
+                # 移除所有 assistant 消息中的 tool_calls
+                for msg in messages:
+                    if msg.get("role") == "assistant":
+                        if msg.get("tool_calls"):
+                            msg["tool_calls"] = []
+                            modified = True
+                            logger.info("[ToolCall修复] 已移除中断时的 tool_calls")
+                return messages, modified
+            return messages, False
+        
+        # 第二步：遍历每个 assistant 消息，修复 tool_calls
         for msg in messages:
             if msg.get("role") != "assistant":
                 fixed_messages.append(msg)
                 continue
             
-            tool_calls = msg.get("tool_calls") or []
+            # 深拷贝，避免修改原消息
+            fixed_msg = dict(msg)
+            tool_calls = fixed_msg.get("tool_calls") or []
+            
             if not tool_calls:
-                fixed_messages.append(msg)
+                fixed_messages.append(fixed_msg)
                 continue
             
-            # 收集这个 assistant 消息的原始 tool_call_ids
-            original_tc_ids = [tc.get("id") for tc in tool_calls]
-            
-            # 去重：保留第一个出现的 id，记录重复的
+            # 去重并过滤：只保留有对应 tool 结果的 tool_call
             seen_ids: set = set()
             new_tool_calls: List[Dict] = []
+            removed_count = 0
             
             for tc in tool_calls:
                 tc_id = tc.get("id", "")
-                if tc_id not in seen_ids:
-                    seen_ids.add(tc_id)
-                    new_tool_calls.append(tc)
-                else:
+                
+                # 检查重复
+                if tc_id in seen_ids:
                     logger.warning(f"[ToolCall修复] 发现重复 tool_call_id: {tc_id[:20]}...，已移除")
                     modified = True
+                    removed_count += 1
+                    continue
+                
+                # 检查是否有对应的 tool 结果
+                if tc_id and tc_id not in valid_tool_call_ids:
+                    logger.warning(f"[ToolCall修复] tool_call {tc_id[:20]}... 无对应 tool 结果，已移除")
+                    modified = True
+                    removed_count += 1
+                    continue
+                
+                seen_ids.add(tc_id)
+                new_tool_calls.append(tc)
             
-            msg["tool_calls"] = new_tool_calls
-            fixed_messages.append(msg)
-        
-        # 第三步：如果修复后仍有问题（有些 tool 没有对应的 assistant），
-        # 则不需要再处理，因为去重后应该能解决问题
+            if new_tool_calls:
+                fixed_msg["tool_calls"] = new_tool_calls
+            else:
+                # 所有 tool_call 都没有对应结果，移除 tool_calls 字段
+                fixed_msg.pop("tool_calls", None)
+                logger.info("[ToolCall修复] 所有 tool_call 均无对应结果，已移除 tool_calls 字段")
+            
+            fixed_messages.append(fixed_msg)
         
         return fixed_messages, modified
 

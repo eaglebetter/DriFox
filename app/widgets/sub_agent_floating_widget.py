@@ -73,7 +73,7 @@ class SubTaskLogWidget(QFrame):
         self.log_text.setFont(get_unified_font(8))
         self.log_text.setStyleSheet("""
             QTextEdit {
-                background-color: #1e1e1e;
+                background-color: transparent;
                 color: #d4d4d4;
                 border: none;
                 border-radius: 3px;

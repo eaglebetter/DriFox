@@ -161,7 +161,7 @@ class ProviderEditCard(QWidget):
 
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(4, 2, 4, 2)
-        main_layout.setSpacing(4)
+        main_layout.setSpacing(3)
 
         # 连接配置区域
         # 服务商名称行
