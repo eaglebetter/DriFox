@@ -993,7 +993,6 @@ class OpenAIChatWorker(QThread):
                 break
             except BadRequestError as e:
                 error_str = str(e)
-                print(req_kwargs["messages"])
                 # 检测 tool call result 错误码 2013
                 is_tool_call_order_error = "2013" in error_str or "tool call result does not follow tool call" in error_str.lower()
                 

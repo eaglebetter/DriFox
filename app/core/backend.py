@@ -5,17 +5,15 @@ ChatBackend - 统一后端接口
 """
 
 from typing import Dict, List, Any, Optional, Callable
-from PyQt5.QtCore import QObject, pyqtSignal, QThreadPool
 
+from PyQt5.QtCore import QObject, pyqtSignal, QThreadPool
 from loguru import logger
 
-from app.core.chat_session import SessionManager, ChatSession
-from app.core.workers import TopicSummaryTask
-from app.core.store import SessionStore
-from app.core.chat_engine import ChatEngine
-from app.core.tool_executor import ToolExecutor
-from app.core.memory_manager import MemoryManagerCore
 from app.core.agent import AgentManager
+from app.core.chat_engine import ChatEngine
+from app.core.chat_session import SessionManager, ChatSession
+from app.core.memory_manager import MemoryManagerCore
+from app.core.tool_executor import ToolExecutor
 
 
 class ChatBackend(QObject):
@@ -166,6 +164,113 @@ class ChatBackend(QObject):
         if self._chat_engine:
             self._chat_engine.set_callback(name, callback)
     
+    def set_all_callbacks(self, callbacks: Dict[str, Callable]):
+        """批量设置回调"""
+        if self._chat_engine:
+            for name, callback in callbacks.items():
+                self._chat_engine.set_callback(name, callback)
+    
+    # ========== ChatEngine 代理方法 ==========
+    
+    def stop_streaming(self):
+        """停止流式输出"""
+        if self._chat_engine:
+            return self._chat_engine.stop()
+    
+    def cleanup_worker(self):
+        """清理 worker"""
+        if self._chat_engine:
+            self._chat_engine.cleanup_worker()
+    
+    def get_context_usage_snapshot(self, session, llm_config) -> Dict:
+        """获取上下文使用快照"""
+        if self._chat_engine:
+            return self._chat_engine.get_context_usage_snapshot(session, llm_config)
+        return {}
+    
+    def switch_agent(self, agent_name: str):
+        """切换 Agent"""
+        if self._chat_engine:
+            self._chat_engine.switch_agent(agent_name)
+    
+    def approve_tool_permission(self, tool_call_id: str, auto_allow: bool = False):
+        """批准工具调用权限"""
+        if self._chat_engine:
+            self._chat_engine.approve_tool_permission(tool_call_id, auto_allow)
+    
+    def deny_tool_permission(self, tool_call_id: str):
+        """拒绝工具调用权限"""
+        if self._chat_engine:
+            self._chat_engine.deny_tool_permission(tool_call_id)
+    
+    def provide_question_answer(self, answer: str):
+        """提供问题答案"""
+        if self._chat_engine:
+            self._chat_engine.provide_question_answer(answer)
+    
+    def send_message_to_engine(self, text: str, context_params: Dict = None) -> bool:
+        """发送消息到引擎"""
+        if self._chat_engine:
+            return self._chat_engine.send_message(text, context_params or {})
+        return False
+    
+    # ========== ToolExecutor 代理方法 ==========
+    
+    def set_session_context(self, session_id: str):
+        """设置会话上下文"""
+        if self._tool_executor:
+            self._tool_executor.set_session_context(session_id)
+    
+    def set_sub_agent_manager(self, manager):
+        """设置子智能体管理器"""
+        self._sub_agent_manager = manager
+        if self._tool_executor:
+            self._tool_executor.set_sub_agent_manager(manager)
+    
+    def reset_session_state(self):
+        """重置会话状态"""
+        if self._tool_executor:
+            self._tool_executor.reset_session_state()
+    
+    def clear_todo_list(self):
+        """清空待办列表"""
+        if self._tool_executor:
+            self._tool_executor.clear_todo_list()
+    
+    @property
+    def todo_list(self):
+        """获取待办列表"""
+        if self._tool_executor:
+            return self._tool_executor.todo_list
+        return []
+    
+    @property
+    def file_recorder(self):
+        """获取文件操作记录器"""
+        if self._tool_executor:
+            return getattr(self._tool_executor, 'file_recorder', None)
+        return None
+    
+    def execute_skill(self, method: str, params: Dict):
+        """执行技能"""
+        if self._tool_executor:
+            return self._tool_executor.execute_skill(method, params)
+        return None
+    
+    # ========== AgentManager 代理方法 ==========
+    
+    def get_primary_agents(self) -> List:
+        """获取主 Agent 列表"""
+        if self._agent_manager:
+            return self._agent_manager.list_primary_agents()
+        return []
+    
+    def get_agent(self, name: str):
+        """获取指定 Agent"""
+        if self._agent_manager:
+            return self._agent_manager.get_agent(name)
+        return None
+    
     # ========== 会话管理 ==========
     
     def create_session(self) -> ChatSession:
@@ -182,6 +287,12 @@ class ChatBackend(QObject):
         """切换会话"""
         self._session_manager.switch_to_session(index)
         session = self.get_current_session()
+        if session:
+            self.session_changed.emit(session.session_id)
+    
+    def set_current_session(self, session: ChatSession):
+        """设置当前会话"""
+        self._session_manager.set_current_session(session)
         if session:
             self.session_changed.emit(session.session_id)
     
