@@ -111,6 +111,7 @@ class ChatBackend(QObject):
         agent_manager: AgentManager,
         memory_manager: MemoryManagerCore,
         session_manager: SessionManager = None,
+        chat_engine: ChatEngine = None,
     ):
         """
         初始化后端组件
@@ -120,7 +121,8 @@ class ChatBackend(QObject):
             tool_executor: 工具执行器
             agent_manager: Agent 管理器
             memory_manager: 记忆管理器
-            session_manager: 会话管理器（可选，Backend 会创建自己的）
+            session_manager: 会话管理器
+            chat_engine: 已有的 ChatEngine 实例（可选）
         """
         logger.info("[ChatBackend] 初始化中...")
         
@@ -130,13 +132,14 @@ class ChatBackend(QObject):
         self._memory_manager = memory_manager
         self._session_manager = session_manager or SessionManager()
         
-        # 创建 ChatEngine
-        self._chat_engine = ChatEngine(
-            session_manager=self._session_manager,
-            get_model_config=get_model_config,
-            tool_executor=tool_executor,
-            agent_manager=agent_manager,
-        )
+        # 如果没有提供 ChatEngine，则创建一个
+        if chat_engine is None:
+            self._chat_engine = ChatEngine(
+                session_manager=self._session_manager,
+                get_model_config=get_model_config,
+                tool_executor=tool_executor,
+                agent_manager=agent_manager,
+            )
         
         # 连接 ChatEngine 信号
         self._connect_chat_engine_signals()

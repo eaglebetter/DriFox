@@ -331,6 +331,7 @@ class OpenAIChatToolWindow(ToolWindow):
             agent_manager=self._agent_manager,
             memory_manager=self._memory_manager,
             session_manager=self.session_manager,
+            chat_engine=self._chat_engine,
         )
 
     def _init_sub_agent_log_store(self):
