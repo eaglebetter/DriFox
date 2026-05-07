@@ -42,6 +42,12 @@ from app.core import (
     ChatEngine,
     ToolExecutor,
     MemoryManagerCore,
+    SessionManager,
+    ChatSession,
+    consolidate_messages,
+    content_to_text,
+    get_user_round_ranges,
+    TopicSummaryTask,
 )
 from app.core.agent import AgentManager
 from app.tool_window import (
@@ -49,11 +55,6 @@ from app.tool_window import (
     DockPosition,
     DockCategory,
 )
-from app.utils.chat_session import (
-    SessionManager,
-    ChatSession,
-)
-from app.utils.config import Settings
 from app.utils.diff_viewer import (
     DiffHtmlGenerator,
     DiffViewerWindow,
@@ -61,16 +62,7 @@ from app.utils.diff_viewer import (
 from app.utils.history_manager import (
     HistoryManager,
 )
-from app.utils.message_content import (
-    consolidate_messages,
-    content_to_text,
-    get_user_round_ranges,
-    group_messages_for_display,
-)
 from app.utils.utils import get_icon, get_font_family_css
-from app.utils.worker import (
-    TopicSummaryTask,
-)
 from app.widgets.base_settings_card import (
     BaseSettingsCard,
 )

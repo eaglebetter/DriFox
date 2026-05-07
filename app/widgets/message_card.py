@@ -53,12 +53,13 @@ from qfluentwidgets.components.widgets.card_widget import (
     SimpleCardWidget,
 )
 
-from app.utils.message_content import (
+from app.core import (
     append_text_block,
     content_to_markdown,
     content_to_text,
-    ensure_content_blocks, make_tool_result_block,
+    ensure_content_blocks,
 )
+from app.core.message_content import make_tool_result_block
 from app.utils.utils import get_font_family_css, get_icon
 from app.widgets.render_helpers import (
     render_tool_block,

@@ -16,12 +16,20 @@ from app.core.agent import (
     AgentManager,
     create_agent_manager,
 )
-from app.core.worker import OpenAIChatWorker
+from app.core.worker import (
+    OpenAIChatWorker,
+    TopicSummaryTask,
+)
 from app.core.message_content import (
     consolidate_messages,
     content_to_text,
+    content_to_markdown,
     to_api_message,
     messages_to_api,
+    append_text_block,
+    ensure_content_blocks,
+    make_tool_result_block,
+    get_user_round_ranges,
 )
 from app.core.retry_helper import (
     create_api_call_with_retry,
@@ -48,11 +56,17 @@ __all__ = [
     "create_agent_manager",
     # Worker
     "OpenAIChatWorker",
+    "TopicSummaryTask",
     # 消息处理
     "consolidate_messages",
     "content_to_text",
+    "content_to_markdown",
     "to_api_message",
     "messages_to_api",
+    "append_text_block",
+    "ensure_content_blocks",
+    "make_tool_result_block",
+    "get_user_round_ranges",
     # 重试
     "create_api_call_with_retry",
     "retry_on_api_error",

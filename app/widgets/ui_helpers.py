@@ -900,7 +900,7 @@ def create_session_from_record(session_record: dict, messages: list, title: str 
     Returns:
         ChatSession 实例
     """
-    from app.utils.chat_session import ChatSession
+    from app.core import ChatSession
     
     session_id = session_record.get("session_id")
     title = title or session_record.get("name") or "历史对话"
@@ -949,7 +949,7 @@ def get_round_message_indices(session, round_index: int) -> tuple:
     Returns:
         (start_idx, end_idx) 或 (None, None)
     """
-    from app.utils.message_content import consolidate_messages, get_user_round_ranges
+    from app.core import consolidate_messages, get_user_round_ranges
     
     canonical_messages = consolidate_messages(session.messages)
     round_ranges = get_user_round_ranges(canonical_messages)

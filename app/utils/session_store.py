@@ -17,7 +17,7 @@ from typing import List, Dict, Optional, Any, Tuple
 from loguru import logger
 
 from app.utils.db_manager import DatabaseManager
-from app.utils.message_content import consolidate_messages
+from app.core import consolidate_messages
 
 
 class SessionStore:
