@@ -1533,13 +1533,15 @@ class OpenAIChatToolWindow(ToolWindow):
         current_tab = self._history_card._current_tab if hasattr(self._history_card, '_current_tab') else "history"
         
         if current_tab == "history":
-            # 刷新历史会话 - 使用 _current_project（从配置加载的）
-            current_idx = (
-                self.history_manager.find_index_by_session_id(self._current_session_id)
-                if self._current_session_id and self.history_manager
-                else None
-            )
+            # 获取当前项目的历史会话列表
             history_list = self.history_manager.get_history_list(self._current_project) if self.history_manager else []
+            # 在项目过滤后的列表中查找当前会话的位置
+            current_idx = None
+            if self._current_session_id and self.history_manager:
+                for i, session in enumerate(history_list):
+                    if session.get("session_id") == self._current_session_id:
+                        current_idx = i
+                        break
             self._history_popup_card.set_history(history_list, current_idx)
         else:
             # 刷新归档会话
