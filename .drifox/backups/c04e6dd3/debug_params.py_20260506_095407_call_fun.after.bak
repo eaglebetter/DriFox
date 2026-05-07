@@ -1,0 +1,118 @@
+"""调试完整的参数显示流程"""
+import sys
+sys.path.insert(0, 'app')
+
+from utils.message_content import content_to_markdown, make_tool_result_block
+from widgets.message_card import _render_tool_block_content
+
+# 用户报告的真实数据
+test_args = {
+    "content": "# -*- coding: utf-8 -*-\n\"\"\"\n扁平式模型选择上拉框\n\"\"\"\nclass Widget:\n    pass",
+    "path": "app\\widgets\\model_selector_popup.py"
+}
+
+print("=" * 60)
+print("1. 原始参数:")
+print("=" * 60)
+print(f"  keys: {list(test_args.keys())}")
+print(f"  path: {test_args['path']}")
+print(f"  content 长度: {len(test_args['content'])}")
+
+print("\n" + "=" * 60)
+print("2. 创建 block:")
+print("=" * 60)
+block = make_tool_result_block(
+    tool_name="write",
+    arguments=test_args,
+    result="Successfully written",
+    success=True,
+    tool_call_id="call_func_123"
+)
+print(f"  block['arguments'] keys: {list(block['arguments'].keys())}")
+
+print("\n" + "=" * 60)
+print("3. content_to_markdown 生成:")
+print("=" * 60)
+markdown = content_to_markdown([block])
+print(f"  markdown 长度: {len(markdown)}")
+
+# 提取 args 部分
+import re
+args_match = re.search(r'args: (\{.+?\})\s*\nresult:', markdown, re.DOTALL)
+if args_match:
+    args_part = args_match.group(1)
+    print(f"\n  args JSON 部分长度: {len(args_part)}")
+    
+    # 检查是否包含所有参数
+    if '"content"' in args_part:
+        print("  ✅ 包含 content")
+    else:
+        print("  ❌ 缺少 content")
+    
+    if '"path"' in args_part:
+        print("  ✅ 包含 path")
+    else:
+        print("  ❌ 缺少 path")
+
+print("\n" + "=" * 60)
+print("4. _render_tool_block_content 解析:")
+print("=" * 60)
+
+# 提取 <tool>...</tool> 内容
+tool_match = re.search(r'<tool>(.*?)</tool>', markdown, re.DOTALL)
+if tool_match:
+    tool_content = tool_match.group(1)
+    print(f"  tool_content 长度: {len(tool_content)}")
+    
+    # 解析 args
+    args_start = tool_content.find("args:")
+    brace_start = tool_content.find("{", args_start)
+    
+    depth = 0
+    i = brace_start
+    tool_args_str = ""
+    while i < len(tool_content):
+        c = tool_content[i]
+        if c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                tool_args_str = tool_content[brace_start:i + 1]
+                break
+        i += 1
+    
+    if tool_args_str:
+        print(f"  提取的 JSON 长度: {len(tool_args_str)}")
+        
+        import json
+        try:
+            parsed = json.loads(tool_args_str)
+            print(f"  ✅ JSON 解析成功")
+            print(f"     参数 keys: {list(parsed.keys())}")
+        except json.JSONDecodeError as e:
+            print(f"  ❌ JSON 解析失败: {e}")
+            print(f"     使用正则提取...")
+            
+            from widgets.message_card import _extract_args_by_regex
+            parsed = _extract_args_by_regex(tool_args_str)
+            print(f"     正则提取结果: {parsed}")
+
+print("\n" + "=" * 60)
+print("5. 最终 HTML 渲染:")
+print("=" * 60)
+
+html = _render_tool_block_content(tool_content)
+
+# 检查参数显示
+if 'args-key' in html:
+    keys = re.findall(r'class="args-key"[^>]*>([^<]+)</span>', html)
+    print(f"  参数名: {keys}")
+    
+    # 检查是否有 "无参数"
+    if '无参数' in html:
+        print("  ❌ 显示 '无参数'")
+    else:
+        print("  ✅ 没有显示 '无参数'")
+else:
+    print("  ❌ 没有找到 args-key 元素")

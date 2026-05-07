@@ -1,0 +1,12 @@
+# -*- coding: utf-8 -*-
+import re
+with open('app/utils/diff_viewer.py', 'r', encoding='utf-8') as f:
+    content = f.read()
+    
+# 找 GITHUB_DARK_CSS
+match = re.search(r'GITHUB_DARK_CSS = """(.*?)"""', content, re.DOTALL)
+if match:
+    css = match.group(1)
+    print('CSS 中 .file-block 出现次数:', css.count('.file-block'))
+else:
+    print('未找到 CSS')

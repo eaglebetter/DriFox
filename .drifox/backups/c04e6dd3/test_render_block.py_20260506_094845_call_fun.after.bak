@@ -1,0 +1,73 @@
+"""测试 _render_tool_block_content 的实际解析"""
+import sys
+sys.path.insert(0, 'app')
+
+import re
+import json
+from widgets.message_card import _render_tool_block_content, _extract_args_by_regex
+
+# 模拟 content_to_markdown 生成的完整 markdown
+content = '''name: write
+args: {"content": "# -*- coding: utf-8 -*-\n\"\"\"\n扁平式模型选择上拉框\n\"\"\"\nclass Test:\n    def __init__(self):\n        self.setStyleSheet(\"\"\"\n            QWidget {\n                background-color: #2b2b2b;\n            }\n        \"\"\")\n\n    def method(self, event):\n        if event.type() == event.MouseButtonPress:\n            if obj.rect().contains(event.pos()):\n                self.update()\n", "path": "app\\\\widgets\\\\model_selector_popup.py"}
+result: Successfully written
+success: True
+tool_call_id: test_id'''
+
+print("=" * 60)
+print("测试 _render_tool_block_content 解析:")
+print("=" * 60)
+
+# 模拟解析过程
+args_start = content.find("args:")
+brace_start = content.find("{", args_start)
+
+print(f"\nargs_start: {args_start}")
+print(f"brace_start: {brace_start}")
+
+depth = 0
+i = brace_start
+tool_args_str = ""
+result_search_start = 0
+
+while i < len(content):
+    c = content[i]
+    if c == "{":
+        depth += 1
+        # 打印深度变化
+        if depth > 1 and depth <= 5:
+            print(f"  depth={depth} at pos {i}: ...{content[max(0,i-20):i+20]}...")
+    elif c == "}":
+        depth -= 1
+        if depth == 0:
+            tool_args_str = content[brace_start:i + 1]
+            result_search_start = i + 1
+            print(f"\n✅ JSON 结束于 pos {i}")
+            print(f"   JSON 长度: {len(tool_args_str)}")
+            break
+    elif c == "\n" and i % 100 < 20:
+        pass  # 减少输出
+    i += 1
+
+if depth != 0:
+    print(f"\n❌ JSON 未正确闭合，depth={depth}")
+
+print(f"\n提取的 JSON:")
+print(tool_args_str[:500] + "..." if len(tool_args_str) > 500 else tool_args_str)
+
+# 尝试解析 JSON
+if tool_args_str:
+    try:
+        args_dict = json.loads(tool_args_str)
+        print(f"\n✅ JSON 解析成功!")
+        print(f"   参数: {list(args_dict.keys())}")
+    except json.JSONDecodeError as e:
+        print(f"\n❌ JSON 解析失败: {e}")
+        print(f"   使用正则提取...")
+        args_dict = _extract_args_by_regex(tool_args_str)
+        print(f"   正则提取结果: {args_dict}")
+
+print("\n" + "=" * 60)
+print("实际渲染结果:")
+print("=" * 60)
+result = _render_tool_block_content(content)
+print(result[:500] if len(result) > 500 else result)

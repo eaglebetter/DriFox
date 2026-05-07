@@ -1,0 +1,371 @@
+# -*- coding: utf-8 -*-
+"""
+内存泄漏诊断工具 - 用于监控和定位内存问题
+
+使用方式:
+    from debug_memory import MemoryProfiler, profile_memory
+    
+    # 启动监控
+    profiler = MemoryProfiler()
+    profiler.start()
+    
+    # 在关键操作后记录内存
+    profiler.snapshot("after_user_message")
+    
+    # 打印报告
+    profiler.report()
+"""
+
+import gc
+import sys
+import traceback
+from datetime import datetime
+from functools import wraps
+from typing import Callable, Dict, List, Optional, Any
+
+# 尝试导入 psutil（可选）
+try:
+    import psutil
+    HAS_PSUTIL = True
+except ImportError:
+    HAS_PSUTIL = False
+    print("[MemoryProfiler] psutil 未安装，部分功能不可用。运行: pip install psutil")
+
+# 尝试导入 objgraph（可选，用于更详细的分析）
+try:
+    import objgraph
+    HAS_OBJGRAPH = True
+except ImportError:
+    HAS_OBJGRAPH = False
+
+
+class MemorySnapshot:
+    """单次内存快照"""
+    def __init__(self, label: str):
+        self.label = label
+        self.timestamp = datetime.now()
+        self.process = psutil.Process() if HAS_PSUTIL else None
+        
+        # Python 内存
+        self.python_memory = self._get_python_mem()
+        
+        # 系统级内存
+        if HAS_PSUTIL:
+            self.rss = self.process.memory_info().rss / 1024 / 1024  # MB
+            self.vms = self.process.memory_info().vms / 1024 / 1024  # MB
+            self.obj_counts: Dict[str, int] = {}
+        else:
+            self.rss = self.vms = 0
+            self.obj_counts = {}
+        
+        self.peak_rss = self.rss
+
+    def _get_python_mem(self) -> float:
+        """获取 Python 对象占用内存（估算）"""
+        try:
+            import sys
+            # 遍历所有存活对象
+            total = 0
+            for obj in gc.get_objects():
+                try:
+                    total += sys.getsizeof(obj)
+                except:
+                    pass
+            return total / 1024 / 1024  # MB
+        except:
+            return 0
+
+    def __repr__(self):
+        if HAS_PSUTIL:
+            return f"<Snapshot '{self.label}': RSS={self.rss:.1f}MB, Python≈{self.python_memory:.1f}MB>"
+        return f"<Snapshot '{self.label}': Python≈{self.python_memory:.1f}MB>"
+
+
+class MemoryProfiler:
+    """内存分析器"""
+    
+    def __init__(self, auto_gc: bool = True):
+        self.auto_gc = auto_gc
+        self.snapshots: List[MemorySnapshot] = []
+        self._baseline_rss = 0
+        self._baseline_python = 0
+        
+    def start(self):
+        """开始监控"""
+        if self.auto_gc:
+            gc.collect()
+        snapshot = MemorySnapshot("baseline")
+        self.snapshots.append(snapshot)
+        self._baseline_rss = snapshot.rss
+        self._baseline_python = snapshot.python_memory
+        print(f"[MemoryProfiler] 启动监控 - {snapshot}")
+        
+    def snapshot(self, label: str) -> MemorySnapshot:
+        """记录一次快照"""
+        if self.auto_gc:
+            gc.collect()
+        snapshot = MemorySnapshot(label)
+        self.snapshots.append(snapshot)
+        
+        # 计算增量
+        if self.snapshots:
+            prev = self.snapshots[-2] if len(self.snapshots) > 1 else self.snapshots[0]
+            delta_rss = snapshot.rss - prev.rss
+            delta_python = snapshot.python_memory - prev.python_memory
+            
+            print(f"[MemoryProfiler] {label}: RSS {'+' if delta_rss >= 0 else ''}{delta_rss:.1f}MB "
+                  f"(累计: {'+' if snapshot.rss - self._baseline_rss >= 0 else ''}{snapshot.rss - self._baseline_rss:.1f}MB)")
+        
+        return snapshot
+    
+    def report(self) -> str:
+        """生成内存报告"""
+        lines = ["=" * 60, "内存分析报告", "=" * 60]
+        
+        if not self.snapshots:
+            lines.append("无快照数据")
+            return "\n".join(lines)
+        
+        # 基础信息
+        if HAS_PSUTIL:
+            baseline = self.snapshots[0]
+            final = self.snapshots[-1]
+            lines.append(f"起始 RSS: {baseline.rss:.1f} MB")
+            lines.append(f"最终 RSS: {final.rss:.1f} MB")
+            lines.append(f"增长: {'+' if final.rss > baseline.rss else ''}{final.rss - baseline.rss:.1f} MB")
+            lines.append(f"峰值 RSS: {max(s.rss for s in self.snapshots):.1f} MB")
+            lines.append("")
+        
+        # 快照时间线
+        lines.append("时间线:")
+        for i, snap in enumerate(self.snapshots):
+            if i == 0:
+                lines.append(f"  [{i}] {snap.label}: RSS={snap.rss:.1f}MB")
+            else:
+                delta = snap.rss - self.snapshots[i-1].rss
+                total_delta = snap.rss - self._baseline_rss
+                lines.append(f"  [{i}] {snap.label}: RSS={snap.rss:.1f}MB (Δ={'+' if delta >= 0 else ''}{delta:.1f}MB, 累计={'+' if total_delta >= 0 else ''}{total_delta:.1f}MB)")
+        
+        lines.append("")
+        
+        # 检测泄漏趋势
+        if len(self.snapshots) >= 3:
+            # 计算每步平均增长
+            total_growth = self.snapshots[-1].rss - self._baseline_rss
+            steps = len(self.snapshots) - 1
+            avg_growth = total_growth / steps if steps > 0 else 0
+            
+            lines.append(f"平均每步增长: {'+' if avg_growth >= 0 else ''}{avg_growth:.1f} MB")
+            
+            if avg_growth > 5:
+                lines.append("⚠️ 检测到显著内存增长趋势，可能存在内存泄漏")
+            elif avg_growth > 2:
+                lines.append("⚡ 检测到中等内存增长，建议关注")
+        
+        lines.append("=" * 60)
+        return "\n".join(lines)
+    
+    def detect_leaks(self, threshold_mb: float = 10) -> List[str]:
+        """检测可疑的内存泄漏点"""
+        leaks = []
+        
+        if len(self.snapshots) < 2:
+            return leaks
+        
+        # 检查整体增长
+        final = self.snapshots[-1]
+        baseline = self.snapshots[0]
+        total_growth = final.rss - baseline.rss
+        
+        if total_growth > threshold_mb:
+            leaks.append(f"整体内存增长 {total_growth:.1f}MB，超过阈值 {threshold_mb}MB")
+        
+        # 检查可疑的突增
+        for i in range(1, len(self.snapshots)):
+            delta = self.snapshots[i].rss - self.snapshots[i-1].rss
+            if delta > threshold_mb:
+                leaks.append(f"步骤 [{i}] {self.snapshots[i].label}: 突增 {delta:.1f}MB")
+        
+        return leaks
+
+
+def profile_memory(label: str = None):
+    """装饰器：自动分析函数内存使用"""
+    def decorator(func: Callable) -> Callable:
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            func_name = label or func.__name__
+            
+            # 调用前快照
+            gc.collect()
+            before = psutil.Process().memory_info().rss / 1024 / 1024 if HAS_PSUTIL else 0
+            
+            try:
+                result = func(*args, **kwargs)
+                return result
+            finally:
+                # 调用后快照
+                gc.collect()
+                after = psutil.Process().memory_info().rss / 1024 / 1024 if HAS_PSUTIL else 0
+                delta = after - before
+                print(f"[MemoryProfile] {func_name}: {'+' if delta >= 0 else ''}{delta:.1f}MB "
+                      f"({before:.1f} -> {after:.1f}MB)")
+        
+        return wrapper
+    return decorator
+
+
+def analyze_qobject_leaks():
+    """分析 QObject/PyQt 泄漏"""
+    gc.collect()
+    
+    print("\n" + "=" * 60)
+    print("QObject 泄漏分析")
+    print("=" * 60)
+    
+    try:
+        from PyQt5.QtWidgets import QApplication
+        from PyQt5.QtCore import QObject
+        
+        app = QApplication.instance()
+        if app is None:
+            print("QApplication 未初始化，跳过分析")
+            return
+        
+        # 统计顶级窗口
+        print(f"顶级窗口数: {len(app.topLevelWidgets())}")
+        
+        # 统计特定类型对象
+        from app.widgets.message_card import MessageCard, CodeWebViewer
+        
+        cards = [obj for obj in gc.get_objects() if isinstance(obj, MessageCard)]
+        viewers = [obj for obj in gc.get_objects() if isinstance(obj, CodeWebViewer)]
+        
+        print(f"MessageCard 实例数: {len(cards)}")
+        print(f"CodeWebViewer 实例数: {len(viewers)}")
+        
+        if len(cards) > 100:
+            print(f"⚠️ MessageCard 实例过多 ({len(cards)})，可能存在泄漏！")
+        if len(viewers) > 200:
+            print(f"⚠️ CodeWebViewer 实例过多 ({len(viewers)})，可能存在泄漏！")
+        
+        # 检查孤立对象（没有父对象的 MessageCard）
+        orphaned_cards = [c for c in cards if c.parent() is None]
+        if orphaned_cards:
+            print(f"孤立 MessageCard: {len(orphaned_cards)}")
+            
+    except ImportError as e:
+        print(f"无法导入 PyQt5: {e}")
+
+
+def find_large_objects(threshold_kb: int = 500):
+    """查找大型 Python 对象"""
+    gc.collect()
+    
+    print("\n" + "=" * 60)
+    print(f"查找大型对象 (>{threshold_kb}KB)")
+    print("=" * 60)
+    
+    large_objects = []
+    
+    for obj in gc.get_objects():
+        try:
+            size = sys.getsizeof(obj)
+            if size > threshold_kb * 1024:
+                obj_type = type(obj).__name__
+                large_objects.append((obj_type, size, repr(obj)[:100]))
+        except (TypeError, RuntimeError):
+            pass
+    
+    # 按大小排序
+    large_objects.sort(key=lambda x: x[1], reverse=True)
+    
+    print(f"找到 {len(large_objects)} 个大型对象:")
+    for obj_type, size, repr_str in large_objects[:20]:
+        size_kb = size / 1024
+        print(f"  {obj_type}: {size_kb:.1f}KB - {repr_str}")
+
+
+def check_circular_refs():
+    """检查循环引用"""
+    gc.collect()
+    
+    print("\n" + "=" * 60)
+    print("循环引用分析")
+    print("=" * 60)
+    
+    # 获取有循环引用的对象
+    gc.collect()
+    referrers = gc.get_referrers
+    gc.set_debug(gc.DEBUG_SAVEALL)
+    
+    # 简单检查：看是否有无法回收的对象
+    before = len(gc.garbage)
+    gc.collect()
+    after = len(gc.garbage)
+    
+    if after > before:
+        print(f"发现 {after - before} 个无法回收的对象（可能在 gc.garbage 中）")
+        for obj in gc.garbage[:10]:
+            print(f"  {type(obj).__name__}: {repr(obj)[:80]}")
+    else:
+        print("未发现明显的循环引用问题")
+
+
+# 全局分析器实例
+_global_profiler: Optional[MemoryProfiler] = None
+
+
+def get_profiler() -> MemoryProfiler:
+    """获取全局分析器"""
+    global _global_profiler
+    if _global_profiler is None:
+        _global_profiler = MemoryProfiler()
+    return _global_profiler
+
+
+def print_memory_status(label: str = ""):
+    """打印当前内存状态（便捷函数）"""
+    if not HAS_PSUTIL:
+        print(f"[Memory] {label}: psutil 不可用")
+        return
+    
+    gc.collect()
+    process = psutil.Process()
+    mem = process.memory_info()
+    
+    print(f"[Memory] {label}: RSS={mem.rss/1024/1024:.1f}MB, "
+          f"VMS={mem.vms/1024/1024:.1f}MB")
+
+
+if __name__ == "__main__":
+    # 独立运行诊断
+    print("=" * 60)
+    print("DriFox 内存泄漏诊断")
+    print("=" * 60)
+    
+    print_memory_status("初始状态")
+    
+    analyze_qobject_leaks()
+    find_large_objects()
+    check_circular_refs()
+    
+    profiler = get_profiler()
+    profiler.start()
+    
+    print("\n提示：在应用程序中使用 MemoryProfiler 记录关键操作的内存快照")
+    print("示例:")
+    print("""
+    from app.debug_memory import get_profiler
+    
+    profiler = get_profiler()
+    profiler.start()
+    
+    # ... 执行操作 ...
+    
+    profiler.snapshot("发送消息后")
+    profiler.snapshot("接收回复后")
+    
+    # 打印报告
+    print(profiler.report())
+    """)

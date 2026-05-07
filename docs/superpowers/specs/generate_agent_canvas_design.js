@@ -1,0 +1,706 @@
+const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, 
+        HeadingLevel, AlignmentType, WidthType, BorderStyle, 
+        PageBreak, VerticalAlign, ShadingType, TableLayoutType,
+        ImageRun } = require('docx');
+const fs = require('fs');
+
+// 颜色定义
+const colors = {
+    green: "C8E6C9",
+    blue: "BBDEFB", 
+    yellow: "FFF9C4",
+    header: "1565C0",
+    lightGray: "F5F5F5",
+    darkGray: "424242",
+    white: "FFFFFF"
+};
+
+// 读取图片并转为 base64
+function getImageBase64(imagePath) {
+    const imageBuffer = fs.readFileSync(imagePath);
+    return imageBuffer.toString('base64');
+}
+
+// 颜色 hex 转 rgb
+function hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16)
+    } : null;
+}
+
+// 创建表头单元格
+function headerCell(text, width = null) {
+    const cellProps = {
+        children: [new Paragraph({ 
+            children: [new TextRun({ text, bold: true, size: 22, font: "Microsoft YaHei" })],
+            alignment: AlignmentType.CENTER 
+        })],
+        shading: { fill: colors.header, type: ShadingType.CLEAR },
+        verticalAlign: VerticalAlign.CENTER
+    };
+    if (width) {
+        cellProps.width = { size: width, type: WidthType.PERCENTAGE };
+    }
+    return new TableCell(cellProps);
+}
+
+// 创建数据单元格
+function dataCell(text, width = null) {
+    const cellProps = {
+        children: [new Paragraph({ 
+            children: [new TextRun({ text, size: 22, font: "Microsoft YaHei" })],
+            alignment: AlignmentType.LEFT 
+        })],
+        verticalAlign: VerticalAlign.CENTER
+    };
+    if (width) {
+        cellProps.width = { size: width, type: WidthType.PERCENTAGE };
+    }
+    return new TableCell(cellProps);
+}
+
+// 创建通用表格（带表头行）
+function createTable(headers, rows, colWidths = null) {
+    const headerRow = new TableRow({
+        tableHeader: true,
+        children: headers.map((h, i) => headerCell(h, colWidths ? colWidths[i] : null))
+    });
+    const dataRows = rows.map(row => 
+        new TableRow({
+            children: row.map((cell, i) => dataCell(cell, colWidths ? colWidths[i] : null))
+        })
+    );
+    return new Table({
+        width: { size: 100, type: WidthType.PERCENTAGE },
+        layout: TableLayoutType.FIXED,
+        rows: [headerRow, ...dataRows]
+    });
+}
+
+// 流程图示表格
+function createFlowTable(title, bgColor, steps) {
+    return new Table({
+        width: { size: 100, type: WidthType.PERCENTAGE },
+        layout: TableLayoutType.FIXED,
+        rows: [
+            new TableRow({
+                children: [
+                    new TableCell({
+                        children: [new Paragraph({ children: [new TextRun({ text: title, bold: true, size: 24, font: "Microsoft YaHei" })], alignment: AlignmentType.CENTER })],
+                        shading: { fill: bgColor, type: ShadingType.CLEAR },
+                        width: { size: 20, type: WidthType.PERCENTAGE }
+                    }),
+                    new TableCell({
+                        children: [new Paragraph({ children: [new TextRun({ text: steps, size: 22, font: "Microsoft YaHei" })], alignment: AlignmentType.CENTER })],
+                        width: { size: 80, type: WidthType.PERCENTAGE }
+                    })
+                ]
+            })
+        ]
+    });
+}
+
+// 对话示例表格
+function createDialogTable(dialogs) {
+    return new Table({
+        width: { size: 100, type: WidthType.PERCENTAGE },
+        layout: TableLayoutType.FIXED,
+        rows: dialogs.map(([speaker, text]) => 
+            new TableRow({
+                children: [
+                    new TableCell({ 
+                        children: [new Paragraph({ children: [new TextRun({ text: speaker, bold: true, size: 22, color: speaker === "用户" ? "1976D2" : "388E3C", font: "Microsoft YaHei" })] })],
+                        width: { size: 20, type: WidthType.PERCENTAGE },
+                        shading: { fill: speaker === "用户" ? "E3F2FD" : "E8F5E9", type: ShadingType.CLEAR }
+                    }),
+                    new TableCell({ 
+                        children: [new Paragraph({ children: [new TextRun({ text, size: 22, font: "Microsoft YaHei" })] })],
+                        width: { size: 80, type: WidthType.PERCENTAGE }
+                    })
+                ]
+            })
+        )
+    });
+}
+
+// 代码块
+function createCode(code) {
+    return new Paragraph({
+        children: [new TextRun({ text: code, size: 20, font: "Consolas" })],
+        shading: { fill: colors.lightGray, type: ShadingType.CLEAR },
+        indent: { left: 360 },
+        spacing: { after: 200 }
+    });
+}
+
+// 普通段落
+function p(text, bold = false, size = 24) {
+    return new Paragraph({
+        children: [new TextRun({ text, size, bold, font: "Microsoft YaHei" })],
+        spacing: { after: 120 }
+    });
+}
+
+// 项目符号
+function bullet(text) {
+    return new Paragraph({
+        children: [
+            new TextRun({ text: "● ", size: 24, bold: true, color: "1976D2", font: "Microsoft YaHei" }),
+            new TextRun({ text, size: 24, font: "Microsoft YaHei" })
+        ],
+        indent: { left: 360 },
+        spacing: { after: 80 }
+    });
+}
+
+// 目录项
+function tocItem(text, page) {
+    const dots = "．".repeat(Math.max(5, 25 - Math.floor(text.length / 2)));
+    return new Paragraph({
+        children: [
+            new TextRun({ text, size: 24, font: "Microsoft YaHei" }),
+            new TextRun({ text: "  " + dots + "  " + page, size: 24, color: "888888", font: "Microsoft YaHei" })
+        ],
+        spacing: { after: 120 }
+    });
+}
+
+// 图片段落（居中）
+function imageParagraph(imagePath, widthCm = 16) {
+    const imageBuffer = fs.readFileSync(imagePath);
+    const base64 = imageBuffer.toString('base64');
+    
+    // 计算高度保持比例 (假设原图比例约 16:9)
+    const widthEmu = Math.round(widthCm * 360000);
+    const heightEmu = Math.round(widthEmu * 9 / 16);
+    
+    return new Paragraph({
+        children: [
+            new ImageRun({
+                data: imageBuffer,
+                transformation: {
+                    width: Math.round(widthEmu / 914400),  // 转换为英寸
+                    height: Math.round(heightEmu / 914400)
+                },
+                type: "png"
+            })
+        ],
+        alignment: AlignmentType.CENTER,
+        spacing: { before: 200, after: 200 }
+    });
+}
+
+// ===== 加载图片 =====
+const imagePath = "D:/work/DriFox/docs/superpowers/specs/流程图参考.png";
+const imageBuffer = fs.readFileSync(imagePath);
+
+const doc = new Document({
+    styles: {
+        default: {
+            document: {
+                run: { font: "Microsoft YaHei", size: 24 }
+            }
+        }
+    },
+    sections: [{
+        properties: {
+            page: {
+                size: { width: 11906, height: 16838 },
+                margin: { top: 1134, right: 1134, bottom: 1134, left: 1418 }
+            }
+        },
+        children: [
+            // ===== 封面 =====
+            new Paragraph({ spacing: { before: 2500 } }),
+            new Paragraph({
+                children: [new TextRun({ text: "智能体画布系统", bold: true, size: 72, color: "1565C0", font: "Microsoft YaHei" })],
+                alignment: AlignmentType.CENTER, spacing: { after: 200 }
+            }),
+            new Paragraph({
+                children: [new TextRun({ text: "设计方案", bold: true, size: 72, color: "1565C0", font: "Microsoft YaHei" })],
+                alignment: AlignmentType.CENTER, spacing: { after: 400 }
+            }),
+            new Paragraph({
+                children: [new TextRun({ text: "—— 基于规则引擎模型的自动创建平台", size: 32, color: "666666", font: "Microsoft YaHei" })],
+                alignment: AlignmentType.CENTER, spacing: { after: 600 }
+            }),
+            new Paragraph({
+                children: [new TextRun({ text: "设计理念参考 Dify，聚焦工业领域知识驱动型规则建模", size: 24, color: "888888", font: "Microsoft YaHei" })],
+                alignment: AlignmentType.CENTER
+            }),
+            new Paragraph({ children: [new PageBreak()] }),
+
+            // ===== 目录 =====
+            p("目  录", true, 40),
+            new Paragraph({ spacing: { after: 300 } }),
+            tocItem("1. 项目概述", 3),
+            tocItem("2. 设计理念", 4),
+            tocItem("3. 参考原型", 5),
+            tocItem("4. 系统架构", 6),
+            tocItem("5. 智能体设计", 7),
+            tocItem("6. 核心流程设计", 9),
+            tocItem("7. 三大模块对比", 11),
+            tocItem("8. 知识库设计", 12),
+            tocItem("9. 画布设计", 13),
+            tocItem("10. 输出规范", 14),
+            tocItem("11. 技术实现要点", 15),
+            new Paragraph({ children: [new PageBreak()] }),
+
+            // ===== 1. 项目概述 =====
+            p("1. 项目概述", true, 40),
+            p("1.1 项目背景", true, 32),
+            p("传统规则引擎模型的创建需要专业知识人员手工编写，工作量大、周期长。本系统旨在通过多智能体协作，结合领域知识库，实现规则引擎模型的自动创建、优化和参数推荐。"),
+            p("1.2 核心问题", true, 32),
+            bullet("知识驱动：依赖领域知识+机理描述，而非纯算法"),
+            bullet("人在回路：保证工业场景的安全性与准确性"),
+            bullet("闭环管理：从定性逻辑（新建）到定量微调（参数推荐）的完整流程"),
+            p("1.3 设计目标", true, 32),
+            bullet("零代码创建规则引擎模型"),
+            bullet("多智能体协作分工"),
+            bullet("多轮对话式模型调整（Human-in-the-loop）"),
+            bullet("可视化画布编排智能体工作流"),
+            bullet("输出规则+阈值格式的完整模型"),
+            new Paragraph({ children: [new PageBreak()] }),
+
+            // ===== 2. 设计理念 =====
+            p("2. 设计理念", true, 40),
+            p("2.1 设计原则", true, 32),
+            bullet("知识驱动型：每个流程都强调知识检索的重要性"),
+            bullet("人机协作：用户始终参与决策，而非纯自动化"),
+            bullet("渐进式深化：从粗略规则到精细参数的递进优化"),
+            bullet("可视化编排：类 Dify 的画布式智能体编排"),
+            p("2.2 视觉语言", true, 32),
+            createTable(
+                ["颜色", "含义", "对应模块"],
+                [
+                    ["绿色", "从零开始构建", "新建模型"],
+                    ["蓝色", "迭代和完善", "模型优化"],
+                    ["黄色", "数值微调", "参数推荐"]
+                ],
+                [20, 40, 40]
+            ),
+            new Paragraph({ spacing: { after: 200 } }),
+            p("2.3 形状语义", true, 32),
+            createTable(
+                ["形状", "含义"],
+                [
+                    ["椭圆", "开始/结束节点，标志流程边界"],
+                    ["矩形框", "静态信息输入源（如知识库、描述）"],
+                    ["圆柱体", "数据库/知识检索操作"],
+                    ["圆角矩形", "处理步骤或系统输出"],
+                    ["大方框", "多轮对话调整子环境"],
+                    ["小人图标", "用户参与（人在回路）"]
+                ],
+                [30, 70]
+            ),
+            new Paragraph({ children: [new PageBreak()] }),
+
+            // ===== 3. 参考原型 =====
+            p("3. 参考原型", true, 40),
+            p("3.1 原型图来源", true, 32),
+            p("以下原型图展示了系统的核心业务流程设计，作为本方案的参考依据："),
+            new Paragraph({ spacing: { after: 200 } }),
+            
+            // 插入图片
+            new Paragraph({
+                children: [
+                    new ImageRun({
+                        data: imageBuffer,
+                        transformation: {
+                            width: 580,  // 约6英寸宽
+                            height: 327  // 约3.4英寸高 (保持16:9比例)
+                        },
+                        type: "png"
+                    })
+                ],
+                alignment: AlignmentType.CENTER,
+                spacing: { before: 200, after: 200 }
+            }),
+            
+            new Paragraph({ spacing: { after: 100 } }),
+            new Paragraph({
+                children: [new TextRun({ text: "图3-1：三大核心业务流程原型", size: 20, color: "666666", font: "Microsoft YaHei", italics: true })],
+                alignment: AlignmentType.CENTER,
+                spacing: { after: 300 }
+            }),
+            
+            p("3.2 原型解读", true, 32),
+            p("该原型定义了三个核心业务流程，形成完整的知识驱动建模闭环："),
+            bullet("新建模型（绿色）：从零开始构建规则模型，强调领域知识检索"),
+            bullet("模型优化（蓝色）：对已有模型迭代完善，侧重逻辑纠偏"),
+            bullet("参数推荐（黄色）：微调具体阈值参数，锁定最优运行值"),
+            p("三个流程共享相同的架构模式：开始 → 问题描述 → 知识检索 → 多轮对话调整 → 模型入库 → 结束"),
+            new Paragraph({ children: [new PageBreak()] }),
+
+            // ===== 4. 系统架构 =====
+            p("4. 系统架构", true, 40),
+            p("4.1 整体架构", true, 32),
+            p("系统采用多层协作架构："),
+            bullet("画布层：可视化编排界面，支持拖拽式智能体配置"),
+            bullet("编排层：工作流引擎，负责智能体调度和数据流转"),
+            bullet("智能体层：各类专业智能体，承担独立任务"),
+            bullet("知识层：领域知识库和模型知识库"),
+            bullet("模型层：规则引擎模型存储和管理"),
+            p("4.2 核心模块", true, 32),
+            createTable(
+                ["模块", "功能"],
+                [
+                    ["智能体管理模块", "管理和配置各类智能体"],
+                    ["工作流编排模块", "定义和执行智能体工作流"],
+                    ["知识库管理模块", "维护领域知识和模型知识"],
+                    ["画布编辑模块", "可视化编排界面"],
+                    ["模型存储模块", "存储和管理规则引擎模型"],
+                    ["对话管理模块", "处理多轮对话交互"]
+                ],
+                [35, 65]
+            ),
+            new Paragraph({ children: [new PageBreak()] }),
+
+            // ===== 5. 智能体设计 =====
+            p("5. 智能体设计", true, 40),
+            p("5.1 智能体类型总览", true, 32),
+            createTable(
+                ["智能体", "英文名", "职责"],
+                [
+                    ["问题分析智能体", "Problem Analysis Agent", "解析问题描述"],
+                    ["知识检索智能体", "Knowledge Retrieval Agent", "检索相关知识"],
+                    ["规则生成智能体", "Rule Generation Agent", "生成规则模型"],
+                    ["模型评价智能体", "Model Evaluation Agent", "评价和推荐"],
+                    ["对话调整智能体", "Dialog Adjustment Agent", "多轮对话调整"],
+                    ["参数推荐智能体", "Parameter Recommendation Agent", "推荐参数"]
+                ],
+                [25, 30, 45]
+            ),
+            new Paragraph({ spacing: { after: 200 } }),
+            p("5.2 问题分析智能体", true, 32),
+            p("【职责】解析用户输入的问题描述，提取结构化信息"),
+            p("【输入】用户原始问题描述（如：轴承温度过高）"),
+            p("【输出】结构化问题描述"),
+            createTable(
+                ["字段", "说明", "示例"],
+                [
+                    ["机理等级", "故障严重程度", "严重故障"],
+                    ["机理现象", "可观测的异常", "轴承温度过高"],
+                    ["机理原因", "故障根本原因", "轴承磨损角度"],
+                    ["机理措施", "处理建议（优化/参数模块）", "检查油位、更换润滑油"],
+                    ["模型参数", "相关阈值（优化/参数模块）", "判断阈值"]
+                ],
+                [20, 40, 40]
+            ),
+            new Paragraph({ spacing: { after: 200 } }),
+            p("5.3 知识检索智能体", true, 32),
+            p("【职责】从知识库中检索相关信息"),
+            p("【核心能力】"),
+            bullet("三向聚合：将用户问题与领域知识、模型知识进行匹配计算"),
+            bullet("向量检索：基于语义相似度检索"),
+            bullet("关联扩展：基于种子知识扩展相关知识"),
+            p("5.4 规则生成智能体（新建模型）", true, 32),
+            p("【职责】根据问题和知识生成初始规则模型"),
+            p("【输出内容】"),
+            createTable(
+                ["输出项", "说明"],
+                [
+                    ["逻辑说明", "规则的业务逻辑解释"],
+                    ["测点选择", "规则涉及的监测点位"],
+                    ["模型应用", "规则的适用范围和使用方式"]
+                ],
+                [30, 70]
+            ),
+            new Paragraph({ spacing: { after: 200 } }),
+            p("5.5 模型评价智能体（模型优化）", true, 32),
+            p("【职责】对已有模型进行评价和优化建议"),
+            p("【输出内容】"),
+            createTable(
+                ["输出项", "说明"],
+                [
+                    ["逻辑推荐", "最优规则逻辑建议"],
+                    ["测点推荐", "最优测点组合建议"],
+                    ["相关模型", "相似场景的参考模型"],
+                    ["模型逻辑", "现有逻辑的优化方向"],
+                    ["模型阈值", "当前阈值的问题分析"]
+                ],
+                [25, 75]
+            ),
+            new Paragraph({ spacing: { after: 200 } }),
+            p("5.6 参数推荐智能体（参数推荐）", true, 32),
+            p("【职责】推荐最优的模型参数阈值"),
+            p("【输出内容】"),
+            createTable(
+                ["输出项", "说明"],
+                [
+                    ["参数推荐", "最优的阈值数值"],
+                    ["置信区间", "参数的合理范围"],
+                    ["权重系数", "多条件组合时的权重"]
+                ],
+                [30, 70]
+            ),
+            new Paragraph({ spacing: { after: 200 } }),
+            p("5.7 对话调整智能体", true, 32),
+            p("【职责】与用户多轮对话，完成模型调整（人在回路）"),
+            p("【交互模式】"),
+            bullet("接收用户追问和修正意见"),
+            bullet("解释当前模型逻辑"),
+            bullet("根据反馈调整规则和参数"),
+            bullet("输出迭代后的模型版本"),
+            new Paragraph({ children: [new PageBreak()] }),
+
+            // ===== 6. 核心流程设计 =====
+            p("6. 核心流程设计", true, 40),
+            p("6.1 新建模型流程（绿色模块）", true, 32),
+            createFlowTable("新建模型", colors.green, "开始 → 问题描述 → 知识检索 → 多轮对话调整 → 模型入库 → 结束"),
+            new Paragraph({ spacing: { after: 150 } }),
+            p("【设计说明】"),
+            bullet("定位：从零开始构建新模型"),
+            bullet("输入复杂度：较低，侧重基础现象描述"),
+            bullet("检索深度：基础规则与手册知识"),
+            bullet("对话输出物：规则（逻辑说明、测点选择、模型应用）"),
+            bullet("人机交互点：用户直接调整规则结构"),
+            bullet("核心特征：从抽象机理到具体规则的转换过程"),
+            new Paragraph({ spacing: { after: 300 } }),
+            p("6.2 模型优化流程（蓝色模块）", true, 32),
+            createFlowTable("模型优化", colors.blue, "开始 → 问题描述 → 知识检索 → 多轮对话调整 → 模型入库 → 结束"),
+            new Paragraph({ spacing: { after: 150 } }),
+            p("【设计说明】"),
+            bullet("定位：对已有模型进行迭代完善"),
+            bullet("输入复杂度：极高，包含措施与阈值背景"),
+            bullet("检索深度：包含现有模型逻辑与阈值的检索"),
+            bullet("对话输出物：评价（逻辑推荐、测点推荐、相关模型）"),
+            bullet("人机交互点：通过问答形式引导模型向更精准方向演进"),
+            bullet("核心特征：侧重于纠偏和补完，引入更丰富的关联模型对比"),
+            new Paragraph({ spacing: { after: 300 } }),
+            p("6.3 参数推荐流程（黄色模块）", true, 32),
+            createFlowTable("参数推荐", colors.yellow, "开始 → 问题描述 → 知识检索 → 多轮对话调整 → 模型入库 → 结束"),
+            new Paragraph({ spacing: { after: 150 } }),
+            p("【设计说明】"),
+            bullet("定位：模型具体数值的微调"),
+            bullet("输入复杂度：与优化模块一致，具备详尽的措施和参数背景"),
+            bullet("检索深度：包含现有模型逻辑与阈值"),
+            bullet("对话输出物：仅针对参数"),
+            bullet("人机交互点：通过问答模式确认参数的合理性"),
+            bullet("核心特征：目标极其明确，寻找最合适的数值阈值，不改变模型逻辑"),
+            new Paragraph({ children: [new PageBreak()] }),
+
+            // ===== 7. 三大模块对比 =====
+            p("7. 三大模块对比", true, 40),
+            createTable(
+                ["维度", "新建模型", "模型优化", "参数推荐"],
+                [
+                    ["颜色", "绿色", "蓝色", "黄色"],
+                    ["输入复杂度", "较低", "极高", "极高"],
+                    ["检索深度", "基础规则", "模型逻辑+阈值", "模型逻辑+阈值"],
+                    ["对话输出", "规则", "评价", "参数"],
+                    ["人机交互", "调整规则结构", "问答完善", "确认数值"],
+                    ["核心目标", "从无到有", "纠偏补完", "锁定最优值"]
+                ],
+                [20, 25, 30, 25]
+            ),
+            new Paragraph({ spacing: { after: 200 } }),
+            p("7.1 颜色语义", true, 32),
+            bullet("绿色（新建模型）：代表从零开始构建一个新模型的流程"),
+            bullet("蓝色（模型优化）：代表对已有模型进行迭代和完善的流程"),
+            bullet("黄色（参数推荐）：侧重于模型具体数值的微调与推荐"),
+            p("7.2 渐进式深化", true, 32),
+            p("三个模块体现了从定性逻辑到定量微调的完整管理闭环："),
+            bullet("第一阶段（新建）：解决「有没有」的问题，建立基础规则"),
+            bullet("第二阶段（优化）：解决「对不对」的问题，完善逻辑准确性"),
+            bullet("第三阶段（参数）：解决「优不优」的问题，锁定最优运行值"),
+            new Paragraph({ children: [new PageBreak()] }),
+
+            // ===== 8. 知识库设计 =====
+            p("8. 知识库设计", true, 40),
+            p("8.1 领域知识库", true, 32),
+            p("【定位】提供外部知识支撑"),
+            createTable(
+                ["知识类型", "内容示例", "来源"],
+                [
+                    ["操作规程", "设备启停操作步骤、安全注意事项", "运维手册"],
+                    ["运行规程", "正常运行参数范围、巡检标准", "运行规范"],
+                    ["定值手册", "测点统一编码、告警阈值标准", "测点清单"],
+                    ["设备说明书", "设备型号规格、故障代码说明", "厂家资料"]
+                ],
+                [25, 40, 35]
+            ),
+            new Paragraph({ spacing: { after: 200 } }),
+            p("8.2 模型知识库", true, 32),
+            p("【定位】提供模型相关的参考知识"),
+            createTable(
+                ["知识类型", "内容示例", "用途"],
+                [
+                    ["模型库", "已建模型模板、典型场景模型", "模型复用"],
+                    ["案例库", "历史故障案例、解决方案", "经验参考"],
+                    ["模型图元", "规则图形表示、节点类型定义", "可视化"],
+                    ["函数规则", "规则函数定义、计算公式", "规则执行"],
+                    ["模型逻辑", "规则判断逻辑、条件组合", "逻辑审查"],
+                    ["模型阈值", "历史阈值数据、调参经验", "参数优化"]
+                ],
+                [20, 40, 40]
+            ),
+            new Paragraph({ spacing: { after: 200 } }),
+            p("8.3 知识检索策略", true, 32),
+            bullet("三向聚合检索：同时检索领域知识和模型知识"),
+            bullet("向量检索：基于 Embedding 向量相似度检索"),
+            bullet("混合检索：结合语义检索和关键词检索"),
+            new Paragraph({ children: [new PageBreak()] }),
+
+            // ===== 9. 画布设计 =====
+            p("9. 画布设计", true, 40),
+            p("9.1 画布功能", true, 32),
+            bullet("拖拽编排：支持拖拽智能体到画布上"),
+            bullet("连线配置：支持拖拽连接线定义数据流向"),
+            bullet("属性配置：支持配置智能体的输入输出参数"),
+            bullet("预览执行：支持实时预览流程执行结果"),
+            bullet("版本管理：支持保存和加载不同版本的画布配置"),
+            p("9.2 画布节点类型", true, 32),
+            createTable(
+                ["节点类型", "形状", "说明"],
+                [
+                    ["开始/结束节点", "椭圆", "流程起点/终点"],
+                    ["智能体节点", "矩形", "执行智能体任务"],
+                    ["知识库节点", "圆柱形", "表示知识库"],
+                    ["用户节点", "小人图标", "表示用户参与"],
+                    ["处理节点", "圆角矩形", "数据处理"],
+                    ["对话容器", "大方框", "多轮对话区域"]
+                ],
+                [25, 20, 55]
+            ),
+            new Paragraph({ spacing: { after: 200 } }),
+            p("9.3 画布布局建议", true, 32),
+            p("采用从左到右的流程布局："),
+            bullet("最左侧：开始节点和用户输入节点"),
+            bullet("中间区域：处理节点（智能体）和数据节点（知识库）"),
+            bullet("多轮对话区：大方框包围，包含规则输出和规则调整"),
+            bullet("最右侧：输出节点和结束节点"),
+            p("9.4 特殊设计：多轮对话容器", true, 32),
+            p("【设计说明】"),
+            bullet("外观：大方框包围，包含规则输出（左侧）和规则调整（右侧）"),
+            bullet("用户参与：Actor 角色位于容器上方，代表用户在回路中的位置"),
+            bullet("双向交互：用户可以追问，系统输出调整建议，双方迭代沟通"),
+            new Paragraph({ children: [new PageBreak()] }),
+
+            // ===== 10. 输出规范 =====
+            p("10. 输出规范", true, 40),
+            p("10.1 模型输出格式", true, 32),
+            p("每个生成的规则引擎模型应包含以下内容："),
+            p("10.1.1 规则定义", true, 28),
+            createCode(`{
+  "rule_id": "R001",
+  "rule_name": "轴承温度过高告警",
+  "description": "当轴承温度超过阈值时触发告警",
+  "logic_type": "新建模型",
+  "conditions": [
+    {"field": "bearing_temp", "operator": ">", "value": 80, "unit": "℃"},
+    {"field": "duration", "operator": ">=", "value": 300, "unit": "秒"}
+  ],
+  "condition_logic": "AND"
+}`),
+            p("10.1.2 阈值参数", true, 28),
+            createCode(`{
+  "parameters": {
+    "warning_threshold": 75,
+    "critical_threshold": 85,
+    "hysteresis": 5,
+    "confidence_interval": [0.95, 0.98],
+    "weight_coefficient": 0.8
+  },
+  "optimization_info": {
+    "source": "参数推荐",
+    "based_on_history": true,
+    "reference_models": ["R-2023-015", "R-2023-022"]
+  }
+}`),
+            p("10.2 模型元数据", true, 32),
+            createTable(
+                ["元数据字段", "说明"],
+                [
+                    ["模型ID", "唯一标识符"],
+                    ["模型名称", "规则引擎模型的名称"],
+                    ["版本号", "模型的版本，用于追踪变更"],
+                    ["创建时间", "模型的创建时间戳"],
+                    ["创建者", "模型创建者信息"],
+                    ["适用场景", "模型适用的业务场景描述"],
+                    ["依赖模型", "模型依赖的其他模型列表"],
+                    ["流程类型", "新建模型/模型优化/参数推荐"]
+                ],
+                [30, 70]
+            ),
+            new Paragraph({ children: [new PageBreak()] }),
+
+            // ===== 11. 技术实现要点 =====
+            p("11. 技术实现要点", true, 40),
+            p("11.1 多智能体协作机制", true, 32),
+            bullet("消息队列：采用消息队列实现智能体间通信"),
+            bullet("标准化接口：定义标准化的消息格式和数据结构"),
+            bullet("协作模式：支持同步和异步两种协作模式"),
+            bullet("状态管理：实现智能体状态管理和异常处理"),
+            p("11.2 人在回路（Human-in-the-loop）", true, 32),
+            bullet("对话状态管理：维护多轮对话的上下文状态"),
+            bullet("决策权归属：确保最终决策权在用户手中"),
+            bullet("工业安全：保证工业场景的安全性与准确性"),
+            bullet("可追溯性：记录对话历史和修改轨迹"),
+            p("11.3 知识库集成", true, 32),
+            bullet("向量数据库：支持向量数据库存储和检索"),
+            bullet("动态更新：实现知识的动态更新和扩展"),
+            bullet("领域定制：支持多语言和领域定制"),
+            bullet("质量评估：实现知识质量评估和过滤"),
+            p("11.4 模型验证机制", true, 32),
+            bullet("规则语法验证：确保规则格式正确"),
+            bullet("逻辑一致性验证：确保规则无冲突"),
+            bullet("阈值合理性验证：确保阈值在合理范围"),
+            bullet("模拟运行验证：通过历史数据验证规则效果"),
+            p("11.5 类 Dify 画布实现", true, 32),
+            bullet("前端：React + 流程图库（如 React Flow）"),
+            bullet("状态管理：画布配置与执行状态分离"),
+            bullet("节点定义：统一的节点类型和数据结构"),
+            bullet("持久化：支持画布配置的保存和加载"),
+            new Paragraph({ children: [new PageBreak()] }),
+
+            // ===== 附录 =====
+            p("附录：智能体协作示例", true, 40),
+            p("【场景】轴承温度告警模型完整生命周期", true, 32),
+            p("阶段一：新建模型", true, 28),
+            createDialogTable([
+                ["用户", "新建一个轴承温度过高告警模型"],
+                ["问题分析智能体", "已解析：机理现象=轴承温度过高，请补充机理等级"],
+                ["用户", "机理等级严重故障"],
+                ["问题分析智能体", "已生成结构化描述：机理等级=严重故障，机理现象=轴承温度过高"],
+                ["知识检索智能体", "检索到：领域知识(轴承维护手册)、模型知识(温度告警模板)"],
+                ["规则生成智能体", "生成规则：IF bearing_temp > 85℃ AND duration > 5min THEN alert"],
+                ["用户", "可以，保存模型"]
+            ]),
+            new Paragraph({ spacing: { after: 150 } }),
+            p("阶段二：模型优化", true, 28),
+            createDialogTable([
+                ["用户", "优化轴承温度告警模型，最近误报较多"],
+                ["问题分析智能体", "已记录优化目标：减少误报，优化逻辑准确性"],
+                ["知识检索智能体", "检索到：相似模型(润滑油相关告警)、历史调参经验"],
+                ["模型评价智能体", "建议：增加润滑油状态作为前置条件"],
+                ["用户", "好，加上这个条件"],
+                ["模型评价智能体", "已优化：IF bearing_temp > 80℃ AND lube_oil_normal AND duration > 5min"]
+            ]),
+            new Paragraph({ spacing: { after: 150 } }),
+            p("阶段三：参数推荐", true, 28),
+            createDialogTable([
+                ["用户", "轴承温度阈值需要调整"],
+                ["问题分析智能体", "已记录：调整目标=优化阈值参数"],
+                ["知识检索智能体", "检索到：历史阈值数据、同类设备调参经验"],
+                ["参数推荐智能体", "推荐：预警阈值=75℃，告警阈值=85℃（原为80℃/90℃）"],
+                ["用户", "好，确认参数"],
+                ["参数推荐智能体", "参数已更新，置信区间[0.95, 0.98]"]
+            ]),
+            new Paragraph({ spacing: { before: 600 } }),
+            new Paragraph({
+                children: [new TextRun({ text: "— 文档结束 —", color: "999999", size: 24, font: "Microsoft YaHei" })],
+                alignment: AlignmentType.CENTER
+            })
+        ]
+    }]
+});
+
+// 生成文档
+Packer.toBuffer(doc).then(buffer => {
+    fs.writeFileSync("D:/work/DriFox/docs/superpowers/specs/智能体画布设计方案_完整版.docx", buffer);
+    console.log("文档生成成功！路径: D:/work/DriFox/docs/superpowers/specs/智能体画布设计方案_完整版.docx");
+});

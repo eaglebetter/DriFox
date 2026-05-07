@@ -1,0 +1,227 @@
+"""用用户报告的真实数据测试"""
+import sys
+sys.path.insert(0, 'app')
+
+from utils.message_content import content_to_markdown, make_tool_result_block
+from widgets.message_card import _render_tool_block_content, _inject_tool_blocks
+
+# 用户报告的真实 write 工具参数（content 截取一部分）
+content_code = '''# -*- coding: utf-8 -*-
+\"\"\"
+扁平式模型选择上拉框 - 类似 OpenCode 风格
+展示所有已配置服务商的模型，服务商作为小标题，下面是模型列表
+\"\"\"
+from typing import List, Tuple, Dict, Any
+
+from PyQt5.QtCore import Qt, pyqtSignal, QPoint
+from PyQt5.QtWidgets import (
+    QWidget,
+    QFrame,
+    QVBoxLayout,
+    QHBoxLayout,
+    QLabel,
+    QScrollArea,
+    QSizePolicy,
+    QLineEdit,
+    QApplication,
+    QDialog,
+    QPushButton,
+)
+from qfluentwidgets import FluentIcon, TransparentToolButton
+from app.widgets.provider_setting_card import ProviderIconWidget
+
+from app.utils.utils import get_font_family_css, get_icon
+
+
+# item 高度常量
+_ITEM_HEIGHT = 34
+_HEADER_HEIGHT = 36
+_MIN_ITEMS = 3
+_MAX_ITEMS = 7
+
+# 滚动区域高度计算
+_MIN_SCROLL_HEIGHT = _MIN_ITEMS * _ITEM_HEIGHT
+_MAX_SCROLL_HEIGHT = _MAX_ITEMS * _ITEM_HEIGHT + _HEADER_HEIGHT
+
+
+def _calculate_scroll_height(total_items: int) -> int:
+    \"\"\"根据 item 总数计算滚动区域高度\"\"\"
+    if total_items <= _MIN_ITEMS:
+        return _MIN_SCROLL_HEIGHT
+    elif total_items >= _MAX_ITEMS:
+        return _MAX_SCROLL_HEIGHT
+    else:
+        ratio = (total_items - _MIN_ITEMS) / (_MAX_ITEMS - _MIN_ITEMS)
+        return int(_MIN_SCROLL_HEIGHT + ratio * (_MAX_SCROLL_HEIGHT - _MIN_SCROLL_HEIGHT))
+
+
+class ProviderHeader(QWidget):
+    \"\"\"服务商标题行\"\"\"
+
+    def __init__(self, provider_name: str, parent=None):
+        super().__init__(parent)
+        self.provider_name = provider_name
+        self.setFixedHeight(_HEADER_HEIGHT)
+        self.setStyleSheet("background: transparent;")
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(10, 0, 8, 0)
+        layout.setSpacing(8)
+
+        # 服务商图标
+        self.icon_widget = ProviderIconWidget(provider_name, 20)
+        layout.addWidget(self.icon_widget)
+
+        # 服务商名称
+        self.name_label = QLabel(provider_name, self)
+        self.name_label.setStyleSheet(f"color: #e0e0e0; {get_font_family_css()} font-size: 12px; font-weight: bold;")
+        layout.addWidget(self.name_label)
+
+        layout.addStretch(1)
+
+
+class ModelItem(QWidget):
+    \"\"\"单个模型项 - 可点击\"\"\"
+    clicked = pyqtSignal(str, str)  # provider_name, model_name
+
+    def __init__(self, provider_name: str, model_name: str, is_active: bool = False, parent=None):
+        super().__init__(parent)
+        self.provider_name = provider_name
+        self.model_name = model_name
+        self.is_active = is_active
+        self.setFixedHeight(_ITEM_HEIGHT)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self._setup_ui()
+
+    def _setup_ui(self):
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(30, 0, 12, 0)
+        layout.setSpacing(8)
+
+        # 选中状态指示点
+        self.dot = QLabel("●", self)
+        self.dot.setStyleSheet(
+            f"color: #0078d4; {get_font_family_css()} font-size: 10px;" if self.is_active else f"color: transparent; {get_font_family_css()} font-size: 10px;"
+        )
+        self.dot.setFixedWidth(14)
+        layout.addWidget(self.dot)
+
+        # 模型名
+        self.name_label = QLabel(self.model_name, self)
+        if self.is_active:
+            self.name_label.setStyleSheet(f"color: #ffffff; font-weight: bold; {get_font_family_css()} font-size: 13px;")
+        else:
+            self.name_label.setStyleSheet(f"color: #cccccc; {get_font_family_css()} font-size: 13px;")
+        layout.addWidget(self.name_label, 1)
+
+    def set_active(self, active: bool):
+        self.is_active = active
+        self.dot.setStyleSheet(
+            f"color: #0078d4; {get_font_family_css()} font-size: 10px;" if active else f"color: transparent; {get_font_family_css()} font-size: 10px;"
+        )
+        if active:
+            self.name_label.setStyleSheet(f"color: #ffffff; font-weight: bold; {get_font_family_css()} font-size: 13px;")
+        else:
+            self.name_label.setStyleSheet(f"color: #cccccc; {get_font_family_css()} font-size: 13px;")
+
+    def mousePressEvent(self, event):
+        self.clicked.emit(self.provider_name, self.model_name)
+        super().mousePressEvent(event)
+
+    def enterEvent(self, event):
+        if not self.is_active:
+            self.name_label.setStyleSheet(f"color: #ffffff; {get_font_family_css()} font-size: 13px;")
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        if not self.is_active:
+            self.name_label.setStyleSheet(f"color: #cccccc; {get_font_family_css()} font-size: 13px;")
+        super().leaveEvent(event)'''
+
+test_args = {
+    "content": content_code,
+    "path": "app\\widgets\\model_selector_popup.py"
+}
+
+print(f"content 长度: {len(content_code)}")
+print(f"path: {test_args['path']}")
+
+# 1. 创建 block
+block = make_tool_result_block(
+    tool_name="write",
+    arguments=test_args,
+    result="Successfully written to app\\widgets\\model_selector_popup.py",
+    success=True,
+    tool_call_id="call_function_tvzpapeolu3x_1"
+)
+
+print(f"\nBlock arguments keys: {list(block['arguments'].keys())}")
+
+# 2. 转换为 markdown
+markdown = content_to_markdown([block])
+
+print(f"\nMarkdown 长度: {len(markdown)}")
+
+# 3. 检查 markdown 中的 args 部分
+import re
+args_match = re.search(r'args: ({.+?})\s*\nresult:', markdown, re.DOTALL)
+if args_match:
+    args_json = args_match.group(1)
+    print(f"\nargs JSON 长度: {len(args_json)}")
+    
+    import json
+    try:
+        parsed_args = json.loads(args_json)
+        print(f"✅ JSON 解析成功!")
+        print(f"   参数 keys: {list(parsed_args.keys())}")
+        print(f"   content 长度: {len(parsed_args.get('content', ''))}")
+        print(f"   path: {parsed_args.get('path')}")
+    except json.JSONDecodeError as e:
+        print(f"❌ JSON 解析失败: {e}")
+        print(f"   错误位置: {e.pos}")
+        # 显示错误上下文
+        start = max(0, e.pos - 50)
+        end = min(len(args_json), e.pos + 50)
+        print(f"   上下文: ...{args_json[start:end]}...")
+else:
+    print("\n❌ 无法提取 args JSON")
+
+# 4. 测试 _inject_tool_blocks
+print("\n" + "=" * 60)
+print("测试 _inject_tool_blocks:")
+print("=" * 60)
+
+# 模拟完整的 markdown（包含 <tool>...</tool>）
+full_md = f'''
+Some text before
+
+<tool>
+{markdown.replace('<tool>\n', '').replace('</tool>', '')}
+</tool>
+
+Some text after
+'''
+
+print(f"Full markdown 长度: {len(full_md)}")
+
+processed = _inject_tool_blocks(full_md, completed=True)
+print(f"Processed HTML 长度: {len(processed)}")
+
+# 检查生成的 HTML 中是否包含参数
+if 'args-key' in processed:
+    print("✅ HTML 中包含 args-key")
+    key_matches = re.findall(r'class="args-key"[^>]*>([^<]+)</span>', processed)
+    print(f"   参数名: {key_matches}")
+else:
+    print("❌ HTML 中不包含 args-key")
+
+if 'path=' in processed:
+    print("✅ HTML 中包含 path=")
+else:
+    print("❌ HTML 中不包含 path=")
+
+if 'content=' in processed:
+    print("✅ HTML 中包含 content=")
+else:
+    print("❌ HTML 中不包含 content=")

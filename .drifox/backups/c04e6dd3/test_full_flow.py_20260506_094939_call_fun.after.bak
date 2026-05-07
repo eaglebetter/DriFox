@@ -1,0 +1,110 @@
+"""完整测试 content_to_markdown → _render_tool_block_content 流程"""
+import sys
+sys.path.insert(0, 'app')
+
+from utils.message_content import content_to_markdown, make_tool_result_block
+from widgets.message_card import _render_tool_block_content
+
+# 用户报告的真实 write 工具参数（简化版）
+content_code = '''# -*- coding: utf-8 -*-
+\"\"\"
+模型选择弹窗
+\"\"\"
+class Widget:
+    def method(self, event):
+        if event.type() == event.MouseButtonPress:
+            if obj.rect().contains(event.pos()):
+                self.update()
+'''
+
+test_args = {
+    "content": content_code,
+    "path": "app\\widgets\\model_selector_popup.py"
+}
+
+print("=" * 60)
+print("1. 创建 tool_result_block")
+print("=" * 60)
+block = make_tool_result_block(
+    tool_name="write",
+    arguments=test_args,
+    result="Successfully written",
+    success=True,
+    tool_call_id="call_func_123"
+)
+
+print(f"Block arguments keys: {list(block['arguments'].keys())}")
+
+print("\n" + "=" * 60)
+print("2. content_to_markdown 生成")
+print("=" * 60)
+markdown = content_to_markdown([block])
+print("Markdown 内容:")
+print(markdown)
+
+print("\n" + "=" * 60)
+print("3. 提取并解析 args JSON")
+print("=" * 60)
+
+import re
+import json
+
+# 模拟 _render_tool_block_content 的解析
+args_start = markdown.find("args:")
+if args_start != -1:
+    brace_start = markdown.find("{", args_start)
+    if brace_start != -1:
+        depth = 0
+        i = brace_start
+        tool_args_str = ""
+        while i < len(markdown):
+            c = markdown[i]
+            if c == "{":
+                depth += 1
+            elif c == "}":
+                depth -= 1
+                if depth == 0:
+                    tool_args_str = markdown[brace_start:i + 1]
+                    break
+            i += 1
+        
+        if tool_args_str:
+            print(f"提取的 JSON 长度: {len(tool_args_str)}")
+            print(f"JSON 前 200 字符: {tool_args_str[:200]}...")
+            
+            try:
+                args_dict = json.loads(tool_args_str)
+                print(f"\n✅ JSON 解析成功!")
+                print(f"   参数: {list(args_dict.keys())}")
+            except json.JSONDecodeError as e:
+                print(f"\n❌ JSON 解析失败: {e}")
+        else:
+            print("❌ 未提取到 JSON")
+    else:
+        print("❌ 未找到 '{'")
+else:
+    print("❌ 未找到 'args:'")
+
+print("\n" + "=" * 60)
+print("4. 完整 _render_tool_block_content 渲染")
+print("=" * 60)
+
+# 提取 <tool>...</tool> 部分
+tool_match = re.search(r'<tool>(.*?)</tool>', markdown, re.DOTALL)
+if tool_match:
+    tool_content = tool_match.group(1)
+    print(f"Tool content 长度: {len(tool_content)}")
+    
+    # 调用实际的 _render_tool_block_content
+    html = _render_tool_block_content(tool_content)
+    print(f"\n渲染 HTML 长度: {len(html)}")
+    
+    # 检查是否包含参数
+    if 'content=' in html and 'path=' in html:
+        print("✅ HTML 中包含参数!")
+    else:
+        print("❌ HTML 中缺少参数!")
+        print("\nHTML 预览:")
+        print(html[:1000])
+else:
+    print("❌ 未找到 <tool>...</tool>")

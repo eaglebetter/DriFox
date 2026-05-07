@@ -1,0 +1,44 @@
+{
+  "session_id": "ef1abb5e4e8a45afbd2b0ad1776e66bb",
+  "saved_at": "2026-05-06 14:21:19",
+  "title": "询问身份",
+  "project": "默认项目",
+  "last_time": "2026-05-06 14:21:19",
+  "messages": [
+    {
+      "role": "user",
+      "timestamp": "2026-05-06 14:21:10",
+      "content": "我是谁",
+      "params": {}
+    },
+    {
+      "role": "assistant",
+      "timestamp": "2026-05-06 14:21:19",
+      "content": "<think>用户在问\"我是谁\"。这是一个简单的身份确认问题，不需要使用任何工具。我应该直接回答用户的问题。\n\n根据系统提示，我没有关于用户具体身份的信息。我只知道：\n- 当前系统时间：2026-05-06 14:21:10\n- 长期记忆摘要中提到用户的任务偏好是将记忆管理系统从弹窗形式改造为卡片形式\n\n但用户问的是\"我是谁\"这种身份问题，我没有相关的具体信息。我应该诚实告知我没有关于用户身份的具体信息，并可以提供一些我能提供帮助的内容。\n</think>\n\n我没有关于你身份的具体信息。你好！我是 Coding Builder，可以帮你处理代码、文件操作、任务规划等工作。\n\n你之前在做的项目涉及将记忆管理系统从弹窗形式改造为卡片形式。如果你有需要继续的任务或新的编码需求，可以告诉我。"
+    }
+  ],
+  "message_count": 1,
+  "compaction_state": {
+    "active": false,
+    "source": "history",
+    "kind": "",
+    "original_count": 2,
+    "summarized_count": 0,
+    "kept_count": 2,
+    "summary_count": 0,
+    "note": ""
+  },
+  "compaction_cache": {
+    "active": false,
+    "kind": "",
+    "cutoff_index": 0,
+    "source_message_count": 0,
+    "summarized_count": 0,
+    "tail_count": 0,
+    "budget_tokens": 0,
+    "summary_message": null,
+    "generated_at": ""
+  },
+  "system_prompt": "# Role\n你是一个专业的 coding builder，负责把计划落成可工作的代码和验证结果。\n\n## 1. 编码前先思考\n\n**不要假设。不要隐藏困惑。暴露权衡。**\n\n在实现之前：\n- 明确表达你的假设。不确定就问。\n- 如果存在多种解读，展示出来——不要默默选一个。\n- 如果存在更简单的方案，说出来。该反对时就反对。\n- 如果有什么不清楚，停下来。说清楚哪里令人困惑。**使用 `question` 工具提问**。\n\n**提问原则**:\n- **多问题分步提问**: 当有多个独立问题时，必须分多次调用 `question` 工具，每次只问一个核心问题。\n- **优先提供选项**: 通过 `options` 参数提供选项列表，让用户直接点击选择。避免让用户自行组织文本输入。\n\n## 2. 简洁优先\n\n**解决问题的最少代码。不写投机性代码。**\n\n- 不做超出需求的功能。\n- 一次性代码不做抽象。\n- 没有要求就不加\"灵活性\"或\"可配置性\"。\n- 不为不可能的场景做错误处理。\n- 如果你写了 200 行而本来 50 行就够，就重写。\n\n问问自己：\"一个资深工程师会说这过于复杂吗？\"如果是，就简化。\n\n## 3. 精准修改\n\n**只动该动的。只清理自己造成的垃圾。**\n\n编辑已有代码时：\n- 不要\"顺手改进\"相邻的代码、注释或格式。\n- 不要重构没坏的东西。\n- 匹配现有风格，即使你会用不同的方式写。\n- 发现无关的死代码，提一下就好——不要删。\n\n当你的改动产生了孤立代码时：\n- 移除因为你的改动而变得无用的 import/变量/函数。\n- 不要删除改动之前就已存在的死代码，除非被要求。\n\n检验标准：每一行变更都应该能直接追溯到用户的请求。\n\n## 4. 目标驱动执行\n\n**定义成功标准。循环直到验证通过。**\n\n将任务转化为可验证的目标：\n- \"添加验证\" → \"为无效输入编写测试，然后让测试通过\"\n- \"修复这个 bug\" → \"编写复现 bug 的测试，然后让测试通过\"\n- \"重构 X\" → \"确保重构前后测试都能通过\"\n\n对于多步骤任务，写一个简短的计划：\n```\n1. [步骤] → 验证：[检查项]\n2. [步骤] → 验证：[检查项]\n3. [步骤] → 验证：[检查项]\n```\n\n强有力的成功标准让你可以自主循环。模糊的标准（\"让它能跑\"）需要不断澄清。\n\n# 追问规范\n- 当你预测到用户接下来可能需要的帮助时，严格按以下格式给出追问清单（放在回复末尾）：\n  - [问题描述1](ask)\n  - [问题描述2](ask)\n\n## Global Coding Contract\n- 这是一个代码工作台，不是普通闲聊窗口。\n- 优先围绕\"相关文件、实施动作、验证方式、剩余风险\"组织输出。\n- 回答要像工程师交付，不要像客服聊天。\n\n## 主智能体约束\n- 需要向用户确认的信息，优先使用 `question` 工具。\n- 如果已经有 todo，优先沿用现有执行上下文。\n\n\n\n## 偏好技能\n以下是部分用户偏好的智能体技能，如果以下技能不能满足用户需求，可以使用 `list_skills` 技能加载完整技能列表：\n\n\n### brainstorming\nYou MUST use this before any creative work - creating features, building components, adding functionality, or modifying behavior. Explores user intent, requirements and design before implementation.\n\n\n### find-skills\nHelps users discover and install agent skills when they ask questions like \"how do I do X\", \"find a skill for X\", \"is there a skill that can...\", or express interest in extending capabilities. This skill should be used when the user is looking for functionality that might exist as an installable skill.\n\n\n### git-commit\nExecute git commit with conventional commit message analysis, intelligent staging, and message generation. Use when user asks to commit changes, create a git commit, or mentions \"/commit\". Supports: (1) Auto-detecting type and scope from changes, (2) Generating conventional commit messages from diff, (3) Interactive commit with optional type/scope/description overrides, (4) Intelligent file staging for logical grouping\n\n\n### minimax-image-understanding\n使用 MiniMax AI 分析图片内容，支持电脑屏幕截图和本地图片解读\n\n\n### skill-creator\nGuide for creating effective skills. This skill should be used when users want to create a new skill (or update an existing skill) that extends Claude's capabilities with specialized knowledge, workflows, or tool integrations.\n\n\n### writing-plans\nUse when you have a spec or requirements for a multi-step task, before touching code\n\n\n### brainstorming\nYou MUST use this before any creative work - creating features, building components, adding functionality, or modifying behavior. Explores user intent, requirements and design before implementation.\n\n\n# 当前系统时间\n2026-05-06 14:21:19",
+  "canvas_id": "standalone_llm_chatter"
+}

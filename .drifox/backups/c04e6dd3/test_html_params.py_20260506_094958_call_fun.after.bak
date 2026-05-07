@@ -1,0 +1,77 @@
+"""检查 HTML 中的参数预览"""
+import sys
+sys.path.insert(0, 'app')
+
+from utils.message_content import content_to_markdown, make_tool_result_block
+from widgets.message_card import _render_tool_block_content
+
+content_code = '''# -*- coding: utf-8 -*-
+\"\"\"
+模型选择弹窗
+\"\"\"
+class Widget:
+    def method(self, event):
+        if event.type() == event.MouseButtonPress:
+            if obj.rect().contains(event.pos()):
+                self.update()
+'''
+
+test_args = {
+    "content": content_code,
+    "path": "app\\widgets\\model_selector_popup.py"
+}
+
+block = make_tool_result_block(
+    tool_name="write",
+    arguments=test_args,
+    result="Successfully written",
+    success=True,
+    tool_call_id="call_func_123"
+)
+
+markdown = content_to_markdown([block])
+
+import re
+
+tool_match = re.search(r'<tool>(.*?)</tool>', markdown, re.DOTALL)
+if tool_match:
+    tool_content = tool_match.group(1)
+    html = _render_tool_block_content(tool_content)
+    
+    # 查找参数预览区域
+    print("=" * 60)
+    print("检查 HTML 中的 args-preview 部分:")
+    print("=" * 60)
+    
+    # 提取折叠按钮中的内容
+    summary_match = re.search(r'<button[^>]*>(.*?)</button>', html, re.DOTALL)
+    if summary_match:
+        print(summary_match.group(0)[:2000])
+    
+    # 查找实际的参数值
+    print("\n" + "=" * 60)
+    print("检查 HTML 中是否包含参数值:")
+    print("=" * 60)
+    
+    if 'args-key' in html:
+        print("✅ 找到 args-key 元素")
+        # 提取所有参数行
+        key_matches = re.findall(r'class="args-key"[^>]*>([^<]+)</span>', html)
+        print(f"   参数名: {key_matches}")
+    
+    if 'path=' in html:
+        print("✅ HTML 中包含 'path='")
+    else:
+        print("❌ HTML 中不包含 'path='")
+        
+    if 'content=' in html:
+        print("✅ HTML 中包含 'content='")
+    else:
+        print("❌ HTML 中不包含 'content='")
+        
+    # 检查参数预览区域
+    preview_match = re.search(r'args-preview[^>]*>([^<]+)</span>', html)
+    if preview_match:
+        print(f"\n参数预览文本: {preview_match.group(1)}")
+    else:
+        print("\n未找到参数预览文本")

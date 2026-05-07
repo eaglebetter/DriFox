@@ -1,0 +1,589 @@
+# -*- coding: utf-8 -*-
+"""
+记忆管理卡片 - 将弹窗改造为卡片形式
+"""
+from datetime import datetime
+from PyQt5.QtCore import pyqtSignal, Qt
+from PyQt5.QtWidgets import (
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QScrollArea,
+    QLineEdit,
+    QPushButton,
+)
+from qfluentwidgets import (
+    BodyLabel,
+    CaptionLabel,
+    CardWidget,
+    TransparentToolButton,
+    FluentIcon,
+)
+from app.utils.utils import get_font_family_css
+
+MEMORY_CATEGORIES_WIDGET = {
+    "agent_identity": "智能体身份",
+    "user_identity": "用户身份",
+    "task_preference": "任务偏好",
+    "task_taboos": "任务忌讳",
+    "key_knowledge": "关键事实",
+}
+
+MEMORY_CATEGORY_SHORT_NAMES = {
+    "agent_identity": "智能体身份",
+    "user_identity": "用户身份",
+    "task_preference": "任务偏好",
+    "task_taboos": "任务忌讳",
+    "key_knowledge": "关键事实",
+}
+
+
+class MemoryItemCard(CardWidget):
+    """单条记忆项卡片"""
+
+    deleted = pyqtSignal(int)
+    toggled = pyqtSignal(int, bool)
+    contentEdited = pyqtSignal(int, str)
+
+    def __init__(
+        self,
+        index: int,
+        content: str,
+        enabled: bool = True,
+        category: str = "",
+        confidence: float = 0.8,
+        source: str = "manual",
+        parent=None,
+    ):
+        super().__init__(parent)
+        self._index = index
+        self._content = content
+        self._enabled = enabled
+        self._category = category
+        self._confidence = confidence
+        self._source = source
+        self._is_editing = False
+
+        self._init_ui()
+
+    def _init_ui(self):
+        self.setStyleSheet("""
+            CardWidget {
+                background-color: rgba(255, 255, 255, 0.04);
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                border-radius: 8px;
+            }
+            CardWidget:hover {
+                background-color: rgba(255, 255, 255, 0.08);
+                border: 1px solid rgba(102, 198, 255, 0.45);
+            }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(6)
+
+        # 顶部行：内容 + 右侧按钮
+        top_row = QHBoxLayout()
+        top_row.setSpacing(8)
+
+        # 内容区域
+        self.content_label = BodyLabel(self._content, self)
+        self.content_label.setWordWrap(True)
+        self.content_label.setStyleSheet(f"""
+            BodyLabel {{
+                color: #e0e0e0;
+                font-size: 13px;
+                {get_font_family_css()}
+            }}
+        """)
+        self.content_label.setCursor(Qt.PointingHandCursor)
+        self.content_label.mousePressEvent = lambda ev: self._start_edit()
+        top_row.addWidget(self.content_label, 1)
+
+        # 编辑输入框（初始隐藏）
+        self.edit_input = QLineEdit(self)
+        self.edit_input.setText(self._content)
+        self.edit_input.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: rgba(50, 50, 55, 200);
+                border: 1px solid #0078d4;
+                border-radius: 4px;
+                color: #e0e0e0;
+                padding: 4px 8px;
+                font-size: 13px;
+                {get_font_family_css()}
+            }}
+        """)
+        self.edit_input.setVisible(False)
+        self.edit_input.returnPressed.connect(self._finish_edit)
+        top_row.addWidget(self.edit_input, 1)
+
+        # 右侧按钮组
+        btn_container = QHBoxLayout()
+        btn_container.setSpacing(4)
+
+        # 启用/禁用开关
+        self.switch = TransparentToolButton(FluentIcon.ACCEPT, self)
+        self.switch.setToolTip("启用/禁用" if self._enabled else "启用")
+        self.switch.setFixedSize(24, 24)
+        self.switch.clicked.connect(lambda: self.toggled.emit(self._index, not self._enabled))
+        if self._enabled:
+            self.switch.setStyleSheet("""
+                QToolButton {
+                    background-color: rgba(0, 120, 212, 0.3);
+                    border: none;
+                    border-radius: 4px;
+                }
+                QToolButton:hover {
+                    background-color: rgba(0, 120, 212, 0.5);
+                }
+            """)
+        else:
+            self.switch.setStyleSheet("""
+                QToolButton {
+                    background-color: transparent;
+                    border: 1px solid rgba(255, 255, 255, 0.2);
+                    border-radius: 4px;
+                }
+                QToolButton:hover {
+                    background-color: rgba(255, 255, 255, 0.1);
+                }
+            """)
+        btn_container.addWidget(self.switch)
+
+        # 删除按钮
+        self.delete_btn = TransparentToolButton(FluentIcon.DELETE, self)
+        self.delete_btn.setToolTip("删除")
+        self.delete_btn.setFixedSize(24, 24)
+        self.delete_btn.setStyleSheet("""
+            QToolButton {
+                background-color: transparent;
+                border: none;
+            }
+            QToolButton:hover {
+                background-color: rgba(220, 53, 69, 0.3);
+                border-radius: 4px;
+            }
+        """)
+        self.delete_btn.clicked.connect(lambda: self.deleted.emit(self._index))
+        btn_container.addWidget(self.delete_btn)
+
+        top_row.addLayout(btn_container)
+        layout.addLayout(top_row)
+
+        # 底部行：元信息
+        bottom_row = QHBoxLayout()
+        bottom_row.setSpacing(8)
+
+        # 分类标签
+        if self._category and self._category in MEMORY_CATEGORY_SHORT_NAMES:
+            category_text = MEMORY_CATEGORY_SHORT_NAMES[self._category]
+            category_label = CaptionLabel(f"📁 {category_text}", self)
+        else:
+            category_label = CaptionLabel("📁 未分类", self)
+        category_label.setStyleSheet(f"""
+            CaptionLabel {{
+                color: #8c99ad;
+                font-size: 11px;
+                {get_font_family_css()}
+            }}
+        """)
+        bottom_row.addWidget(category_label)
+
+        # 置信度
+        confidence_label = CaptionLabel(f"置信度: {self._confidence:.1f}", self)
+        confidence_label.setStyleSheet(f"""
+            CaptionLabel {{
+                color: #8c99ad;
+                font-size: 11px;
+                {get_font_family_css()}
+            }}
+        """)
+        bottom_row.addWidget(confidence_label)
+
+        # 来源
+        source_label = CaptionLabel(f"来源: {self._source}", self)
+        source_label.setStyleSheet(f"""
+            CaptionLabel {{
+                color: #8c99ad;
+                font-size: 11px;
+                {get_font_family_css()}
+            }}
+        """)
+        bottom_row.addWidget(source_label)
+
+        bottom_row.addStretch()
+        layout.addLayout(bottom_row)
+
+    def _start_edit(self):
+        """开始编辑内容"""
+        if self._is_editing:
+            return
+        self._is_editing = True
+        self.content_label.setVisible(False)
+        self.edit_input.setVisible(True)
+        self.edit_input.setFocus()
+        self.edit_input.selectAll()
+
+    def _finish_edit(self):
+        """完成编辑"""
+        new_content = self.edit_input.text().strip()
+        if new_content and new_content != self._content:
+            self._content = new_content
+            self.content_label.setText(new_content)
+            self.contentEdited.emit(self._index, new_content)
+        self._cancel_edit()
+
+    def _cancel_edit(self):
+        """取消编辑"""
+        self._is_editing = False
+        self.edit_input.setVisible(False)
+        self.content_label.setVisible(True)
+        self.edit_input.setText(self._content)
+
+    def update_state(self, enabled: bool):
+        """更新启用状态"""
+        self._enabled = enabled
+        if enabled:
+            self.switch.setStyleSheet("""
+                QToolButton {
+                    background-color: rgba(0, 120, 212, 0.3);
+                    border: none;
+                    border-radius: 4px;
+                }
+                QToolButton:hover {
+                    background-color: rgba(0, 120, 212, 0.5);
+                }
+            """)
+        else:
+            self.switch.setStyleSheet("""
+                QToolButton {
+                    background-color: transparent;
+                    border: 1px solid rgba(255, 255, 255, 0.2);
+                    border-radius: 4px;
+                }
+                QToolButton:hover {
+                    background-color: rgba(255, 255, 255, 0.1);
+                }
+            """)
+
+
+class MemoryFilterBar(QWidget):
+    """记忆筛选栏"""
+
+    filterChanged = pyqtSignal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._current_filter = "all"
+        self._filter_buttons = {}
+        self._init_ui()
+
+    def _init_ui(self):
+        self.setFixedHeight(36)
+        self.setStyleSheet("background: transparent;")
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 4, 0, 4)
+        layout.setSpacing(8)
+
+        # 筛选标签
+        filters = [
+            ("all", "全部"),
+            ("agent_identity", "智能体"),
+            ("user_identity", "用户"),
+            ("task_preference", "偏好"),
+            ("task_taboos", "忌讳"),
+            ("key_knowledge", "知识"),
+        ]
+
+        for filter_id, filter_name in filters:
+            btn = QPushButton(filter_name, self)
+            btn.setCheckable(True)
+            btn.setChecked(filter_id == "all")
+            btn.setFixedHeight(26)
+            btn.clicked.connect(lambda checked, fid=filter_id: self._on_filter_clicked(fid))
+            layout.addWidget(btn)
+            self._filter_buttons[filter_id] = btn
+
+        layout.addStretch()
+
+    def _on_filter_clicked(self, filter_id: str):
+        if self._current_filter == filter_id:
+            return
+        self._current_filter = filter_id
+
+        # 更新按钮状态
+        for fid, btn in self._filter_buttons.items():
+            btn.setChecked(fid == filter_id)
+
+        self.filterChanged.emit(filter_id)
+
+    def set_filter(self, filter_id: str):
+        """程序化设置筛选"""
+        if filter_id in self._filter_buttons:
+            self._on_filter_clicked(filter_id)
+
+
+class MemoryCardContent(QWidget):
+    """记忆卡片内容区域"""
+
+    memorySaved = pyqtSignal(list)
+    memoryAdded = pyqtSignal(dict)
+
+    def __init__(self, memory_manager, parent=None):
+        super().__init__(parent)
+        self._memory_manager = memory_manager
+        self._current_category = "agent_identity"
+        self._current_filter = "all"
+        self._item_cards = []
+        self._init_ui()
+
+    def _init_ui(self):
+        self.setStyleSheet("background: transparent;")
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+
+        # 筛选栏
+        self.filter_bar = MemoryFilterBar(self)
+        self.filter_bar.filterChanged.connect(self._on_filter_changed)
+        layout.addWidget(self.filter_bar)
+
+        # 滚动区域
+        self.scroll_area = QScrollArea(self)
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setStyleSheet("""
+            QScrollArea {
+                border: none;
+                background: transparent;
+            }
+            QScrollArea > QWidget > QWidget {
+                background: transparent;
+            }
+            QScrollBar:vertical {
+                border: none;
+                background: transparent;
+                width: 10px;
+                margin: 4px 4px 4px 4px;
+            }
+            QScrollBar::handle:vertical {
+                background: #555555;
+                border-radius: 5px;
+                min-height: 30px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: #888888;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0px;
+            }
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+                background: none;
+            }
+        """)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
+        # 内容容器
+        self.content_widget = QWidget()
+        self.content_widget.setStyleSheet("background: transparent;")
+        self.content_layout = QVBoxLayout(self.content_widget)
+        self.content_layout.setContentsMargins(0, 0, 0, 0)
+        self.content_layout.setSpacing(8)
+        self.content_layout.addStretch()
+
+        self.scroll_area.setWidget(self.content_widget)
+        layout.addWidget(self.scroll_area, 1)
+
+        # 添加区域
+        self._init_add_area(layout)
+
+    def _init_add_area(self, parent_layout):
+        """初始化添加区域"""
+        add_area = QWidget(self)
+        add_area.setStyleSheet("""
+            QWidget {
+                background-color: rgba(50, 50, 55, 150);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                border-radius: 8px;
+            }
+        """)
+        add_layout = QHBoxLayout(add_area)
+        add_layout.setContentsMargins(12, 8, 12, 8)
+        add_layout.setSpacing(8)
+
+        # 输入框
+        self.input_edit = QLineEdit(add_area)
+        self.input_edit.setPlaceholderText("添加新记忆...")
+        self.input_edit.setStyleSheet(f"""
+            QLineEdit {
+                background-color: rgba(60, 60, 65, 180);
+                border: 1px solid rgba(255, 255, 255, 0.15);
+                border-radius: 6px;
+                color: #e0e0e0;
+                padding: 6px 10px;
+                font-size: 13px;
+                {get_font_family_css()}
+            }
+            QLineEdit:focus {
+                border: 1px solid #0078d4;
+            }
+            QLineEdit::placeholder {
+                color: #666666;
+            }
+        """)
+        self.input_edit.returnPressed.connect(self._add_memory)
+        add_layout.addWidget(self.input_edit, 1)
+
+        # 添加按钮
+        self.add_btn = QPushButton("添加", add_area)
+        self.add_btn.setFixedSize(60, 32)
+        self.add_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #0078d4;
+                border: none;
+                border-radius: 6px;
+                color: white;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #1084d8;
+            }
+            QPushButton:pressed {
+                background-color: #0068b4;
+            }
+        """)
+        self.add_btn.clicked.connect(self._add_memory)
+        add_layout.addWidget(self.add_btn)
+
+        # 保存按钮
+        self.save_btn = QPushButton("保存", add_area)
+        self.save_btn.setFixedSize(60, 32)
+        self.save_btn.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(0, 120, 212, 0.3);
+                border: 1px solid rgba(0, 120, 212, 0.5);
+                border-radius: 6px;
+                color: #66c6ff;
+            }
+            QPushButton:hover {
+                background-color: rgba(0, 120, 212, 0.5);
+            }
+        """)
+        self.save_btn.clicked.connect(self._save_memories)
+        add_layout.addWidget(self.save_btn)
+
+        parent_layout.addWidget(add_area)
+
+    def load_memories(self):
+        """加载记忆数据"""
+        if not self._memory_manager:
+            return
+
+        memories = self._memory_manager.get_user_memories()
+
+        # 清理旧卡片
+        while self.content_layout.count() > 1:
+            item = self.content_layout.takeAt(0)
+            if item and item.widget():
+                item.widget().deleteLater()
+
+        self._item_cards.clear()
+
+        # 添加卡片
+        for idx, mem in enumerate(memories):
+            if isinstance(mem, dict):
+                content = mem.get("content", "")
+                enabled = mem.get("enabled", True)
+                category = mem.get("category", "task_preference")
+                confidence = mem.get("confidence", 0.8)
+                source = mem.get("source", "manual")
+            else:
+                content = str(mem)
+                enabled = True
+                category = "task_preference"
+                confidence = 0.8
+                source = "manual"
+
+            # 根据筛选条件过滤
+            if self._current_filter != "all" and category != self._current_filter:
+                continue
+
+            card = MemoryItemCard(
+                index=idx,
+                content=content,
+                enabled=enabled,
+                category=category,
+                confidence=confidence,
+                source=source,
+            )
+            card.deleted.connect(self._delete_item)
+            card.toggled.connect(self._toggle_item)
+            card.contentEdited.connect(self._edit_item)
+
+            self.content_layout.insertWidget(len(self._item_cards), card)
+            self._item_cards.append(card)
+
+    def _on_filter_changed(self, filter_id: str):
+        """筛选变化"""
+        self._current_filter = filter_id
+        self.load_memories()
+
+    def _add_memory(self):
+        """添加记忆"""
+        content = self.input_edit.text().strip()
+        if not content or not self._memory_manager:
+            return
+
+        # 获取当前记忆列表，添加新记忆，然后保存
+        memories = self._memory_manager.get_user_memories()
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        new_entry = {
+            "content": content,
+            "enabled": True,
+            "timestamp": now,
+            "confidence": 0.8,
+            "source": "manual",
+            "last_used_at": "",
+            "conflict_group": "",
+            "category": self._current_category,
+        }
+        memories.append(new_entry)
+        self._memory_manager.update_user_memories(memories)
+        self.input_edit.clear()
+        self.load_memories()
+
+    def _delete_item(self, index: int):
+        """删除记忆"""
+        if not self._memory_manager:
+            return
+
+        self._memory_manager.delete_user_memory(index)
+        self.load_memories()
+
+    def _toggle_item(self, index: int, enabled: bool):
+        """切换启用状态"""
+        if not self._memory_manager:
+            return
+
+        self._memory_manager.toggle_memory(index, enabled)
+        # 找到对应卡片并更新状态
+        for card in self._item_cards:
+            if card._index == index:
+                card.update_state(enabled)
+                break
+
+    def _edit_item(self, index: int, new_content: str):
+        """编辑记忆内容"""
+        if not self._memory_manager:
+            return
+
+        self._memory_manager.update_memory_content(index, new_content)
+
+    def _save_memories(self):
+        """保存记忆"""
+        if self._memory_manager:
+            self._memory_manager.save_memories()
+            self.memorySaved.emit(self._memory_manager.get_user_memories())

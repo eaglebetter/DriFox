@@ -1,0 +1,424 @@
+# -*- coding: utf-8 -*-
+"""
+服务商编辑卡片 - 将弹窗改为卡片形式
+"""
+import threading
+
+from PyQt5.QtCore import pyqtSignal
+from PyQt5.QtWidgets import (
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QFrame,
+    QLineEdit,
+    QDoubleSpinBox, QLabel,
+)
+from qfluentwidgets import (
+    BodyLabel,
+    LineEdit,
+    PrimaryPushButton,
+    PushButton, IconWidget,
+)
+
+from app.constants import (
+    PROVIDER_ICONS,
+    PROVIDER_MODELS,
+    FREE_PROVIDERS,
+)
+from app.utils.utils import get_icon, get_font_family_css
+from app.widgets.searchable_editable_combobox import SearchableEditableComboBox
+
+
+class ProviderEditCard(QWidget):
+    """服务商编辑卡片 - 紧凑设计，无内部标题"""
+
+    # 信号
+    saved = pyqtSignal(str, dict)  # provider_name, provider_info
+    closed = pyqtSignal()
+
+    def __init__(self, provider_name: str = "", provider_info: dict = None, is_new: bool = True, parent=None):
+        super().__init__(parent)
+        self.provider_name = provider_name
+        self.provider_info = (provider_info or {}).copy()
+        self.is_new = is_new
+        self._original_info = (provider_info or {}).copy()
+        self._fetched_models = []
+        self._init_ui()
+
+    def _init_ui(self):
+        self.setStyleSheet(f"""
+            QWidget {{
+                background: transparent;
+            }}
+            QLabel {{
+                color: #cccccc;
+                background: transparent;
+                {get_font_family_css()}
+                font-size: 12px;
+            }}
+            QDoubleSpinBox {{
+                background-color: rgba(61, 61, 61, 180);
+                color: #ffffff;
+                border: 1px solid rgba(85, 85, 85, 150);
+                border-radius: 4px;
+                padding: 2px 6px;
+                {get_font_family_css()}
+                font-size: 11px;
+            }}
+            QDoubleSpinBox:hover {{
+                border-color: rgba(0, 120, 212, 200);
+            }}
+            QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {{
+                background-color: transparent;
+                border: none;
+                width: 16px;
+            }}
+            QFrame {{
+                background-color: rgba(45, 45, 45, 180);
+                border-radius: 6px;
+                border: none;
+            }}
+            QLineEdit {{
+                background-color: rgba(61, 61, 61, 180);
+                color: #ffffff;
+                border: 1px solid rgba(85, 85, 85, 150);
+                border-radius: 4px;
+                padding: 4px 8px;
+                {get_font_family_css()}
+                font-size: 12px;
+            }}
+            QLineEdit:focus {{
+                border-color: rgba(0, 120, 212, 200);
+            }}
+            QPushButton {{
+                background-color: rgba(0, 120, 212, 180);
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 4px 10px;
+                font-size: 11px;
+                {get_font_family_css()}
+            }}
+            QPushButton:hover {{
+                background-color: rgba(0, 140, 240, 200);
+            }}
+            QPushButton:disabled {{
+                background-color: rgba(85, 85, 85, 180);
+                color: #888888;
+            }}
+        """)
+
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(8, 4, 8, 4)
+        main_layout.setSpacing(0)
+
+        # 连接配置区域
+        connection_frame = QFrame()
+        connection_layout = QVBoxLayout(connection_frame)
+        connection_layout.setContentsMargins(10, 4, 10, 4)
+        connection_layout.setSpacing(4)
+        name_row = QHBoxLayout()
+        name_row.addWidget(BodyLabel("服务商: "))
+        # 服务商名称行
+        if self.is_new:
+            self.nameCombo = SearchableEditableComboBox()
+            for provider_name in FREE_PROVIDERS.keys():
+                icon_name = PROVIDER_ICONS.get(provider_name, "大模型")
+                icon = get_icon(icon_name)
+                self.nameCombo.addItem(provider_name, icon=icon)
+            self.nameCombo.setDisabled(False)
+            self.nameCombo.setCurrentIndex(0)
+            self.nameCombo.currentTextChanged.connect(self._on_provider_changed)
+            name_row.addWidget(self.nameCombo, 1)
+
+            self.getKeyBtn = PrimaryPushButton("获取Key")
+            self.getKeyBtn.setFixedHeight(24)
+            self.getKeyBtn.clicked.connect(lambda: self._open_help_url(self.nameCombo.currentText()))
+            name_row.addWidget(self.getKeyBtn)
+
+            connection_layout.addLayout(name_row)
+            first_provider = self.nameCombo.currentText()
+            template = FREE_PROVIDERS.get(first_provider, {})
+        else:
+            if self.provider_name in FREE_PROVIDERS:
+                template = FREE_PROVIDERS[self.provider_name]
+            else:
+                template = self.provider_info
+            # 服务商图标
+            icon_name = PROVIDER_ICONS.get(self.provider_name, "大模型")
+            icon = get_icon(icon_name)
+            icon_label = IconWidget(icon)
+            name_row.addWidget(icon_label)
+
+            name_value = BodyLabel(self.provider_name)
+            name_value.setStyleSheet(f"color: #ffffff; font-weight: bold; {get_font_family_css()} font-size: 12px;")
+            name_row.addWidget(name_value, 1)
+
+            # 获取 Key 按钮（如果有的话）
+            if self.provider_name in FREE_PROVIDERS and FREE_PROVIDERS[self.provider_name].get("获取地址"):
+                getKeyBtn = PrimaryPushButton("获取Key")
+                getKeyBtn.setFixedHeight(24)
+                getKeyBtn.clicked.connect(lambda: self._open_help_url(self.provider_name))
+                name_row.addWidget(getKeyBtn)
+            else:
+                name_row.addStretch()
+
+            connection_layout.addLayout(name_row)
+
+        # API URL 行
+        url_row = QHBoxLayout()
+        url_row.addWidget(BodyLabel("API URL: "))
+        self.apiUrlCombo = SearchableEditableComboBox()
+        self._load_preset_urls()
+        current_url = self.provider_info.get("API_URL", template.get("API_URL", ""))
+        if current_url:
+            existing_items = [self.apiUrlCombo.itemText(i) for i in range(self.apiUrlCombo.count())]
+            if current_url not in existing_items:
+                self.apiUrlCombo.addItem(current_url)
+            idx = self.apiUrlCombo.findText(current_url)
+            if idx >= 0:
+                self.apiUrlCombo.setCurrentIndex(idx)
+            else:
+                self.apiUrlCombo.setCurrentText(current_url)
+        url_row.addWidget(self.apiUrlCombo, 1)
+        connection_layout.addLayout(url_row)
+
+        # API Key 行
+        key_row = QHBoxLayout()
+        key_row.addWidget(BodyLabel("API Key: "))
+        self.apiKeyEdit = LineEdit()
+        self.apiKeyEdit.setEchoMode(QLineEdit.Password)
+        current_key = self.provider_info.get("API_KEY", template.get("API_KEY", ""))
+        if current_key:
+            self.apiKeyEdit.setText(current_key)
+        key_row.addWidget(self.apiKeyEdit, 1)
+        connection_layout.addLayout(key_row)
+
+        main_layout.addWidget(connection_frame)
+
+        # 模型配置区域
+        model_frame = QFrame()
+        model_layout = QVBoxLayout(model_frame)
+        model_layout.setContentsMargins(10, 4, 10, 4)
+        model_layout.setSpacing(4)
+
+        model_row = QHBoxLayout()
+        model_row.addWidget(BodyLabel("模型列表: "))
+        self.modelCombo = SearchableEditableComboBox()
+        current_model = self.provider_info.get("模型名称", template.get("模型名称", ""))
+
+        if self.is_new:
+            if self.nameCombo.currentText() in PROVIDER_MODELS:
+                self.modelCombo.addItems(PROVIDER_MODELS[self.nameCombo.currentText()])
+            elif self.nameCombo.currentText() in FREE_PROVIDERS:
+                default_model = FREE_PROVIDERS[self.nameCombo.currentText()].get("模型名称", "")
+                if default_model:
+                    self.modelCombo.addItem(default_model)
+        elif self.provider_name in PROVIDER_MODELS:
+            self.modelCombo.addItems(PROVIDER_MODELS[self.provider_name])
+        elif self.provider_name in FREE_PROVIDERS:
+            default_model = FREE_PROVIDERS[self.provider_name].get("模型名称", "")
+            if default_model:
+                self.modelCombo.addItem(default_model)
+
+        if current_model:
+            existing = [self.modelCombo.itemText(i) for i in range(self.modelCombo.count())]
+            if current_model not in existing:
+                self.modelCombo.addItem(current_model)
+            idx = self.modelCombo.findText(current_model)
+            if idx >= 0:
+                self.modelCombo.setCurrentIndex(idx)
+            else:
+                self.modelCombo.setCurrentText(current_model)
+
+        fetch_btn = PrimaryPushButton("获取模型列表")
+        fetch_btn.clicked.connect(self._fetch_models)
+        model_row.addWidget(self.modelCombo, 1)
+        model_row.addWidget(fetch_btn)
+        model_layout.addLayout(model_row)
+
+        self.fetchStatusLabel = BodyLabel("")
+        self.fetchStatusLabel.setStyleSheet(f"color: #888888; font-size: 10px; {get_font_family_css()}")
+        model_layout.addWidget(self.fetchStatusLabel)
+
+        main_layout.addWidget(model_frame)
+
+        # 参数配置区域
+        param_frame = QFrame()
+        param_layout = QVBoxLayout(param_frame)
+        param_layout.setContentsMargins(10, 4, 10, 4)
+        param_layout.setSpacing(4)
+
+        temp_row = QHBoxLayout()
+        temp_row.addWidget(BodyLabel("模型温度: "))
+        self.tempSpin = QDoubleSpinBox()
+        self.tempSpin.setRange(0, 2)
+        self.tempSpin.setSingleStep(0.1)
+        self.tempSpin.setDecimals(2)
+        self.tempSpin.setFixedHeight(26)
+        self.tempSpin.setValue(self._original_info.get("温度", template.get("温度", 0.7)))
+        temp_row.addWidget(self.tempSpin, 1)
+        param_layout.addLayout(temp_row)
+
+        context_row = QHBoxLayout()
+        context_row.addWidget(BodyLabel("上下文长度: "))
+        self.contextLengthSpin = QDoubleSpinBox()
+        self.contextLengthSpin.setRange(1, 99999999)
+        self.contextLengthSpin.setSingleStep(1000)
+        self.contextLengthSpin.setDecimals(0)
+        self.contextLengthSpin.setFixedHeight(26)
+        self.contextLengthSpin.setValue(
+            self._original_info.get("最大Token", template.get("最大Token", 4096))
+        )
+        context_row.addWidget(self.contextLengthSpin, 1)
+        param_layout.addLayout(context_row)
+
+        main_layout.addWidget(param_frame)
+
+        # 保存按钮（右上角）
+        save_layout = QHBoxLayout()
+        save_layout.addStretch()
+        save_btn = PrimaryPushButton("保存")
+        save_btn.setFixedHeight(28)
+        save_btn.clicked.connect(self._on_save)
+        save_layout.addWidget(save_btn)
+        main_layout.addLayout(save_layout)
+
+    def _load_preset_urls(self):
+        """加载预设端点"""
+        for name, info in FREE_PROVIDERS.items():
+            url = info.get("API_URL", "")
+            if url and self.apiUrlCombo.findText(url) < 0:
+                self.apiUrlCombo.addItem(url)
+
+    def _on_provider_changed(self, name: str):
+        """服务商变化时更新预设值"""
+        if name in FREE_PROVIDERS:
+            info = FREE_PROVIDERS[name]
+            if "API_URL" in info:
+                self.apiUrlCombo.clear()
+                self._load_preset_urls()
+
+            if "模型名称" in info:
+                self.modelCombo.clear()
+                self.modelCombo.addItem(info["模型名称"])
+
+    def _open_help_url(self, name: str):
+        """打开帮助链接"""
+        if name in FREE_PROVIDERS:
+            import webbrowser
+            url = FREE_PROVIDERS[name].get("获取地址", "")
+            if url:
+                webbrowser.open(url)
+
+    def _fetch_models(self):
+        """获取模型列表"""
+        api_url = self.apiUrlCombo.currentText().strip()
+        api_key = self.apiKeyEdit.text().strip()
+
+        if not api_url or not api_key:
+            self.fetchStatusLabel.setText("请先填写 URL 和 Key")
+            self.fetchStatusLabel.setStyleSheet("color: #e74c3c; font-size: 10px;")
+            return
+
+        provider_name = self.nameCombo.currentText() if self.is_new else self.provider_name
+
+        # 显示加载状态
+        self.fetchStatusLabel.setText("获取中...")
+        self.fetchStatusLabel.setStyleSheet(f"color: #888888; font-size: 10px; {get_font_family_css()}")
+
+        def do_fetch():
+            try:
+                headers = {"Authorization": f"Bearer {api_key}"}
+                urls_to_try = [
+                    f"{api_url.rstrip('/')}/v1/models",
+                    f"{api_url.rstrip('/')}/api/models",
+                ]
+                models = []
+                for url in urls_to_try:
+                    try:
+                        resp = requests.get(url, headers=headers, timeout=10)
+                        if resp.status_code == 200:
+                            data = resp.json()
+                            if "data" in data:
+                                for item in data["data"]:
+                                    model_id = item.get("id", "")
+                                    if model_id and _is_text_chat_model(model_id):
+                                        models.append(model_id)
+                            elif "models" in data:
+                                for item in data["models"]:
+                                    model_id = item.get("id", "") or item.get("name", "")
+                                    if model_id and _is_text_chat_model(model_id):
+                                        models.append(model_id)
+                            if models:
+                                break
+                    except Exception:
+                        continue
+                return models
+            except Exception:
+                return []
+
+        thread = threading.Thread(target=self._do_fetch_thread, args=(do_fetch,))
+        thread.daemon = True
+        thread.start()
+
+    def _do_fetch_thread(self, fetch_func):
+        """在后台线程中获取模型"""
+        import time
+        time.sleep(0.1)
+        models = fetch_func()
+        if models:
+            self._fetched_models = models
+            self.fetchStatusLabel.setText(f"获取到 {len(models)} 个模型")
+            self.fetchStatusLabel.setStyleSheet("color: #2ecc71; font-size: 10px;")
+            self.modelCombo.clear()
+            self.modelCombo.addItems(models)
+            idx = self.modelCombo.findText(self._original_info.get("模型名称", ""))
+            if idx >= 0:
+                self.modelCombo.setCurrentIndex(idx)
+        else:
+            self.fetchStatusLabel.setText("获取失败，请检查配置")
+            self.fetchStatusLabel.setStyleSheet("color: #e74c3c; font-size: 10px;")
+
+    def _on_save(self):
+        """保存"""
+        provider_name = self.nameCombo.currentText() if self.is_new else self.provider_name
+        self.provider_info = {
+            "API_URL": self.apiUrlCombo.currentText().strip(),
+            "API_KEY": self.apiKeyEdit.text().strip(),
+            "模型名称": self.modelCombo.currentText().strip(),
+            "温度": self.tempSpin.value(),
+            "最大Token": int(self.contextLengthSpin.value()),
+            "认证方式": "bearer",
+        }
+        if self._fetched_models:
+            self.provider_info["模型列表"] = self._fetched_models
+        self.saved.emit(provider_name, self.provider_info)
+
+    def _on_cancel(self):
+        """取消"""
+        self.closed.emit()
+
+    def get_result(self):
+        """获取结果"""
+        if self.is_new:
+            return self.nameCombo.currentText(), self.provider_info
+        return self.provider_name, self.provider_info
+
+
+def _is_text_chat_model(model_id: str) -> bool:
+    """判断模型是否为文本聊天模型"""
+    if not model_id:
+        return False
+    model_lower = model_id.lower()
+    non_text_keywords = [
+        'dall-e', 'dalle', 'stable-diffusion', 'sd-', 'imagen', 'flux',
+        'image', 'diffusion', 'kandinsky', 'midjourney', "wan",
+        'whisper', 'tts', 'speech', 'audio', 'piper', "voice",
+        'embedding', 'embed', 'text-embedding', 'bge',
+        'moderation', 'rerank', 'search', 'retrieval',
+    ]
+    for keyword in non_text_keywords:
+        if keyword in model_lower:
+            return False
+    return True

@@ -1,0 +1,13 @@
+# -*- coding: utf-8 -*-
+import sys
+sys.stdout.reconfigure(line_buffering=True)
+from app.utils.diff_viewer import DiffHtmlGenerator
+import difflib
+
+old_lines = ['old line 1\n', 'old line 2\n']
+new_lines = ['old line 1\n', 'new line 2\n']
+diff = difflib.unified_diff(old_lines, new_lines, fromfile='a.txt', tofile='b.txt', lineterm='\n')
+html = DiffHtmlGenerator.generate_html_report(''.join(diff), '', lazy_load=True)
+print('HTML length:', len(html))
+print('file-block count:', html.count('class="file-block"'))
+print('preloadCount:', html.count('window._preloadCount'))

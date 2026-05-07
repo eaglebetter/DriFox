@@ -1,0 +1,72 @@
+"""
+下载单个文件
+"""
+import argparse
+import os
+import requests
+from loguru import logger
+
+
+def download_file(file_name: str, uuid: str, output_dir: str = "./downloaded_files") -> bool:
+    """
+    下载单个文件
+    
+    Args:
+        file_name: 文件名（含扩展名）
+        uuid: 文件uuid
+        output_dir: 保存目录
+    
+    Returns:
+        下载是否成功
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    
+    file_path = os.path.join(output_dir, file_name)
+    
+    # 检查文件是否已存在
+    if os.path.exists(file_path):
+        logger.info(f"文件已存在，跳过: {file_name}")
+        return True
+    
+    url = f"http://10.246.11.125:8080/open/SNPDP/DocumentActions/download?download=true&fileName={file_name}&specification={uuid}"
+    
+    try:
+        response = requests.get(url)
+        response.encoding = "utf-8"
+        
+        if response.status_code == 200:
+            with open(file_path, "wb") as f:
+                f.write(response.content)
+            logger.info(f"文件下载成功: {file_name}")
+            return True
+        else:
+            logger.error(f"文件下载失败: {file_name}, 状态码: {response.status_code}")
+            return False
+            
+    except Exception as e:
+        logger.error(f"文件下载异常: {file_name}, 错误信息: {e}")
+        return False
+
+
+def main():
+    parser = argparse.ArgumentParser(description="下载单个文件")
+    parser.add_argument("--file-name", type=str, required=True,
+                        help="文件名（含扩展名）")
+    parser.add_argument("--uuid", type=str, required=True,
+                        help="文件uuid")
+    parser.add_argument("--output-dir", type=str, default="./downloaded_files",
+                        help="保存目录")
+    
+    args = parser.parse_args()
+    
+    success = download_file(args.file_name, args.uuid, args.output_dir)
+    
+    if success:
+        logger.info("下载完成")
+    else:
+        logger.error("下载失败")
+        exit(1)
+
+
+if __name__ == "__main__":
+    main()
