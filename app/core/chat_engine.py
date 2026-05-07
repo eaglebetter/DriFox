@@ -197,13 +197,21 @@ class ChatEngine:
     ):
         self._emit("permission_approval_requested", tool_call_id, tool_name, arguments)
 
-    def approve_tool_permission(self, tool_call_id: str, auto_allow: bool = False):
+    def approve_tool_permission(self, tool_call_id: str, auto_allow: bool = False, session_allow: bool = False):
         if self._current_worker:
-            self._current_worker.approve_permission(tool_call_id, auto_allow)
+            self._current_worker.approve_permission(tool_call_id, auto_allow, session_allow)
 
     def deny_tool_permission(self, tool_call_id: str):
         if self._current_worker:
             self._current_worker.deny_permission(tool_call_id)
+
+    def clear_session_permission_cache(self, tool_name: str = None):
+        """清除会话级权限缓存"""
+        if self._current_worker:
+            if tool_name:
+                self._current_worker.set_session_permission_cache(tool_name, False)
+            else:
+                self._current_worker._session_permission_cache = {}
 
     def _truncate_with_head_tail(self, content: str, max_length: int) -> str:
         """

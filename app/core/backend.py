@@ -193,10 +193,10 @@ class ChatBackend(QObject):
         if self._chat_engine:
             self._chat_engine.switch_agent(agent_name)
     
-    def approve_tool_permission(self, tool_call_id: str, auto_allow: bool = False):
+    def approve_tool_permission(self, tool_call_id: str, auto_allow: bool = False, session_allow: bool = False):
         """批准工具调用权限"""
         if self._chat_engine:
-            self._chat_engine.approve_tool_permission(tool_call_id, auto_allow)
+            self._chat_engine.approve_tool_permission(tool_call_id, auto_allow, session_allow)
     
     def deny_tool_permission(self, tool_call_id: str):
         """拒绝工具调用权限"""
@@ -328,10 +328,10 @@ class ChatBackend(QObject):
         if self._chat_engine and self._chat_engine._current_worker:
             self._chat_engine._current_worker.stop()
     
-    def approve_permission(self, tool_call_id: str, auto_allow: bool = False):
+    def approve_permission(self, tool_call_id: str, auto_allow: bool = False, session_allow: bool = False):
         """批准权限"""
         if self._chat_engine:
-            self._chat_engine.approve_tool_permission(tool_call_id, auto_allow)
+            self._chat_engine.approve_tool_permission(tool_call_id, auto_allow, session_allow)
     
     def deny_permission(self, tool_call_id: str):
         """拒绝权限"""

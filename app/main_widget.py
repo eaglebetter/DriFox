@@ -121,7 +121,7 @@ from app.widgets.ui_helpers import add_message_to_layout, refresh_history_card_i
     post_append_user_message, create_assistant_card_widget, scroll_to_bottom_if_streaming, \
     build_node_preview_from_session, calculate_scroll_progress, find_user_card_at_index, truncate_and_remove_round, \
     log_deletion_stats, restore_input_from_card, find_last_tool_call_id_after_round, get_first_file_operation, \
-    show_diff_viewer, render_batch_to_assistant_card
+    show_diff_viewer, render_batch_to_assistant_card, find_user_round_index
 
 
 class OpenAIChatToolWindow(ToolWindow):
@@ -168,18 +168,29 @@ class OpenAIChatToolWindow(ToolWindow):
     toolStartUiSyncRequested = pyqtSignal(str, str, object, str)
 
     def __init__(self, homepage, button):
-        # 需要在 super().__init__() 之前初始化
+        # 需要在 super().__init__() 之前初始化所有依赖项
+        self.homepage = homepage  # 必须在 super() 之前设置，供 backend.initialize 使用
         from app.core.agent import AgentManager
         self._agent_manager = AgentManager()
         
-        # 创建后端（后端自己创建所有组件）- 需要在 super() 之前创建
-        # 因为 setup_ui() 中会用到 self.backend
+        # 创建后端（后端自己创建所有组件）- 需要在 super() 之前创建并初始化
+        # 因为 setup_ui() 中会用到 self.backend.get_primary_agents()
         self.backend = ChatBackend()
-        self.session_manager = None  # 占位，初始化后填充
-        self._chat_engine = None
-        self._tool_executor = None
-        self._memory_manager = None
+        self.backend.initialize(
+            get_model_config=self._get_current_model_config,
+            agent_manager=self._agent_manager,  # 传递已有的 AgentManager
+            workdir=str(Path(__file__).parent.parent.parent),
+            canvas_name=getattr(homepage, "workflow_name", "default") or "default",
+        )
         
+        # 从后端获取组件（前端只负责 UI 逻辑）
+        self.session_manager = self.backend.session_manager
+        self._chat_engine = self.backend.chat_engine
+        self._tool_executor = self.backend.tool_executor
+        self._agent_manager = self.backend.agent_manager  # 同步为后端的实例
+        self._memory_manager = self.backend.memory_manager
+        
+        # 调用父类（会触发 setup_ui -> _create_agent_switch_buttons）
         super().__init__(homepage, button)
         self._session_card_cache: Dict[str, Dict[str, Any]] = {}
         self._current_history_project: Optional[str] = None  # 当前历史面板项目过滤
@@ -227,7 +238,6 @@ class OpenAIChatToolWindow(ToolWindow):
         self.toolStartUiSyncRequested.connect(
             self._handle_tool_start_ui_sync, type=Qt.BlockingQueuedConnection
         )
-        self.homepage = homepage
         self._is_streaming = False
         # 使用 try-except 保护 homepage 操作，防止 C++ 对象已删除错误
         try:
@@ -246,21 +256,6 @@ class OpenAIChatToolWindow(ToolWindow):
         self._pending_scroll_to_index: Optional[int] = None  # 时间线节点滚动目标索引
         self._pending_scroll_to_batch: Optional[int] = None  # 时间线节点滚动目标 batch 索引
         self._pending_scroll_to_update: Optional[int] = None  # 待更新的节点索引（用于同步高亮和进度）
-        
-        # 初始化后端 - 后端内部创建 SessionManager, ChatEngine, ToolExecutor 等
-        self.backend.initialize(
-            get_model_config=self._get_current_model_config,
-            agent_manager=self._agent_manager,  # 传递已有的 AgentManager
-            workdir=str(Path(__file__).parent.parent.parent),
-            canvas_name=getattr(homepage, "workflow_name", "default") or "default",
-        )
-        
-        # 从后端获取组件（前端只负责 UI 逻辑）
-        self.session_manager = self.backend.session_manager
-        self._chat_engine = self.backend.chat_engine
-        self._tool_executor = self.backend.tool_executor
-        self._agent_manager = self.backend.agent_manager
-        self._memory_manager = self.backend.memory_manager
         
         self._current_session_id = self.session_manager.get_current_session().session_id
         
@@ -324,7 +319,9 @@ class OpenAIChatToolWindow(ToolWindow):
         self._sub_agent_manager.task_started.connect(self._on_sub_agent_task_started)
         self._sub_agent_manager.task_finished.connect(self._on_sub_agent_task_finished)
         self._sub_agent_manager.set_history_getter(self._get_current_session_messages_for_tools)
-        self._sub_agent_manager = self.backend.sub_agent_manager
+        
+        # 将子智能体管理器设置到 backend，让 ToolExecutor 能访问
+        self.backend.set_sub_agent_manager(self._sub_agent_manager)
 
         # 初始化子智能体日志存储（在 ChatEngine 之后）
         self._init_sub_agent_log_store()
@@ -4349,9 +4346,11 @@ class OpenAIChatToolWindow(ToolWindow):
             tool_call_id = self._pending_permission_tool_call_id
             self._pending_permission_tool_call_id = None
             if answer == "允许":
-                self.backend.approve_tool_permission(tool_call_id, False)
+                self.backend.approve_tool_permission(tool_call_id, False, False)
             elif answer == "允许且该轮对话自动允许":
-                self.backend.approve_tool_permission(tool_call_id, True)
+                self.backend.approve_tool_permission(tool_call_id, True, False)
+            elif answer == "本次会话允许":
+                self.backend.approve_tool_permission(tool_call_id, False, True)
             else:
                 self.backend.deny_tool_permission(tool_call_id)
             if self.input_area:
@@ -4403,7 +4402,7 @@ class OpenAIChatToolWindow(ToolWindow):
         try:
             arg_str = str(arguments)[:200] if arguments else ""
             question_text = f"工具 `{tool_name}` 需要权限执行。\n\n参数: {arg_str}"
-            options = ["允许", "允许且该轮对话自动允许", "不允许"]
+            options = ["允许", "允许且该轮对话自动允许", "本次会话允许", "不允许"]
             self._question_floating_widget.show_question(question_text, options, False)
         except Exception as e:
             logger.error(f"[Permission] Approval error: {e}")

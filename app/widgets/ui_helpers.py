@@ -1247,6 +1247,46 @@ def find_user_card_at_index(chat_layout, target_index: int) -> Any:
     return None
 
 
+def find_user_round_index(session, user_text: str, timestamp: str) -> int:
+    """
+    从 session 中找到 user 消息对应的 round_index。
+    
+    通过在 session.messages 中定位 user 消息，然后计算它是第几个 user。
+    
+    Args:
+        session: ChatSession 对象
+        user_text: 用户消息的纯文本内容
+        timestamp: 用户消息的时间戳
+        
+    Returns:
+        round_index (0-based)，如果找不到返回 -1
+    """
+    if not session or not hasattr(session, 'messages'):
+        return -1
+    
+    round_index = 0
+    for msg in session.messages:
+        if msg.get("role") == "user":
+            # 检查是否匹配（通过文本内容或时间戳）
+            content = msg.get("content", "")
+            # 支持纯文本内容或结构化内容
+            if isinstance(content, dict):
+                content = content.get("text", "")
+            if isinstance(content, list):
+                for item in content:
+                    if isinstance(item, dict) and item.get("type") == "text":
+                        content = item.get("text", "")
+                        break
+            
+            # 通过时间戳或内容匹配
+            msg_timestamp = msg.get("timestamp", "")
+            if msg_timestamp == timestamp or (user_text and user_text in str(content)):
+                return round_index
+            round_index += 1
+    
+    return -1
+
+
 def clear_and_show_welcome(
     session,
     session_card_cache,
