@@ -50,6 +50,7 @@ from app.core import (
     TopicSummaryTask,
 )
 from app.core.agent import AgentManager
+from app.utils.config import Settings
 from app.tool_window import (
     ToolWindow,
     DockPosition,
