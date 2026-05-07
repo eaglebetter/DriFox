@@ -39,6 +39,7 @@ from app.constants import (
     PROVIDER_MODELS,
 )
 from app.core import (
+    ChatBackend,
     ChatEngine,
     ToolExecutor,
     MemoryManagerCore,
@@ -240,6 +241,10 @@ class OpenAIChatToolWindow(ToolWindow):
         self.session_manager = SessionManager()
         self.session_manager.create_new_session()
         self._current_session_id = self.session_manager.get_current_session().session_id
+        
+        # 创建后端（用于前后端分离）
+        self.backend = ChatBackend()
+        
         app = QApplication.instance()
         if app is not None:
             try:
@@ -318,6 +323,15 @@ class OpenAIChatToolWindow(ToolWindow):
         self._init_sub_agent_log_store()
 
         self._initialize_history_manager()
+        
+        # 初始化后端（前后端分离）
+        self.backend.initialize(
+            get_model_config=self._get_current_model_config,
+            tool_executor=self._tool_executor,
+            agent_manager=self._agent_manager,
+            memory_manager=self._memory_manager,
+            session_manager=self.session_manager,
+        )
 
     def _init_sub_agent_log_store(self):
         """初始化子智能体日志存储"""
