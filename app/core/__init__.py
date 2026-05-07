@@ -18,7 +18,10 @@ from app.core.agent import (
 )
 from app.core.worker import (
     OpenAIChatWorker,
+)
+from app.core.tasks import (
     TopicSummaryTask,
+    ShellExecutionTask,
 )
 from app.core.message_content import (
     consolidate_messages,
@@ -58,6 +61,7 @@ __all__ = [
     # Worker
     "OpenAIChatWorker",
     "TopicSummaryTask",
+    "ShellExecutionTask",
     # 消息处理
     "consolidate_messages",
     "content_to_text",

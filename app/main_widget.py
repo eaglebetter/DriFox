@@ -48,7 +48,7 @@ from app.core import (
     content_to_text,
     content_to_markdown,
     group_messages_for_display,
-    get_user_round_ranges,
+    get_user_round_ranges, TopicSummaryTask,
 )
 from app.core.agent import AgentManager
 from app.utils.config import Settings
