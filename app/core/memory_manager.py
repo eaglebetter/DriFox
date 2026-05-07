@@ -13,7 +13,7 @@ from loguru import logger
 
 from openai import OpenAI
 
-from app.utils.retry_helper import (
+from app.core.retry_helper import (
     create_api_call_with_retry,
 )
 from app.utils.session_store import (

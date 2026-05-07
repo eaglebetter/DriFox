@@ -13,23 +13,23 @@ from app.core.provider_profile import (
     get_provider_profile,
 )
 from app.tools import get_builtin_tools_schema
-from app.utils.chat_session import (
+from app.core.chat_session import (
     ChatSession,
     SessionManager,
 )
 from app.utils.config import Settings
-from app.utils.message_content import (
+from app.core.message_content import (
     consolidate_messages,
     content_to_text,
 )
-from app.utils.retry_helper import (
+from app.core.retry_helper import (
     create_api_call_with_retry,
 )
-from app.utils.token_estimator import (
+from app.core.token_estimator import (
     estimate_tokens,
     count_messages_tokens,
 )
-from app.utils.worker import OpenAIChatWorker
+from app.core.worker import OpenAIChatWorker
 
 MAX_HISTORY_SNIPPET_CHARS = 1200
 RECENT_HISTORY_MIN_MESSAGES = 6
