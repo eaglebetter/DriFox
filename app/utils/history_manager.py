@@ -292,10 +292,12 @@ class HistoryManager:
         return most_recent
 
     def get_history_list(self, project: str = None) -> List[Dict]:
-        """获取历史会话列表，可选按项目过滤"""
+        """获取历史会话列表，可选按项目过滤，按最后对话时间排序"""
+        sessions = self._history_sessions
         if project:
-            return [s for s in self._history_sessions if s.get("project", "默认项目") == project]
-        return self._history_sessions
+            sessions = [s for s in sessions if s.get("project", "默认项目") == project]
+        # 按最后对话时间 last_time 降序排序
+        return sorted(sessions, key=lambda x: x.get("last_time", ""), reverse=True)
 
     def get_projects(self) -> List[str]:
         """获取所有不重复的项目名"""

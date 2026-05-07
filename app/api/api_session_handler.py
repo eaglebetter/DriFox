@@ -142,8 +142,8 @@ class APIHistoryManager:
             self._session_store.save_session(session_record)
     
     def get_history_list(self) -> List[Dict]:
-        """获取所有会话列表"""
-        return self._api_sessions
+        """获取所有会话列表，按最后对话时间排序"""
+        return sorted(self._api_sessions, key=lambda x: x.get("last_time", ""), reverse=True)
     
     def get_session_by_session_id(self, session_id: str) -> Optional[Dict]:
         """根据 session_id 获取会话"""
