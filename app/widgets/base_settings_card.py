@@ -243,10 +243,10 @@ class BaseSettingsCard(SimpleCardWidget):
         self._tab_buttons = {}
         for tab_id, tab_name in tabs:
             btn = QLabel(f" {tab_name} ", self)
+            btn.setFont(get_unified_font(11))  # 使用系统配置字体
             btn.setStyleSheet("""
                 QLabel {
                     color: rgba(255, 255, 255, 0.5);
-                    font-size: 11px;
                     padding: 3px 8px;
                     border-radius: 4px;
                     cursor: pointer;
@@ -278,3 +278,5 @@ class BaseSettingsCard(SimpleCardWidget):
                 btn.setStyleSheet(TabStyles.active())
             else:
                 btn.setStyleSheet(TabStyles.inactive())
+            # 重新应用系统字体，确保字体不被样式覆盖
+            btn.setFont(get_unified_font(11))
