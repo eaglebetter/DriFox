@@ -29,7 +29,7 @@ from app.core.token_estimator import (
     estimate_tokens,
     count_messages_tokens,
 )
-from app.core.worker import OpenAIChatWorker
+from app.core.workers import OpenAIChatWorker
 
 MAX_HISTORY_SNIPPET_CHARS = 1200
 RECENT_HISTORY_MIN_MESSAGES = 6

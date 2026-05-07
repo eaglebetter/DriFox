@@ -1,0 +1,17 @@
+# Extract OpenAIChatWorker from worker.py
+with open('app/core/worker.py', 'r', encoding='utf-8') as f:
+    lines = f.readlines()
+
+# Find OpenAIChatWorker
+start = None
+for i, line in enumerate(lines):
+    if 'class OpenAIChatWorker' in line:
+        start = i
+        print(f'Found at line {i+1}')
+        break
+
+if start:
+    content = ''.join(lines[start:])
+    with open('app/core/workers/chat_worker.py', 'w', encoding='utf-8') as f:
+        f.write(content)
+    print(f'Saved {len(content)} chars')

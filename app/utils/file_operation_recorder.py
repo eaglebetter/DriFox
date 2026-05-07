@@ -13,7 +13,7 @@ from typing import List, Dict, Optional, Tuple
 
 from loguru import logger
 
-from app.utils.session_store import SessionStore
+from app.core.store import SessionStore
 
 
 @dataclass

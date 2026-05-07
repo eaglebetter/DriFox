@@ -50,8 +50,6 @@ from app.core import (
     group_messages_for_display,
     get_user_round_ranges,
     TopicSummaryTask,
-    find_user_round_index,
-    export_messages_to_markdown,
 )
 from app.core.agent import AgentManager
 from app.utils.config import Settings
@@ -272,9 +270,7 @@ class OpenAIChatToolWindow(ToolWindow):
         primary_agents = self._agent_manager.list_primary_agents()
         logger.info(f"[Init] AgentManager 加载了 {len(all_agents)} 个智能体，其中 {len(primary_agents)} 个 primary")
 
-        from app.core.sub_agent_executor import (
-            SubAgentManager,
-        )
+        from app.core import SubAgentManager
 
         self._sub_agent_manager = SubAgentManager(
             agent_manager=self._agent_manager,
@@ -325,7 +321,7 @@ class OpenAIChatToolWindow(ToolWindow):
 
     def _init_sub_agent_log_store(self):
         """初始化子智能体日志存储"""
-        from app.core.sub_agent_log_store import SubAgentLogStore
+        from app.core import SubAgentLogStore
         import os
 
         try:
@@ -2112,7 +2108,7 @@ class OpenAIChatToolWindow(ToolWindow):
 
             # 获取文件操作记录
             from app.utils.file_operation_recorder import FileOperationRecorder
-            from app.utils.session_store import SessionStore
+            from app.core.store import SessionStore
 
             session_store = SessionStore()
             file_recorder = FileOperationRecorder(session_store)

@@ -21,7 +21,7 @@ from loguru import logger
 from PyQt5.QtCore import QTimer
 
 from app.core import consolidate_messages, content_to_text
-from app.utils.session_store import SessionStore
+from app.core.store import SessionStore
 from app.utils.utils import serialize_for_json, deserialize_from_json
 
 

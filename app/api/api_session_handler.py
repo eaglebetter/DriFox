@@ -101,9 +101,8 @@ class APIHistoryManager:
     def _init_sqlite(self):
         """初始化 SQLite 存储"""
         try:
-            from app.utils.session_store import (
-                SessionStore,
-            )
+            from app.core.store import SessionStore
+            
             self._session_store = SessionStore(db_dir=".drifox")
             if self._session_store.is_initialized:
                 logger.info("[APIHistoryManager] SQLite 存储已启用，canvas_id=api")
