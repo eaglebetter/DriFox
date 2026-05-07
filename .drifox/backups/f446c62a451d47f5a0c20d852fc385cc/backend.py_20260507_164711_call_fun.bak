@@ -1,0 +1,247 @@
+# -*- coding: utf-8 -*-
+"""
+ChatBackend - 统一后端接口
+后端自己创建和管理所有组件，前端只负责 UI 调用
+"""
+
+from typing import Dict, List, Any, Optional, Callable
+from PyQt5.QtCore import QObject, pyqtSignal, QThreadPool
+
+from loguru import logger
+
+from app.core.chat_session import SessionManager, ChatSession
+from app.core.workers import TopicSummaryTask
+from app.core.store import SessionStore
+from app.core.chat_engine import ChatEngine
+from app.core.tool_executor import ToolExecutor
+from app.core.memory_manager import MemoryManagerCore
+from app.core.agent import AgentManager
+
+
+class ChatBackend(QObject):
+    """
+    聊天后端 - 自己创建所有核心组件，暴露统一接口给前端
+    
+    职责：
+    1. 创建并管理 ChatEngine, SessionManager, ToolExecutor 等
+    2. 暴露统一的 API 给前端（UI 层）
+    3. 发出状态变化信号供前端订阅
+    """
+    
+    # ========== 信号定义 ==========
+    # 会话相关
+    session_created = pyqtSignal(str)  # session_id
+    session_changed = pyqtSignal(str)  # session_id
+    session_deleted = pyqtSignal(int)  # index
+    
+    # 消息相关
+    message_received = pyqtSignal(dict)  # 新消息
+    stream_started = pyqtSignal()
+    stream_chunk = pyqtSignal(str)  # 流式内容片段
+    stream_finished = pyqtSignal(dict)  # 完成时的消息
+    reasoning_content = pyqtSignal(str)  # DeepSeek thinking mode
+    
+    # 工具相关
+    tool_call_started = pyqtSignal(str, str, dict)  # tool_call_id, tool_name, arguments
+    tool_result_received = pyqtSignal(str, str, dict, bool)  # tool_call_id, name, result, success
+    
+    # 权限相关
+    permission_requested = pyqtSignal(str, str, dict)  # tool_call_id, tool_name, arguments
+    
+    # 错误
+    error_occurred = pyqtSignal(str)
+    
+    # 上下文
+    context_updated = pyqtSignal(int, int)  # token_count, limit
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        
+        # 核心组件（后端自己创建）
+        self._session_manager: Optional[SessionManager] = None
+        self._chat_engine: Optional[ChatEngine] = None
+        self._tool_executor: Optional[ToolExecutor] = None
+        self._agent_manager: Optional[AgentManager] = None
+        self._memory_manager: Optional[MemoryManagerCore] = None
+        self._sub_agent_manager = None
+        
+        # 配置回调
+        self._get_model_config: Optional[Callable] = None
+        
+        # 线程池
+        self._thread_pool = QThreadPool()
+        
+        # 状态
+        self._initialized = False
+    
+    # ========== 属性访问 ==========
+    
+    @property
+    def session_manager(self) -> SessionManager:
+        return self._session_manager
+    
+    @property
+    def chat_engine(self) -> ChatEngine:
+        return self._chat_engine
+    
+    @property
+    def tool_executor(self) -> ToolExecutor:
+        return self._tool_executor
+    
+    @property
+    def agent_manager(self) -> AgentManager:
+        return self._agent_manager
+    
+    @property
+    def memory_manager(self) -> MemoryManagerCore:
+        return self._memory_manager
+    
+    @property
+    def sub_agent_manager(self):
+        return self._sub_agent_manager
+    
+    @property
+    def is_initialized(self) -> bool:
+        return self._initialized
+    
+    # ========== 初始化 ==========
+    
+    def initialize(
+        self,
+        get_model_config: Callable[[], Dict[str, Any]],
+        agent_manager: AgentManager = None,
+        homepage=None,
+        workdir: str = None,
+        canvas_name: str = None,
+    ):
+        """
+        后端初始化 - 自己创建所有组件
+        
+        Args:
+            get_model_config: 获取模型配置的回调
+            agent_manager: 已有的 AgentManager（可选）
+            homepage: Qt 父窗口（ToolExecutor 需要）
+            workdir: 工作目录
+            canvas_name: 画布名称
+        """
+        logger.info("[ChatBackend] 初始化中...")
+        
+        self._get_model_config = get_model_config
+        
+        # 1. 创建 SessionManager
+        self._session_manager = SessionManager()
+        self._session_manager.create_new_session()
+        logger.info("[ChatBackend] SessionManager 创建完成")
+        
+        # 2. 创建 MemoryManager
+        self._memory_manager = MemoryManagerCore(canvas_name or "default")
+        logger.info("[ChatBackend] MemoryManager 创建完成")
+        
+        # 3. 使用传入的 AgentManager 或创建新的
+        if agent_manager is not None:
+            self._agent_manager = agent_manager
+        else:
+            self._agent_manager = AgentManager()
+        logger.info(f"[ChatBackend] AgentManager 就绪，{len(self._agent_manager.list_agents())} 个 Agent")
+        
+        # 4. 创建 ToolExecutor
+        self._tool_executor = ToolExecutor(homepage, workdir=workdir)
+        self._tool_executor.set_memory_manager(self._memory_manager)
+        self._tool_executor.set_llm_config_getter(get_model_config)
+        self._tool_executor.set_agent_manager(self._agent_manager)
+        logger.info("[ChatBackend] ToolExecutor 创建完成")
+        
+        # 5. 创建 ChatEngine
+        self._chat_engine = ChatEngine(
+            session_manager=self._session_manager,
+            get_model_config=get_model_config,
+            tool_executor=self._tool_executor,
+            agent_manager=self._agent_manager,
+        )
+        logger.info("[ChatBackend] ChatEngine 创建完成")
+        
+        self._initialized = True
+        logger.info("[ChatBackend] 初始化完成")
+    
+    def set_callback(self, name: str, callback: Callable):
+        """设置回调（代理到 ChatEngine）"""
+        if self._chat_engine:
+            self._chat_engine.set_callback(name, callback)
+    
+    # ========== 会话管理 ==========
+    
+    def create_session(self) -> ChatSession:
+        """创建新会话"""
+        session = self._session_manager.create_new_session()
+        self.session_created.emit(session.session_id)
+        return session
+    
+    def get_current_session(self) -> Optional[ChatSession]:
+        """获取当前会话"""
+        return self._session_manager.get_current_session()
+    
+    def switch_session(self, index: int):
+        """切换会话"""
+        self._session_manager.switch_to_session(index)
+        session = self.get_current_session()
+        if session:
+            self.session_changed.emit(session.session_id)
+    
+    def delete_session(self, index: int) -> bool:
+        """删除会话"""
+        result = self._session_manager.delete_session(index)
+        if result:
+            self.session_deleted.emit(index)
+        return result
+    
+    def get_all_sessions(self) -> List[ChatSession]:
+        """获取所有会话"""
+        return self._session_manager.get_all_sessions()
+    
+    # ========== 对话操作 ==========
+    
+    def send_message(self, text: str, agent_name: str = None, **kwargs):
+        """发送消息"""
+        session = self.get_current_session()
+        if not session:
+            session = self.create_session()
+        
+        session.add_user_message(text, params=kwargs)
+        
+        self._chat_engine.send_message(
+            text,
+            session=session,
+            agent_name=agent_name,
+        )
+    
+    def stop_streaming(self):
+        """停止流式输出"""
+        if self._chat_engine and self._chat_engine._current_worker:
+            self._chat_engine._current_worker.stop()
+    
+    def approve_permission(self, tool_call_id: str, auto_allow: bool = False):
+        """批准权限"""
+        if self._chat_engine:
+            self._chat_engine.approve_tool_permission(tool_call_id, auto_allow)
+    
+    def deny_permission(self, tool_call_id: str):
+        """拒绝权限"""
+        if self._chat_engine:
+            self._chat_engine.deny_tool_permission(tool_call_id)
+    
+    # ========== 状态查询 ==========
+    
+    def get_current_agent(self) -> str:
+        """获取当前 Agent"""
+        return self._chat_engine._current_agent if self._chat_engine else "plan"
+    
+    def set_current_agent(self, agent_name: str):
+        """设置当前 Agent"""
+        if self._chat_engine:
+            self._chat_engine._current_agent = agent_name
+    
+    def get_context_usage(self) -> tuple:
+        """获取上下文使用情况"""
+        if self._chat_engine:
+            return self._chat_engine._get_context_usage()
+        return (0, 0)

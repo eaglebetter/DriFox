@@ -238,30 +238,38 @@ class OpenAIChatToolWindow(ToolWindow):
         self._pending_scroll_to_index: Optional[int] = None  # 时间线节点滚动目标索引
         self._pending_scroll_to_batch: Optional[int] = None  # 时间线节点滚动目标 batch 索引
         self._pending_scroll_to_update: Optional[int] = None  # 待更新的节点索引（用于同步高亮和进度）
-        self.session_manager = SessionManager()
-        self.session_manager.create_new_session()
-        self._current_session_id = self.session_manager.get_current_session().session_id
         
-        # 创建并初始化后端（用于前后端分离）
+        # 创建后端（后端自己创建所有组件）
         self.backend = ChatBackend()
-        self._initialize_managers()
         
-        # 初始化后端 - 将组件注册到 backend
+        # 初始化后端 - 后端内部创建 SessionManager, ChatEngine, ToolExecutor 等
         self.backend.initialize(
             get_model_config=self._get_current_model_config,
-            tool_executor=self._tool_executor,
-            agent_manager=self._agent_manager,
-            memory_manager=self._memory_manager,
-            session_manager=self.session_manager,
-            chat_engine=self._chat_engine,
+            agent_manager=self._agent_manager,  # 传递已有的 AgentManager
+            workdir=str(Path(__file__).parent.parent.parent),
+            canvas_name=getattr(homepage, "workflow_name", "default") or "default",
         )
         
-        # 代理属性到 backend（保持向后兼容）
+        # 从后端获取组件（前端只负责 UI 逻辑）
         self.session_manager = self.backend.session_manager
         self._chat_engine = self.backend.chat_engine
         self._tool_executor = self.backend.tool_executor
         self._agent_manager = self.backend.agent_manager
         self._memory_manager = self.backend.memory_manager
+        
+        self._current_session_id = self.session_manager.get_current_session().session_id
+        
+        # 初始化 UI 相关的回调
+        self._setup_engine_callbacks()
+        
+        # 初始化子智能体管理器
+        self._init_sub_agent_manager()
+        
+        # 初始化子智能体日志存储
+        self._init_sub_agent_log_store()
+        
+        # 初始化历史管理器
+        self._initialize_history_manager()
         
         # 应用退出时自动保存
         app = QApplication.instance()
@@ -279,43 +287,8 @@ class OpenAIChatToolWindow(ToolWindow):
         if self._tool_executor:
             self._tool_executor.set_session_context(self._current_session_id)
 
-    def _initialize_managers(self):
-        """初始化核心管理器"""
-        canvas_name = getattr(self.homepage, "workflow_name", "default") or "default"
-        self._memory_manager = MemoryManagerCore(canvas_name)
-        self._tool_executor = ToolExecutor(self.homepage, workdir=Path(__file__).parent.parent.parent)
-        self._tool_executor.set_memory_manager(self._memory_manager)
-        self._tool_executor.set_llm_config_getter(self._get_current_model_config)
-        self._tool_executor.set_session_messages_getter(
-            self._get_current_session_messages_for_tools
-        )
-        self._tool_executor.set_agent_manager(self._agent_manager)
-        # _agent_manager 已在 __init__ 开头初始化，这里只记录日志
-        all_agents = self._agent_manager.list_agents()
-        primary_agents = self._agent_manager.list_primary_agents()
-        logger.info(f"[Init] AgentManager 加载了 {len(all_agents)} 个智能体，其中 {len(primary_agents)} 个 primary")
-
-        from app.core import SubAgentManager
-
-        self._sub_agent_manager = SubAgentManager(
-            agent_manager=self._agent_manager,
-            tool_executor=self._tool_executor,
-            get_llm_config=self._get_current_model_config,
-        )
-        self._sub_agent_manager.task_started.connect(self._on_sub_agent_task_started)
-        self._sub_agent_manager.task_finished.connect(self._on_sub_agent_task_finished)
-        self._sub_agent_manager.set_history_getter(self._get_current_session_messages_for_tools)
-        self._tool_executor.set_sub_agent_manager(self._sub_agent_manager)
-
-        self._chat_engine = ChatEngine(
-            session_manager=self.session_manager,
-            get_model_config=self._get_current_model_config,
-            tool_executor=self._tool_executor,
-            agent_manager=self._agent_manager,
-            get_chat_cards=self._get_chat_cards_for_engine,
-            get_memory_context=self._build_memory_context_for_engine,
-        )
-
+    def _setup_engine_callbacks(self):
+        """设置 ChatEngine 的回调"""
         self._chat_engine.set_callback("content_received", self._on_content_received)
         self._chat_engine.set_callback("reasoning_content_received", self._on_reasoning_content_received)
         self._chat_engine.set_callback("tool_call_started", self._on_tool_call_started)
@@ -338,6 +311,20 @@ class OpenAIChatToolWindow(ToolWindow):
         self._chat_engine.set_callback(
             "permission_approval_requested", self._on_permission_approval_requested
         )
+    
+    def _init_sub_agent_manager(self):
+        """初始化子智能体管理器"""
+        from app.core import SubAgentManager
+        
+        self._sub_agent_manager = SubAgentManager(
+            agent_manager=self._agent_manager,
+            tool_executor=self._tool_executor,
+            get_llm_config=self._get_current_model_config,
+        )
+        self._sub_agent_manager.task_started.connect(self._on_sub_agent_task_started)
+        self._sub_agent_manager.task_finished.connect(self._on_sub_agent_task_finished)
+        self._sub_agent_manager.set_history_getter(self._get_current_session_messages_for_tools)
+        self._tool_executor.set_sub_agent_manager(self._sub_agent_manager)
 
         # 初始化子智能体日志存储（在 ChatEngine 之后）
         self._init_sub_agent_log_store()
