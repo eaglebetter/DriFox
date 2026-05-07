@@ -53,12 +53,13 @@ from qfluentwidgets.components.widgets.card_widget import (
     SimpleCardWidget,
 )
 
-from app.utils.message_content import (
+from app.core import (
     append_text_block,
     content_to_markdown,
     content_to_text,
-    ensure_content_blocks, make_tool_result_block,
+    ensure_content_blocks,
 )
+from app.core.message_content import make_tool_result_block
 from app.utils.utils import get_font_family_css, get_icon
 from app.widgets.render_helpers import (
     render_tool_block,
@@ -1480,16 +1481,24 @@ class CodeWebViewer(QWebEngineView):
                         if (progress < 1) {{
                             window._collapsibleAnimId = requestAnimationFrame(tick);
                         }} else {{
-                            // 动画结束
+                            // 动画结束：设置最终状态
                             body.style.height = expand ? 'auto' : '0px';
                             body.style.opacity = endOpacity;
-                            body.style.overflow = '';  // 动画结束后恢复 overflow
-                            // 动画结束后用防抖报告高度，避免频繁更新导致抖动
-                            setTimeout(() => reportHeightDebounced(), 0);
+                            body.style.overflow = '';
+                            // 动画结束后重置高度报告标志
+                            _collapsibleHeightReporting = false;
+                            // 暂时不报告高度，测试抖动是否消失
+                            // setTimeout(() => reportHeight(), 80);
                         }}
                     }}
 
                     window._collapsibleAnimId = requestAnimationFrame(tick);
+                }}
+
+                // 折叠动画期间暂停高度报告，避免卡片抖动
+                let _collapsibleHeightReporting = false;
+                function startCollapsibleAnimation() {{
+                    _collapsibleHeightReporting = true;
                 }}
 
                 function restoreCollapsibleStates(root) {{
@@ -1554,9 +1563,10 @@ class CodeWebViewer(QWebEngineView):
                     const h = document.documentElement.getBoundingClientRect().height;
                     console.log('pywebview_height:' + h);
                 }}
-                // 防抖报告高度：动画期间合并多个高度变化，只报告最终稳定值
+                // 防抖报告高度：动画期间暂停报告，只在动画结束后报告最终值
                 let _heightReportPending = false;
                 function reportHeightDebounced() {{
+                    if (_collapsibleHeightReporting) return;  // 动画期间暂停
                     if (_heightReportPending) return;
                     _heightReportPending = true;
                     requestAnimationFrame(() => {{
@@ -1578,6 +1588,8 @@ class CodeWebViewer(QWebEngineView):
                     if (summary) {{
                         const block = summary.closest('.cm-collapsible');
                         if (block) {{
+                            // 动画开始前暂停高度报告
+                            startCollapsibleAnimation();
                             animateCollapsible(block, block.dataset.expanded !== 'true');
                         }}
                         return;
@@ -1607,6 +1619,8 @@ class CodeWebViewer(QWebEngineView):
                     // 使用防抖的 ResizeObserver，避免频繁触发高度更新
                     let resizeTimeout = null;
                     new ResizeObserver(() => {{
+                        // 动画期间跳过高度报告
+                        if (_collapsibleHeightReporting) return;
                         if (resizeTimeout) clearTimeout(resizeTimeout);
                         resizeTimeout = setTimeout(() => requestAnimationFrame(reportHeight), 50);
                     }}).observe(document.body);

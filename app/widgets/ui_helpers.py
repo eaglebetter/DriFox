@@ -72,7 +72,7 @@ def _get_content_to_text() -> Callable:
     """延迟获取 content_to_text 函数"""
     global _content_to_text_getter
     if _content_to_text_getter is None:
-        from app.utils.message_content import content_to_text
+        from app.core import content_to_text
         _content_to_text_getter = content_to_text
     return _content_to_text_getter
 
@@ -190,7 +190,7 @@ def export_messages_to_markdown(messages: list, timestamp: str = None) -> str:
         Markdown 格式的对话内容
     """
     from datetime import datetime
-    from app.utils.message_content import content_to_text
+    from app.core import content_to_text
     
     if timestamp is None:
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -900,7 +900,7 @@ def create_session_from_record(session_record: dict, messages: list, title: str 
     Returns:
         ChatSession 实例
     """
-    from app.utils.chat_session import ChatSession
+    from app.core import ChatSession
     
     session_id = session_record.get("session_id")
     title = title or session_record.get("name") or "历史对话"
@@ -949,7 +949,7 @@ def get_round_message_indices(session, round_index: int) -> tuple:
     Returns:
         (start_idx, end_idx) 或 (None, None)
     """
-    from app.utils.message_content import consolidate_messages, get_user_round_ranges
+    from app.core import consolidate_messages, get_user_round_ranges
     
     canonical_messages = consolidate_messages(session.messages)
     round_ranges = get_user_round_ranges(canonical_messages)
@@ -972,7 +972,7 @@ def create_new_session_state(old_session_manager=None, old_chat_engine=None) -> 
         dict 包含 new_session, new_session_id
     """
     # 延迟导入避免循环依赖
-    from app.utils.chat_session import SessionManager
+    from app.core import SessionManager
     
     session_manager = SessionManager()
     session_manager.create_new_session()
@@ -1247,6 +1247,46 @@ def find_user_card_at_index(chat_layout, target_index: int) -> Any:
     return None
 
 
+def find_user_round_index(session, user_text: str, timestamp: str) -> int:
+    """
+    从 session 中找到 user 消息对应的 round_index。
+    
+    通过在 session.messages 中定位 user 消息，然后计算它是第几个 user。
+    
+    Args:
+        session: ChatSession 对象
+        user_text: 用户消息的纯文本内容
+        timestamp: 用户消息的时间戳
+        
+    Returns:
+        round_index (0-based)，如果找不到返回 -1
+    """
+    if not session or not hasattr(session, 'messages'):
+        return -1
+    
+    round_index = 0
+    for msg in session.messages:
+        if msg.get("role") == "user":
+            # 检查是否匹配（通过文本内容或时间戳）
+            content = msg.get("content", "")
+            # 支持纯文本内容或结构化内容
+            if isinstance(content, dict):
+                content = content.get("text", "")
+            if isinstance(content, list):
+                for item in content:
+                    if isinstance(item, dict) and item.get("type") == "text":
+                        content = item.get("text", "")
+                        break
+            
+            # 通过时间戳或内容匹配
+            msg_timestamp = msg.get("timestamp", "")
+            if msg_timestamp == timestamp or (user_text and user_text in str(content)):
+                return round_index
+            round_index += 1
+    
+    return -1
+
+
 def clear_and_show_welcome(
     session,
     session_card_cache,
@@ -1368,7 +1408,7 @@ def build_node_preview_from_session(
     Returns:
         节点预览数据列表
     """
-    from app.utils.message_content import consolidate_messages
+    from app.core import consolidate_messages
     
     messages = consolidate_messages(session.messages)
     return build_node_preview_data(messages, content_to_text_func, max_len)

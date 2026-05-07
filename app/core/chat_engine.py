@@ -13,23 +13,23 @@ from app.core.provider_profile import (
     get_provider_profile,
 )
 from app.tools import get_builtin_tools_schema
-from app.utils.chat_session import (
+from app.core.chat_session import (
     ChatSession,
     SessionManager,
 )
 from app.utils.config import Settings
-from app.utils.message_content import (
+from app.core.message_content import (
     consolidate_messages,
     content_to_text,
 )
-from app.utils.retry_helper import (
+from app.core.retry_helper import (
     create_api_call_with_retry,
 )
-from app.utils.token_estimator import (
+from app.core.token_estimator import (
     estimate_tokens,
     count_messages_tokens,
 )
-from app.utils.worker import OpenAIChatWorker
+from app.core.workers import OpenAIChatWorker
 
 MAX_HISTORY_SNIPPET_CHARS = 1200
 RECENT_HISTORY_MIN_MESSAGES = 6
@@ -197,13 +197,21 @@ class ChatEngine:
     ):
         self._emit("permission_approval_requested", tool_call_id, tool_name, arguments)
 
-    def approve_tool_permission(self, tool_call_id: str, auto_allow: bool = False):
+    def approve_tool_permission(self, tool_call_id: str, auto_allow: bool = False, session_allow: bool = False):
         if self._current_worker:
-            self._current_worker.approve_permission(tool_call_id, auto_allow)
+            self._current_worker.approve_permission(tool_call_id, auto_allow, session_allow)
 
     def deny_tool_permission(self, tool_call_id: str):
         if self._current_worker:
             self._current_worker.deny_permission(tool_call_id)
+
+    def clear_session_permission_cache(self, tool_name: str = None):
+        """清除会话级权限缓存"""
+        if self._current_worker:
+            if tool_name:
+                self._current_worker.set_session_permission_cache(tool_name, False)
+            else:
+                self._current_worker._session_permission_cache = {}
 
     def _truncate_with_head_tail(self, content: str, max_length: int) -> str:
         """

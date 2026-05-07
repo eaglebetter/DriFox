@@ -20,8 +20,8 @@ from pathlib import Path
 from loguru import logger
 from PyQt5.QtCore import QTimer
 
-from app.utils.message_content import consolidate_messages, content_to_text
-from app.utils.session_store import SessionStore
+from app.core import consolidate_messages, content_to_text
+from app.core.store import SessionStore
 from app.utils.utils import serialize_for_json, deserialize_from_json
 
 
@@ -167,7 +167,9 @@ class HistoryManager:
                 break
 
         if existing_index is not None:
-            self._history_sessions[existing_index] = session_record
+            # 更新现有会话时，移动到列表开头以保持与 SQLite ORDER BY updated_at DESC 一致
+            self._history_sessions.pop(existing_index)
+            self._history_sessions.insert(0, session_record)
         else:
             self._history_sessions.insert(0, session_record)
 
@@ -397,8 +399,9 @@ class HistoryManager:
             if existing_session_id:
                 existing_index = self.find_index_by_session_id(existing_session_id)
                 if existing_index is not None:
-                    # 更新已存在的会话
-                    self._history_sessions[existing_index] = session
+                    # 更新已存在的会话，移动到列表开头以保持与 SQLite ORDER BY updated_at DESC 一致
+                    self._history_sessions.pop(existing_index)
+                    self._history_sessions.insert(0, session)
                     session["canvas_id"] = self.canvas_name
                     self._schedule_save(existing_session_id)
                     logger.info(f"[HistoryManager] 更新已存在的会话: {existing_session_id}")
@@ -581,7 +584,9 @@ class HistoryManager:
                 ),
                 project=project if project is not None else existing.get("project", "默认项目"),
             )
-            self._history_sessions[index] = updated
+            # 移动到列表开头以保持与 SQLite ORDER BY updated_at DESC 一致
+            self._history_sessions.pop(index)
+            self._history_sessions.insert(0, updated)
             self._schedule_save(existing.get("session_id"))
 
     def _schedule_save(self, session_id: str = None):
