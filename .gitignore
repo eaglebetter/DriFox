@@ -24,4 +24,5 @@ logs/
 .DS_Store
 Thumbs.db
 /.drifox/
+/app.config
 /docs/
