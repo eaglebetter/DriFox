@@ -95,7 +95,7 @@ class BuiltinTools(QObject):
         return result
 
     def edit_file(
-        self, path: str, oldString: str, newString: str, replaceAll: bool = False
+            self, path: str, oldString: str, newString: str, replaceAll: bool = False
     ):
         result = self._file_tools.edit_file(path, oldString, newString, replaceAll)
         if result.success:
@@ -138,10 +138,11 @@ class BuiltinTools(QObject):
             self.fileModified.emit(str(resolved_path))
         return result
 
-    def execute_bash(self, command: str, timeout: int = 120,):
+    def execute_bash(self, command: str, timeout: int = 120, ):
         return self._terminal_tools.execute_bash(command, timeout)
 
-    def fetch_web(self, url: str, format: str = "markdown", max_chars: int = 26000, callback=None, cancelled_ref: list = None):
+    def fetch_web(self, url: str, format: str = "markdown", max_chars: int = 26000, callback=None,
+                  cancelled_ref: list = None):
         return self._web_tools.fetch_web(url, format, max_chars, callback, cancelled_ref)
 
     def search_web(self, query: str, num_results: int = 10, callback=None, cancelled_ref: list = None):
@@ -160,7 +161,7 @@ class BuiltinTools(QObject):
         """Reset session-scoped state when switching sessions"""
         self._todo_list = []
         self._task_tools.reset_session_state()
-    
+
     def cleanup(self):
         """
         彻底清理 BuiltinTools 的所有缓存，防止内存泄漏。
@@ -170,14 +171,14 @@ class BuiltinTools(QObject):
         self._todo_list = []
         if hasattr(self._task_tools, 'cleanup'):
             self._task_tools.cleanup()
-        
+
         # 清理加载的技能
         self._loaded_skills = {}
         self._skill_workspaces = {}
-        
+
         # 清理子智能体管理器
         self._sub_agent_manager = None
-        
+
         # 清理文件工具的缓存
         if hasattr(self._file_tools, 'cleanup'):
             self._file_tools.cleanup()
@@ -185,8 +186,8 @@ class BuiltinTools(QObject):
     def todo_read(self):
         return self._task_tools.todo_read()
 
-    def task_execute_batch(self, tasks: List[Dict]):
-        return self._task_tools.task_execute_batch(tasks)
+    def task_execute_batch(self, tasks: List[Dict], share_context: bool = False):
+        return self._task_tools.task_execute_batch(tasks, share_context)
 
     # def task_wait(self, task_ids: List[str], timeout: int = 1800, poll_interval: float = 0.1):
     #     # 已禁用，改为自动回调机制
@@ -208,7 +209,7 @@ class BuiltinTools(QObject):
         return self._task_tools.stage_files(files)
 
     def ask_question(
-        self, question: str, options: List[str] = None, multiple: bool = False
+            self, question: str, options: List[str] = None, multiple: bool = False
     ):
         return self._task_tools.ask_question(question, options, multiple)
 
@@ -232,7 +233,7 @@ class BuiltinTools(QObject):
         summary = "\n".join(clean_lines)
         if len(summary) > limit:
             head = summary[: int(limit * 0.75)].rstrip()
-            tail = summary[-int(limit * 0.15) :].lstrip()
+            tail = summary[-int(limit * 0.15):].lstrip()
             summary = f"{head}\n\n[... 已省略 {len(summary) - len(head) - len(tail)} 个字符 ...]\n\n{tail}"
         return ToolResult(True, content=summary)
 
@@ -253,9 +254,9 @@ class BuiltinTools(QObject):
             self._task_tools._agent_manager = agent_manager
 
     def memory_list(
-        self,
-        limit: int = 10,
-        include_disabled: bool = False,
+            self,
+            limit: int = 10,
+            include_disabled: bool = False,
     ) -> ToolResult:
         if not self._memory_manager:
             return ToolResult(False, error="Memory manager not available")
@@ -278,10 +279,10 @@ class BuiltinTools(QObject):
         )
 
     def memory_search(
-        self,
-        query: str = "",
-        limit: int = 8,
-        include_disabled: bool = False,
+            self,
+            query: str = "",
+            limit: int = 8,
+            include_disabled: bool = False,
     ) -> ToolResult:
         if not self._memory_manager:
             return ToolResult(False, error="Memory manager not available")
@@ -307,11 +308,11 @@ class BuiltinTools(QObject):
         )
 
     def memory_save(
-        self,
-        content: str,
-        confidence: float = 0.8,
-        source: str = "assistant",
-        conflict_group: str = "",
+            self,
+            content: str,
+            confidence: float = 0.8,
+            source: str = "assistant",
+            conflict_group: str = "",
     ) -> ToolResult:
         if not self._memory_manager:
             return ToolResult(False, error="Memory manager not available")
@@ -341,9 +342,9 @@ class BuiltinTools(QObject):
         )
 
     def memory_consolidate(
-        self,
-        max_items: int = 3,
-        save: bool = True,
+            self,
+            max_items: int = 3,
+            save: bool = True,
     ) -> ToolResult:
         if not self._memory_manager:
             return ToolResult(False, error="Memory manager not available")
@@ -378,11 +379,11 @@ class BuiltinTools(QObject):
         if save:
             for item in consolidated:
                 if self._memory_manager.add_user_memory(
-                    item.get("content", ""),
-                    source=item.get("source", "session"),
-                    confidence=float(item.get("confidence", 0.8) or 0.8),
-                    conflict_group=str(item.get("conflict_group", "") or ""),
-                    category=str(item.get("category", "task_preference") or "task_preference"),
+                        item.get("content", ""),
+                        source=item.get("source", "session"),
+                        confidence=float(item.get("confidence", 0.8) or 0.8),
+                        conflict_group=str(item.get("conflict_group", "") or ""),
+                        category=str(item.get("category", "task_preference") or "task_preference"),
                 ):
                     saved_count += 1
 
@@ -413,7 +414,7 @@ def create_builtin_tools(homepage=None, workdir: str = None) -> BuiltinTools:
 
 def get_builtin_tools_schema(agent_manager=None) -> List[Dict]:
     """获取内置工具的 schema 定义（用于给 LLM 调用）
-    
+
     Args:
         agent_manager: AgentManager 实例，用于动态注入可用子智能体列表
     """
@@ -437,7 +438,7 @@ def get_builtin_tools_schema(agent_manager=None) -> List[Dict]:
             "批量分发多个子智能体任务（并行执行）。任务完成后系统会自动发送 `[后台任务状态]` 消息通知。"
             "收到通知后使用 task_status 获取结果。"
         )
-    
+
     return [
         {
             "type": "function",
@@ -820,7 +821,7 @@ def get_builtin_tools_schema(agent_manager=None) -> List[Dict]:
                                 "type": "object",
                                 "properties": {
                                     "agent": {
-                                        "type": "string", 
+                                        "type": "string",
                                         "description": f"子智能体名称。",
                                         "enum": ', '.join(subagent_names),
                                     },
@@ -829,6 +830,11 @@ def get_builtin_tools_schema(agent_manager=None) -> List[Dict]:
                                 },
                                 "required": ["agent", "description"],
                             },
+                        },
+                        "share_context": {
+                            "type": "boolean",
+                            "description": "是否共享主智能体上下文给子智能体（默认 False）。启用后子智能体将获得主智能体的完整上下文信息。",
+                            "default": True,
                         },
                     },
                     "required": ["tasks"],
@@ -868,7 +874,8 @@ def get_builtin_tools_schema(agent_manager=None) -> List[Dict]:
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "name": {"type": "string", "description": "技能名称，如 brainstorming, writing-plans, find-skills, git-commit 等"},
+                        "name": {"type": "string",
+                                 "description": "技能名称，如 brainstorming, writing-plans, find-skills, git-commit 等"},
                     },
                     "required": ["name"],
                 },
@@ -891,7 +898,8 @@ def get_builtin_tools_schema(agent_manager=None) -> List[Dict]:
                     "type": "object",
                     "properties": {
                         "question": {"type": "string", "description": "问题内容及描述，尽量简洁，不要包含选项内容"},
-                        "options": {"type": "array", "description": "选项列表。当有多个可选方案或需要用户确认时，**必须提供选项列表**，不要留空让用户文本输入。"},
+                        "options": {"type": "array",
+                                    "description": "选项列表。当有多个可选方案或需要用户确认时，**必须提供选项列表**，不要留空让用户文本输入。"},
                         "multiple": {
                             "type": "boolean",
                             "description": "是否允许多选，默认false",

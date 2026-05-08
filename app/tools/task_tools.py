@@ -69,7 +69,7 @@ class TaskTools:
             return ToolResult(False, error=f"Todo read error: {str(e)}")
 
     def task_execute_batch(
-        self, tasks: List[Dict]
+            self, tasks: List[Dict], share_context: bool = False
     ) -> ToolResult:
         """
         批量执行子智能体任务（并行）。
@@ -79,6 +79,7 @@ class TaskTools:
                 - agent: str 子智能体名称
                 - description: str 任务描述
                 - context: str (可选) 父任务上下文
+            share_context: bool 是否共享主智能体上下文给子智能体
 
         Returns:
             ToolResult: success=True, content={"task_ids": [str], "status": "running"}
@@ -110,6 +111,7 @@ class TaskTools:
                     on_finished=None,
                     on_error=None,
                     executor_ref=None,
+                    share_context=share_context,
                 )
                 task_ids.append(task_id)
 
@@ -126,16 +128,16 @@ class TaskTools:
             logger.error(f"[Task] task_execute_batch exception: {e}")
             return ToolResult(False, error=f"批量任务启动失败: {str(e)}")
 
-    # def task_wait(
-    #     self,
-    #     task_ids: List[str],
-    #     timeout: int = 1800,
-    #     poll_interval: float = 0.1,
-    # ) -> ToolResult:
-    #     """
-    #     【已禁用】请使用自动回调机制。
-    #     任务完成后系统会自动发送 `[后台任务状态]` 消息。
-    #     """
+        # def task_wait(
+        #     self,
+        #     task_ids: List[str],
+        #     timeout: int = 1800,
+        #     poll_interval: float = 0.1,
+        # ) -> ToolResult:
+        #     """
+        #     【已禁用】请使用自动回调机制。
+        #     任务完成后系统会自动发送 `[后台任务状态]` 消息。
+        #     """
         if not hasattr(self, "_sub_agent_manager") or not self._sub_agent_manager:
             return ToolResult(False, error="子智能体管理器未初始化")
 
@@ -147,12 +149,12 @@ class TaskTools:
         try:
             while pending:
                 now = time.time()
-                
+
                 # 每 10 秒检查一次卡死的任务
                 if now - last_cleanup_check > 10:
                     self._sub_agent_manager.cleanup_dead_tasks(timeout_seconds=300)
                     last_cleanup_check = now
-                
+
                 if now - start_time > timeout:
                     logger.warning(f"[task_wait] Timeout after {timeout}s, pending: {pending}")
                     # 超时后，先清理卡死任务（这会将它们移到 _finished_tasks）
@@ -163,9 +165,11 @@ class TaskTools:
                         if existing.get("result"):
                             results.append({"task_id": tid, "status": "finished", "result": existing.get("result", "")})
                         elif existing.get("error"):
-                            results.append({"task_id": tid, "status": "timeout", "result": "", "error": existing.get("error", "")})
+                            results.append(
+                                {"task_id": tid, "status": "timeout", "result": "", "error": existing.get("error", "")})
                         else:
-                            results.append({"task_id": tid, "status": "timeout", "result": "", "error": "Task execution timeout"})
+                            results.append(
+                                {"task_id": tid, "status": "timeout", "result": "", "error": "Task execution timeout"})
                     break
 
                 # 检查已完成的任务
@@ -327,7 +331,7 @@ class TaskTools:
                     d
                     for d in dirs
                     if d not in {'.mypy_cache', '.git', 'node_modules', '__pycache__', 'venv', '.venv',
-                           'dist', 'build', '.idea', '.vscode'}
+                                 'dist', 'build', '.idea', '.vscode'}
                 ]
                 rel_root = Path(root).relative_to(target_path)
                 display_root = "." if str(rel_root) == "." else str(rel_root)
@@ -359,7 +363,7 @@ class TaskTools:
             return ToolResult(False, error=f"stage_files error: {str(e)}")
 
     def ask_question(
-        self, question: str, options: List[str] = None, multiple: bool = False
+            self, question: str, options: List[str] = None, multiple: bool = False
     ) -> ToolResult:
         return ToolResult(
             True,

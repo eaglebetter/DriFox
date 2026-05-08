@@ -417,7 +417,8 @@ class ToolExecutor:
             "todowrite": lambda: self._builtin_tools.todo_write(args.get("todos", [])),
             "todoread": lambda: self._builtin_tools.todo_read(),
             "task_batch": lambda: self._builtin_tools.task_execute_batch(
-                args.get("tasks", [])
+                args.get("tasks", []),
+                args.get("share_context", True),
             ),
             "task_status": lambda: self._builtin_tools.task_status(
                 args.get("task_ids"),

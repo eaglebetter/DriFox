@@ -63,6 +63,7 @@ from app.utils.diff_viewer import (
     DiffHtmlGenerator,
     DiffViewerWindow,
 )
+from app.utils.file_operation_recorder import FileOperationRecorder
 from app.utils.history_manager import (
     HistoryManager,
 )
@@ -180,6 +181,7 @@ class OpenAIChatToolWindow(ToolWindow):
         )
 
         # 从后端获取组件（前端只负责 UI 逻辑）
+        self.session_store = self.backend.session_store
         self.session_manager = self.backend.session_manager
         self._chat_engine = self.backend.chat_engine
         self._tool_executor = self.backend.tool_executor
@@ -2206,12 +2208,7 @@ class OpenAIChatToolWindow(ToolWindow):
                 InfoBar.warning("提示", "工具执行器未初始化", parent=self, position=InfoBarPosition.TOP)
                 return
 
-            # 获取文件操作记录
-            from app.utils.file_operation_recorder import FileOperationRecorder
-            from app.core.store import SessionStore
-
-            session_store = SessionStore()
-            file_recorder = FileOperationRecorder(session_store)
+            file_recorder = FileOperationRecorder(self.session_store)
 
             # 获取当前会话的所有文件操作
             operations = file_recorder.get_all_operations_for_session(session_id)
