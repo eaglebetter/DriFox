@@ -1796,8 +1796,28 @@ class CodeWebViewer(QWebEngineView):
         for timer in timers_to_stop:
             try:
                 timer.stop()
+                timer.deleteLater()
             except RuntimeError:
                 pass
+
+        # 断开所有信号连接
+        try:
+            if hasattr(self._page, 'codeActionRequested'):
+                self._page.codeActionRequested.disconnect()
+            if hasattr(self._page, 'contextActionRequested'):
+                self._page.contextActionRequested.disconnect()
+            if hasattr(self._page, 'heightReported'):
+                self._page.heightReported.disconnect()
+            if hasattr(self._page, 'contentReady'):
+                self._page.contentReady.disconnect()
+            if hasattr(self._page, 'toolDiffRequested'):
+                self._page.toolDiffRequested.disconnect()
+            if hasattr(self._page, 'subAgentLogRequested'):
+                self._page.subAgentLogRequested.disconnect()
+            if hasattr(self._page, 'saveFileRequested'):
+                self._page.saveFileRequested.disconnect()
+        except Exception:
+            pass
 
         # 清理流式输出和渲染缓存
         self._streaming = False
@@ -1812,10 +1832,12 @@ class CodeWebViewer(QWebEngineView):
         self._height_report_pending = False
         self._resize_locked = False
 
-        # 清理页面
+        # 清理页面：先加载空白页释放资源
         try:
-            if self.page():
-                self.page().deleteLater()
+            self.setHtml("")
+            if hasattr(self, '_page'):
+                self._page.deleteLater()
+                delattr(self, '_page')
         except RuntimeError:
             pass
 

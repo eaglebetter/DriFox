@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import gc
 import ctypes
 import orjson as json
 import os
@@ -199,10 +200,20 @@ class OpenAIChatToolWindow(ToolWindow):
         self._initial_visible_batch_count = 12
         self._incremental_visible_batch_count = 8
         self._history_load_threshold = 48
+        # 虚拟滚动：可见范围外前后保留多少个增量批次（缓冲区）
+        self._virtual_scroll_buffer = 2
         self._message_batch: List[List[Dict[str, Any]]] = []
+        # 存储每个batch对应的UI卡片：None表示已回收（只存数据不存UI）
+        self._batch_cards: List[Optional[List[MessageCard]]] = []
         self._visible_batch_start = 0
         self._visible_batch_end = 0
         self._is_loading_history_batches = False
+        self._is_virtual_recycling = False
+        # 滚动停止后延迟回收
+        self._virtual_scroll_timer = QTimer(self)
+        self._virtual_scroll_timer.setSingleShot(True)
+        self._virtual_scroll_timer.setInterval(300)
+        self._virtual_scroll_timer.timeout.connect(self._recycle_out_of_view_batches)
         self._suspend_auto_scroll = False
         self._gen_thread_pool = QThreadPool()
         self._gen_thread_pool.setMaxThreadCount(2)
@@ -911,6 +922,10 @@ class OpenAIChatToolWindow(ToolWindow):
         self.chat_layout.setSpacing(8)
         self.chat_layout.setAlignment(Qt.AlignBottom)
         self.chat_scroll_area.setWidget(self.chat_container)
+
+        # 连接滚动事件，触发虚拟滚动回收
+        scroll_bar = self.chat_scroll_area.verticalScrollBar()
+        scroll_bar.valueChanged.connect(lambda: self._virtual_scroll_timer.start())
 
         layout.addWidget(self.chat_scroll_area, 1)
 
@@ -1966,6 +1981,8 @@ class OpenAIChatToolWindow(ToolWindow):
 
         self._clear_chat_area()
         self._message_batch = group_messages_for_display(session.messages)
+        # 初始化 batch_cards：每个batch对应一个卡片列表，None表示已回收
+        self._batch_cards = [None for _ in self._message_batch]
         self._visible_batch_end = len(self._message_batch)
         self._visible_batch_start = max(
             0, self._visible_batch_end - self._initial_visible_batch_count
@@ -2020,6 +2037,8 @@ class OpenAIChatToolWindow(ToolWindow):
         # 滚动完成后同步时间线节点到最后一个（延迟执行确保卡片渲染完成）
         QTimer.singleShot(100, self._sync_node_preview_to_last)
         self._refresh_context_usage_indicator()
+        # 会话切换加载完成后，延迟触发垃圾回收释放未使用内存
+        QTimer.singleShot(500, lambda: gc.collect())
 
     def _has_more_history_batches(self) -> bool:
         return self._visible_batch_start > 0
@@ -2056,6 +2075,51 @@ class OpenAIChatToolWindow(ToolWindow):
                 self._is_loading_history_batches = False
 
         QTimer.singleShot(0, restore_anchor)
+
+    def _recycle_out_of_view_batches(self):
+        """回收超出可视缓冲区范围的批次UI，只保留数据，节省内存"""
+        if self._is_virtual_recycling or len(self._batch_cards) == 0:
+            return
+
+        self._is_virtual_recycling = True
+        try:
+            # 计算可回收范围
+            buffer_batches = self._incremental_visible_batch_count * self._virtual_scroll_buffer
+            recycle_start = 0 if self._visible_batch_start <= buffer_batches else self._visible_batch_start - buffer_batches
+            recycle_end = self._visible_batch_end + buffer_batches
+
+            recycled_count = 0
+            # 回收前面超出缓冲区的批次
+            for batch_idx in range(0, recycle_start):
+                if self._batch_cards[batch_idx] is not None:
+                    cards = self._batch_cards[batch_idx]
+                    if cards:
+                        for card in cards:
+                            if isinstance(card, MessageCard):
+                                card.cleanup()
+                                card.deleteLater()
+                        recycled_count += 1
+                    self._batch_cards[batch_idx] = None
+
+            # 回收后面超出缓冲区的批次
+            for batch_idx in range(recycle_end, len(self._batch_cards)):
+                if self._batch_cards[batch_idx] is not None:
+                    cards = self._batch_cards[batch_idx]
+                    if cards:
+                        for card in cards:
+                            if isinstance(card, MessageCard):
+                                card.cleanup()
+                                card.deleteLater()
+                        recycled_count += 1
+                    self._batch_cards[batch_idx] = None
+
+            # 回收完成，如果有回收触发GC
+            if recycled_count > 0:
+                logger.debug(f"[virtual-scroll] 回收了 {recycled_count} 个离屏批次")
+                QTimer.singleShot(100, lambda: gc.collect())
+
+        finally:
+            self._is_virtual_recycling = False
 
     def _initialize_history_manager(self):
         canvas_name = getattr(self.homepage, "workflow_name", "default") or "default"
@@ -2389,6 +2453,23 @@ class OpenAIChatToolWindow(ToolWindow):
                 global_batch_index, batch_offset
             )
 
+            # 检查该batch是否已经渲染过并且被回收了
+            if self._batch_cards[global_batch_index] is not None:
+                # 已经渲染过，卡片已经存在，不需要重新创建
+                # 但是需要确保已经添加到布局（如果是滚动回来加载更多）
+                cards = self._batch_cards[global_batch_index]
+                if cards and insert_index is not None:
+                    for card in cards:
+                        if self._is_widget_alive(card):
+                            if role == "user":
+                                self.chat_layout.insertWidget(insert_index, card, 0, Qt.AlignRight)
+                            else:
+                                self.chat_layout.insertWidget(insert_index, card)
+                            insert_index += 1
+                continue
+
+            # 需要重新创建
+            cards = []
             if role == "user":
                 content = self._sanitize_user_message_for_display(
                     batch[0].get("content", "")
@@ -2405,6 +2486,7 @@ class OpenAIChatToolWindow(ToolWindow):
                 if user_card:
                     # 设置 message_index 用于卡片差异功能
                     user_card._message_index = global_batch_index
+                    cards.append(user_card)
                 if insert_index is not None and user_card:
                     insert_index += 1
 
@@ -2418,10 +2500,14 @@ class OpenAIChatToolWindow(ToolWindow):
                 if assistant_card:
                     # 设置 message_index 用于卡片差异功能
                     assistant_card._message_index = global_batch_index
-                # 使用辅助函数渲染消息
-                render_batch_to_assistant_card(assistant_card, batch)
+                    cards.append(assistant_card)
+                    # 使用辅助函数渲染消息
+                    render_batch_to_assistant_card(assistant_card, batch)
                 if insert_index is not None and assistant_card:
                     insert_index += 1
+
+            # 保存卡片引用到 batch_cards
+            self._batch_cards[global_batch_index] = cards if cards else None
 
     def _get_rendered_message_cards(self) -> List[MessageCard]:
         def is_user_or_assistant(widget):
@@ -2844,7 +2930,6 @@ class OpenAIChatToolWindow(ToolWindow):
     def _on_archived_session_renamed(self, file_path: str, new_title: str):
         """重命名归档会话"""
         try:
-            import json
             # 读取文件
             with open(file_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
