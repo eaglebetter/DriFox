@@ -42,8 +42,7 @@ class HistoryManager:
     使用 SQLite 进行持久化存储，同时维护内存缓存以提高读取性能。
     """
 
-    def __init__(self, canvas_name: str):
-        self.canvas_name = canvas_name
+    def __init__(self):
         self.archive_dir = Path(".drifox") / "archived"
         self.archive_dir.mkdir(parents=True, exist_ok=True)
 
@@ -70,11 +69,10 @@ class HistoryManager:
                 self._session_store = SessionStore(db_dir=".drifox")
                 if self._session_store.is_initialized:
                     self._use_sqlite = True
-                    logger.info(f"[HistoryManager] SQLite 存储已启用: {self.canvas_name}")
+                    logger.info(f"[HistoryManager] SQLite 存储已启用")
 
                     # 从 SQLite 加载
                     self._history_sessions = self._session_store.load_sessions(
-                        self.canvas_name, self._history_limit
                     )
 
                     # 检查是否需要迁移旧 JSON 数据
@@ -92,7 +90,7 @@ class HistoryManager:
             return
 
         # 检查 SQLite 是否已有数据
-        if self._session_store.get_session_count(self.canvas_name) > 0:
+        if self._session_store.get_session_count() > 0:
             return
 
     def _normalize_sessions(self, data: List) -> List[Dict]:
@@ -175,19 +173,13 @@ class HistoryManager:
 
         self._history_sessions = self._history_sessions[: self._history_limit]
 
-        # 持久化
-        self._persist_session(session_record)
+                # 持久化
 
     def _persist_session(self, session_record: Dict):
         """持久化单个会话（延迟保存）"""
-        # 添加 canvas_id
-        session_record["canvas_id"] = self.canvas_name
-
         if self._use_sqlite and self._session_store:
-            # SQLite 模式：延迟保存，只保存当前会话
             self._schedule_save(session_record.get("session_id"))
         else:
-            # JSON 模式
             self._save_to_disk_json()
 
     def _build_session_record(
@@ -238,9 +230,6 @@ class HistoryManager:
     def update_session_title(self, index: int, new_title: str):
         if 0 <= index < len(self._history_sessions):
             self._history_sessions[index]["title"] = new_title
-            session = self._history_sessions[index]
-            session["canvas_id"] = self.canvas_name
-            self._persist_session(session)
 
     def update_topic_summary(self, index: int, summary: str):
         self.update_session_title(index, summary)
@@ -302,7 +291,7 @@ class HistoryManager:
     def get_projects(self) -> List[str]:
         """获取所有不重复的项目名"""
         if self._use_sqlite and self._session_store:
-            return self._session_store.get_projects(self.canvas_name)
+            return self._session_store.get_projects()
         projects = set()
         for s in self._history_sessions:
             p = s.get("project", "默认项目")
@@ -317,7 +306,6 @@ class HistoryManager:
         if 0 <= index < len(self._history_sessions):
             self._history_sessions[index]["project"] = project
             session = self._history_sessions[index]
-            session["canvas_id"] = self.canvas_name
             if self._use_sqlite and self._session_store:
                 self._session_store.update_session_project(
                     session.get("session_id"), project
@@ -329,7 +317,7 @@ class HistoryManager:
     def archive_sessions_by_project(self, project: str) -> int:
         """批量归档指定项目的所有会话"""
         if self._use_sqlite and self._session_store:
-            count = self._session_store.archive_sessions_by_project(self.canvas_name, project)
+            count = self._session_store.archive_sessions_by_project(project)
             # 同步内存缓存
             self._history_sessions = [
                 s for s in self._history_sessions
@@ -399,7 +387,6 @@ class HistoryManager:
                     # 更新已存在的会话，移动到列表开头以保持与 SQLite ORDER BY updated_at DESC 一致
                     self._history_sessions.pop(existing_index)
                     self._history_sessions.insert(0, session)
-                    session["canvas_id"] = self.canvas_name
                     self._schedule_save(existing_session_id)
                     logger.info(f"[HistoryManager] 更新已存在的会话: {existing_session_id}")
                 else:
@@ -412,7 +399,6 @@ class HistoryManager:
                         session["title"] = f"[导入] {session.get('title', '新对话')}"
 
                     # 添加到内存缓存顶部
-                    session["canvas_id"] = self.canvas_name
                     self._history_sessions.insert(0, session)
                     self._history_sessions = self._history_sessions[: self._history_limit]
                     self._schedule_save(session["session_id"])
@@ -420,7 +406,6 @@ class HistoryManager:
             else:
                 # 没有 session_id，生成一个新的
                 session["session_id"] = uuid.uuid4().hex[:8]
-                session["canvas_id"] = self.canvas_name
                 self._history_sessions.insert(0, session)
                 self._history_sessions = self._history_sessions[: self._history_limit]
                 self._schedule_save(session["session_id"])
@@ -605,7 +590,6 @@ class HistoryManager:
             logger.debug(f"[HistoryManager] 保存会话: pending_id={pending_id}")
             for session in self._history_sessions:
                 if session.get("session_id") == pending_id:
-                    session["canvas_id"] = self.canvas_name
                     self._session_store.save_session(session)
                     break
         else:

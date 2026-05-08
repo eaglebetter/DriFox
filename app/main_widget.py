@@ -2139,8 +2139,7 @@ class OpenAIChatToolWindow(ToolWindow):
             self._is_virtual_recycling = False
 
     def _initialize_history_manager(self):
-        canvas_name = getattr(self.homepage, "workflow_name", "default") or "default"
-        self.history_manager = HistoryManager(canvas_name)
+        self.history_manager = HistoryManager()
         # 从配置加载上次选中的项目
         from app.utils.config import Settings
         cfg = Settings.get_instance()
@@ -3141,7 +3140,8 @@ class OpenAIChatToolWindow(ToolWindow):
         self._sync_node_preview_to_scroll()
 
     def _sync_node_preview_to_scroll(self):
-        # 加载历史时抑制滚动同步，避免节点跑到渲染的卡片数量位置
+        """根据当前滚动位置同步时间线节点的高亮和进度条"""
+        # 加载历史时抑制滚动同步
         if self._suppress_scroll_sync_count > 0:
             self._suppress_scroll_sync_count -= 1
             return
@@ -3160,52 +3160,61 @@ class OpenAIChatToolWindow(ToolWindow):
             self.node_preview.set_progress_position(-1)
             return
 
+        # 如果有待更新的目标索引（点击跳转中），直接使用它
+        if self._pending_scroll_to_update is not None:
+            highlighted_index = self._pending_scroll_to_update
+            self._pending_scroll_to_update = None
+            highlighted_index = max(0, min(highlighted_index, total_nodes - 1))
+            self.node_preview.set_progress_position(highlighted_index)
+            if highlighted_index != self._last_visible_user_pair_index:
+                self._last_visible_user_pair_index = highlighted_index
+                self.node_preview.set_visible_node(highlighted_index)
+            return
+
         scroll_bar = self.chat_scroll_area.verticalScrollBar()
         viewport_height = self.chat_scroll_area.viewport().height()
         visible_top = scroll_bar.value()
         visible_bottom = visible_top + viewport_height
-
-        # 基于滚动比例计算进度，而非渲染的卡片数量
-        # 这样即使只渲染了部分卡片（懒渲染），进度条也能正确显示
         scroll_max = scroll_bar.maximum()
-        if scroll_max > 0:
-            scroll_ratio = visible_top / scroll_max
-            progress = scroll_ratio * (total_nodes - 1)
-        else:
-            progress = 0.0
 
-        # 计算可见区域内的 user card 高亮索引
-        # 遍历实际渲染的 user card，找到在可视区域内最靠近顶部的那个
-        user_widgets = collect_user_card_widgets(self.chat_layout)
+        # 核心逻辑：遍历 _message_batch 找到所有 user 批次，
+        # 对比每个批次对应卡片的 y 坐标，确定哪个 user 在可视区域内
         highlighted_index = -1
 
-        if user_widgets:
-            # 找到可视区域内最靠近可视区顶部的 user card
-            best_widget = None
-            for i, w in enumerate(user_widgets):
-                card_y = w.y()
-                card_bottom = card_y + w.height()
-                # 卡片的任何部分在可视区域内
-                if card_bottom > visible_top and card_y < visible_bottom:
-                    if best_widget is None or card_y < best_widget.y():
-                        best_widget = w
-                        highlighted_index = i
+        # 遍历 _message_batch 中的 user 批次，找到可视区域内最靠近顶部的
+        user_node_index = 0  # 节点预览中的索引
+        best_y = None
+        for batch_idx, batch in enumerate(self._message_batch):
+            if not batch or batch[0].get("role") != "user":
+                continue
+            if user_node_index >= total_nodes:
+                break
 
-        # 如果没找到可见的user card，使用滚动比例作为fallback
-        if highlighted_index < 0:
-            clamped_progress = min(max(progress, 0.0), total_nodes - 1)
-            highlighted_index = int(round(clamped_progress))
+            # 尝试从 batch_cards 中找到对应的卡片
+            cards = self._batch_cards[batch_idx] if batch_idx < len(self._batch_cards) else None
+            if cards:
+                for card in cards:
+                    if isinstance(card, MessageCard) and card.role == "user":
+                        card_y = card.y()
+                        card_bottom = card_y + card.height()
+                        # 卡片在可视区域内
+                        if card_bottom > visible_top and card_y < visible_bottom:
+                            if best_y is None or card_y < best_y:
+                                best_y = card_y
+                                highlighted_index = user_node_index
+                        break
 
-        # 如果有待更新的目标索引（点击跳转），直接使用它
-        if self._pending_scroll_to_update is not None:
-            highlighted_index = self._pending_scroll_to_update
-            self._pending_scroll_to_update = None
+            user_node_index += 1
+
+        # fallback：使用滚动比例估算
+        if highlighted_index < 0 and scroll_max > 0:
+            scroll_ratio = visible_top / scroll_max
+            highlighted_index = int(round(scroll_ratio * (total_nodes - 1)))
 
         highlighted_index = max(0, min(highlighted_index, total_nodes - 1))
 
-        # 更新进度条（使用索引作为 progress）
+        # 更新进度条和高亮节点
         self.node_preview.set_progress_position(highlighted_index)
-
         if highlighted_index != self._last_visible_user_pair_index:
             self._last_visible_user_pair_index = highlighted_index
             self.node_preview.set_visible_node(highlighted_index)
@@ -3259,7 +3268,7 @@ class OpenAIChatToolWindow(ToolWindow):
         # 检查目标 batch 是否已经加载（可见）
         if target_batch_index >= self._visible_batch_start:
             # 已加载，直接滚动到目标位置
-            self._scroll_to_batch_index(target_batch_index)
+            self._scroll_to_batch_index(target_batch_index, node_index=target_index)
             return
 
         # 需要加载更多历史批次
@@ -3310,37 +3319,58 @@ class OpenAIChatToolWindow(ToolWindow):
         self._pending_scroll_to_index = None
         self._pending_scroll_to_batch = None
 
-        # 先标记目标索引（但不直接设置进度条）
-        # 让 _sync_node_preview_to_scroll 在滚动时自动计算正确的值
+        # 标记目标索引
         total_nodes = len(self.node_preview._nodes) if hasattr(self.node_preview, '_nodes') else 0
         if total_nodes > 0:
             self._pending_scroll_to_update = target_index
 
+        # 确保目标批次的卡片已经懒渲染
+        target_batch_index = -1
+        user_count = 0
+        for idx, batch in enumerate(self._message_batch):
+            if batch and batch[0].get("role") == "user":
+                if user_count == target_index:
+                    target_batch_index = idx
+                    break
+                user_count += 1
+
+        if target_batch_index >= 0 and target_batch_index < len(self._batch_cards):
+            cards = self._batch_cards[target_batch_index]
+            if cards:
+                for card in cards:
+                    if isinstance(card, MessageCard):
+                        card.ensure_rendered()
+
         # 现在目标卡片应该已经渲染，尝试找到它并滚动
         target_widget = find_user_card_at_index(self.chat_layout, target_index)
         if target_widget:
-            # 滚动到目标位置，_sync_node_preview_to_scroll 会自动更新高亮和进度
             self.chat_scroll_area.verticalScrollBar().setValue(target_widget.y())
         else:
-            # 仍然找不到，说明批次数量不足，继续加载
-            logger.info(f"[NodePreview] Still not found, target_index={target_index}")
+            logger.info(f"[NodePreview] Still not found after rendering, target_index={target_index}")
 
-    def _scroll_to_batch_index(self, batch_index: int):
+    def _scroll_to_batch_index(self, batch_index: int, node_index: int = -1):
         """
         滚动到指定 batch 索引的位置
 
         Args:
             batch_index: 目标 batch 索引
+            node_index: 对应的节点预览索引（如果已知）
         """
-        # 标记目标索引
-        total_nodes = len(self.node_preview._nodes) if hasattr(self.node_preview, '_nodes') else 0
-        if total_nodes > 0:
-            self._pending_scroll_to_update = batch_index
+        if node_index >= 0:
+            self._pending_scroll_to_update = node_index
 
         # 找到对应的 user card widget 并滚动
-        target_widget = find_user_card_at_index(self.chat_layout, batch_index)
+        # 先确保该批次的卡片已经懒渲染
+        if batch_index < len(self._batch_cards):
+            cards = self._batch_cards[batch_index]
+            if cards:
+                for card in cards:
+                    if isinstance(card, MessageCard):
+                        card.ensure_rendered()
+
+        # 计算 node_index 对应的 user card 在布局中的索引
+        target_widget = find_user_card_at_index(self.chat_layout, node_index if node_index >= 0 else batch_index)
         if target_widget:
-            # 滚动到目标位置，_sync_node_preview_to_scroll 会自动更新高亮和进度
             self.chat_scroll_area.verticalScrollBar().setValue(target_widget.y())
 
     def _on_node_preview_clicked(self, index: int):

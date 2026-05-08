@@ -53,7 +53,6 @@ class SessionStore:
                 # 创建会话表（TIMESTAMP 改为 TEXT 避免时区问题）
                 self._db.create_table(self.TABLE_NAME, [
                     {"name": "session_id", "type": "TEXT", "primary_key": True},
-                    {"name": "canvas_id", "type": "TEXT", "not_null": True},
                     {"name": "title", "type": "TEXT"},
                     {"name": "messages", "type": "TEXT"},  # JSON 序列化
                     {"name": "system_prompt", "type": "TEXT"},
@@ -65,9 +64,6 @@ class SessionStore:
                 ])
 
                 # 创建索引
-                self._db.execute_sql(
-                    f'CREATE INDEX IF NOT EXISTS idx_canvas_id ON {self.TABLE_NAME}(canvas_id)'
-                )
                 self._db.execute_sql(
                     f'CREATE INDEX IF NOT EXISTS idx_updated ON {self.TABLE_NAME}(updated_at DESC)'
                 )
@@ -183,7 +179,6 @@ class SessionStore:
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             session_data = {
                 "session_id": session_id,
-                "canvas_id": session.get("canvas_id", "default"),
                 "title": session.get("title", ""),
                 "project": session.get("project", "默认项目"),
                 "messages": json.dumps(session.get("messages", [])).decode('utf-8'),
@@ -196,11 +191,11 @@ class SessionStore:
             # 使用 INSERT OR REPLACE，使用本地时间
             success, result = self._execute(f'''
                 INSERT OR REPLACE INTO {self.TABLE_NAME}
-                (session_id, canvas_id, title, project, messages, system_prompt,
+                (session_id, title, project, messages, system_prompt,
                  compaction_state, compaction_cache, message_count,
                  created_at, updated_at)
                 VALUES (
-                    :session_id, :canvas_id, :title, :project, :messages, :system_prompt,
+                    :session_id, :title, :project, :messages, :system_prompt,
                     :compaction_state, :compaction_cache, :message_count,
                     COALESCE((SELECT created_at FROM {self.TABLE_NAME} WHERE session_id = :session_id), :now),
                     :now
@@ -221,17 +216,16 @@ class SessionStore:
     def _dict_to_params(self, d: Dict) -> Tuple:
         """将字典转换为参数元组（按字段顺序）"""
         fields = [
-            "session_id", "canvas_id", "title", "project", "messages", "system_prompt",
+            "session_id", "title", "project", "messages", "system_prompt",
             "compaction_state", "compaction_cache", "message_count"
         ]
         return tuple(d.get(f) for f in fields)
 
-    def load_sessions(self, canvas_id: str, limit: int = 100) -> List[Dict]:
+    def load_sessions(self, limit: int = 100) -> List[Dict]:
         """
-        加载指定画布的会话列表（按更新时间倒序）
+        加载会话列表（按更新时间倒序）
 
         Args:
-            canvas_id: 画布 ID
             limit: 返回数量限制
 
         Returns:
@@ -244,10 +238,9 @@ class SessionStore:
         try:
             success, rows = self._execute(f'''
                 SELECT * FROM {self.TABLE_NAME}
-                WHERE canvas_id = ?
                 ORDER BY updated_at DESC
                 LIMIT ?
-            ''', (canvas_id, limit))
+            ''', (limit,))
 
             if not success:
                 logger.error(f"[SessionStore] 加载失败: {rows}")
@@ -258,7 +251,7 @@ class SessionStore:
                 session = self._row_to_session(row)
                 sessions.append(session)
 
-            logger.debug(f"[SessionStore] 加载 {len(sessions)} 条会话: canvas={canvas_id}")
+            logger.debug(f"[SessionStore] 加载 {len(sessions)} 条会话")
             return sessions
 
         except Exception as e:
@@ -336,13 +329,12 @@ class SessionStore:
 
         return session
 
-    def get_session_count(self, canvas_id: str) -> int:
-        """获取指定画布的会话数量"""
+    def get_session_count(self) -> int:
+        """获取会话数量"""
         if not self.is_initialized:
             return 0
         success, result = self._execute(
-            f'SELECT COUNT(*) FROM {self.TABLE_NAME} WHERE canvas_id = ?',
-            (canvas_id,)
+            f'SELECT COUNT(*) FROM {self.TABLE_NAME}'
         )
         if success and result:
             first = result[0]
@@ -352,14 +344,13 @@ class SessionStore:
                 return int(first[0]) if first[0] else 0
         return 0
 
-    def get_projects(self, canvas_id: str = "default") -> List[str]:
-        """获取指定画布下所有不重复的项目名"""
+    def get_projects(self) -> List[str]:
+        """获取所有不重复的项目名"""
         if not self.is_initialized:
             return ["默认项目"]
         try:
             success, rows = self._execute(
-                f'SELECT DISTINCT project FROM {self.TABLE_NAME} WHERE canvas_id = ? ORDER BY project',
-                (canvas_id,)
+                f'SELECT DISTINCT project FROM {self.TABLE_NAME} ORDER BY project'
             )
             if success and rows:
                 projects = [row[0] if isinstance(row, tuple) else row["project"] for row in rows]
@@ -383,14 +374,14 @@ class SessionStore:
             logger.error(f"[SessionStore] update_session_project 异常: {e}")
             return False
 
-    def get_sessions_by_project(self, canvas_id: str, project: str, limit: int = 100) -> List[Dict]:
+    def get_sessions_by_project(self, project: str, limit: int = 100) -> List[Dict]:
         """加载指定项目的会话列表"""
         if not self.is_initialized:
             return []
         try:
             success, rows = self._execute(
-                f'SELECT * FROM {self.TABLE_NAME} WHERE canvas_id = ? AND project = ? ORDER BY updated_at DESC LIMIT ?',
-                (canvas_id, project, limit)
+                f'SELECT * FROM {self.TABLE_NAME} WHERE project = ? ORDER BY updated_at DESC LIMIT ?',
+                (project, limit)
             )
             if not success:
                 return []
@@ -399,12 +390,12 @@ class SessionStore:
             logger.error(f"[SessionStore] get_sessions_by_project 异常: {e}")
             return []
 
-    def archive_sessions_by_project(self, canvas_id: str, project: str) -> int:
+    def archive_sessions_by_project(self, project: str) -> int:
         """归档指定项目的所有会话"""
         if not self.is_initialized:
             return 0
         try:
-            sessions = self.get_sessions_by_project(canvas_id, project, limit=1000)
+            sessions = self.get_sessions_by_project(project, limit=1000)
             count = 0
             for s in sessions:
                 sid = s.get("session_id")
@@ -450,7 +441,6 @@ class SessionStore:
                     # 检查是否已存在
                     existing = self.get_session(session_id)
                     if not existing:
-                        session["canvas_id"] = session.get("canvas_id", "default")
                         if self.save_session(session):
                             count += 1
 
