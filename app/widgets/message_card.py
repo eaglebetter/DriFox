@@ -2476,6 +2476,10 @@ class MessageCard(SimpleCardWidget):
         if self.role == "user":
             return
 
+        # welcome 卡片不需要 resize placeholder
+        if self.role == "welcome":
+            return
+
         # 懒渲染还没创建viewer，跳过
         if self.viewer is None:
             return

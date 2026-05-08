@@ -2539,7 +2539,13 @@ class OpenAIChatToolWindow(ToolWindow):
         return collect_message_cards_from_layout(self.chat_layout, is_user_or_assistant)
 
     def _get_current_user_round_index(self) -> int:
-        """获取当前 user message 应该是第几个 user（从 0 开始）"""
+        """获取当前 user message 应该是第几个 user（从 0 开始）
+        基于session消息计算，而非布局中渲染的卡片数量，避免动态加载导致索引错误
+        """
+        session = self.session_manager.get_current_session()
+        if session:
+            return sum(1 for msg in session.messages if msg.get("role") == "user")
+        # fallback: 从布局计数
         return count_user_cards_in_layout(self.chat_layout)
 
     def _find_user_round_index_for_card(self, card: MessageCard) -> Optional[int]:
@@ -3631,9 +3637,11 @@ class OpenAIChatToolWindow(ToolWindow):
 
         start_idx, end_idx = get_round_message_indices(session, round_index)
         if start_idx is None:
+            logger.warning(f"[card-diff] get_round_message_indices returned None for round_index={round_index}")
             return []
 
         canonical_messages = consolidate_messages(session.messages)
+        logger.debug(f"[card-diff] round_index={round_index}, start_idx={start_idx}, end_idx={end_idx}, total_msgs={len(canonical_messages)}")
 
         # 使用辅助函数收集 tool_call_id
         return collect_tool_call_ids(canonical_messages, start_idx, end_idx)
@@ -3795,6 +3803,7 @@ class OpenAIChatToolWindow(ToolWindow):
             return
 
         session_id = session.session_id
+        logger.debug(f"[card-diff] requested round_index={round_index}, session_id={session_id}, msg_count={len(session.messages)}")
 
         # 检查是否有 file_recorder
         if not self._tool_executor or not self.backend.file_recorder:
@@ -3804,6 +3813,7 @@ class OpenAIChatToolWindow(ToolWindow):
         try:
             # 获取该 round 范围内的所有 tool_call_id
             all_call_ids = self._get_tool_call_ids_in_round(round_index)
+            logger.debug(f"[card-diff] found call_ids: {all_call_ids}")
 
             if not all_call_ids:
                 InfoBar.warning(

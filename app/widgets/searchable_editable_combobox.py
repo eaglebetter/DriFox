@@ -48,11 +48,11 @@ class SearchableEditableComboBox(EditableComboBox):
             self._item_texts.append(text)
             self._update_completer_model()
 
-    def addItems(self, texts: list):
+    def addItems(self, texts):
         """重写批量添加"""
         super().addItems(texts)
         # 这里的 texts 应该是从 Scanner 获取的所有类型列表
-        self._item_texts = list(set(self._item_texts + texts))
+        self._item_texts = list(set(self._item_texts + list(texts)))
         self._update_completer_model()
 
     def _update_completer_model(self):
@@ -68,3 +68,31 @@ class SearchableEditableComboBox(EditableComboBox):
         self._item_texts = []
         self._update_completer_model()
         self.setText("")
+
+    def get_all_models(self):
+        """获取当前模型列表中的所有模型名称"""
+        models = []
+        for i in range(self.count()):
+            text = self.itemText(i)
+            if text:
+                models.append(text)
+        return models
+
+    def removeItemByText(self, text: str) -> bool:
+        """按文本移除项"""
+        idx = self.findText(text)
+        if idx >= 0:
+            self.removeItem(idx)
+            return True
+        return False
+
+    def renameItem(self, old_text: str, new_text: str):
+        """重命名项"""
+        idx = self.findText(old_text)
+        if idx >= 0:
+            self.setItemText(idx, new_text)
+            # 更新补全器
+            if old_text in self._item_texts:
+                idx_list = self._item_texts.index(old_text)
+                self._item_texts[idx_list] = new_text
+                self._update_completer_model()
