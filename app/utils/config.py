@@ -67,7 +67,8 @@ class Settings(QConfig):
     @classmethod
     def save_config(cls):
         """保存配置"""
-        pass
+        instance = cls.get_instance()
+        instance.save()
 
     def set(self, item, value, save=False, copy=True):
         """set the value of config item

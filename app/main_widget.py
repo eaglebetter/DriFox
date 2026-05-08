@@ -1272,7 +1272,7 @@ class OpenAIChatToolWindow(ToolWindow):
         setting = Settings.get_instance()
         saved_providers = setting.llm_saved_providers.value or {}
         saved_providers[provider_name] = provider_info
-        setting.llm_saved_providers.value = saved_providers
+        setting.set(setting.llm_saved_providers, saved_providers, save=True)
 
         # 隐藏服务商编辑卡片，显示设置卡片
         self._provider_edit_card.hide()

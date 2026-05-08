@@ -417,7 +417,7 @@ class ProviderListSettingCard(ExpandSettingCard):
         if item.provider_name not in self.providers:
             return
         del self.providers[item.provider_name]
-        qconfig.set(self.configItem, self.providers)
+        qconfig.set(self.configItem, self.providers, save=True)
         self.viewLayout.removeWidget(item)
         item.deleteLater()
         self._adjustViewSize()
@@ -425,7 +425,7 @@ class ProviderListSettingCard(ExpandSettingCard):
         if self.default_provider == item.provider_name:
             keys = list(self.providers.keys())
             self.default_provider = keys[0] if keys else ""
-            qconfig.set(self.defaultProviderItem, self.default_provider)
+            qconfig.set(self.defaultProviderItem, self.default_provider, save=True)
             self.defaultProviderChanged.emit(self.default_provider)
 
     def _select_provider(self, item: ProviderItem):
@@ -435,5 +435,5 @@ class ProviderListSettingCard(ExpandSettingCard):
                 w.radioButton.setChecked(False)
         item.radioButton.setChecked(True)
         self.default_provider = item.provider_name
-        qconfig.set(self.defaultProviderItem, self.default_provider)
+        qconfig.set(self.defaultProviderItem, self.default_provider, save=True)
         self.defaultProviderChanged.emit(self.default_provider)

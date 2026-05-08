@@ -159,7 +159,7 @@ class FontListSettingCard(ExpandSettingCard):
             if font and font not in self.fonts:
                 self.__addFontItem(font)
                 self.fonts.append(font)
-                qconfig.set(self.fontListItem, self.fonts)
+                qconfig.set(self.fontListItem, self.fonts, save=True)
                 self.fontChanged.emit(self.fonts)
 
     def __addFontItem(self, font: str):
@@ -193,7 +193,7 @@ class FontListSettingCard(ExpandSettingCard):
         self._adjustViewSize()
 
         self.fontChanged.emit(self.fonts)
-        qconfig.set(self.fontListItem, self.fonts)
+        qconfig.set(self.fontListItem, self.fonts, save=True)
 
         if self.currentFont == item.font and self.fonts:
             self.__updateSelectedFont(self.fonts[0])
@@ -430,7 +430,7 @@ class SkillListSettingCard(ExpandSettingCard):
         elif not enabled and name in self.enabled_skills:
             self.enabled_skills.remove(name)
 
-        qconfig.set(self.configItem, self.enabled_skills)
+        qconfig.set(self.configItem, self.enabled_skills, save=True)
         self.skillsChanged.emit(self.enabled_skills)
 
 
@@ -504,7 +504,7 @@ class PackageListSettingCard(ExpandSettingCard):
             if package and package not in self.packages:
                 self.__addPackageItem(package)
                 self.packages.append(package)
-                qconfig.set(self.configItem, self.packages)
+                qconfig.set(self.configItem, self.packages, save=True)
                 self.packageChanged.emit(self.packages)
 
     def __addPackageItem(self, package: str):
@@ -538,4 +538,4 @@ class PackageListSettingCard(ExpandSettingCard):
         self._adjustViewSize()
 
         self.packageChanged.emit(self.packages)
-        qconfig.set(self.configItem, self.packages)
+        qconfig.set(self.configItem, self.packages, save=True)
