@@ -61,6 +61,11 @@ PROVIDER_CAPABILITIES = {
         "max_output_tokens": 8192,
         "supports_vision": True,
     },
+    "volcengine": {
+        "context_limit": 1000000,
+        "max_output_tokens": 8192,
+        "supports_vision": False,
+    },
     "lmstudio": {
         "context_limit": 128000,
         "max_output_tokens": 8192,
@@ -93,6 +98,8 @@ def detect_provider_family(llm_config: Dict[str, Any]) -> str:
         return "groq"
     if "minimax" in api_url or model.startswith("minimax"):
         return "minimax"
+    if "volces.com" in api_url or "ark.cn-beijing" in api_url or model.startswith("doubao"):
+        return "volcengine"
     if "qianfan.baidubce.com" in api_url or auth == "bce":
         return "baidu_qianfan"
     if "localhost:11434" in api_url or auth == "none":
