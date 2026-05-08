@@ -5,7 +5,7 @@
 import webbrowser
 
 from PyQt5.QtCore import Qt, pyqtSignal, QTimer
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel
 from qfluentwidgets import (
     BodyLabel,
     LineEdit,
@@ -59,27 +59,77 @@ class ModelConfigCard(QWidget):
         self._clear_layout(self.layout)
         self._widgets.clear()
 
+        # 补充缺失的思考相关字段（向后兼容旧配置）
+        if "启用思考" not in self.config:
+            self.config["启用思考"] = True  # 默认开启
+        if "思考等级" not in self.config:
+            self.config["思考等级"] = "high"  # 默认普通思考
+
         # 仅显示参数配置（温度、上下文长度等），不显示连接/模型字段
         skip_keys = ["模型名称", "API_URL", "API_KEY", "认证方式", "获取地址", "模型列表", "选择模型"]
         # 显示名称映射（存储字段名 -> UI显示名）
         display_name_map = {
             "最大Token": "上下文长度",
         }
-        for key, value in config.items():
+        
+        # 分离普通参数和思考相关参数
+        normal_params = []
+        thinking_params = []
+        for key, value in self.config.items():
             if key in skip_keys:
                 continue
-            ui_type = self._infer_ui_type(key, value)
-            widget = self._create_widget(key, ui_type, value)
-            display_name = display_name_map.get(key, key)
-            label = BodyLabel(f"{display_name}：", self)
-            # label 和 widget 放同一行
-            hlayout = QHBoxLayout()
-            hlayout.setContentsMargins(0, 0, 0, 0)
-            hlayout.setSpacing(8)
-            hlayout.addWidget(label, 0)
-            hlayout.addWidget(widget, 1)
-            self.layout.addLayout(hlayout)
-            self._widgets[key] = (label, widget)
+            if key in ["启用思考", "思考等级"]:
+                thinking_params.append((key, value))
+            else:
+                normal_params.append((key, value))
+        
+        # 先显示普通参数
+        for key, value in normal_params:
+            self._add_param_row(key, value, display_name_map)
+        
+        # 添加分隔线和思考分组
+        if thinking_params:
+            separator = QLabel("", self)
+            separator.setStyleSheet("border-bottom: 1px solid #3a3a3a; margin: 8px 0;")
+            self.layout.addWidget(separator)
+            
+            thinking_header = QLabel("🔮 思考模式", self)
+            thinking_header.setStyleSheet("color: #888; font-size: 11px; margin-bottom: 4px;")
+            self.layout.addWidget(thinking_header)
+            
+            for key, value in thinking_params:
+                self._add_param_row(key, value, display_name_map)
+                
+    def _add_param_row(self, key, value, display_name_map):
+        """添加一行参数配置"""
+        ui_type = self._infer_ui_type(key, value)
+        widget = self._create_widget(key, ui_type, value)
+        display_name = display_name_map.get(key, key)
+        label = BodyLabel(f"{display_name}：", self)
+        
+        # 思考相关参数样式微调
+        if key in ["启用思考", "思考等级"]:
+            label.setStyleSheet("color: #aaa;")
+        
+        hlayout = QHBoxLayout()
+        hlayout.setContentsMargins(0, 2, 0, 2)  # 紧凑间距
+        hlayout.setSpacing(12)
+        hlayout.addWidget(label, 0)
+        hlayout.addWidget(widget, 1)
+        self.layout.addLayout(hlayout)
+        self._widgets[key] = (label, widget)
+        
+        # 特殊处理：填充 combobox 选项
+        if ui_type == "combobox":
+            self._setup_combobox_options(key, widget, value)
+    
+    def _setup_combobox_options(self, key: str, widget, current_value):
+        """为下拉框设置选项列表"""
+        if key == "思考等级":
+            options = ["low", "medium", "high", "max"]
+            widget.addItems(options)
+            if current_value in options:
+                widget.setCurrentText(current_value)
 
     def _infer_ui_type(self, key: str, value) -> str:
         key_lower = key.lower()
@@ -98,7 +148,9 @@ class ModelConfigCard(QWidget):
     def _create_widget(self, key, ui_type: str, value):
         if ui_type == "password":
             widget = PasswordLineEdit(self)
+            widget.blockSignals(True)  # 阻断信号
             widget.setText(str(value) if value else "")
+            widget.blockSignals(False)
             widget.setMinimumWidth(280)  # 统一宽度
             widget.textChanged.connect(lambda: self._on_field_changed())
             return widget
@@ -123,7 +175,9 @@ class ModelConfigCard(QWidget):
 
             slider = Slider(Qt.Horizontal, self)
             slider.setRange(slider_min, slider_max)
+            slider.blockSignals(True)  # 阻断信号
             slider.setValue(slider_value)
+            slider.blockSignals(False)
             slider.setMinimumHeight(22)
             slider.valueChanged.connect(lambda: self._on_field_changed())
 
@@ -163,8 +217,38 @@ class ModelConfigCard(QWidget):
                 checked = value.lower() in ("true", "1", "yes", "on")
             elif isinstance(value, (int, float)):
                 checked = bool(value)
+            widget.blockSignals(True)  # 阻断信号，避免初始化时触发保存
             widget.setChecked(checked)
+            widget.blockSignals(False)
             widget.checkedChanged.connect(lambda: self._on_field_changed())
+            return widget
+        elif ui_type == "switch":
+            # 开关类型（和 checkbox 一样使用 SwitchButton）
+            widget = SwitchButton(self)
+            widget._onText = widget.tr("开启")
+            widget._offText = widget.tr("关闭")
+            checked = False
+            if isinstance(value, bool):
+                checked = value
+            elif isinstance(value, str):
+                checked = value.lower() in ("true", "1", "yes", "on")
+            elif isinstance(value, (int, float)):
+                checked = bool(value)
+            widget.blockSignals(True)  # 阻断信号，避免初始化时触发保存
+            widget.setChecked(checked)
+            widget.blockSignals(False)
+            widget.checkedChanged.connect(lambda: self._on_field_changed())
+            return widget
+        elif ui_type == "combobox":
+            # 下拉框类型（用于思考等级等选项）
+            widget = ComboBox(self)
+            widget.setMinimumWidth(120)
+            widget.blockSignals(True)  # 阻断信号
+            if hasattr(widget, 'currentTextChanged'):
+                # 先设置选项再设置当前值
+                pass
+            widget.blockSignals(False)
+            widget.currentTextChanged.connect(lambda: self._on_field_changed())
             return widget
         elif ui_type == "spinbox":
             widget = SpinBox()
@@ -172,14 +256,18 @@ class ModelConfigCard(QWidget):
             # 从 PARAM_RANGE_MAP 获取范围配置，默认为无限范围
             range_info = PARAM_RANGE_MAP.get(key, {"min": 1, "max": 99999999})
             widget.setRange(range_info["min"], range_info["max"])
+            widget.blockSignals(True)  # 阻断信号
             widget.setValue(val)
+            widget.blockSignals(False)
             widget.setMinimumWidth(280)  # 统一宽度
             widget.valueChanged.connect(lambda: self._on_field_changed())
             return widget
         else:
             widget = LineEdit(self)
             widget.setMinimumWidth(280)  # 统一宽度
+            widget.blockSignals(True)  # 阻断信号
             widget.setText(str(value) if value else "")
+            widget.blockSignals(False)
             widget.textChanged.connect(lambda: self._on_field_changed())
             return widget
 

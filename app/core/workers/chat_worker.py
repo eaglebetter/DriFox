@@ -457,6 +457,45 @@ class OpenAIChatWorker(QThread):
         if max_tokens is not None:
             extra_body["max_tokens"] = self._cap_max_output_tokens(model, max_tokens)
 
+        # 处理「启用思考」参数
+        enable_thinking = self.llm_config.get("启用思考", False)
+        thinking_level = self.llm_config.get("思考等级", "high")
+        
+        # 判断模型类型并生成对应的思考参数格式
+        if base_url and "deepseek" in base_url.lower():
+            # DeepSeek 格式
+            if enable_thinking:
+                extra_body["thinking"] = {"type": "enabled"}
+                if thinking_level:
+                    extra_body["reasoning_effort"] = thinking_level
+            else:
+                extra_body["thinking"] = {"type": "disabled"}
+        elif base_url and any(x in base_url.lower() for x in ["volc", "doubao", "ark"]):
+            # 火山引擎（豆包）格式 - 支持 enabled/disabled/auto
+            if enable_thinking:
+                extra_body["thinking"] = {"type": "enabled"}
+            else:
+                extra_body["thinking"] = {"type": "disabled"}
+        elif base_url and "minimax" in base_url.lower():
+            # MiniMax 格式 - 使用 reasoning_split 分离思考内容
+            if enable_thinking:
+                extra_body["reasoning_split"] = True
+            # MiniMax 没有显式关闭思考的参数，保持默认行为
+        elif model and any(x in model.lower() for x in ["qwen", "qwq"]):
+            # Qwen/QwQ 格式 (vLLM/Ollama)
+            if enable_thinking:
+                extra_body["enable_thinking"] = True
+                if thinking_level:
+                    extra_body["thinking_effort"] = thinking_level
+            else:
+                extra_body["enable_thinking"] = False
+        else:
+            # 其他支持思考的模型
+            if enable_thinking:
+                extra_body["enable_thinking"] = True
+            else:
+                extra_body["enable_thinking"] = False
+
         # 处理认证
         auth_headers = None
         auth_type = self.llm_config.get("认证方式", "bearer")

@@ -10,8 +10,11 @@ PARAM_UI_MAP = {
     "top_p": "slider",
     "frequency_penalty": "slider",
     "presence_penalty": "slider",
+    "repetition_penalty": "slider",
     "选择模型": "model_selector",
     "启用技能": "checkbox",
+    "启用思考": "switch",
+    "思考等级": "combobox",
 }
 
 
@@ -24,6 +27,7 @@ PARAM_RANGE_MAP = {
     "top_p": {"min": 0.0, "max": 1.0, "step": 0.01, "type": "float"},
     "frequency_penalty": {"min": -2.0, "max": 2.0, "step": 0.01, "type": "float"},
     "presence_penalty": {"min": -2.0, "max": 2.0, "step": 0.01, "type": "float"},
+    "repetition_penalty": {"min": 1.0, "max": 2.0, "step": 0.01, "type": "float"},
 }
 
 
@@ -122,18 +126,22 @@ FREE_PROVIDERS = {
     "MiniMax": {
         "API_URL": "https://api.minimax.chat/v1",
         "API_KEY": "",
-        "模型名称": "MiniMax-M2.5",
+        "模型名称": "MiniMax-M2.7",
         "温度": 0.7,
         "最大Token": 200000,
+        "启用思考": True,
+        "思考等级": "high",
         "认证方式": "bearer",
         "获取地址": "https://platform.minimaxi.com/user-center/basic-information/interface-key",
     },
     "火山方舟": {
         "API_URL": "https://ark.cn-beijing.volces.com/api/coding/v3",
         "API_KEY": "",
-        "模型名称": "doubao-pro-32k",
+        "模型名称": "doubao-seed-1.6-thinking",
         "温度": 0.7,
         "最大Token": 200000,
+        "启用思考": True,
+        "思考等级": "high",
         "认证方式": "bearer",
         "获取地址": "https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey",
     },
@@ -152,6 +160,8 @@ FREE_PROVIDERS = {
         "模型名称": "qwen3.5-plus",
         "温度": 0.7,
         "最大Token": 200000,
+        "启用思考": True,
+        "思考等级": "high",
         "认证方式": "bearer",
         "获取地址": "https://bailian.console.aliyun.com/cn-beijing?tab=model#/api-key",
     },
@@ -167,9 +177,11 @@ FREE_PROVIDERS = {
     "DeepSeek": {
         "API_URL": "https://api.deepseek.com",
         "API_KEY": "",
-        "模型名称": "deepseek-chat",
+        "模型名称": "deepseek-v4-pro",
         "温度": 0.7,
         "最大Token": 40960,
+        "启用思考": True,
+        "思考等级": "high",
         "认证方式": "bearer",
         "获取地址": "https://platform.deepseek.com/api_keys",
     },

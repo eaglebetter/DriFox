@@ -1,13 +1,14 @@
 # -*- coding: utf-8 -*-
-import gc
+import sip
 import ctypes
-import orjson as json
+import gc
 import os
 import time
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 
+import orjson as json
 from PyQt5.QtCore import (
     QTimer,
     pyqtSignal,
@@ -44,22 +45,20 @@ from app.core import (
     ChatEngine,
     ToolExecutor,
     MemoryManagerCore,
-    SessionManager,
     ChatSession,
     consolidate_messages,
     content_to_text,
-    content_to_markdown,
     group_messages_for_display,
     get_user_round_ranges,
     TopicSummaryTask,
 )
 from app.core.agent import AgentManager
-from app.utils.config import Settings
 from app.tool_window import (
     ToolWindow,
     DockPosition,
     DockCategory,
 )
+from app.utils.config import Settings
 from app.utils.diff_viewer import (
     DiffHtmlGenerator,
     DiffViewerWindow,
@@ -77,9 +76,6 @@ from app.widgets.bottom_input_area import (
 from app.widgets.context_usage_ring import (
     ContextUsageRing,
 )
-from app.widgets.coding_plan_usage_ring import (
-    CodingPlanUsageRing,
-)
 from app.widgets.conversation_node_preview import (
     ConversationNodePreview,
 )
@@ -96,15 +92,15 @@ from app.widgets.llm_settings_card import (
 from app.widgets.memory_card import (
     MemoryCardContent,
 )
-from app.widgets.provider_edit_card import (
-    ProviderEditCard,
-)
 from app.widgets.message_card import (
     MessageCard,
     create_welcome_card,
 )
 from app.widgets.model_config_card import (
     ModelConfigCard,
+)
+from app.widgets.provider_edit_card import (
+    ProviderEditCard,
 )
 from app.widgets.question_floating_widget import (
     QuestionFloatingWidget,
@@ -123,7 +119,7 @@ from app.widgets.ui_helpers import add_message_to_layout, refresh_history_card_i
     init_new_session_after_archive, clear_and_show_welcome, refresh_session_view, save_or_archive_session, \
     invalidate_session_card_cache, delete_widgets_from_layout, init_after_loading_session, setup_user_card_signals, \
     post_append_user_message, create_assistant_card_widget, scroll_to_bottom_if_streaming, \
-    build_node_preview_from_session, calculate_scroll_progress, find_user_card_at_index, truncate_and_remove_round, \
+    build_node_preview_from_session, find_user_card_at_index, truncate_and_remove_round, \
     log_deletion_stats, restore_input_from_card, find_last_tool_call_id_after_round, get_first_file_operation, \
     show_diff_viewer, render_batch_to_assistant_card, find_user_round_index
 
@@ -174,7 +170,6 @@ class OpenAIChatToolWindow(ToolWindow):
     def __init__(self, homepage, button):
         # 需要在 super().__init__() 之前初始化所有依赖项
         self.homepage = homepage  # 必须在 super() 之前设置，供 backend.initialize 使用
-        from app.core.agent import AgentManager
 
         # 创建后端（后端自己创建所有组件）- 需要在 super() 之前创建并初始化
         # 因为 setup_ui() 中会用到 self.backend.get_primary_agents()
@@ -848,10 +843,6 @@ class OpenAIChatToolWindow(ToolWindow):
         self.balance_display = BalanceDisplay(self)
         right_layout.addWidget(self.balance_display)
 
-        # Coding Plan 用量圆环
-        self.coding_plan_usage_ring = CodingPlanUsageRing(self)
-        right_layout.addWidget(self.coding_plan_usage_ring)
-
         # 上下文占用圆环
         self.context_usage_ring = ContextUsageRing(self)
         right_layout.addWidget(self.context_usage_ring)
@@ -1242,13 +1233,6 @@ class OpenAIChatToolWindow(ToolWindow):
         if not ring:
             return
 
-        if not self._chat_engine:
-            ring.set_usage(0, 0, 0)
-            coding_ring = getattr(self, "coding_plan_usage_ring", None)
-            if coding_ring:
-                coding_ring.clear()
-            return
-
         session = self.session_manager.get_current_session()
         llm_config = self._get_current_model_config()
         snapshot = self.backend.get_context_usage_snapshot(session, llm_config)
@@ -1258,11 +1242,6 @@ class OpenAIChatToolWindow(ToolWindow):
             snapshot.get("budget_tokens", 0),
             snapshot.get("compaction", {}),
         )
-        
-        # 刷新 Coding Plan 用量显示
-        coding_ring = getattr(self, "coding_plan_usage_ring", None)
-        if coding_ring:
-            self._update_balance_display()
 
     def _update_balance_display(self):
         """更新余额显示"""
@@ -1274,20 +1253,12 @@ class OpenAIChatToolWindow(ToolWindow):
         provider_name = getattr(self, "_current_provider_name", "")
         if not provider_name:
             balance_display.clear()
-            coding_ring = getattr(self, "coding_plan_usage_ring", None)
-            if coding_ring:
-                coding_ring.clear()
             return
 
         config = self._valid_configs.get(provider_name, {})
         api_key = config.get("API_KEY", "")
 
         balance_display.set_provider(provider_name, api_key)
-        
-        # 更新 Coding Plan 用量显示
-        coding_ring = getattr(self, "coding_plan_usage_ring", None)
-        if coding_ring:
-            coding_ring.set_provider(provider_name, api_key)
 
     def _open_settings_popup(self):
         """打开设置卡片"""
@@ -3001,7 +2972,7 @@ class OpenAIChatToolWindow(ToolWindow):
 
             # 写回文件
             with open(file_path, "wb") as f:
-                f.write(json.dumps(data, option=orjson.OPT_INDENT_2))
+                f.write(json.dumps(data, option=json.OPT_INDENT_2))
 
             logger.info(f"[归档会话重命名] 成功: {file_path} -> {new_title}")
 
@@ -3228,6 +3199,8 @@ class OpenAIChatToolWindow(ToolWindow):
             cards = self._batch_cards[batch_idx] if batch_idx < len(self._batch_cards) else None
             if cards:
                 for card in cards:
+                    if sip.isdeleted(card):
+                        continue
                     if isinstance(card, MessageCard) and card.role == "user":
                         card_y = card.y()
                         card_bottom = card_y + card.height()
@@ -3372,6 +3345,8 @@ class OpenAIChatToolWindow(ToolWindow):
             cards = self._batch_cards[target_batch_index]
             if cards:
                 for card in cards:
+                    if sip.isdeleted(card):
+                        continue
                     if isinstance(card, MessageCard):
                         card.ensure_rendered()
 
@@ -3399,6 +3374,8 @@ class OpenAIChatToolWindow(ToolWindow):
             cards = self._batch_cards[batch_index]
             if cards:
                 for card in cards:
+                    if sip.isdeleted(card):
+                        continue
                     if isinstance(card, MessageCard):
                         card.ensure_rendered()
 
