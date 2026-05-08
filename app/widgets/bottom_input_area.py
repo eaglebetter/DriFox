@@ -602,10 +602,9 @@ class SendableTextEdit(QTextEdit):
         has_text = bool(self.toPlainText().strip())
         # 在停止模式下，按钮应该始终可用（用于停止正在进行的请求）
         # 只在发送模式下才根据文本内容决定是否启用
-        if getattr(self, '_is_stop_mode', False):
-            return
-        self.send_btn.setDisabled(not has_text)
-        # 初始化期间不调整高度
+        if not getattr(self, '_is_stop_mode', False):
+            self.send_btn.setDisabled(not has_text)
+        # 文本变化时总是需要调整高度，不管是否在停止模式
         if not getattr(self, '_initializing', False):
             self._adjust_height_to_content()
 
@@ -643,6 +642,8 @@ class SendableTextEdit(QTextEdit):
             self.send_btn.setToolTip("发送（Enter）")
             self._rebind_send_btn(self._on_send_click)
             self._on_text_changed()
+            # 发送完成后，确保输入框高度重置（即使在停止模式下也可能需要调整高度）
+            self._adjust_height_to_content()
         else:
             self._is_stop_mode = True
             self.send_btn.setIcon(FluentIcon.PAUSE)

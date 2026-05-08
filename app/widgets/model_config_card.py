@@ -127,9 +127,11 @@ class ModelConfigCard(QWidget):
         """为下拉框设置选项列表"""
         if key == "思考等级":
             options = ["low", "medium", "high", "max"]
+            widget.blockSignals(True)  # 阻断信号，避免设置时触发保存
             widget.addItems(options)
             if current_value in options:
                 widget.setCurrentText(current_value)
+            widget.blockSignals(False)
 
     def _infer_ui_type(self, key: str, value) -> str:
         key_lower = key.lower()

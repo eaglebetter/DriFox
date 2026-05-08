@@ -2,27 +2,25 @@
 """
 Chat Worker - OpenAI 对话执行器
 """
-
-import orjson as json
 import re
 import time
 import httpcore
 import httpx
+import orjson as json
 
-from loguru import logger
 from collections import deque
 from datetime import datetime
 from threading import Event
 from typing import Any, Dict, List, Callable, Optional, Tuple
 from PyQt5.QtCore import QThread, pyqtSignal, QCoreApplication
 from PyQt5.QtWidgets import QApplication
+from loguru import logger
 from openai import (
     OpenAI, BadRequestError, RateLimitError, APIError, APIConnectionError,
 )
 
-from app.core.memory_manager import MEMORY_CATEGORIES
-from app.core.provider_profile import get_provider_profile
 from app.core.message_content import consolidate_messages, append_text_block, messages_to_api, to_api_message
+from app.core.provider_profile import get_provider_profile
 
 # ========== 预编译正则表达式 ==========
 _RE_PATH = re.compile(r'"path"\s*:\s*"([^"]*)"')
@@ -337,7 +335,6 @@ class OpenAIChatWorker(QThread):
         彻底清理 worker 的所有缓存数据，防止内存泄漏。
         应该在对话结束后调用。
         """
-        import sys
         from loguru import logger
 
         # 计算清理前的内存占用估算
@@ -1017,7 +1014,6 @@ class OpenAIChatWorker(QThread):
 
         # 性能优化：使用预构建的 API 参数
         cached_config = self._build_api_request_kwargs()
-
         req_kwargs: Dict[str, Any] = {
             "model": cached_config["model"],
             "messages": sanitized,
