@@ -597,19 +597,17 @@ class HistoryManager:
         if self._use_sqlite and self._session_store:
             # SQLite 模式下保存指定会话或所有会话
             pending_id = getattr(self, '_pending_save_session_id', None)
-            logger.debug(f"[HistoryManager] 保存会话: pending_id={pending_id}, total={len(self._history_sessions)}")
-            if pending_id:
-                # 只保存指定会话
-                for session in self._history_sessions:
-                    if session.get("session_id") == pending_id:
-                        session["canvas_id"] = self.canvas_name
-                        self._session_store.save_session(session)
-                        break
-            else:
-                # 保存所有会话
-                for session in self._history_sessions:
+            if not pending_id:
+                logger.debug("[HistoryManager] 无待保存会话，跳过")
+                self._save_timer = None
+                self._pending_save_session_id = None
+                return
+            logger.debug(f"[HistoryManager] 保存会话: pending_id={pending_id}")
+            for session in self._history_sessions:
+                if session.get("session_id") == pending_id:
                     session["canvas_id"] = self.canvas_name
                     self._session_store.save_session(session)
+                    break
         else:
             self._save_to_disk_json()
         self._save_timer = None
