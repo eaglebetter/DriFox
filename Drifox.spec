@@ -32,7 +32,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['D:\\work\\DriFox\\icons\\drifox.ico'],
+    icon=['D:\\work\\DriFoxx\\icons\\drifox.ico'],
 )
 coll = COLLECT(
     exe,

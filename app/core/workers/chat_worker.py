@@ -1034,8 +1034,12 @@ class OpenAIChatWorker(QThread):
                     fixed_messages, was_fixed = self._fix_tool_result_order(req_kwargs["messages"])
 
                     if was_fixed:
-                        req_kwargs["messages"] = messages_to_api(fixed_messages)
-                        logger.warning(f"[API] 已修复消息顺序，重试 (attempt {attempt + 1}/{max_retries})")
+                        fixed_sanitized = messages_to_api(fixed_messages)
+                        req_kwargs["messages"] = fixed_sanitized
+                        # 更新 API 消息缓存，修复结果持久化，避免下一轮迭代重复修复
+                        if use_cache:
+                            self._api_messages_cache = fixed_sanitized
+                        logger.warning(f"[API] 已修复消息顺序，已更新缓存，重试 (attempt {attempt + 1}/{max_retries})")
                         continue
                     else:
                         logger.error(f"[API] 无法自动修复 tool call result 顺序问题 - 可能需要查看上面的消息结构")
@@ -1050,8 +1054,12 @@ class OpenAIChatWorker(QThread):
                     fixed_messages = self._try_recover_tool_arguments(req_kwargs["messages"])
 
                     if fixed_messages is not None:
-                        req_kwargs["messages"] = messages_to_api(fixed_messages)
-                        logger.warning(f"[API] 已恢复工具参数，重试 (attempt {attempt + 1}/{max_retries})")
+                        fixed_sanitized = messages_to_api(fixed_messages)
+                        req_kwargs["messages"] = fixed_sanitized
+                        # 更新 API 消息缓存，修复结果持久化，避免下一轮迭代重复修复
+                        if use_cache:
+                            self._api_messages_cache = fixed_sanitized
+                        logger.warning(f"[API] 已恢复工具参数，已更新缓存，重试 (attempt {attempt + 1}/{max_retries})")
                         continue
                     else:
                         logger.warning(f"[API] 无法恢复工具参数，保持现有消息")

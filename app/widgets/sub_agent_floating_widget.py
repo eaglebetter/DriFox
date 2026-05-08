@@ -1,7 +1,10 @@
 # -*- coding: utf-8 -*-
+import time
+import orjson as json
 from typing import Dict
 
 from PyQt5.QtCore import Qt, pyqtSignal, QTimer
+from PyQt5.QtGui import QFont, QTextCharFormat, QColor
 from PyQt5.QtWidgets import (
     QVBoxLayout,
     QLabel,
@@ -10,13 +13,10 @@ from PyQt5.QtWidgets import (
     QTextEdit,
     QFrame, QSizePolicy,
 )
+from qfluentwidgets import SegmentedWidget, BodyLabel
 from qfluentwidgets import SimpleCardWidget
 
-from PyQt5.QtCore import Qt, pyqtSignal, QTimer
-from PyQt5.QtGui import QFont, QTextCharFormat, QColor
-from qfluentwidgets import CardWidget, SegmentedWidget, BodyLabel, PrimaryPushButton
 from app.utils.utils import get_unified_font
-import time
 
 
 class SubTaskLogWidget(QFrame):

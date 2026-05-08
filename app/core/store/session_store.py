@@ -71,6 +71,9 @@ class SessionStore:
                     f'CREATE INDEX IF NOT EXISTS idx_project ON {self.TABLE_NAME}(project)'
                 )
 
+                # 迁移：删除已废弃的 canvas_id 列（如果存在）
+                self._migrate_remove_canvas_id()
+
                 # 创建长期记忆表
                 self._db.create_table(self.MEMORIES_TABLE, [
                     {"name": "memory_id", "type": "TEXT", "primary_key": True},
@@ -89,6 +92,9 @@ class SessionStore:
                 self._db.execute_sql(
                     f'CREATE INDEX IF NOT EXISTS idx_memories_canvas ON {self.MEMORIES_TABLE}(canvas_id)'
                 )
+
+                # 迁移：删除已废弃的 canvas_id 列（如果存在）
+                self._migrate_remove_canvas_id()
 
                 # 创建文件操作记录表（撤销功能）
                 self._db.create_table("file_operations", [
@@ -136,6 +142,35 @@ class SessionStore:
                 logger.info("[SessionStore] project 列迁移完成")
         except Exception as e:
             logger.warning(f"[SessionStore] project 列迁移失败(可能已存在): {e}")
+
+    def _migrate_remove_canvas_id(self):
+        """迁移：删除已废弃的 canvas_id 列（如果存在）"""
+        if not self._db or not self._db.is_connected:
+            return
+        try:
+            columns = self._db.get_table_info(self.TABLE_NAME)
+            col_names = [c.get("name", "") for c in columns]
+            if "canvas_id" in col_names:
+                logger.info("[SessionStore] 迁移：删除 canvas_id 列")
+                # SQLite 不支持 DROP COLUMN，需要重建表
+                # 1. 创建临时表（不含 canvas_id）
+                self._db.execute_sql(f'''
+                    CREATE TABLE {self.TABLE_NAME}_temp AS
+                    SELECT session_id, title, messages, system_prompt,
+                           compaction_state, compaction_cache, message_count,
+                           project, created_at, updated_at
+                    FROM {self.TABLE_NAME}
+                ''')
+                # 2. 删除旧表
+                self._db.execute_sql(f'DROP TABLE {self.TABLE_NAME}')
+                # 3. 重命名临时表
+                self._db.execute_sql(f'ALTER TABLE {self.TABLE_NAME}_temp RENAME TO {self.TABLE_NAME}')
+                # 4. 重建索引
+                self._db.execute_sql(f'CREATE INDEX IF NOT EXISTS idx_updated ON {self.TABLE_NAME}(updated_at DESC)')
+                self._db.execute_sql(f'CREATE INDEX IF NOT EXISTS idx_project ON {self.TABLE_NAME}(project)')
+                logger.info("[SessionStore] canvas_id 列迁移完成")
+        except Exception as e:
+            logger.warning(f"[SessionStore] canvas_id 列迁移失败(可能已不存在): {e}")
 
     @property
     def is_initialized(self) -> bool:
