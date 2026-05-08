@@ -4,7 +4,7 @@ UI 渲染辅助函数
 """
 
 import hashlib
-import json
+import orjson as json
 import re
 from html import escape
 
@@ -22,7 +22,7 @@ def format_tool_block(
     success: bool = True,
 ) -> str:
     """格式化工具块为纯文本标记，用于存储"""
-    args_json = json.dumps(tool_args, ensure_ascii=False)
+    args_json = json.dumps(tool_args).decode('utf-8')
     result_str = str(result) if result else ""
 
     return (
@@ -65,10 +65,10 @@ def _escape_text_for_plain(text: str) -> str:
 def _truncate_value(v, max_len: int = 80) -> str:
     """截断单个参数值"""
     if isinstance(v, dict):
-        s = json.dumps(v, ensure_ascii=False)
+        s = json.dumps(v).decode('utf-8')
         return s[:max_len] + "..." if len(s) > max_len else s
     elif isinstance(v, list):
-        s = json.dumps(v, ensure_ascii=False)
+        s = json.dumps(v).decode('utf-8')
         return s[:max_len] + "..." if len(s) > max_len else s
     elif isinstance(v, str):
         return v[:max_len] + "..." if len(v) > max_len else v
@@ -153,9 +153,9 @@ def _format_unified_table(tool_args: dict, result: str = None, is_sub_agent_task
     if tool_args:
         for key, value in tool_args.items():
             if isinstance(value, dict):
-                value_str = json.dumps(value, ensure_ascii=False)
+                value_str = json.dumps(value).decode('utf-8')
             elif isinstance(value, list):
-                value_str = json.dumps(value, ensure_ascii=False)
+                value_str = json.dumps(value).decode('utf-8')
             else:
                 value_str = str(value)
             
@@ -306,7 +306,7 @@ def render_tool_block(
     # 生成哈希 key
     block_seed = "|".join([
         str(tool_name or ""),
-        json.dumps(tool_args or {}, ensure_ascii=False, sort_keys=True),
+        json.dumps(tool_args or {}, option=json.OPT_SORT_KEYS).decode('utf-8'),
         str(result or ""),
         str(success),
     ])

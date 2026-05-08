@@ -1145,8 +1145,19 @@ def render_batch_to_assistant_card(assistant_card, batch: list) -> None:
         batch: 消息批次列表
     """
     for msg in batch:
-        if msg.get("role") == "assistant" and msg.get("content", ""):
-            assistant_card.append_text(msg.get("content", {}))
+        if msg.get("role") == "assistant":
+            # 处理思考内容：将 reasoning_content 转换成 <think> 标签格式
+            reasoning_content = msg.get("reasoning_content", "")
+            content = msg.get("content", "")
+            combined_content = ""
+            if reasoning_content:
+                combined_content += f"<think>{reasoning_content}</think>"
+            if content:
+                if combined_content:
+                    combined_content += "\n\n"
+                combined_content += content
+            if combined_content:
+                assistant_card.append_text(combined_content)
         elif msg.get("role") == "tool" and msg.get("content", ""):
             assistant_card.append_tool_result(
                 tool_name=msg.get("name", ""),
@@ -1591,7 +1602,11 @@ def create_assistant_card_widget(
     
     card = MessageCard(parent=parent, role="assistant", timestamp=timestamp)
     card._round_index = round_index
-    card.viewer._install_dialog_filter()
+    # 新创建的assistant卡片肯定在可视区，确保立即渲染
+    card.ensure_rendered()
+    # 懒渲染：viewer现在已经创建，安装dialog filter
+    if card.viewer is not None:
+        card.viewer._install_dialog_filter()
     
     if on_action:
         card.actionRequested.connect(on_action)

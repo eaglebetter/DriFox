@@ -4,7 +4,7 @@
 支持 SQLite 持久化存储
 """
 
-import json
+import orjson as json
 import os
 from datetime import datetime
 from pathlib import Path
@@ -266,8 +266,8 @@ class MemoryManagerCore:
 
             memory_data["last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-            with open(self._memory_file, "w", encoding="utf-8") as f:
-                json.dump(memory_data, f, ensure_ascii=False, indent=2)
+            with open(self._memory_file, "wb") as f:
+                f.write(json.dumps(memory_data, option=orjson.OPT_INDENT_2))
 
             logger.info(f"[MemoryManager] Memory saved successfully")
             return True

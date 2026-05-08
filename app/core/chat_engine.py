@@ -2,7 +2,7 @@
 """
 聊天引擎模块 - 处理 LLM 对话的核心逻辑
 """
-import json
+import orjson as json
 from datetime import datetime
 from typing import Dict, List, Optional, Any, Callable
 
@@ -1029,8 +1029,10 @@ class ChatEngine:
         llm_config: Dict,
         tools: List[Dict],
     ):
-        # 启动新 worker 前，先彻底清理旧的 worker
+        # 保存旧 worker 的会话级权限缓存，创建新 worker 后恢复
+        saved_session_permission_cache = {}
         if self._current_worker:
+            saved_session_permission_cache = getattr(self._current_worker, "_session_permission_cache", {})
             self.cleanup_worker()
         
         compaction_prompt = ""
@@ -1053,6 +1055,10 @@ class ChatEngine:
             compaction_prompt=compaction_prompt,
             compaction_config=compaction_config,
         )
+
+        # 恢复会话级权限缓存，保持"当前会话允许"的状态
+        if saved_session_permission_cache and hasattr(self._current_worker, "_session_permission_cache"):
+            self._current_worker._session_permission_cache = saved_session_permission_cache.copy()
 
         # API 模式：直接调用回调（不使用 Qt 信号-槽，避免跨线程事件循环问题）
         # API 模式下 worker 运行在没有 Qt 事件循环的线程中，Qt 信号无法传递
@@ -1083,6 +1089,10 @@ class ChatEngine:
     def _on_reasoning_content_received(self, reasoning_piece: str):
         """DeepSeek 思考内容接收"""
         self._emit("reasoning_content_received", reasoning_piece)
+
+    def _on_reasoning_finished(self):
+        """DeepSeek 思考内容结束"""
+        self._emit("reasoning_finished")
 
     def _on_tool_call_started(
         self, tool_call_id: str, tool_name: str, arguments: dict, round_id: str

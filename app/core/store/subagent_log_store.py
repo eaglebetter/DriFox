@@ -3,7 +3,7 @@
 子智能体日志存储 - 使用 SQLite 持久化存储
 """
 
-import json
+import orjson as json
 from typing import Dict, List, Optional
 from datetime import datetime
 
@@ -73,8 +73,8 @@ class SubAgentLogStore:
                 "status": status,
                 "result": result or "",
                 "error": error or "",
-                "logs": json.dumps(logs or [], ensure_ascii=False),
-                "summary": json.dumps(summary or {}, ensure_ascii=False),
+                "logs": json.dumps(logs or []).decode('utf-8'),
+                "summary": json.dumps(summary or {}).decode('utf-8'),
                 "updated_at": now,
             }
             self._db.update_data(self.TABLE_NAME, data, "task_id = ?", (task_id,))
@@ -87,8 +87,8 @@ class SubAgentLogStore:
                 "status": status,
                 "result": result or "",
                 "error": error or "",
-                "logs": json.dumps(logs or [], ensure_ascii=False),
-                "summary": json.dumps(summary or {}, ensure_ascii=False),
+                "logs": json.dumps(logs or []).decode('utf-8'),
+                "summary": json.dumps(summary or {}).decode('utf-8'),
                 "created_at": now,
                 "updated_at": now,
             }
@@ -107,9 +107,9 @@ class SubAgentLogStore:
         if error is not None:
             data["error"] = error
         if logs is not None:
-            data["logs"] = json.dumps(logs, ensure_ascii=False)
+            data["logs"] = json.dumps(logs).decode('utf-8')
         if summary is not None:
-            data["summary"] = json.dumps(summary, ensure_ascii=False)
+            data["summary"] = json.dumps(summary).decode('utf-8')
 
         self._db.update_data(self.TABLE_NAME, data, "task_id = ?", (task_id,))
 

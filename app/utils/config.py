@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import json
+import orjson as json
 import os
 import sys
 from copy import deepcopy
@@ -67,7 +67,8 @@ class Settings(QConfig):
     @classmethod
     def save_config(cls):
         """保存配置"""
-        pass
+        instance = cls.get_instance()
+        instance.save()
 
     def set(self, item, value, save=False, copy=True):
         """set the value of config item
@@ -113,8 +114,8 @@ class Settings(QConfig):
         # 确保目录存在
         self.file.parent.mkdir(parents=True, exist_ok=True)
         # 写入文件
-        with open(self.file, "w", encoding="utf-8") as f:
-            json.dump(self.toDict(), f, ensure_ascii=False, indent=4)
+        with open(self.file, "wb") as f:
+            f.write(json.dumps(self.toDict(), option=json.OPT_INDENT_2))
 
     # 版本信息
     current_version = "v0.1.0"

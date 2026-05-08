@@ -24,7 +24,7 @@ LLM Chatter HTTP API 服务
 """
 
 import asyncio
-import json
+import orjson as json
 import threading
 from typing import Optional, Dict, Any, List, Callable
 

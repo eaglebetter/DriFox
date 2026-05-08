@@ -3,7 +3,7 @@
 话题摘要任务 - 异步生成话题摘要和长期记忆判断
 """
 
-import json
+import orjson as json
 import re
 
 from loguru import logger

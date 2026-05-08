@@ -10,7 +10,7 @@ MiniMax 图片分析脚本
 环境配置:
     set MINIMAX_API_KEY=your_key  # 或在 ~/.minimax/api_key 配置
 """
-import json
+import orjson as json
 import os
 import sys
 import base64
@@ -89,7 +89,7 @@ def analyze_image(image_path, prompt=None, api_key=None):
     print(f"提示词: {prompt[:50]}..." if len(prompt) > 50 else f"提示词: {prompt}")
     
     # 发送请求
-    data = json.dumps(payload, ensure_ascii=False).encode('utf-8')
+    data = json.dumps(payload)
     
     try:
         req = urllib.request.Request(url, data=data, headers=headers, method='POST')
@@ -103,7 +103,7 @@ def analyze_image(image_path, prompt=None, api_key=None):
             elif 'content' in result:
                 content = result['content']
             else:
-                return {"success": True, "raw": result, "content": json.dumps(result, indent=2, ensure_ascii=False)}
+                return {"success": True, "raw": result, "content": json.dumps(result, option=json.OPT_INDENT_2).decode('utf-8')}
             
             return {"success": True, "content": content}
             

@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import orjson as json
 from PyQt5.QtCore import Qt, pyqtSignal, QTimer
 from PyQt5.QtWidgets import (
     QVBoxLayout,
@@ -110,7 +111,6 @@ class ToolFloatingWidget(SimpleCardWidget):
     def start_tool(self, tool_name: str, args: dict = None):
         """开始执行工具"""
         import time
-        import json
         from PyQt5.QtWidgets import QApplication
 
         self._task_start_time = time.time()
@@ -127,7 +127,7 @@ class ToolFloatingWidget(SimpleCardWidget):
 
         args_preview = ""
         if args:
-            args_str = json.dumps(args, ensure_ascii=False)
+            args_str = json.dumps(args).decode('utf-8')
             if len(args_str) > 60:
                 args_preview = f" | {args_str[:60]}..."
             else:

@@ -28,6 +28,14 @@ PARAM_RANGE_MAP = {
 
 
 PROVIDER_MODELS = {
+    "火山方舟": [
+        "doubao-seed-code",
+        "kimi-k2.6 ",
+        "kimi-k2.5",
+        "minimax-m2.7",
+        "glm-4.7",
+        "glm5.1"
+    ],
     "MiniMax": [
         "MiniMax-M2.7",
         "MiniMax-M2.7-highspeed",
@@ -119,6 +127,15 @@ FREE_PROVIDERS = {
         "最大Token": 200000,
         "认证方式": "bearer",
         "获取地址": "https://platform.minimaxi.com/user-center/basic-information/interface-key",
+    },
+    "火山方舟": {
+        "API_URL": "https://ark.cn-beijing.volces.com/api/coding/v3",
+        "API_KEY": "",
+        "模型名称": "doubao-pro-32k",
+        "温度": 0.7,
+        "最大Token": 200000,
+        "认证方式": "bearer",
+        "获取地址": "https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey",
     },
     "SiliconFlow (硅基流动)": {
         "API_URL": "https://api.siliconflow.cn/v1",
@@ -213,6 +230,7 @@ FREE_PROVIDERS = {
 }
 
 PROVIDER_ICONS = {
+    "火山方舟": "火山引擎",
     "MiniMax": "MiniMax",
     "SiliconFlow (硅基流动)": "siliconflow",
     "阿里云 (DashScope)": "qwen",

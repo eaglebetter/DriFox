@@ -61,6 +61,11 @@ PROVIDER_CAPABILITIES = {
         "max_output_tokens": 8192,
         "supports_vision": True,
     },
+    "volcengine": {
+        "context_limit": 1000000,
+        "max_output_tokens": 8192,
+        "supports_vision": False,
+    },
     "lmstudio": {
         "context_limit": 128000,
         "max_output_tokens": 8192,
@@ -93,6 +98,8 @@ def detect_provider_family(llm_config: Dict[str, Any]) -> str:
         return "groq"
     if "minimax" in api_url or model.startswith("minimax"):
         return "minimax"
+    if "volces.com" in api_url or "ark.cn-beijing" in api_url or model.startswith("doubao"):
+        return "volcengine"
     if "qianfan.baidubce.com" in api_url or auth == "bce":
         return "baidu_qianfan"
     if "localhost:11434" in api_url or auth == "none":
@@ -114,7 +121,8 @@ def get_provider_profile(llm_config: Dict[str, Any]) -> Dict[str, Any]:
 
 def supports_vision(llm_config: Dict[str, Any]) -> bool:
     model = str(llm_config.get("模型名称", "") or "").lower()
-    profile = get_provider_profile(llm_config)
-    if any(marker in model for marker in ("vision", "vl", "4o", "llava")):
+    # 只有模型名称里包含视觉相关关键词时才返回 True，不要根据整个服务商判断
+    vision_markers = ("vision", "vl", "llava", "glm-4v", "gpt-4o", "gpt-4o-mini", "claude-3")
+    if any(marker in model for marker in vision_markers):
         return True
-    return bool(profile.get("supports_vision", False))
+    return False

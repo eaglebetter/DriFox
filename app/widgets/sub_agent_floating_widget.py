@@ -155,8 +155,7 @@ class SubTaskLogWidget(QFrame):
         self._tool_call_count += 1
         tool_info = f"🔧 工具: {tool_name}"
         if args:
-            import json
-            args_str = json.dumps(args, ensure_ascii=False, indent=2)[:80]
+            args_str = json.dumps(args, option=json.OPT_INDENT_2).decode('utf-8')[:80]
             self._append_log(f"{tool_info}\n   └ {args_str}", self._tool_fmt)
         else:
             self._append_log(tool_info, self._tool_fmt)
