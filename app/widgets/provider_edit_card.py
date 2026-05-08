@@ -38,10 +38,15 @@ def _is_text_chat_model(model_id: str) -> bool:
         return False
     model_lower = model_id.lower()
     non_text_keywords = [
+        # 图片生成/视觉模型
         'dall-e', 'dalle', 'stable-diffusion', 'sd-', 'imagen', 'flux',
-        'image', 'diffusion', 'kandinsky', 'midjourney', "wan",
-        'whisper', 'tts', 'speech', 'audio', 'piper', "voice",
+        'image', 'diffusion', 'kandinsky', 'midjourney', 'wan', 'vision',
+        'vl', 'llava', 'seance', 'cogview', 'cogvideo', 'pixart', 'visual',
+        # 音频模型
+        'whisper', 'tts', 'speech', 'audio', 'piper', 'voice',
+        # 词嵌入模型
         'embedding', 'embed', 'text-embedding', 'bge',
+        # 其他非聊天模型
         'moderation', 'rerank', 'search', 'retrieval',
     ]
     for keyword in non_text_keywords:
@@ -351,6 +356,10 @@ class ProviderEditCard(QWidget):
                 preset_urls = [
                     "https://api.openai.com/v1",
                     "https://api.openai.com/v1/chat/completions",
+                ]
+            elif provider_name == "火山方舟":
+                preset_urls = [
+                    "https://ark.cn-beijing.volces.com/api/v3",
                 ]
             elif provider_name in FREE_PROVIDERS:
                 url = FREE_PROVIDERS[provider_name].get("API_URL", "")

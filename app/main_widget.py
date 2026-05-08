@@ -1087,6 +1087,36 @@ class OpenAIChatToolWindow(ToolWindow):
 
     def _show_model_selector_popup(self):
         """显示扁平式模型选择上拉框"""
+        from app.core.provider_profile import supports_vision
+        
+        def is_text_chat_model(model_id: str) -> bool:
+            """判断模型是否为纯文本聊天模型，过滤掉视觉、图片生成、音频等非文本模型"""
+            if not model_id:
+                return False
+            
+            model_lower = model_id.lower()
+            
+            # 非文本模型关键词黑名单
+            non_text_keywords = [
+                # 图片生成/视觉模型
+                'dall-e', 'dalle', 'stable-diffusion', 'sd-', 'imagen', 'flux',
+                'image', 'diffusion', 'kandinsky', 'midjourney', 'wan', 'vision',
+                'vl', 'llava', 'seance', 'cogview', 'cogvideo', 'pixart', 'visual',
+                # 音频模型
+                'whisper', 'tts', 'speech', 'audio', 'piper', 'voice',
+                # 词嵌入模型
+                'embedding', 'embed', 'text-embedding', 'bge',
+                # 其他非聊天模型
+                'moderation', 'rerank', 'search', 'retrieval',
+            ]
+            
+            # 检查是否包含非文本模型关键词
+            for keyword in non_text_keywords:
+                if keyword in model_lower:
+                    return False
+            
+            return True
+        
         provider_models_data = []
         for provider_name, config in self._valid_configs.items():
             model_list = []
@@ -1106,6 +1136,14 @@ class OpenAIChatToolWindow(ToolWindow):
                 model_list.insert(0, cur_model)
             if not model_list and cur_model:
                 model_list = [cur_model]
+            
+            # 双重过滤：既用黑名单过滤非文本模型，又用supports_vision过滤视觉模型
+            model_list = [
+                model for model in model_list 
+                if is_text_chat_model(model) 
+                and not supports_vision({**config, "模型名称": model})
+            ]
+            
             is_current = provider_name == self._current_provider_name
             provider_models_data.append((provider_name, model_list, is_current))
 
@@ -1775,16 +1813,21 @@ class OpenAIChatToolWindow(ToolWindow):
             self._valid_configs[provider_name] = config
 
         # 恢复或设置当前选中的服务商和模型
-        if saved_model and saved_model in self._valid_configs:
-            self._current_provider_name = saved_model
-        elif old_provider and old_provider in self._valid_configs:
+        # 优先保留当前实例已选择的模型（确保多窗口互不影响），只有当旧模型不存在时才使用全局保存的最后一次选择
+        if old_provider and old_provider in self._valid_configs:
             self._current_provider_name = old_provider
+        elif saved_model and saved_model in self._valid_configs:
+            self._current_provider_name = saved_model
         else:
             self._current_provider_name = list(self._valid_configs.keys())[0] if self._valid_configs else ""
 
         if self._current_provider_name:
             provider_config = self._valid_configs.get(self._current_provider_name, {})
-            self._current_model_name = provider_config.get("模型名称", "")
+            # 如果旧模型存在但旧模型名称不存在，才使用配置中的默认名称，否则保留旧模型名称
+            if not (old_model and old_provider == self._current_provider_name):
+                self._current_model_name = provider_config.get("模型名称", "")
+            else:
+                self._current_model_name = old_model
         else:
             self._current_model_name = ""
 

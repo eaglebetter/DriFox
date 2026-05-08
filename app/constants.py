@@ -127,7 +127,7 @@ FREE_PROVIDERS = {
         "获取地址": "https://platform.minimaxi.com/user-center/basic-information/interface-key",
     },
     "火山方舟": {
-        "API_URL": "https://ark.cn-beijing.volces.com/api/v3",
+        "API_URL": "https://ark.cn-beijing.volces.com/api/coding/v3",
         "API_KEY": "",
         "模型名称": "doubao-pro-32k",
         "温度": 0.7,

@@ -48,13 +48,14 @@ def _is_text_chat_model(model_id: str) -> bool:
     
     # 非文本模型关键词黑名单
     non_text_keywords = [
-        # 图片生成模型
+        # 图片生成/视觉模型
         'dall-e', 'dalle', 'stable-diffusion', 'sd-', 'imagen', 'flux',
-        'image', 'diffusion', 'kandinsky', 'midjourney', "wan"
+        'image', 'diffusion', 'kandinsky', 'midjourney', 'wan', 'vision',
+        'vl', 'llava', 'seance', 'cogview', 'cogvideo', 'pixart', 'visual',
         # 音频模型
-        'whisper', 'tts', 'speech', 'audio', 'piper', "voice"
+        'whisper', 'tts', 'speech', 'audio', 'piper', 'voice',
         # 词嵌入模型
-        'embedding', 'embed', 'text-embedding', 'bge'
+        'embedding', 'embed', 'text-embedding', 'bge',
         # 其他非聊天模型
         'moderation', 'rerank', 'search', 'retrieval',
     ]
