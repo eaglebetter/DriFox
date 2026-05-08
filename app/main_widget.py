@@ -4770,6 +4770,7 @@ class OpenAIChatToolWindow(ToolWindow):
         )
         self._project_selector_popup.projectSelected.connect(self._on_project_selected)
         self._project_selector_popup.newProjectCreated.connect(self._on_new_project_created)
+        self._project_selector_popup.archiveProject.connect(self._on_archive_project)
         self._project_selector_popup.show_at(self._project_label)
 
     def _on_project_selected(self, project: str):
@@ -4801,6 +4802,52 @@ class OpenAIChatToolWindow(ToolWindow):
         self._history_popup_card.refreshRequested.emit()
         # 自动触发新建会话
         self._create_new_session()
+
+    def _on_archive_project(self, project_name: str):
+        """归档项目处理"""
+        if not self.history_manager:
+            return
+            
+        from qfluentwidgets import InfoBar
+        # 后端执行归档
+        count = self.history_manager.archive_project(project_name)
+        
+        if count > 0:
+            # 如果归档的是当前项目，切换到默认项目
+            if project_name == self._current_project:
+                default_project = "默认项目"
+                self._current_project = default_project
+                self._project_label.setText(default_project)
+                # 保存到配置
+                from app.utils.config import Settings
+                cfg = Settings.get_instance()
+                cfg.current_project.value = default_project
+                cfg.save()
+                # 创建新会话
+                self._create_new_session()
+            else:
+                # 更新当前项目过滤
+                self._current_history_project = self._current_project
+                self._refresh_history_toggle_panel()
+            
+            # 刷新历史面板
+            self._history_popup_card.refreshRequested.emit()
+            
+            InfoBar.success(
+                "归档成功", 
+                f"已归档项目「{project_name}」的 {count} 个会话", 
+                parent=self, 
+                duration=3000, 
+                position=InfoBarPosition.TOP
+            )
+        else:
+            InfoBar.warning(
+                "归档失败", 
+                f"项目「{project_name}」没有可归档的会话", 
+                parent=self, 
+                duration=3000, 
+                position=InfoBarPosition.TOP
+            )
 
     def _show_soul_memory(self):
         """切换记忆管理卡片的显示"""

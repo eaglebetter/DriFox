@@ -295,7 +295,7 @@ class HistoryManager:
         projects = set()
         for s in self._history_sessions:
             p = s.get("project", "默认项目")
-            if p:
+            if p and not p.startswith("__archived__/"):
                 projects.add(p)
         if not projects:
             return ["默认项目"]
@@ -325,6 +325,41 @@ class HistoryManager:
             ]
             return count
         return 0
+
+    def archive_project(self, project_name: str) -> int:
+        """归档整个项目，归档该项目所有会话并从项目列表中移除"""
+        # 获取项目下所有会话
+        sessions = self.get_history_list(project_name)
+        count = 0
+        
+        for session in sessions:
+            title = session.get("title", "未命名")
+            last_time = session.get("last_time", datetime.now().strftime("%Y-%m-%d"))
+            session_id = session.get("session_id", "unknown")
+
+            # 保存到归档目录 JSON 文件
+            safe_title = sanitize_filename(title[:50])
+            date_str = last_time[:10] if last_time else datetime.now().strftime("%Y-%m-%d")
+            filename = f"{date_str}_{safe_title}_{session_id}.json"
+            archive_file = self.archive_dir / filename
+
+            try:
+                with open(archive_file, "wb") as f:
+                    f.write(json.dumps(serialize_for_json(session), option=json.OPT_INDENT_2))
+            except Exception:
+                logger.warning(f"[HistoryManager] 归档会话失败: {archive_file}")
+                continue
+
+            # 从内存缓存移除
+            self._history_sessions = [s for s in self._history_sessions if s.get("session_id") != session_id]
+
+            # 从 SQLite 删除
+            if self._use_sqlite and self._session_store:
+                self._session_store.delete_session(session_id)
+
+            count += 1
+
+        return count
 
     def archive_history(self, index: int) -> bool:
         """归档历史记录"""
