@@ -298,6 +298,7 @@ class OpenAIChatToolWindow(ToolWindow):
         callbacks = {
             "content_received": self._on_content_received,
             "reasoning_content_received": self._on_reasoning_content_received,
+            "thinking_started": self._on_thinking_started,
             "tool_call_started": self._on_tool_call_started,
             "tool_call_sync_requested": self._request_tool_start_ui_sync,
             "tool_result_received": self._on_tool_result_received,
@@ -1877,8 +1878,9 @@ class OpenAIChatToolWindow(ToolWindow):
         self._current_agent = agent_name
         self.backend.switch_agent(agent_name)
         self._update_agent_status(agent_name)
-        if not getattr(self, "_suppress_agent_intro", False):
-            self._show_agent_intro(agent_name)
+        # 已禁用：切换智能体时不再自动显示介绍卡片
+        # if not getattr(self, "_suppress_agent_intro", False):
+        #     self._show_agent_intro(agent_name)
 
     def _show_agent_intro(self, agent_name: str):
         """显示智能体介绍卡片"""
@@ -4129,6 +4131,11 @@ class OpenAIChatToolWindow(ToolWindow):
         """处理 DeepSeek 思考内容（流式接收）"""
         if self._current_assistant_card:
             self._current_assistant_card.append_reasoning(reasoning_piece)
+
+    def _on_thinking_started(self):
+        """新轮次思考开始，为当前助手卡片创建新的独立思考块"""
+        if self._current_assistant_card:
+            self._current_assistant_card.start_new_thinking_block()
 
     def _on_tool_call_started(
             self, tool_call_id: str, tool_name: str, arguments: dict, round_id: str = None
