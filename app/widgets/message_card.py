@@ -878,6 +878,34 @@ class CodeWebViewer(QWebEngineView):
             pass
         return super().event(event)
 
+    def wheelEvent(self, event: QWheelEvent):
+        # 获取滚动条（向上递归找 QScrollArea chat_scroll_area）
+        try:
+            widget = self
+            # 一直向上遍历父控件直到找到 chat_scroll_area
+            for _ in range(5):  # 最多找5层
+                if hasattr(widget, 'chat_scroll_area'):
+                    break
+                parent_widget = widget.parent()
+                if parent_widget is None:
+                    break
+                widget = parent_widget
+            
+            if hasattr(widget, 'chat_scroll_area'):
+                scroll_area = getattr(widget, 'chat_scroll_area')
+                if scroll_area:
+                    vbar = scroll_area.verticalScrollBar()
+                    if vbar and vbar.minimum() != vbar.maximum():
+                        # 让外部 ScrollArea 滚动
+                        delta = event.angleDelta().y()
+                        vbar.setValue(vbar.value() - delta // 2)
+                        event.accept()  # 标记事件已处理
+                        return
+        except Exception:
+            pass
+
+        super().wheelEvent(event)
+
     def setFixedSize(self, *args, **kwargs):
         """限制最大尺寸，防止 GPU 内存溢出"""
         # 计算安全尺寸
@@ -1769,7 +1797,7 @@ class CodeWebViewer(QWebEngineView):
 
     def wheelEvent(self, event: QWheelEvent):
         # 获取滚动条（向上找 QScrollArea）
-        scroll_area = self.parent().parent.chat_scroll_area
+        scroll_area = self.parent().parent().parent.chat_scroll_area
         if scroll_area:
             vbar = scroll_area.verticalScrollBar()
             if vbar and vbar.minimum() != vbar.maximum():
@@ -2019,6 +2047,12 @@ class MessageCard(SimpleCardWidget):
         self._options_were_visible_before_resize = False
         # WebEngine 上下文恢复标志
         self._webengine_needs_restore = False
+        # 懒渲染标志：未进入可视区域前不创建QWebEngine
+        self._lazy_rendered = False
+        self._pending_content: Optional[str] = None
+        self._viewer_container = QWidget(self)
+        self._viewer_layout = QVBoxLayout(self._viewer_container)
+        self._viewer_layout.setContentsMargins(0, 0, 0, 0)
         self._setup_ui()
 
     def _build_theme(self, role: str, error: bool = False) -> Dict[str, str]:
@@ -2176,8 +2210,11 @@ class MessageCard(SimpleCardWidget):
         if self.role == "user":
             self.viewer = PlainTextViewer(self)
             self.viewer.contentHeightChanged.connect(self._update_height)
-            main.addWidget(self.viewer)
-        else:
+            self._viewer_layout.addWidget(self.viewer)
+            main.addWidget(self._viewer_container)
+            self._lazy_rendered = True
+        elif self.role == "welcome":
+            # 欢迎卡片一开始就在可视区域，直接创建viewer不需要懒加载
             self.viewer = CodeWebViewer(self)
             self.viewer.codeActionRequested.connect(self.actionRequested.emit)
             self.viewer.contextActionRequested.connect(self.contextActionRequested.emit)
@@ -2188,7 +2225,19 @@ class MessageCard(SimpleCardWidget):
             # WebEngine 上下文丢失处理
             self.viewer.contextLost.connect(self._on_webengine_context_lost)
             self.viewer.contextRestored.connect(self._on_webengine_context_restored)
-            main.addWidget(self.viewer)
+            self.viewer._install_dialog_filter()
+            self._viewer_layout.addWidget(self.viewer)
+            main.addWidget(self._viewer_container)
+            self._lazy_rendered = True
+        else:
+            # 懒渲染：占位符，不立即创建QWebEngine，进入可视区域再创建
+            placeholder = QLabel("加载中...", self)
+            placeholder.setStyleSheet("color: #888888; font-size: 14px; padding: 8px;")
+            placeholder.setAlignment(Qt.AlignCenter)
+            self._viewer_layout.addWidget(placeholder)
+            main.addWidget(self._viewer_container)
+            self._lazy_rendered = False
+            self.viewer = None  # 懒加载，延后创建
             self.resize_placeholder = QFrame(self)
             self.resize_placeholder.setVisible(False)
             self.resize_placeholder.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
@@ -2427,6 +2476,10 @@ class MessageCard(SimpleCardWidget):
         if self.role == "user":
             return
 
+        # 懒渲染还没创建viewer，跳过
+        if self.viewer is None:
+            return
+
         if enabled:
             viewer_height = max(self.viewer.height(), self.viewer.minimumHeight(), 40)
             options_height = self.options_widget.sizeHint().height() if self.options_widget.isVisible() else 0
@@ -2479,6 +2532,38 @@ class MessageCard(SimpleCardWidget):
             return
         self.append_text(txt)
 
+    def ensure_rendered(self):
+        """如果还没渲染，懒加载创建QWebViewer并渲染内容"""
+        if self._lazy_rendered or self.role == "user":
+            return
+
+        # 移除占位符，创建真正的viewer
+        for i in reversed(range(self._viewer_layout.count())):
+            item = self._viewer_layout.itemAt(i)
+            if item and item.widget():
+                item.widget().deleteLater()
+
+        self.viewer = CodeWebViewer(self)
+        self.viewer.codeActionRequested.connect(self.actionRequested.emit)
+        self.viewer.contextActionRequested.connect(self.contextActionRequested.emit)
+        self.viewer.contentHeightChanged.connect(self._update_height)
+        self.viewer.toolDiffRequested.connect(self.toolDiffRequested.emit)
+        self.viewer.subAgentLogRequested.connect(self.subAgentLogRequested.emit)
+        self.viewer.saveFileRequested.connect(self.saveFileRequested.emit)
+        # WebEngine 上下文丢失处理
+        self.viewer.contextLost.connect(self._on_webengine_context_lost)
+        self.viewer.contextRestored.connect(self._on_webengine_context_restored)
+        # 安装对话框过滤
+        self.viewer._install_dialog_filter()
+
+        self._viewer_layout.addWidget(self.viewer)
+        self._lazy_rendered = True
+
+        # 如果有等待渲染的内容，现在渲染
+        if self._pending_content is not None:
+            self.set_content(self._pending_content)
+            self._pending_content = None
+
     def set_content(self, content: Any):
         if self.role == "assistant":
             self._content_data = ensure_content_blocks(content)
@@ -2486,6 +2571,11 @@ class MessageCard(SimpleCardWidget):
         else:
             self._content_data = str(content or "")
             rendered = self._content_data
+
+        if not self._lazy_rendered:
+            # 懒渲染阶段，保存内容等待进入可视区域
+            self._pending_content = content
+            return
 
         if hasattr(self.viewer, "_markdown_text"):
             self.viewer._markdown_text = rendered
@@ -2497,12 +2587,17 @@ class MessageCard(SimpleCardWidget):
         if self.role == "assistant":
             self._content_data = append_text_block(self._content_data, text)
             rendered = content_to_markdown(self._content_data)
+            if not self._lazy_rendered:
+                # 懒渲染阶段，内容会在ensure_rendered时一次性设置
+                self._pending_content = self._content_data
+                return
             self.viewer._markdown_text = rendered
             self.viewer._schedule_render(immediate=False)
             return
 
         self._content_data = str(self._content_data or "") + str(text or "")
-        self.viewer.append_chunk(str(text or ""))
+        if self.viewer:
+            self.viewer.append_chunk(str(text or ""))
 
     def append_tool_result(
             self,
@@ -2521,6 +2616,10 @@ class MessageCard(SimpleCardWidget):
                 tool_call_id=tool_call_id,
             )
         )
+        if not self._lazy_rendered:
+            # 懒渲染阶段，内容会在ensure_rendered时一次性设置
+            self._pending_content = self._content_data
+            return
         self.viewer._markdown_text = content_to_markdown(self._content_data)
         self.viewer._schedule_render(immediate=True)
 
@@ -2654,7 +2753,8 @@ class MessageCard(SimpleCardWidget):
 
     def finish_streaming(self):
         try:
-            self.viewer.finish_streaming()
+            if self.viewer is not None and hasattr(self.viewer, 'finish_streaming'):
+                self.viewer.finish_streaming()
         except RuntimeError:
             pass
         self.stop_streaming_anim()

@@ -1602,7 +1602,9 @@ def create_assistant_card_widget(
     
     card = MessageCard(parent=parent, role="assistant", timestamp=timestamp)
     card._round_index = round_index
-    card.viewer._install_dialog_filter()
+    # 懒渲染：viewer可能还没创建，等创建后再安装dialog filter
+    if card.viewer is not None:
+        card.viewer._install_dialog_filter()
     
     if on_action:
         card.actionRequested.connect(on_action)

@@ -2077,46 +2077,63 @@ class OpenAIChatToolWindow(ToolWindow):
         QTimer.singleShot(0, restore_anchor)
 
     def _recycle_out_of_view_batches(self):
-        """回收超出可视缓冲区范围的批次UI，只保留数据，节省内存"""
+        """回收超出可视缓冲区范围的批次UI，只保留数据，节省内存
+        同时确保当前可视范围内的批次都已经懒渲染完成
+        """
         if self._is_virtual_recycling or len(self._batch_cards) == 0:
             return
 
         self._is_virtual_recycling = True
         try:
-            # 计算可回收范围
+            # 计算可视缓冲区范围
             buffer_batches = self._incremental_visible_batch_count * self._virtual_scroll_buffer
-            recycle_start = 0 if self._visible_batch_start <= buffer_batches else self._visible_batch_start - buffer_batches
-            recycle_end = self._visible_batch_end + buffer_batches
+            active_start = 0 if self._visible_batch_start <= buffer_batches else self._visible_batch_start - buffer_batches
+            active_end = self._visible_batch_end + buffer_batches
 
+            # 第一步：确保当前激活范围内所有卡片都已经懒渲染完成
+            lazy_render_count = 0
+            for batch_idx in range(active_start, active_end):
+                if batch_idx >= len(self._batch_cards):
+                    continue
+                cards = self._batch_cards[batch_idx]
+                if not cards:
+                    continue
+                for card in cards:
+                    if isinstance(card, MessageCard) and not getattr(card, '_lazy_rendered', True):
+                        card.ensure_rendered()
+                        lazy_render_count += 1
+
+            # 第二步：回收超出缓冲区的批次
             recycled_count = 0
             # 回收前面超出缓冲区的批次
-            for batch_idx in range(0, recycle_start):
+            for batch_idx in range(0, active_start):
                 if self._batch_cards[batch_idx] is not None:
                     cards = self._batch_cards[batch_idx]
                     if cards:
                         for card in cards:
-                            if isinstance(card, MessageCard):
+                            if isinstance(card, MessageCard) and self._is_widget_alive(card):
                                 card.cleanup()
                                 card.deleteLater()
                         recycled_count += 1
                     self._batch_cards[batch_idx] = None
 
             # 回收后面超出缓冲区的批次
-            for batch_idx in range(recycle_end, len(self._batch_cards)):
+            for batch_idx in range(active_end, len(self._batch_cards)):
                 if self._batch_cards[batch_idx] is not None:
                     cards = self._batch_cards[batch_idx]
                     if cards:
                         for card in cards:
-                            if isinstance(card, MessageCard):
+                            if isinstance(card, MessageCard) and self._is_widget_alive(card):
                                 card.cleanup()
                                 card.deleteLater()
                         recycled_count += 1
                     self._batch_cards[batch_idx] = None
 
             # 回收完成，如果有回收触发GC
-            if recycled_count > 0:
-                logger.debug(f"[virtual-scroll] 回收了 {recycled_count} 个离屏批次")
-                QTimer.singleShot(100, lambda: gc.collect())
+            if recycled_count > 0 or lazy_render_count > 0:
+                logger.debug(f"[virtual-scroll] 懒渲染 {lazy_render_count}，回收 {recycled_count} 个离屏批次")
+                if recycled_count > 0:
+                    QTimer.singleShot(100, lambda: gc.collect())
 
         finally:
             self._is_virtual_recycling = False
@@ -2508,6 +2525,12 @@ class OpenAIChatToolWindow(ToolWindow):
 
             # 保存卡片引用到 batch_cards
             self._batch_cards[global_batch_index] = cards if cards else None
+
+            # 如果当前batch在可视范围内，确保已经渲染（懒渲染需要主动触发）
+            if cards and (self._visible_batch_start <= global_batch_index < self._visible_batch_end):
+                for card in cards:
+                    if isinstance(card, MessageCard):
+                        card.ensure_rendered()
 
     def _get_rendered_message_cards(self) -> List[MessageCard]:
         def is_user_or_assistant(widget):
