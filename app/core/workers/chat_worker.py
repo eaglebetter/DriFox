@@ -3,7 +3,7 @@
 Chat Worker - OpenAI 对话执行器
 """
 
-import json
+import orjson as json
 import re
 import time
 import httpcore
@@ -87,7 +87,7 @@ def _try_fix_malformed_json_arguments(raw_args: str, tool_name: str) -> Tuple[Op
                     try:
                         test_json = copy.deepcopy(args)
                         test_json["content"] = content_value
-                        json.dumps(test_json, ensure_ascii=False)
+                        json.dumps(test_json)
                         args["content"] = content_value
                         return args, "fixed_content"
                     except Exception:

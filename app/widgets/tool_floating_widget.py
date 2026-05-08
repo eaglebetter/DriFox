@@ -127,7 +127,7 @@ class ToolFloatingWidget(SimpleCardWidget):
 
         args_preview = ""
         if args:
-            args_str = json.dumps(args, ensure_ascii=False)
+            args_str = json.dumps(args).decode('utf-8')
             if len(args_str) > 60:
                 args_preview = f" | {args_str[:60]}..."
             else:

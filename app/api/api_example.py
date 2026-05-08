@@ -19,7 +19,7 @@ API 文档：http://localhost:8765/docs
 - DELETE /sessions/{id}              - 删除会话
 - POST /sessions/{id}/chat/stream   - 流式对话（SSE）
 """
-import json
+import orjson as json
 import time
 
 import httpx

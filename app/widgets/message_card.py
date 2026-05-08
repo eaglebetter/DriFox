@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 import base64
 import hashlib
-import json
+import orjson as json
 import math
 import re
 import urllib.parse
@@ -1741,7 +1741,7 @@ class CodeWebViewer(QWebEngineView):
 
             self._last_rendered_html = html_content
             self._height_report_pending = True
-            js_code = f"updateContent({json.dumps(html_content, ensure_ascii=False)});"
+            js_code = f"updateContent({json.dumps(html_content).decode('utf-8')});"
             self.page().runJavaScript(js_code)
         except RuntimeError:
             pass

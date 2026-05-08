@@ -1,4 +1,4 @@
-import json
+import orjson as json
 import subprocess
 from pathlib import Path
 from typing import Optional, Tuple

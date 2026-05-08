@@ -798,7 +798,7 @@ class DiffHtmlGenerator:
                 "lines": file_info["lines"]
             })
 
-        return json.dumps(files_data, ensure_ascii=False)
+        return json.dumps(files_data).decode('utf-8')
 
     @classmethod
     def _generate_file_block_header(cls, file_info: Dict, file_id: str) -> str:

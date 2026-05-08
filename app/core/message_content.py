@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import json
+import orjson as json
 import re
 from functools import lru_cache
 from typing import Any, Dict, List, Optional
@@ -225,7 +225,7 @@ def content_to_markdown(content: Any) -> str:
                         safe_v = _sanitize_result(safe_v)
                         args_parts.append(f'"{k}": "{safe_v}"')
                     else:
-                        args_parts.append(f'"{k}": {_sanitize_result(json.dumps(v, ensure_ascii=False)[:50])}')
+                        args_parts.append(f'"{k}": {_sanitize_result(json.dumps(v).decode("utf-8")[:50])}')
                 args_json = "{" + ", ".join(args_parts) + "}"
             else:
                 args_json = "{}"
@@ -270,8 +270,8 @@ def dedupe_tool_result_blocks(blocks: List[Dict[str, Any]]) -> List[Dict[str, An
             block.get("tool_call_id"),
             block.get("name"),
             json.dumps(
-                block.get("arguments", {}) or {}, ensure_ascii=False, sort_keys=True
-            ),
+                block.get("arguments", {}) or {}, option=json.OPT_SORT_KEYS
+            ).decode("utf-8"),
             block.get("result", ""),
             bool(block.get("success", True)),
         )
@@ -298,7 +298,7 @@ def normalize_tool_call(tool_call: Any) -> Optional[Dict[str, Any]]:
     function_name = str(function.get("name", "") or "").strip()
     function_arguments = function.get("arguments", "{}")
     if isinstance(function_arguments, dict):
-        function_arguments = json.dumps(function_arguments, ensure_ascii=False)
+        function_arguments = json.dumps(function_arguments).decode("utf-8")
     else:
         function_arguments = str(function_arguments or "{}")
 
@@ -315,7 +315,7 @@ def normalize_tool_call(tool_call: Any) -> Optional[Dict[str, Any]]:
         "type": str(tool_call.get("type", "function") or "function"),
         "function": {
             "name": function_name,
-            "arguments": json.dumps(parsed_arguments, ensure_ascii=False),
+            "arguments": json.dumps(parsed_arguments).decode("utf-8"),
         },
     }
     return normalized

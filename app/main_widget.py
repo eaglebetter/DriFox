@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 import ctypes
-import json
+import orjson as json
 import os
 import time
 from datetime import datetime
@@ -2853,8 +2853,8 @@ class OpenAIChatToolWindow(ToolWindow):
             data["title"] = new_title
 
             # 写回文件
-            with open(file_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
+            with open(file_path, "wb") as f:
+                f.write(json.dumps(data, option=orjson.OPT_INDENT_2))
 
             logger.info(f"[归档会话重命名] 成功: {file_path} -> {new_title}")
 

@@ -3,7 +3,7 @@
 子智能体执行器 - 独立运行子智能体任务，避免共享超长上下文
 """
 
-import json
+import orjson as json
 import re
 import time
 from typing import Dict, List, Optional, Any, Callable
@@ -408,8 +408,8 @@ class SubAgentExecutor(QThread):
                                     "function": {
                                         "name": buffer["function"]["name"],
                                         "arguments": json.dumps(
-                                            parsed_args, ensure_ascii=False
-                                        ),
+                                            parsed_args
+                                        ).decode('utf-8'),
                                     },
                                 }
                             )
@@ -433,7 +433,7 @@ class SubAgentExecutor(QThread):
                     "type": buffer["type"],
                     "function": {
                         "name": buffer["function"]["name"],
-                        "arguments": json.dumps(parsed_args, ensure_ascii=False),
+                        "arguments": json.dumps(parsed_args).decode('utf-8'),
                     },
                 }
             )

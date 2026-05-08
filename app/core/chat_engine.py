@@ -2,7 +2,7 @@
 """
 聊天引擎模块 - 处理 LLM 对话的核心逻辑
 """
-import json
+import orjson as json
 from datetime import datetime
 from typing import Dict, List, Optional, Any, Callable
 

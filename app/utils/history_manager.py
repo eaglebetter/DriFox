@@ -9,7 +9,7 @@
 - 增量更新
 """
 
-import json
+import orjson as json
 import uuid
 import re
 import os
@@ -355,13 +355,8 @@ class HistoryManager:
             archive_file = self.archive_dir / filename
 
             try:
-                with open(archive_file, "w", encoding="utf-8") as f:
-                    json.dump(
-                        serialize_for_json(session),
-                        f,
-                        ensure_ascii=False,
-                        indent=2,
-                    )
+                with open(archive_file, "wb") as f:
+                    f.write(json.dumps(serialize_for_json(session), option=orjson.OPT_INDENT_2))
             except Exception:
                 return False
 

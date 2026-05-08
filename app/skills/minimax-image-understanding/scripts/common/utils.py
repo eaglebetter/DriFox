@@ -4,7 +4,7 @@
 import os
 import sys
 import subprocess
-import json
+import orjson as json
 import base64
 from pathlib import Path
 

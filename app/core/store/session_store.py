@@ -8,7 +8,7 @@
 - 损坏隔离
 """
 
-import json
+import orjson as json
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -186,10 +186,10 @@ class SessionStore:
                 "canvas_id": session.get("canvas_id", "default"),
                 "title": session.get("title", ""),
                 "project": session.get("project", "默认项目"),
-                "messages": json.dumps(session.get("messages", []), ensure_ascii=False),
+                "messages": json.dumps(session.get("messages", [])).decode('utf-8'),
                 "system_prompt": session.get("system_prompt", ""),
-                "compaction_state": json.dumps(session.get("compaction_state", {})),
-                "compaction_cache": json.dumps(session.get("compaction_cache", {})),
+                "compaction_state": json.dumps(session.get("compaction_state", {})).decode('utf-8'),
+                "compaction_cache": json.dumps(session.get("compaction_cache", {})).decode('utf-8'),
                 "message_count": session.get("message_count", 0),
             }
 

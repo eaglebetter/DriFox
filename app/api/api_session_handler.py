@@ -12,7 +12,7 @@ API 会话处理器 - 完全隔离的 API 调用，支持并发和持久化
 """
 
 import asyncio
-import json
+import orjson as json
 import threading
 import uuid
 from typing import Optional, Dict, Any, List, Callable, AsyncGenerator
