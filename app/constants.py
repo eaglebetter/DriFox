@@ -29,10 +29,12 @@ PARAM_RANGE_MAP = {
 
 PROVIDER_MODELS = {
     "火山方舟": [
-        "doubao-pro-32k",
-        "doubao-pro-128k",
-        "doubao-lite-32k",
-        "doubao-lite-128k",
+        "doubao-seed-code",
+        "kimi-k2.6 ",
+        "kimi-k2.5",
+        "minimax-m2.7",
+        "glm-4.7",
+        "glm5.1"
     ],
     "MiniMax": [
         "MiniMax-M2.7",
