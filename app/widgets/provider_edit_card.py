@@ -15,6 +15,7 @@ from PyQt5.QtWidgets import (
 )
 from qfluentwidgets import (
     BodyLabel,
+    InfoBarPosition,
 )
 from qfluentwidgets import (
     LineEdit,
@@ -408,11 +409,11 @@ class ProviderEditCard(QWidget):
         provider_name = self.nameCombo.currentText() if self.is_new else self.provider_name
 
         if not api_url or not api_key:
-            InfoBar.warning("提示", "请先填写 API URL 和 Key", parent=self.window(), duration=2000)
+            InfoBar.warning("提示", "请先填写 API URL 和 Key", parent=self.window(), duration=2000, position=InfoBarPosition.TOP)
             return
 
         self.fetchBtn.setEnabled(False)
-        InfoBar.info("获取中", "正在获取模型列表...", parent=self.window(), duration=3000)
+        InfoBar.info("获取中", "正在获取模型列表...", parent=self.window(), duration=3000, position=InfoBarPosition.TOP)
 
         def do_fetch():
             return fetch_provider_models(api_url, api_key, provider_name)
@@ -444,13 +445,13 @@ class ProviderEditCard(QWidget):
             self.modelCombo.setCurrentIndex(self.modelCombo.findText(current))
         self.modelCombo.blockSignals(False)
         from qfluentwidgets import InfoBar
-        InfoBar.success("成功", f"获取到 {len(models)} 个模型", parent=self.window(), duration=2000)
+        InfoBar.success("成功", f"获取到 {len(models)} 个模型", parent=self.window(), duration=2000, position=InfoBarPosition.TOP)
 
     def _on_fetch_failed(self):
         """获取失败（主线程）"""
         self.fetchBtn.setEnabled(True)
         from qfluentwidgets import InfoBar
-        InfoBar.error("失败", "获取模型列表失败，请检查配置", parent=self.window(), duration=3000)
+        InfoBar.error("失败", "获取模型列表失败，请检查配置", parent=self.window(), duration=3000, position=InfoBarPosition.TOP)
 
     def _on_save(self):
         """保存"""

@@ -153,6 +153,8 @@ class ChatBackend(QObject):
             get_model_config=get_model_config,
             tool_executor=self._tool_executor,
             agent_manager=self._agent_manager,
+            get_chat_cards=getattr(self, '_build_chat_cards_context', None),
+            get_memory_context=getattr(self, '_build_memory_context', None),
         )
         logger.info("[ChatBackend] ChatEngine 创建完成")
         
@@ -354,3 +356,20 @@ class ChatBackend(QObject):
         if self._chat_engine:
             return self._chat_engine._get_context_usage()
         return (0, 0)
+    
+    # ========== 上下文构建方法 ==========
+    
+    def _build_memory_context(self, query: str = "") -> str:
+        """构建长期记忆上下文（供 ChatEngine 调用）"""
+        if not self._memory_manager:
+            return ""
+        return self._memory_manager.get_context_string(query=query, limit=8)
+    
+    def _build_chat_cards_context(self) -> str:
+        """构建卡片上下文"""
+        # 如果有 get_chat_cards 回调，调用它
+        if self._get_chat_cards:
+            cards = self._get_chat_cards()
+            if cards:
+                return "\n\n# 已启用的卡片\n" + "\n".join(cards)
+        return ""
