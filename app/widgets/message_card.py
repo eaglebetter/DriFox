@@ -1466,7 +1466,9 @@ class CodeWebViewer(QWebEngineView):
                         }} else {{
                             // 动画结束
                             if (expand) {{
-                                body.style.height = 'auto';
+                                // 展开完成后保持计算出的精确高度，不切换到 auto
+                                // 这样避免二次重排导致的抖动！
+                                body.style.height = endHeight + 'px';
                                 body.style.overflow = '';
                             }} else {{
                                 body.style.height = '0px';

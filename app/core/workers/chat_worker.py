@@ -131,6 +131,7 @@ def _smart_parse_arguments(raw_args: str, tool_name: str) -> Optional[Dict]:
 class OpenAIChatWorker(QThread):
     content_received = pyqtSignal(str)
     reasoning_content_received = pyqtSignal(str)  # DeepSeek thinking mode
+    reasoning_finished = pyqtSignal()  # 思考结束信号
     error_occurred = pyqtSignal(str)
     finished_with_content = pyqtSignal(str)
     finished_with_messages = pyqtSignal(list)
@@ -183,6 +184,7 @@ class OpenAIChatWorker(QThread):
         self._current_tool_calls = {}  # 改成字典
         self._tool_calls_buffer = {}
         self._reasoning_content = ""
+        self._reasoning_started = False  # 标记是否已开始思考（用于精准判断思考结束）
         
         # ========== 性能优化：HTTP 客户端和参数缓存 ==========
         self._http_client: Optional[Any] = None  # 复用的 HTTP 客户端
@@ -1232,7 +1234,12 @@ class OpenAIChatWorker(QThread):
             if reasoning_delta:
                 # 性能优化：使用 list append 代替字符串拼接
                 self._reasoning_chunks.append(reasoning_delta)
+                self._reasoning_started = True  # 标记已开始思考
                 self._emit_with_callback("reasoning_content_received", self.reasoning_content_received, reasoning_delta)
+            elif self._reasoning_started and not reasoning_delta:
+                # 如果之前已经开始思考，但现在 reasoning_delta 为空，说明思考结束了
+                self._reasoning_started = False  # 重置状态
+                self._emit_with_callback("reasoning_finished", self.reasoning_finished)
 
             if content:
                 # 性能优化：使用 list append + join 代替字符串拼接

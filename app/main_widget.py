@@ -292,6 +292,7 @@ class OpenAIChatToolWindow(ToolWindow):
         callbacks = {
             "content_received": self._on_content_received,
             "reasoning_content_received": self._on_reasoning_content_received,
+            "reasoning_finished": self._on_reasoning_finished,
             "tool_call_started": self._on_tool_call_started,
             "tool_call_sync_requested": self._request_tool_start_ui_sync,
             "tool_result_received": self._on_tool_result_received,
@@ -3979,6 +3980,11 @@ class OpenAIChatToolWindow(ToolWindow):
         """处理 DeepSeek 思考内容（流式接收）"""
         if self._current_assistant_card:
             self._current_assistant_card.append_reasoning(reasoning_piece)
+
+    def _on_reasoning_finished(self):
+        """DeepSeek 思考内容结束，闭合思考标签"""
+        if self._current_assistant_card:
+            self._current_assistant_card.finish_reasoning_if_needed()
 
     def _on_tool_call_started(
         self, tool_call_id: str, tool_name: str, arguments: dict, round_id: str = None
