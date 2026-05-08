@@ -57,10 +57,6 @@ class HistoryManager:
 
         # 内存缓存
         self._history_sessions: List[Dict] = []
-        # session_id 到索引的映射缓存，加速查找 O(n) -> O(1)
-        self._session_id_to_index: Dict[str, int] = {}
-        # session_id 到会话对象的映射缓存
-        self._session_id_to_session: Dict[str, Dict] = {}
 
         # 初始化存储
         self._init_storage()
@@ -90,16 +86,6 @@ class HistoryManager:
             except Exception as e:
                 logger.warning(f"[HistoryManager] SQLite 初始化异常: {e}")
 
-    def _rebuild_cache(self):
-        """重建 session_id 缓存，在加载完成后调用"""
-        self._session_id_to_index.clear()
-        self._session_id_to_session.clear()
-        for idx, session in enumerate(self._history_sessions):
-            session_id = session.get("session_id")
-            if session_id:
-                self._session_id_to_index[session_id] = idx
-                self._session_id_to_session[session_id] = session
-
     def _migrate_if_needed(self):
         """迁移旧 JSON 数据到 SQLite（如果 SQLite 为空），迁移后删除 JSON"""
         if not self._session_store:
@@ -107,8 +93,6 @@ class HistoryManager:
 
         # 检查 SQLite 是否已有数据
         if self._session_store.get_session_count(self.canvas_name) > 0:
-            # 已经加载了会话，重建缓存
-            self._rebuild_cache()
             return
 
     def _normalize_sessions(self, data: List) -> List[Dict]:
@@ -175,8 +159,12 @@ class HistoryManager:
         )
         new_session_id = session_record["session_id"]
 
-        # 更新内存缓存，使用缓存查找 O(1)
-        existing_index = self._session_id_to_index.get(new_session_id)
+        # 更新内存缓存
+        existing_index = None
+        for i, s in enumerate(self._history_sessions):
+            if s.get("session_id") == new_session_id:
+                existing_index = i
+                break
 
         if existing_index is not None:
             # 更新现有会话时，移动到列表开头以保持与 SQLite ORDER BY updated_at DESC 一致
@@ -186,9 +174,6 @@ class HistoryManager:
             self._history_sessions.insert(0, session_record)
 
         self._history_sessions = self._history_sessions[: self._history_limit]
-
-        # 重建索引缓存（因为位置都变了，重建比增量更新简单不容易错）
-        self._rebuild_cache()
 
         # 持久化
         self._persist_session(session_record)
@@ -307,13 +292,12 @@ class HistoryManager:
         return most_recent
 
     def get_history_list(self, project: str = None) -> List[Dict]:
-        """获取历史会话列表，可选按项目过滤，按最后对话时间排序（已保持倒序）"""
+        """获取历史会话列表，可选按项目过滤，按最后对话时间排序"""
         sessions = self._history_sessions
         if project:
             sessions = [s for s in sessions if s.get("project", "默认项目") == project]
-        # _history_sessions 已经按更新时间倒序维护，不需要重复排序
-        # 排序会在SQLite加载时就完成，插入新会话时也保持倒序
-        return sessions
+        # 按最后对话时间 last_time 降序排序
+        return sorted(sessions, key=lambda x: x.get("last_time", ""), reverse=True)
 
     def get_projects(self) -> List[str]:
         """获取所有不重复的项目名"""
@@ -544,16 +528,22 @@ class HistoryManager:
         return None
 
     def find_index_by_session_id(self, session_id: str) -> Optional[int]:
-        """根据 session_id 查找索引，使用缓存 O(1)"""
+        """根据 session_id 查找索引"""
         if not session_id:
             return None
-        return self._session_id_to_index.get(session_id)
+        for i, session in enumerate(self._history_sessions):
+            if session.get("session_id") == session_id:
+                return i
+        return None
 
     def get_session_by_session_id(self, session_id: str) -> Optional[Dict]:
-        """根据 session_id 获取会话，使用缓存 O(1)"""
+        """根据 session_id 获取会话"""
         if not session_id:
             return None
-        return self._session_id_to_session.get(session_id)
+        for session in self._history_sessions:
+            if session.get("session_id") == session_id:
+                return session
+        return None
 
     def get_session_messages(self, session_id: str) -> Optional[List[Dict]]:
         """根据 session_id 获取会话的消息列表"""

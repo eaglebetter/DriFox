@@ -1068,7 +1068,6 @@ class ChatEngine:
             # UI 模式：使用 Qt 信号-槽机制
             self._current_worker.content_received.connect(self._on_content_received)
             self._current_worker.reasoning_content_received.connect(self._on_reasoning_content_received)
-            self._current_worker.reasoning_finished.connect(self._on_reasoning_finished)
             self._current_worker.tool_call_started.connect(self._on_tool_call_started)
             self._current_worker.tool_result_received.connect(self._on_tool_result_received)
             self._current_worker.error_occurred.connect(self._on_error)
