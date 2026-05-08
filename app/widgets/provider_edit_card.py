@@ -30,7 +30,7 @@ from app.constants import (
 from app.utils.utils import get_icon, get_font_family_css
 from app.widgets.provider_setting_card import ProviderIconWidget
 from app.widgets.searchable_editable_combobox import SearchableEditableComboBox
-from app.widgets.model_tag_editor import ModelTagEditor
+from app.widgets.model_list_edit_dialog import ModelListEditDialog
 
 
 def _is_text_chat_model(model_id: str) -> bool:
@@ -172,6 +172,8 @@ class ProviderEditCard(QWidget):
 
         # 连接配置区域
         # 服务商名称行
+        current_provider = self.provider_name if not self.is_new else None
+        template_url = ""
         if self.is_new:
             name_row = QHBoxLayout()
             # 服务商名称标签 - 固定宽度右对齐
@@ -195,11 +197,15 @@ class ProviderEditCard(QWidget):
             main_layout.addLayout(name_row)
             first_provider = self.nameCombo.currentText()
             template = FREE_PROVIDERS.get(first_provider, {})
+            current_provider = first_provider
+            template_url = template.get("API_URL", "")
         else:
             if self.provider_name in FREE_PROVIDERS:
                 template = FREE_PROVIDERS[self.provider_name]
             else:
                 template = self.provider_info
+            current_provider = self.provider_name
+            template_url = template.get("API_URL", "")
             name_row = QHBoxLayout()
             name_row.addWidget(BodyLabel("服务商:"))
             name_row.addWidget(ProviderIconWidget(self.provider_name, 24))
@@ -216,8 +222,9 @@ class ProviderEditCard(QWidget):
         url_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         url_row.addWidget(url_label)
         self.apiUrlCombo = SearchableEditableComboBox()
-        self._load_preset_urls()
-        current_url = self.provider_info.get("API_URL", template.get("API_URL", ""))
+        # 传入当前服务商名称和模板URL，加载预设URL列表
+        self._load_preset_urls(provider_name=current_provider, template_url=template_url)
+        current_url = self.provider_info.get("API_URL", template_url)
         if current_url:
             existing_items = [self.apiUrlCombo.itemText(i) for i in range(self.apiUrlCombo.count())]
             if current_url not in existing_items:
@@ -247,7 +254,6 @@ class ProviderEditCard(QWidget):
         self.fetchBtn = PrimaryPushButton("获取模型列表")
         self.fetchBtn.clicked.connect(self._on_fetch_models)
 
-        # --- 默认模型行：下拉选择 + 获取按钮 ---
         model_row = QHBoxLayout()
         model_row.addWidget(BodyLabel("默认模型:"))
         self.modelCombo = SearchableEditableComboBox()
@@ -264,10 +270,8 @@ class ProviderEditCard(QWidget):
             elif "DeepSeek" in PROVIDER_MODELS:
                 self.modelCombo.addItems(PROVIDER_MODELS["DeepSeek"])
         else:
-            # 编辑模式：优先使用已保存的模型列表
             has_saved_models = "模型列表" in self.provider_info and isinstance(saved_models, list) and len(saved_models) > 0
             if has_saved_models:
-                # 有保存的模型列表（只有非空列表才使用）
                 self.modelCombo.addItems(saved_models)
             elif self.provider_name in PROVIDER_MODELS:
                 self.modelCombo.addItems(PROVIDER_MODELS[self.provider_name])
@@ -286,13 +290,13 @@ class ProviderEditCard(QWidget):
 
         model_row.addWidget(self.modelCombo, 1)
         model_row.addWidget(self.fetchBtn)
-        main_layout.addLayout(model_row)
 
-        # --- 模型标签编辑器（内联管理，替代弹窗） ---
-        self.tagEditor = ModelTagEditor(saved_models, current_model, self)
-        self.tagEditor.modelsChanged.connect(self._on_tag_models_changed)
-        self.tagEditor.currentModelChanged.connect(self._on_tag_current_changed)
-        main_layout.addWidget(self.tagEditor)
+        # 管理模型列表按钮
+        self.manageModelsBtn = PrimaryPushButton("编辑列表")
+        self.manageModelsBtn.clicked.connect(self._on_manage_models)
+        model_row.addWidget(self.manageModelsBtn)
+
+        main_layout.addLayout(model_row)
 
         temp_row = QHBoxLayout()
         temp_label = BodyLabel("模型温度:")
@@ -401,19 +405,14 @@ class ProviderEditCard(QWidget):
 
             self.modelCombo.blockSignals(True)
             self.modelCombo.clear()
-            provider_models = PROVIDER_MODELS.get(name, [])
-            if provider_models:
-                self.modelCombo.addItems(provider_models)
+            if name in PROVIDER_MODELS:
+                self.modelCombo.addItems(PROVIDER_MODELS[name])
             default_model = template.get("模型名称", "")
             if default_model:
                 self.modelCombo.addItem(default_model)
             if self.modelCombo.count() > 0:
                 self.modelCombo.setCurrentIndex(0)
             self.modelCombo.blockSignals(False)
-
-            # 同步标签编辑器
-            new_models = provider_models + ([default_model] if default_model and default_model not in provider_models else [])
-            self.tagEditor.set_models(new_models, default_model or (new_models[0] if new_models else ""))
 
             self.contextLengthSpin.setValue(template.get("最大Token", 4096))
 
@@ -469,8 +468,6 @@ class ProviderEditCard(QWidget):
         if current and self.modelCombo.findText(current) >= 0:
             self.modelCombo.setCurrentIndex(self.modelCombo.findText(current))
         self.modelCombo.blockSignals(False)
-        # 同步到标签编辑器
-        self.tagEditor.set_models(models, current or (models[0] if models else ""))
         from qfluentwidgets import InfoBar
         InfoBar.success("成功", f"获取到 {len(models)} 个模型", parent=self.window(), duration=2000, position=InfoBarPosition.TOP)
 
@@ -480,41 +477,33 @@ class ProviderEditCard(QWidget):
         from qfluentwidgets import InfoBar
         InfoBar.error("失败", "获取模型列表失败，请检查配置", parent=self.window(), duration=3000, position=InfoBarPosition.TOP)
 
-    def _on_tag_models_changed(self, models: list):
-        """标签编辑器模型列表变化 → 同步到下拉框"""
-        self.modelCombo.blockSignals(True)
-        self.modelCombo.clear()
-        self.modelCombo.addItems(models)
-        # 尝试保持当前选中
-        current = self.modelCombo.currentText()
-        if not current or self.modelCombo.findText(current) < 0:
-            if models:
-                self.modelCombo.setCurrentIndex(0)
-        self.modelCombo.blockSignals(False)
-
-    def _on_tag_current_changed(self, model_name: str):
-        """标签编辑器选中模型变化 → 同步到下拉框"""
-        self.modelCombo.blockSignals(True)
-        idx = self.modelCombo.findText(model_name)
-        if idx >= 0:
-            self.modelCombo.setCurrentIndex(idx)
-        self.modelCombo.blockSignals(False)
+    def _on_manage_models(self):
+        """打开模型列表管理对话框"""
+        current_models = self.modelCombo.get_all_models()
+        dialog = ModelListEditDialog(current_models, self.window())
+        if dialog.exec_() == dialog.Accepted:
+            new_models = dialog.get_models()
+            self.modelCombo.blockSignals(True)
+            self.modelCombo.clear()
+            self.modelCombo.addItems(new_models)
+            current = self.modelCombo.currentText()
+            if not current or self.modelCombo.findText(current) < 0:
+                if new_models:
+                    self.modelCombo.setCurrentIndex(0)
+            self.modelCombo.blockSignals(False)
 
     def _on_save(self):
         """保存"""
         provider_name = self.nameCombo.currentText() if self.is_new else self.provider_name
-        # 从标签编辑器获取模型列表（这是最权威的数据源）
-        current_models = self.tagEditor.get_models()
-        current_model = self.tagEditor.get_current_model()
+        current_models = self.modelCombo.get_all_models()
         self.provider_info = {
             "API_URL": self.apiUrlCombo.currentText().strip(),
             "API_KEY": self.apiKeyEdit.text().strip(),
-            "模型名称": current_model or self.modelCombo.currentText().strip(),
+            "模型名称": self.modelCombo.currentText().strip(),
             "温度": self.tempSpin.value(),
             "最大Token": int(self.contextLengthSpin.value()),
             "认证方式": "bearer",
         }
-        # 保存当前模型列表
         if current_models:
             self.provider_info["模型列表"] = current_models
         elif "模型列表" not in self.provider_info:
