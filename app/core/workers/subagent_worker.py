@@ -18,7 +18,6 @@ from openai import OpenAI
 
 from app.core.provider_profile import get_provider_profile
 
-
 # ========== 性能优化：预编译正则表达式 ==========
 _THINKING_PATTERN = re.compile(r"<think>[\s\S]*?")  # 过滤思考内容
 
@@ -33,15 +32,15 @@ class SubAgentExecutor(QThread):
     tool_result_received = pyqtSignal(str, str, str, bool)  # task_id, tool_name, result, success
 
     def __init__(
-        self,
-        task_id: str,
-        agent_name: str,
-        task_description: str,
-        llm_config: Dict,
-        agent_manager: Any,
-        tool_executor: Any = None,
-        parent_context: str = "",
-        is_subagent_call: bool = True,  # 标记是否为被主智能体调用（通过 task_batch）
+            self,
+            task_id: str,
+            agent_name: str,
+            task_description: str,
+            llm_config: Dict,
+            agent_manager: Any,
+            tool_executor: Any = None,
+            parent_context: str = "",
+            is_subagent_call: bool = True,  # 标记是否为被主智能体调用（通过 task_batch）
     ):
         super().__init__()
         self.task_id = task_id
@@ -70,7 +69,7 @@ class SubAgentExecutor(QThread):
     def set_history_getter(self, getter: callable):
         """
         设置获取历史消息的回调。
-        
+
         Args:
             getter: callable, 返回 List[Dict]，每个 dict 包含 role/content
         """
@@ -96,7 +95,8 @@ class SubAgentExecutor(QThread):
         # 实时保存到数据库
         if self._log_store_callback:
             try:
-                self._log_store_callback(self.task_id, self.agent_name, self.task_description, "running", None, None, self._logs, self.get_summary())
+                self._log_store_callback(self.task_id, self.agent_name, self.task_description, "running", None, None,
+                                         self._logs, self.get_summary())
             except Exception as e:
                 logger.warning(f"[SubAgentExecutor] 实时保存日志失败: {e}")
 
@@ -121,7 +121,7 @@ class SubAgentExecutor(QThread):
     def run(self):
         import time
         self._start_time = time.time()
-        
+
         try:
             agent = self.agent_manager.get_agent(self.agent_name)
             if not agent:
@@ -146,7 +146,7 @@ class SubAgentExecutor(QThread):
                         # 根据 inherit_history_count 限制消息数量
                         if agent.inherit_history_count is not None:
                             history_messages = history_messages[-agent.inherit_history_count:]
-                        
+
                         # 格式化历史消息（每条限制在合理长度内，避免上下文过长）
                         history_lines = []
                         max_chars = getattr(agent, 'inherit_history_max_chars', 500) or 500
@@ -161,7 +161,7 @@ class SubAgentExecutor(QThread):
                                 # 截断过长内容
                                 truncated = content[:max_chars] + ("..." if len(content) > max_chars else "")
                                 history_lines.append(f"**{role}**: {truncated}")
-                        
+
                         if history_lines:
                             history_section = "\n\n## 主智能体历史上下文\n" + "\n".join(history_lines)
                 except Exception as e:
@@ -171,11 +171,11 @@ class SubAgentExecutor(QThread):
                 content = f"## 父任务上下文\n{self.parent_context}\n\n## 子任务\n{self.task_description}"
             else:
                 content = f"## 子任务\n{self.task_description}"
-            
+
             # 追加历史上下文
             if history_section:
                 content += history_section
-            
+
             messages.append({"role": "user", "content": content})
 
             self._add_log("progress", f"开始执行子任务: {self.agent_name}")
@@ -201,7 +201,8 @@ class SubAgentExecutor(QThread):
             # 任务完成，保存最终状态
             if self._log_store_callback:
                 try:
-                    self._log_store_callback(self.task_id, self.agent_name, self.task_description, "finished", self._last_result, None, self._logs, self.get_summary())
+                    self._log_store_callback(self.task_id, self.agent_name, self.task_description, "finished",
+                                             self._last_result, None, self._logs, self.get_summary())
                 except Exception as e:
                     logger.warning(f"[SubAgentExecutor] 保存完成状态失败: {e}")
 
@@ -213,7 +214,8 @@ class SubAgentExecutor(QThread):
             # 任务出错，保存错误状态
             if self._log_store_callback:
                 try:
-                    self._log_store_callback(self.task_id, self.agent_name, self.task_description, "error", None, self._execution_error, self._logs, self.get_summary())
+                    self._log_store_callback(self.task_id, self.agent_name, self.task_description, "error", None,
+                                             self._execution_error, self._logs, self.get_summary())
                 except Exception as e:
                     logger.warning(f"[SubAgentExecutor] 保存错误状态失败: {e}")
             self.error_occurred.emit(self.task_id, f"SubAgent execution error: {str(e)}")
@@ -609,8 +611,8 @@ class SubAgentManager(QObject):
         self._log_store = log_store
 
     def _save_task_to_store(self, task_id: str, agent_name: str, task_description: str,
-                             status: str = "running", result: str = None, error: str = None,
-                             logs: List[Dict] = None, summary: Dict = None):
+                            status: str = "running", result: str = None, error: str = None,
+                            logs: List[Dict] = None, summary: Dict = None):
         """保存任务到数据库"""
         if not self._log_store:
             return
@@ -621,20 +623,22 @@ class SubAgentManager(QObject):
                     logs = executor.get_logs()
                 if executor and hasattr(executor, "get_summary"):
                     summary = executor.get_summary()
-            self._log_store.save_task(task_id, agent_name, task_description, status, result, error, logs or [], summary or {})
+            self._log_store.save_task(task_id, agent_name, task_description, status, result, error, logs or [],
+                                      summary or {})
         except Exception as e:
             logger.error(f"[SubAgentManager] 保存任务到数据库失败: {e}")
 
     def execute_task(
-        self,
-        task_id: str,
-        agent_name: str,
-        task_description: str,
-        parent_context: str = "",
-        on_finished: Callable[[str], None] = None,
-        on_error: Callable[[str], None] = None,
-        on_progress: Callable[[str], None] = None,
-        executor_ref: Dict = None,
+            self,
+            task_id: str,
+            agent_name: str,
+            task_description: str,
+            parent_context: str = "",
+            on_finished: Callable[[str], None] = None,
+            on_error: Callable[[str], None] = None,
+            on_progress: Callable[[str], None] = None,
+            executor_ref: Dict = None,
+            share_context: bool = False,  # 是否共享主智能体上下文
     ) -> bool:
         """执行子智能体任务"""
         # 验证 agent 是否存在且是有效的子智能体类型
@@ -649,7 +653,7 @@ class SubAgentManager(QObject):
             if on_error:
                 on_error(error_msg)
             return False
-        
+
         # 只允许 mode 为 subagent 或 all 的 agent 作为子智能体
         if not agent.is_subagent():
             error_msg = f"Agent '{agent_name}' cannot be used as subagent (mode: {agent.mode})"
@@ -668,6 +672,35 @@ class SubAgentManager(QObject):
                     on_error("No LLM config available")
                 return False
 
+            # 如果启用共享上下文，将获取完整的上下文信息
+            full_context = parent_context
+            if share_context and self._get_history_messages:
+                try:
+                    history_messages = self._get_history_messages() or []
+                    if history_messages:
+                        # 格式化历史消息
+                        history_lines = []
+                        max_chars = 1000  # 完整上下文字符限制
+                        for msg in history_messages:
+                            role = msg.get("role", "user")
+                            content = msg.get("content", "")
+                            if isinstance(content, list):
+                                content = "".join(
+                                    c.get("text", "") for c in content if isinstance(c, dict)
+                                )
+                            if content:
+                                truncated = content[:max_chars] + ("..." if len(content) > max_chars else "")
+                                history_lines.append(f"**{role}**: {truncated}")
+
+                        if history_lines:
+                            history_section = "\n\n## 主智能体完整上下文\n" + "\n".join(history_lines)
+                            if parent_context:
+                                full_context = f"{parent_context}{history_section}"
+                            else:
+                                full_context = history_section.lstrip("\n\n")
+                except Exception as e:
+                    logger.warning(f"[SubAgentManager] 获取上下文失败: {e}")
+
             executor = SubAgentExecutor(
                 task_id=task_id,
                 agent_name=agent_name,
@@ -675,7 +708,7 @@ class SubAgentManager(QObject):
                 llm_config=llm_config,
                 agent_manager=self._agent_manager,
                 tool_executor=self._tool_executor,
-                parent_context=parent_context,
+                parent_context=full_context,
                 is_subagent_call=True,  # 标记为被主智能体调用
             )
 
@@ -767,17 +800,17 @@ class SubAgentManager(QObject):
     def cleanup_dead_tasks(self, timeout_seconds: int = 300) -> List[str]:
         """
         清理卡死的任务（运行时间超过 timeout_seconds 的任务）
-        
+
         Returns: 已清理的任务ID列表
         """
         import time
         cleaned = []
         now = time.time()
-        
+
         for task_id in list(self._running_tasks.keys()):
             executor = self._running_tasks[task_id]
             start_time = getattr(executor, "_start_time", None)
-            
+
             if start_time and (now - start_time) > timeout_seconds:
                 logger.warning(f"[SubAgentManager] Task {task_id} dead for {now - start_time}s, cancelling")
                 executor.cancel()
@@ -796,7 +829,7 @@ class SubAgentManager(QObject):
                 self._save_task_to_store(task_id, agent_name, task_description, "timeout", "", error_msg)
                 del self._running_tasks[task_id]
                 cleaned.append(task_id)
-        
+
         return cleaned
 
     def get_task_result(self, task_id: str) -> Dict:
@@ -933,7 +966,8 @@ class SubAgentManager(QObject):
                 })
         return ToolResult(True, content={"tasks": tasks_info})
 
-    def get_tasks_status_with_details(self, task_ids: List[str], with_log: bool = False, with_result: bool = True) -> ToolResult:
+    def get_tasks_status_with_details(self, task_ids: List[str], with_log: bool = False,
+                                      with_result: bool = True) -> ToolResult:
         """获取指定任务的详细状态"""
         tasks_info = []
         for tid in task_ids:

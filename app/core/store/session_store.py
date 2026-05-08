@@ -400,7 +400,8 @@ class SessionStore:
             )
             if success and rows:
                 projects = [row[0] if isinstance(row, tuple) else row["project"] for row in rows]
-                return [p for p in projects if p]
+                # 过滤掉空项目名和已归档项目
+                return [p for p in projects if p and not p.startswith("__archived__/")]
             return ["默认项目"]
         except Exception as e:
             logger.error(f"[SessionStore] get_projects 异常: {e}")

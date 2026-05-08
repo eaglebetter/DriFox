@@ -2,25 +2,27 @@
 """
 Chat Worker - OpenAI 对话执行器
 """
+
+import orjson as json
 import re
 import time
 import httpcore
 import httpx
-import orjson as json
 
+from loguru import logger
 from collections import deque
 from datetime import datetime
 from threading import Event
 from typing import Any, Dict, List, Callable, Optional, Tuple
 from PyQt5.QtCore import QThread, pyqtSignal, QCoreApplication
 from PyQt5.QtWidgets import QApplication
-from loguru import logger
 from openai import (
     OpenAI, BadRequestError, RateLimitError, APIError, APIConnectionError,
 )
 
-from app.core.message_content import consolidate_messages, append_text_block, messages_to_api, to_api_message
+from app.core.memory_manager import MEMORY_CATEGORIES
 from app.core.provider_profile import get_provider_profile
+from app.core.message_content import consolidate_messages, append_text_block, messages_to_api, to_api_message
 
 # ========== 预编译正则表达式 ==========
 _RE_PATH = re.compile(r'"path"\s*:\s*"([^"]*)"')
@@ -335,6 +337,7 @@ class OpenAIChatWorker(QThread):
         彻底清理 worker 的所有缓存数据，防止内存泄漏。
         应该在对话结束后调用。
         """
+        import sys
         from loguru import logger
 
         # 计算清理前的内存占用估算
@@ -453,45 +456,6 @@ class OpenAIChatWorker(QThread):
         max_tokens = self.llm_config.get("最大Token")
         if max_tokens is not None:
             extra_body["max_tokens"] = self._cap_max_output_tokens(model, max_tokens)
-
-        # 处理「启用思考」参数
-        enable_thinking = self.llm_config.get("启用思考", False)
-        thinking_level = self.llm_config.get("思考等级", "high")
-        
-        # 判断模型类型并生成对应的思考参数格式
-        if base_url and "deepseek" in base_url.lower():
-            # DeepSeek 格式
-            if enable_thinking:
-                extra_body["thinking"] = {"type": "enabled"}
-                if thinking_level:
-                    extra_body["reasoning_effort"] = thinking_level
-            else:
-                extra_body["thinking"] = {"type": "disabled"}
-        elif base_url and any(x in base_url.lower() for x in ["volc", "doubao", "ark"]):
-            # 火山引擎（豆包）格式 - 支持 enabled/disabled/auto
-            if enable_thinking:
-                extra_body["thinking"] = {"type": "enabled"}
-            else:
-                extra_body["thinking"] = {"type": "disabled"}
-        elif base_url and "minimax" in base_url.lower():
-            # MiniMax 格式 - 使用 reasoning_split 分离思考内容
-            if enable_thinking:
-                extra_body["reasoning_split"] = True
-            # MiniMax 没有显式关闭思考的参数，保持默认行为
-        elif model and any(x in model.lower() for x in ["qwen", "qwq"]):
-            # Qwen/QwQ 格式 (vLLM/Ollama)
-            if enable_thinking:
-                extra_body["enable_thinking"] = True
-                if thinking_level:
-                    extra_body["thinking_effort"] = thinking_level
-            else:
-                extra_body["enable_thinking"] = False
-        else:
-            # 其他支持思考的模型
-            if enable_thinking:
-                extra_body["enable_thinking"] = True
-            else:
-                extra_body["enable_thinking"] = False
 
         # 处理认证
         auth_headers = None
@@ -1014,6 +978,7 @@ class OpenAIChatWorker(QThread):
 
         # 性能优化：使用预构建的 API 参数
         cached_config = self._build_api_request_kwargs()
+
         req_kwargs: Dict[str, Any] = {
             "model": cached_config["model"],
             "messages": sanitized,

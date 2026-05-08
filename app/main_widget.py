@@ -63,6 +63,7 @@ from app.utils.diff_viewer import (
     DiffHtmlGenerator,
     DiffViewerWindow,
 )
+from app.utils.file_operation_recorder import FileOperationRecorder
 from app.utils.history_manager import (
     HistoryManager,
 )
@@ -180,6 +181,7 @@ class OpenAIChatToolWindow(ToolWindow):
         )
 
         # 从后端获取组件（前端只负责 UI 逻辑）
+        self.session_store = self.backend.session_store
         self.session_manager = self.backend.session_manager
         self._chat_engine = self.backend.chat_engine
         self._tool_executor = self.backend.tool_executor
@@ -298,6 +300,7 @@ class OpenAIChatToolWindow(ToolWindow):
         callbacks = {
             "content_received": self._on_content_received,
             "reasoning_content_received": self._on_reasoning_content_received,
+            "thinking_started": self._on_thinking_started,
             "tool_call_started": self._on_tool_call_started,
             "tool_call_sync_requested": self._request_tool_start_ui_sync,
             "tool_result_received": self._on_tool_result_received,
@@ -1877,8 +1880,9 @@ class OpenAIChatToolWindow(ToolWindow):
         self._current_agent = agent_name
         self.backend.switch_agent(agent_name)
         self._update_agent_status(agent_name)
-        if not getattr(self, "_suppress_agent_intro", False):
-            self._show_agent_intro(agent_name)
+        # 已禁用：切换智能体时不再自动显示介绍卡片
+        # if not getattr(self, "_suppress_agent_intro", False):
+        #     self._show_agent_intro(agent_name)
 
     def _show_agent_intro(self, agent_name: str):
         """显示智能体介绍卡片"""
@@ -2204,12 +2208,7 @@ class OpenAIChatToolWindow(ToolWindow):
                 InfoBar.warning("提示", "工具执行器未初始化", parent=self, position=InfoBarPosition.TOP)
                 return
 
-            # 获取文件操作记录
-            from app.utils.file_operation_recorder import FileOperationRecorder
-            from app.core.store import SessionStore
-
-            session_store = SessionStore()
-            file_recorder = FileOperationRecorder(session_store)
+            file_recorder = FileOperationRecorder(self.session_store)
 
             # 获取当前会话的所有文件操作
             operations = file_recorder.get_all_operations_for_session(session_id)
@@ -4130,6 +4129,11 @@ class OpenAIChatToolWindow(ToolWindow):
         if self._current_assistant_card:
             self._current_assistant_card.append_reasoning(reasoning_piece)
 
+    def _on_thinking_started(self):
+        """新轮次思考开始，为当前助手卡片创建新的独立思考块"""
+        if self._current_assistant_card:
+            self._current_assistant_card.start_new_thinking_block()
+
     def _on_tool_call_started(
             self, tool_call_id: str, tool_name: str, arguments: dict, round_id: str = None
     ):
@@ -4766,6 +4770,7 @@ class OpenAIChatToolWindow(ToolWindow):
         )
         self._project_selector_popup.projectSelected.connect(self._on_project_selected)
         self._project_selector_popup.newProjectCreated.connect(self._on_new_project_created)
+        self._project_selector_popup.archiveProject.connect(self._on_archive_project)
         self._project_selector_popup.show_at(self._project_label)
 
     def _on_project_selected(self, project: str):
@@ -4797,6 +4802,52 @@ class OpenAIChatToolWindow(ToolWindow):
         self._history_popup_card.refreshRequested.emit()
         # 自动触发新建会话
         self._create_new_session()
+
+    def _on_archive_project(self, project_name: str):
+        """归档项目处理"""
+        if not self.history_manager:
+            return
+            
+        from qfluentwidgets import InfoBar
+        # 后端执行归档
+        count = self.history_manager.archive_project(project_name)
+        
+        if count > 0:
+            # 如果归档的是当前项目，切换到默认项目
+            if project_name == self._current_project:
+                default_project = "默认项目"
+                self._current_project = default_project
+                self._project_label.setText(default_project)
+                # 保存到配置
+                from app.utils.config import Settings
+                cfg = Settings.get_instance()
+                cfg.current_project.value = default_project
+                cfg.save()
+                # 创建新会话
+                self._create_new_session()
+            else:
+                # 更新当前项目过滤
+                self._current_history_project = self._current_project
+                self._refresh_history_toggle_panel()
+            
+            # 刷新历史面板
+            self._history_popup_card.refreshRequested.emit()
+            
+            InfoBar.success(
+                "归档成功", 
+                f"已归档项目「{project_name}」的 {count} 个会话", 
+                parent=self, 
+                duration=3000, 
+                position=InfoBarPosition.TOP
+            )
+        else:
+            InfoBar.warning(
+                "归档失败", 
+                f"项目「{project_name}」没有可归档的会话", 
+                parent=self, 
+                duration=3000, 
+                position=InfoBarPosition.TOP
+            )
 
     def _show_soul_memory(self):
         """切换记忆管理卡片的显示"""

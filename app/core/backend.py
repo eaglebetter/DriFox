@@ -9,6 +9,7 @@ from typing import Dict, List, Any, Optional, Callable
 from PyQt5.QtCore import QObject, pyqtSignal, QThreadPool
 from loguru import logger
 
+from app.core.store import SessionStore
 from app.core.agent import AgentManager
 from app.core.chat_engine import ChatEngine
 from app.core.chat_session import SessionManager, ChatSession
@@ -62,6 +63,7 @@ class ChatBackend(QObject):
         self._agent_manager: Optional[AgentManager] = None
         self._memory_manager: Optional[MemoryManagerCore] = None
         self._sub_agent_manager = None
+        self._session_store = None
         
         # 配置回调
         self._get_model_config: Optional[Callable] = None
@@ -101,6 +103,10 @@ class ChatBackend(QObject):
     @property
     def is_initialized(self) -> bool:
         return self._initialized
+
+    @property
+    def session_store(self):
+        return self._session_store
     
     # ========== 初始化 ==========
     
@@ -122,6 +128,7 @@ class ChatBackend(QObject):
         self._get_model_config = get_model_config
         
         # 1. 创建 SessionManager
+        self._session_store = SessionStore()
         self._session_manager = SessionManager()
         self._session_manager.create_new_session()
         logger.info("[ChatBackend] SessionManager 创建完成")
