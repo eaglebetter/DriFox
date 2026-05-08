@@ -3967,6 +3967,8 @@ class OpenAIChatToolWindow(ToolWindow):
 
     def _on_content_received(self, content_piece: str):
         if self._current_assistant_card:
+            # 如果正在思考中，先闭合思考标签
+            self._current_assistant_card.finish_reasoning_if_needed()
             self._update_assistant_message(self._current_assistant_card, content_piece)
 
         if not hasattr(self, "_accumulated_content"):
@@ -4249,6 +4251,7 @@ class OpenAIChatToolWindow(ToolWindow):
         self._toggle_send_stop(False)
 
         if self._current_assistant_card:
+            self._current_assistant_card.finish_reasoning_if_needed()
             self._current_assistant_card.finish_streaming()
         if self.history_manager:
             self._save_current_session_to_history()

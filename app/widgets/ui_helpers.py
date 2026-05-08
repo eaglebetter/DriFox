@@ -1145,8 +1145,19 @@ def render_batch_to_assistant_card(assistant_card, batch: list) -> None:
         batch: 消息批次列表
     """
     for msg in batch:
-        if msg.get("role") == "assistant" and msg.get("content", ""):
-            assistant_card.append_text(msg.get("content", {}))
+        if msg.get("role") == "assistant":
+            # 处理思考内容：将 reasoning_content 转换成 <think> 标签格式
+            reasoning_content = msg.get("reasoning_content", "")
+            content = msg.get("content", "")
+            combined_content = ""
+            if reasoning_content:
+                combined_content += f"<think>{reasoning_content}</think>"
+            if content:
+                if combined_content:
+                    combined_content += "\n\n"
+                combined_content += content
+            if combined_content:
+                assistant_card.append_text(combined_content)
         elif msg.get("role") == "tool" and msg.get("content", ""):
             assistant_card.append_tool_result(
                 tool_name=msg.get("name", ""),

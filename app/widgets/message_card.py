@@ -538,10 +538,9 @@ def _inject_tool_blocks(md_text: str, completed: bool = True) -> str:
 _LRU_CACHE_SIZE_THRESHOLD = 50 * 1024  # 50KB
 
 
-@lru_cache(maxsize=256)
-def _render_markdown_to_html_cached_impl(raw_md: str, reasoning: str) -> str:
+def _render_markdown_to_html_impl(raw_md: str) -> str:
     """
-    Markdown 转 HTML 的核心渲染函数（带 LRU 缓存）。
+    Markdown 转 HTML 的核心渲染函数。
     """
     safe_md = _sanitize_incomplete_markdown(raw_md)
     safe_md = _unwrap_code_blocks_with_context_links(safe_md)
@@ -558,30 +557,11 @@ def _render_markdown_to_html_cached_impl(raw_md: str, reasoning: str) -> str:
         return f"<pre>{escape(raw_md)}</pre>"
 
 
-def _render_markdown_to_html_cached(raw_md: str, reasoning: str) -> str:
+def _render_markdown_to_html_cached(raw_md: str, reasoning: str = "") -> str:
     """
-    带内存保护的 Markdown 渲染函数。
-    - 对于超过阈值的文本，跳过缓存直接渲染
-    - 保持 LRU 缓存以提高重复内容的性能
+    Markdown 渲染函数。
     """
-    # 添加思考块内容
-    if reasoning:
-        raw_md = _render_think_block(reasoning, completed=True) + raw_md
-
-    # 大文本跳过缓存，防止内存膨胀
-    text_size = len(raw_md.encode('utf-8'))
-    if text_size > _LRU_CACHE_SIZE_THRESHOLD:
-        # 大文本直接渲染，绕过缓存
-        # 临时禁用缓存
-        original_cache_info = _render_markdown_to_html_cached_impl.cache_info()
-        _render_markdown_to_html_cached_impl.cache_clear()
-        try:
-            return _render_markdown_to_html_cached_impl(raw_md, reasoning)
-        finally:
-            # 恢复缓存状态
-            pass
-
-    return _render_markdown_to_html_cached_impl(raw_md, reasoning)
+    return _render_markdown_to_html_impl(raw_md)
 
     try:
         md = get_markdown_instance()
@@ -1253,8 +1233,6 @@ class CodeWebViewer(QWebEngineView):
                     height: 0;
                     opacity: 0;
                     overflow: hidden;
-                    will-change: height, opacity;
-                    transition: height 250ms cubic-bezier(0.4, 0, 0.2, 1), opacity 200ms ease;
                 }}
                 .cm-collapsible[data-expanded="true"] .cm-collapsible__body {{
                     opacity: 1;
@@ -1435,63 +1413,72 @@ class CodeWebViewer(QWebEngineView):
                     const body = block.querySelector('.cm-collapsible__body');
                     if (!body) return;
 
-                    const ANIM_DURATION = 220;
-                    const startTime = performance.now();
-                    const startHeight = body.getBoundingClientRect().height;
-                    const startOpacity = expand ? 0 : 1;
-                    const endHeight = expand ? body.scrollHeight : 0;
-                    const endOpacity = expand ? 1 : 0;
-
-                    // 立即更新展开状态
-                    syncExpandedAttrs(block, expand);
-
-                    // 阻止 CSS transition 干扰
-                    const isCollapsing = !expand;
-                    body.style.transition = 'none';
-                    body.style.height = startHeight + 'px';
-                    body.style.opacity = startOpacity;
-                    // 立即设置 overflow 防止内容泄漏
-                    body.style.overflow = 'hidden';
-                    // 折叠时立即设置高度，防止视觉抖动
-                    if (isCollapsing) body.style.height = '0px';
-
-                    // 强制重绘
-                    void body.offsetHeight;
-
+                    const ANIM_DURATION = 250;
+                    
                     // 取消之前的动画
                     if (window._collapsibleAnimId) {{
                         cancelAnimationFrame(window._collapsibleAnimId);
                     }}
 
+                    // 立即更新展开状态
+                    syncExpandedAttrs(block, expand);
+
+                    // 完全禁用 transition，用纯 JS 动画
+                    body.style.transition = 'none';
+                    body.style.overflow = 'hidden';
+                    
+                    // 获取准确的起始和目标高度
+                    let startHeight, endHeight;
+                    if (expand) {{
+                        // 展开：获取完整高度
+                        body.style.height = 'auto';
+                        body.style.opacity = '1';
+                        endHeight = body.scrollHeight;
+                        body.style.height = '0px';
+                        body.style.opacity = '0';
+                        startHeight = 0;
+                    }} else {{
+                        // 折叠：获取当前高度
+                        startHeight = body.getBoundingClientRect().height;
+                        body.style.height = startHeight + 'px';
+                        body.style.opacity = '1';
+                        endHeight = 0;
+                    }}
+                    
+                    // 强制重绘
+                    void body.offsetHeight;
+                    
+                    const startTime = performance.now();
+                    
                     function tick(now) {{
                         const elapsed = now - startTime;
                         const progress = Math.min(elapsed / ANIM_DURATION, 1);
-                        // 使用 easeOutQuad 缓动
-                        const eased = 1 - (1 - progress) * (1 - progress);
-
-                        // 折叠时 startHeight 已经是0，currentHeight 计算应该从0开始
-                        const currentHeight = isCollapsing 
-                            ? startHeight * (1 - eased)  // 从 startHeight 减少到 0
-                            : startHeight + (endHeight - startHeight) * eased;
-                        const currentOpacity = startOpacity + (endOpacity - startOpacity) * eased;
-
+                        
+                        // 简单的线性渐变，最稳定
+                        const currentHeight = startHeight + (endHeight - startHeight) * progress;
+                        const currentOpacity = expand ? progress : (1 - progress);
+                        
                         body.style.height = currentHeight + 'px';
                         body.style.opacity = currentOpacity;
-
+                        
                         if (progress < 1) {{
                             window._collapsibleAnimId = requestAnimationFrame(tick);
                         }} else {{
-                            // 动画结束：设置最终状态
-                            body.style.height = expand ? 'auto' : '0px';
-                            body.style.opacity = endOpacity;
-                            body.style.overflow = '';
-                            // 动画结束后重置高度报告标志
-                            _collapsibleHeightReporting = false;
-                            // 暂时不报告高度，测试抖动是否消失
-                            // setTimeout(() => reportHeight(), 80);
+                            // 动画结束
+                            if (expand) {{
+                                body.style.height = 'auto';
+                                body.style.overflow = '';
+                            }} else {{
+                                body.style.height = '0px';
+                            }}
+                            
+                            // 延迟超长时间再报告高度
+                            setTimeout(() => {{
+                                reportHeight();
+                            }}, 600);
                         }}
                     }}
-
+                    
                     window._collapsibleAnimId = requestAnimationFrame(tick);
                 }}
 
@@ -1499,6 +1486,8 @@ class CodeWebViewer(QWebEngineView):
                 let _collapsibleHeightReporting = false;
                 function startCollapsibleAnimation() {{
                     _collapsibleHeightReporting = true;
+                    // 锁定足够长时间
+                    setTimeout(() => {{ _collapsibleHeightReporting = false; }}, 800);
                 }}
 
                 function restoreCollapsibleStates(root) {{
@@ -1667,32 +1656,7 @@ class CodeWebViewer(QWebEngineView):
             self._schedule_render()
 
     def _render_markdown_to_html(self, raw_md: str) -> str:
-        if not self._streaming:
-            return _render_markdown_to_html_cached(
-                raw_md,
-                getattr(self, "_reasoning_content", "") or "",
-            )
-
-        # 流式模式下对思考内容的优化策略
-        reasoning = getattr(self, '_reasoning_content', '') or ''
-        
-        # 思考内容长度阈值
-        LARGE_THINKING_THRESHOLD = 50 * 1024  # 50KB
-        
-        # 检查思考内容是否过大
-        if reasoning:
-            reasoning_size = len(reasoning.encode('utf-8'))
-            
-            if reasoning_size > LARGE_THINKING_THRESHOLD:
-                # 超长思考：使用轻量级渲染策略
-                # 1. 使用简化的思考块 HTML（不包含完整代码块处理）
-                think_html = _render_think_block_lightweight(reasoning, completed=True)
-                raw_md = think_html + raw_md
-            else:
-                # 普通长度：使用完整渲染
-                think_html = _render_think_block(reasoning, completed=True)
-                raw_md = think_html + raw_md
-
+        # 完全依靠 <think> 标签和 _inject_think_cards 处理思考内容
         safe_md = _sanitize_incomplete_markdown(raw_md)
         safe_md = _unwrap_code_blocks_with_context_links(safe_md)
         safe_md = _inject_context_links(safe_md)
@@ -2188,6 +2152,10 @@ class MessageCard(SimpleCardWidget):
         main.addWidget(self.options_widget)
 
         main.addWidget(CardSeparator(self))
+        # 初始化思考内容到 viewer
+        if self._reasoning_content and hasattr(self.viewer, '_reasoning_content'):
+            self.viewer._reasoning_content = self._reasoning_content
+
         self.setStyleSheet(
             f"""
             CardWidget {{
@@ -2516,10 +2484,8 @@ class MessageCard(SimpleCardWidget):
 
     def set_reasoning_content(self, content: str):
         """设置思考内容（用于 DeepSeek 思考模式）"""
-        self._reasoning_content = content
-        if content and hasattr(self.viewer, "_markdown_text"):
-            # 刷新渲染以显示思考内容
-            self.viewer._schedule_render(immediate=True)
+        # 这个函数现在不用了，因为我们用 xml 方式处理
+        pass
 
     def set_html_direct(self, html: str):
         """直接设置 HTML，绕过打字机效果"""
@@ -2532,28 +2498,20 @@ class MessageCard(SimpleCardWidget):
             pass
 
     def append_reasoning(self, text: str):
-        """追加思考内容（流式模式）
-        
-        优化：使用防抖机制，避免每次片段都触发完整重渲染。
-        对于超长思考，使用增量更新策略减少内存压力。
-        """
-        if not hasattr(self.viewer, '_reasoning_content'):
-            return
-        
-        old_len = len(self._reasoning_content or '')
-        self._reasoning_content = (self._reasoning_content or '') + text
-        new_len = len(self._reasoning_content)
-        self.viewer._reasoning_content = self._reasoning_content
-        
-        # 思考内容长度阈值（超过此值使用增量更新策略）
-        LARGE_THINKING_THRESHOLD = 50 * 1024  # 50KB
-        
-        if new_len > LARGE_THINKING_THRESHOLD:
-            # 超长思考：使用增量更新策略，避免完整重渲染
-            self._update_thinking_incremental(text)
-        else:
-            # 普通长度：使用防抖机制，遵循流式模式渲染频率
-            self.viewer._schedule_render(immediate=False)
+        """追加思考内容（流式模式）"""
+        # 简单处理：如果还没有开始思考标签，先添加 <think>
+        if not hasattr(self, '_thinking_started'):
+            self._thinking_started = False
+        if not self._thinking_started:
+            self._thinking_started = True
+            self.append_text("<think>")
+        self.append_text(text)
+    
+    def finish_reasoning_if_needed(self):
+        """如果正在思考中，闭合思考标签"""
+        if hasattr(self, '_thinking_started') and self._thinking_started:
+            self.append_text("</think>")
+            self._thinking_started = False
     
     def _update_thinking_incremental(self, new_text: str):
         """增量更新思考内容（用于超长思考）

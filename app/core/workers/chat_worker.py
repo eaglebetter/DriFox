@@ -615,9 +615,6 @@ class OpenAIChatWorker(QThread):
     def _build_response_message_sequence(self, tool_results=None) -> List[Dict]:
         now_ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
-        # 性能优化：缓存 reasoning_content，避免重复 join
-        reasoning_content = self._get_reasoning_content()
-        
         tool_call_map = {}
         # 从 _current_tool_calls 字典获取 tool_calls
         current_tcs = self._current_tool_calls
@@ -740,8 +737,12 @@ class OpenAIChatWorker(QThread):
                 tool_call = tool_call_map.get(tool_call_id)
                 if tool_call:
                     assistant_msg["tool_calls"] = [tool_call]
-                if reasoning_content:
-                    assistant_msg["reasoning_content"] = reasoning_content
+                # 获取当前轮的思考内容，然后立即清空，避免污染下一轮
+                current_reasoning = self._get_reasoning_content()
+                if current_reasoning:
+                    assistant_msg["reasoning_content"] = current_reasoning
+                    self._reasoning_content = ""
+                    self._reasoning_chunks = []
                 if assistant_msg.get("content") or assistant_msg.get("tool_calls"):
                     sequence.append(assistant_msg)
 
@@ -765,8 +766,12 @@ class OpenAIChatWorker(QThread):
                 tool_call = tool_call_map.get(tool_call_id)
                 if tool_call:
                     assistant_msg["tool_calls"] = [tool_call]
-                if reasoning_content:
-                    assistant_msg["reasoning_content"] = reasoning_content
+                # 获取当前轮的思考内容，然后立即清空
+                current_reasoning = self._get_reasoning_content()
+                if current_reasoning:
+                    assistant_msg["reasoning_content"] = current_reasoning
+                    self._reasoning_content = ""
+                    self._reasoning_chunks = []
                 if assistant_msg.get("tool_calls"):
                     sequence.append(assistant_msg)
                 sequence.append(tool_result)
@@ -777,8 +782,12 @@ class OpenAIChatWorker(QThread):
                 "content": pending_text_blocks[0].get("text"),
                 "timestamp": now_ts,
             }
-            if reasoning_content:
-                assistant_msg["reasoning_content"] = reasoning_content
+            # 获取当前轮的思考内容，然后立即清空
+            current_reasoning = self._get_reasoning_content()
+            if current_reasoning:
+                assistant_msg["reasoning_content"] = current_reasoning
+                self._reasoning_content = ""
+                self._reasoning_chunks = []
             sequence.append(assistant_msg)
         elif not sequence and self.full_response:
             assistant_msg = {
@@ -786,8 +795,12 @@ class OpenAIChatWorker(QThread):
                 "content": append_text_block([], self.full_response)[0].get("text"),
                 "timestamp": now_ts,
             }
-            if reasoning_content:
-                assistant_msg["reasoning_content"] = reasoning_content
+            # 获取当前轮的思考内容，然后立即清空
+            current_reasoning = self._get_reasoning_content()
+            if current_reasoning:
+                assistant_msg["reasoning_content"] = current_reasoning
+                self._reasoning_content = ""
+                self._reasoning_chunks = []
             sequence.append(assistant_msg)
         elif not sequence and not response_blocks:
             sequence.append({"role": "assistant", "content": [], "timestamp": now_ts})
