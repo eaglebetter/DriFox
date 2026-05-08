@@ -77,6 +77,9 @@ from app.widgets.bottom_input_area import (
 from app.widgets.context_usage_ring import (
     ContextUsageRing,
 )
+from app.widgets.coding_plan_usage_ring import (
+    CodingPlanUsageRing,
+)
 from app.widgets.conversation_node_preview import (
     ConversationNodePreview,
 )
@@ -172,16 +175,13 @@ class OpenAIChatToolWindow(ToolWindow):
         # 需要在 super().__init__() 之前初始化所有依赖项
         self.homepage = homepage  # 必须在 super() 之前设置，供 backend.initialize 使用
         from app.core.agent import AgentManager
-        self._agent_manager = AgentManager()
 
         # 创建后端（后端自己创建所有组件）- 需要在 super() 之前创建并初始化
         # 因为 setup_ui() 中会用到 self.backend.get_primary_agents()
         self.backend = ChatBackend()
         self.backend.initialize(
             get_model_config=self._get_current_model_config,
-            agent_manager=self._agent_manager,  # 传递已有的 AgentManager
             workdir=str(Path(__file__).parent.parent.parent),
-            canvas_name=getattr(homepage, "workflow_name", "default") or "default",
         )
 
         # 从后端获取组件（前端只负责 UI 逻辑）
@@ -848,6 +848,10 @@ class OpenAIChatToolWindow(ToolWindow):
         self.balance_display = BalanceDisplay(self)
         right_layout.addWidget(self.balance_display)
 
+        # Coding Plan 用量圆环
+        self.coding_plan_usage_ring = CodingPlanUsageRing(self)
+        right_layout.addWidget(self.coding_plan_usage_ring)
+
         # 上下文占用圆环
         self.context_usage_ring = ContextUsageRing(self)
         right_layout.addWidget(self.context_usage_ring)
@@ -1240,6 +1244,9 @@ class OpenAIChatToolWindow(ToolWindow):
 
         if not self._chat_engine:
             ring.set_usage(0, 0, 0)
+            coding_ring = getattr(self, "coding_plan_usage_ring", None)
+            if coding_ring:
+                coding_ring.clear()
             return
 
         session = self.session_manager.get_current_session()
@@ -1251,6 +1258,11 @@ class OpenAIChatToolWindow(ToolWindow):
             snapshot.get("budget_tokens", 0),
             snapshot.get("compaction", {}),
         )
+        
+        # 刷新 Coding Plan 用量显示
+        coding_ring = getattr(self, "coding_plan_usage_ring", None)
+        if coding_ring:
+            self._update_balance_display()
 
     def _update_balance_display(self):
         """更新余额显示"""
@@ -1262,12 +1274,20 @@ class OpenAIChatToolWindow(ToolWindow):
         provider_name = getattr(self, "_current_provider_name", "")
         if not provider_name:
             balance_display.clear()
+            coding_ring = getattr(self, "coding_plan_usage_ring", None)
+            if coding_ring:
+                coding_ring.clear()
             return
 
         config = self._valid_configs.get(provider_name, {})
         api_key = config.get("API_KEY", "")
 
         balance_display.set_provider(provider_name, api_key)
+        
+        # 更新 Coding Plan 用量显示
+        coding_ring = getattr(self, "coding_plan_usage_ring", None)
+        if coding_ring:
+            coding_ring.set_provider(provider_name, api_key)
 
     def _open_settings_popup(self):
         """打开设置卡片"""
@@ -1547,11 +1567,14 @@ class OpenAIChatToolWindow(ToolWindow):
             # 刷新数据
             self._refresh_history_toggle_panel()
 
-    def _refresh_history_toggle_panel(self):
+    def _refresh_history_toggle_panel(self, is_archived: bool = False):
         """刷新历史面板数据"""
+        if not self._history_card:
+            return
+        
         current_tab = self._history_card._current_tab if hasattr(self._history_card, '_current_tab') else "history"
 
-        if current_tab == "history":
+        if current_tab == "history" or is_archived:
             # 获取当前项目的历史会话列表
             history_list = self.history_manager.get_history_list(self._current_project) if self.history_manager else []
             # 在项目过滤后的列表中查找当前会话的位置
@@ -1561,7 +1584,11 @@ class OpenAIChatToolWindow(ToolWindow):
                     if session.get("session_id") == self._current_session_id:
                         current_idx = i
                         break
-            self._history_popup_card.set_history(history_list, current_idx)
+            # 归档操作后需要清理归档会话列表
+            if is_archived:
+                self._history_popup_card.set_history(history_list, current_idx, clear_archived=True)
+            else:
+                self._history_popup_card.set_history(history_list, current_idx)
         else:
             # 刷新归档会话
             self._refresh_archived_sessions()
@@ -1602,7 +1629,8 @@ class OpenAIChatToolWindow(ToolWindow):
         for session in archived_list:
             try:
                 with open(session["path"], "r", encoding="utf-8") as f:
-                    data = json.load(f)
+                    content = f.read()
+                    data = json.loads(content)
                     messages = data.get("messages", [])
                     session["message_count"] = data.get("message_count",
                                                         len([m for m in messages if m.get("role") == "user"]))
@@ -2828,7 +2856,12 @@ class OpenAIChatToolWindow(ToolWindow):
             )
 
         # 刷新历史会话卡片
-        refresh_history_card_if_visible(self._history_card, self._refresh_history_toggle_panel)
+        current_tab = self._history_popup_card._current_tab if hasattr(self._history_popup_card, '_current_tab') else "history"
+        if current_tab == "archived":
+            # 如果当前在归档标签页，需要清理并刷新
+            refresh_history_card_if_visible(self._history_card, lambda: self._refresh_history_toggle_panel(is_archived=True))
+        else:
+            refresh_history_card_if_visible(self._history_card, self._refresh_history_toggle_panel)
 
     def _rename_history_session(self, index: int, new_title: str):
         if not self.history_manager:
@@ -2960,7 +2993,8 @@ class OpenAIChatToolWindow(ToolWindow):
         try:
             # 读取文件
             with open(file_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
+                content = f.read()
+                data = json.loads(content)
 
             # 更新标题
             data["title"] = new_title

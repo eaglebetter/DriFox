@@ -54,9 +54,7 @@ MEMORY_DECAY_CONFIG = {
 class MemoryManagerCore:
     """长期记忆管理器核心类"""
 
-    def __init__(self, canvas_name: str = "default"):
-        self._canvas_name = canvas_name
-
+    def __init__(self):
         # SQLite 存储层
         self._session_store: Optional[SessionStore] = None
         self._use_sqlite = False
@@ -74,7 +72,7 @@ class MemoryManagerCore:
                 self._session_store = SessionStore(db_dir=".drifox")
                 if self._session_store.is_initialized:
                     self._use_sqlite = True
-                    logger.info(f"[MemoryManager] SQLite 存储已启用: {self._canvas_name}")
+                    logger.info("[MemoryManager] SQLite 存储已启用")
 
                     # 检查是否需要迁移旧 JSON 数据
                     self._migrate_if_needed()
@@ -87,7 +85,7 @@ class MemoryManagerCore:
         # 回退到 JSON 模式
         self._use_sqlite = False
         self._ensure_memory_file()
-        logger.info(f"[MemoryManager] JSON 存储模式: {self._canvas_name}")
+        logger.info("[MemoryManager] JSON 存储模式")
 
     def _ensure_memory_file(self):
         """确保记忆文件存在 - SQLite 模式下不再使用"""
@@ -102,14 +100,14 @@ class MemoryManagerCore:
             return
 
         # 检查 SQLite 是否已有数据
-        memories = self._session_store.load_memories(self._canvas_name, limit=1)
+        memories = self._session_store.load_memories(limit=1)
         if len(memories) > 0:
             return  # 已有数据，不需要迁移
 
         # 迁移数据
         try:
             migrated = self._session_store.migrate_memories_from_json(
-                str(self._memory_file), self._canvas_name
+                str(self._memory_file)
             )
             if migrated > 0:
                 logger.info(f"[MemoryManager] 已迁移 {migrated} 条记忆到 SQLite")
@@ -131,7 +129,7 @@ class MemoryManagerCore:
         """加载记忆数据"""
         if self._use_sqlite and self._session_store:
             # SQLite 模式 - 加载所有记忆（包括禁用的），管理界面需要能看到全部
-            memories = self._session_store.load_memories(self._canvas_name, limit=200, include_disabled=True)
+            memories = self._session_store.load_memories(limit=200, include_disabled=True)
             return {
                 "version": "2.0",
                 "user_profile": {},
@@ -146,7 +144,8 @@ class MemoryManagerCore:
         if self._memory_file and self._memory_file.exists():
             try:
                 with open(self._memory_file, "r", encoding="utf-8") as f:
-                    data = json.load(f)
+                    content = f.read()
+                    data = json.loads(content)
                     if "user_memories" not in data:
                         data["user_memories"] = []
                     normalized_memories = []
@@ -255,7 +254,7 @@ class MemoryManagerCore:
             if self._use_sqlite and self._session_store:
                 # SQLite 模式：批量保存记忆
                 memories = memory_data.get("user_memories", [])
-                success = self._session_store.save_memories(memories, self._canvas_name)
+                success = self._session_store.save_memories(memories)
                 if success:
                     logger.info(f"[MemoryManager] Memory saved to SQLite: {len(memories)} items")
                 return success
@@ -684,7 +683,7 @@ class MemoryManagerCore:
         try:
             if self._use_sqlite and self._session_store:
                 # SQLite 模式
-                self._session_store.clear_memories(self._canvas_name)
+                self._session_store.clear_memories()
                 logger.info("[MemoryManager] Memory cleared from SQLite")
                 return True
 
@@ -733,9 +732,4 @@ class MemoryManagerCore:
             "", include_disabled=False, limit=limit, memory_data=memory_data
         )
 
-    def set_canvas_name(self, canvas_name: str):
-        """设置画布名称（切换工作区时调用）"""
-        self._canvas_name = canvas_name
-        # SQLite 模式下不需要切换文件，canvas_id 在查询时指定
-        if not self._use_sqlite:
-            self._ensure_memory_file()
+

@@ -344,8 +344,9 @@ class HistoryManager:
 
             try:
                 with open(archive_file, "wb") as f:
-                    f.write(json.dumps(serialize_for_json(session), option=orjson.OPT_INDENT_2))
+                    f.write(json.dumps(serialize_for_json(session), option=json.OPT_INDENT_2))
             except Exception:
+                logger.warning(f"[HistoryManager] 归档失败: {archive_file}")
                 return False
 
             # 从内存缓存移除
@@ -370,7 +371,8 @@ class HistoryManager:
         """
         try:
             with open(file_path, "r", encoding="utf-8") as f:
-                data = deserialize_from_json(json.load(f))
+                content = f.read()
+                data = deserialize_from_json(json.loads(content))
 
             if not isinstance(data, dict):
                 logger.warning(f"[HistoryManager] 导入失败，非法的会话数据格式: {file_path}")
@@ -468,7 +470,7 @@ class HistoryManager:
             for json_file in self.archive_dir.glob("*.json"):
                 try:
                     with open(json_file, "r", encoding="utf-8") as f:
-                        data = json.load(f)
+                        data = json.loads(f.read())
                     archived_files.append({
                         "path": str(json_file),
                         "name": json_file.name,
@@ -476,6 +478,7 @@ class HistoryManager:
                         "title": data.get("title", json_file.stem[:50]),
                     })
                 except Exception:
+                    logger.error(f"[HistoryManager] 读取归档文件失败: {json_file}")
                     # 跳过损坏的文件
                     continue
         except Exception:

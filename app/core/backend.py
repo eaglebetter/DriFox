@@ -107,9 +107,7 @@ class ChatBackend(QObject):
     def initialize(
         self,
         get_model_config: Callable[[], Dict[str, Any]],
-        agent_manager: AgentManager = None,
         workdir: str = None,
-        canvas_name: str = None,
     ):
         """
         后端初始化 - 自己创建所有组件（不依赖 Qt）
@@ -118,7 +116,6 @@ class ChatBackend(QObject):
             get_model_config: 获取模型配置的回调
             agent_manager: 已有的 AgentManager（可选）
             workdir: 工作目录
-            canvas_name: 画布名称
         """
         logger.info("[ChatBackend] 初始化中...")
         
@@ -130,14 +127,11 @@ class ChatBackend(QObject):
         logger.info("[ChatBackend] SessionManager 创建完成")
         
         # 2. 创建 MemoryManager
-        self._memory_manager = MemoryManagerCore(canvas_name or "default")
+        self._memory_manager = MemoryManagerCore()
         logger.info("[ChatBackend] MemoryManager 创建完成")
         
         # 3. 使用传入的 AgentManager 或创建新的
-        if agent_manager is not None:
-            self._agent_manager = agent_manager
-        else:
-            self._agent_manager = AgentManager()
+        self._agent_manager = AgentManager()
         logger.info(f"[ChatBackend] AgentManager 就绪，{len(self._agent_manager.list_agents())} 个 Agent")
         
         # 4. 创建 ToolExecutor（不传递 homepage，解耦 Qt）
