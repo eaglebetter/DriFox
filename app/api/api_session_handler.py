@@ -12,7 +12,7 @@ API 会话处理器 - 完全隔离的 API 调用，支持并发和持久化
 """
 
 import asyncio
-import json
+import orjson as json
 import threading
 import uuid
 from typing import Optional, Dict, Any, List, Callable, AsyncGenerator
@@ -79,13 +79,10 @@ class _APISessionStub:
 
 
 class APIHistoryManager:
-    """API 专用历史管理器 - 固化到 SQLite，canvas_id="api"
+    """API 专用历史管理器 - 固化到 SQLite
     
     使用独立的 SessionStore 持久化到 SQLite，不影响 UI 的历史记录。
-    canvas_id 使用 "api" 来区分。
     """
-    
-    CANVAS_ID = "api"
     
     def __init__(self, ui_history_manager):
         self._ui_history_manager = ui_history_manager
@@ -101,12 +98,11 @@ class APIHistoryManager:
     def _init_sqlite(self):
         """初始化 SQLite 存储"""
         try:
-            from app.utils.session_store import (
-                SessionStore,
-            )
-            self._session_store = SessionStore(db_dir=".drifox")
+            from app.core.store import SessionStore
+            
+            self._session_store = SessionStore.get_instance(db_dir=".drifox")
             if self._session_store.is_initialized:
-                logger.info("[APIHistoryManager] SQLite 存储已启用，canvas_id=api")
+                logger.info("[APIHistoryManager] SQLite 存储已启用")
             else:
                 logger.warning("[APIHistoryManager] SQLite 初始化失败")
         except Exception as e:
@@ -116,15 +112,10 @@ class APIHistoryManager:
         """从 SQLite 加载会话到内存"""
         if self._session_store and self._session_store.is_initialized:
             try:
-                self._api_sessions = self._session_store.load_sessions(self.CANVAS_ID, limit=100)
+                self._api_sessions = self._session_store.load_sessions(limit=100)
                 logger.debug(f"[APIHistoryManager] 从 SQLite 加载 {len(self._api_sessions)} 条会话")
             except Exception as e:
                 logger.error(f"[APIHistoryManager] 加载失败: {e}")
-    
-    @property
-    def canvas_name(self):
-        """获取画布名称"""
-        return self.CANVAS_ID
     
     @property
     def _history_sessions(self) -> List[Dict[str, Any]]:
@@ -139,12 +130,11 @@ class APIHistoryManager:
     def _persist_session(self, session_record: Dict) -> None:
         """持久化会话到 SQLite"""
         if self._session_store and self._session_store.is_initialized:
-            session_record["canvas_id"] = self.CANVAS_ID
             self._session_store.save_session(session_record)
     
     def get_history_list(self) -> List[Dict]:
-        """获取所有会话列表"""
-        return self._api_sessions
+        """获取所有会话列表，按最后对话时间排序"""
+        return sorted(self._api_sessions, key=lambda x: x.get("last_time", ""), reverse=True)
     
     def get_session_by_session_id(self, session_id: str) -> Optional[Dict]:
         """根据 session_id 获取会话"""
@@ -185,7 +175,6 @@ class APIHistoryManager:
         # 构建会话记录
         session_record = {
             "session_id": session_id,
-            "canvas_id": self.CANVAS_ID,
             "title": title,
             "messages": messages,
             "created_at": now,

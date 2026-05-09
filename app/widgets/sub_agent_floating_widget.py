@@ -1,7 +1,10 @@
 # -*- coding: utf-8 -*-
+import time
+import orjson as json
 from typing import Dict
 
 from PyQt5.QtCore import Qt, pyqtSignal, QTimer
+from PyQt5.QtGui import QFont, QTextCharFormat, QColor
 from PyQt5.QtWidgets import (
     QVBoxLayout,
     QLabel,
@@ -10,13 +13,10 @@ from PyQt5.QtWidgets import (
     QTextEdit,
     QFrame, QSizePolicy,
 )
+from qfluentwidgets import SegmentedWidget, BodyLabel
 from qfluentwidgets import SimpleCardWidget
 
-from PyQt5.QtCore import Qt, pyqtSignal, QTimer
-from PyQt5.QtGui import QFont, QTextCharFormat, QColor
-from qfluentwidgets import CardWidget, SegmentedWidget, BodyLabel, PrimaryPushButton
 from app.utils.utils import get_unified_font
-import time
 
 
 class SubTaskLogWidget(QFrame):
@@ -73,7 +73,7 @@ class SubTaskLogWidget(QFrame):
         self.log_text.setFont(get_unified_font(8))
         self.log_text.setStyleSheet("""
             QTextEdit {
-                background-color: #1e1e1e;
+                background-color: transparent;
                 color: #d4d4d4;
                 border: none;
                 border-radius: 3px;
@@ -155,8 +155,7 @@ class SubTaskLogWidget(QFrame):
         self._tool_call_count += 1
         tool_info = f"🔧 工具: {tool_name}"
         if args:
-            import json
-            args_str = json.dumps(args, ensure_ascii=False, indent=2)[:80]
+            args_str = json.dumps(args, option=json.OPT_INDENT_2).decode('utf-8')[:80]
             self._append_log(f"{tool_info}\n   └ {args_str}", self._tool_fmt)
         else:
             self._append_log(tool_info, self._tool_fmt)
@@ -204,7 +203,7 @@ class SubAgentFloatingWidget(SimpleCardWidget):
         super().__init__(parent)
         self._tasks: Dict[str, SubTaskLogWidget] = {}  # task_id -> widget
         self._task_labels: Dict[str, str] = {}  # task_id -> label text
-        self._segment_items: Dict[str, object] = {}  # task_id -> segment item
+        self._segment_items: Dict[str, object] = {}  # task_id -> segment item (用于更新按钮文字)
         self._active_task_id: str = None
         self._batch_started: bool = False  # 当前批次是否已开始
         self._timer: QTimer = None
@@ -338,11 +337,15 @@ class SubAgentFloatingWidget(SimpleCardWidget):
         # 更新 Segment，使用 task_id 作为唯一标识
         task_index = len(self._tasks)
         item = self.segment_widget.addItem(task_id, f"任务{task_index}")
-        self.segment_widget.setCurrentItem(task_id)
-
-        # 同步更新 _task_labels 和 _segment_items
-        self._task_labels[task_id] = f"任务{task_index}"
         self._segment_items[task_id] = item
+
+        # 同步更新 _task_labels
+        self._task_labels[task_id] = f"任务{task_index}"
+
+        # 只在添加第一个任务时设置当前项为第一个任务
+        # 后续添加的任务不改变当前选中项，保持第一个任务被选中
+        if len(self._tasks) == 1:
+            self.segment_widget.setCurrentItem(task_id)
 
         # 更新计数
         self._update_task_count()
@@ -351,8 +354,9 @@ class SubAgentFloatingWidget(SimpleCardWidget):
         self._auto_showed = True
         self._was_auto_showed = True  # 标记曾经自动弹出过
 
-        # 显示日志（只显示当前任务）
-        self._show_task_log(task_id)
+        # 显示日志（只显示第一个任务）
+        first_task_id = list(self._tasks.keys())[0]
+        self._show_task_log(first_task_id)
         self.setVisible(True)
 
     def show_task_from_data(self, task_data: dict, clear_first: bool = True):
@@ -401,9 +405,12 @@ class SubAgentFloatingWidget(SimpleCardWidget):
         # 更新 Segment（与 add_task 保持一致的命名）
         task_index = len(self._tasks)
         item = self.segment_widget.addItem(task_id, f"任务{task_index}")
-        self.segment_widget.setCurrentItem(task_id)
-        self._task_labels[task_id] = f"任务{task_index}"
         self._segment_items[task_id] = item
+        self._task_labels[task_id] = f"任务{task_index}"
+
+        # 只在添加第一个任务时设置当前项
+        if len(self._tasks) == 1:
+            self.segment_widget.setCurrentItem(task_id)
 
         # 重放日志（与运行时的实时日志格式一致）
         for log in logs:

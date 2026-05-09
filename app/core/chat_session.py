@@ -3,7 +3,10 @@ from datetime import datetime
 from typing import Dict, List, Optional
 from PyQt5.QtCore import QObject
 
-from app.utils.message_content import consolidate_messages
+from app.core.message_content import consolidate_messages
+
+# 默认最大缓存会话数（内存中同时保留的会话）
+DEFAULT_MAX_CACHED_SESSIONS = 5
 
 
 class ChatSession:
@@ -158,25 +161,84 @@ class ChatSession:
 
 
 class SessionManager(QObject):
-    def __init__(self):
+    def __init__(self, max_cached: int = DEFAULT_MAX_CACHED_SESSIONS):
         super().__init__()
         self.sessions: List[ChatSession] = []
+        self._last_access: Dict[str, float] = {}  # session_id -> last access time (timestamp)
+        self.max_cached_sessions: int = max_cached
         self.current_index = -1
 
     def create_new_session(self) -> ChatSession:
         session = ChatSession()
         self.sessions.append(session)
         self.current_index = len(self.sessions) - 1
+        self._touch_session(session.session_id)
+        self._evict_if_needed()
         return session
 
     def get_current_session(self) -> Optional[ChatSession]:
         if 0 <= self.current_index < len(self.sessions):
-            return self.sessions[self.current_index]
+            session = self.sessions[self.current_index]
+            self._touch_session(session.session_id)
+            return session
         return None
+
+    def _touch_session(self, session_id: str):
+        """更新会话最后访问时间"""
+        import time
+        self._last_access[session_id] = time.time()
+
+    def _evict_if_needed(self):
+        """如果超过最大缓存数，淘汰最久未访问的非当前会话"""
+        if len(self.sessions) <= self.max_cached_sessions:
+            return
+
+        # 获取当前会话ID，不淘汰当前会话
+        current_session = self.get_current_session()
+        current_id = current_session.session_id if current_session else None
+
+        # 找出所有非当前会话，按访问时间排序（最久未访问在前）
+        candidates = [
+            (sid, t) for sid, t in self._last_access.items()
+            if sid != current_id
+            and any(s.session_id == sid for s in self.sessions)
+        ]
+        if not candidates:
+            return
+
+        # 按访问时间升序排列，最早的排前面
+        candidates.sort(key=lambda x: x[1])
+
+        # 淘汰最久未访问的，直到满足最大缓存限制
+        to_remove = len(self.sessions) - self.max_cached_sessions
+        removed = 0
+        for sid, _ in candidates:
+            if removed >= to_remove:
+                break
+            # 找到会话在列表中的索引
+            for idx, session in enumerate(self.sessions):
+                if session.session_id == sid:
+                    self.sessions.pop(idx)
+                    self._last_access.pop(sid, None)
+                    removed += 1
+                    # 调整当前索引
+                    if idx <= self.current_index and self.current_index > 0:
+                        self.current_index -= 1
+                    break
+
+    def set_max_cached_sessions(self, max_cached: int):
+        """设置最大缓存会话数"""
+        self.max_cached_sessions = max_cached
+        self._evict_if_needed()
 
     def switch_to_session(self, index: int):
         if 0 <= index < len(self.sessions):
             self.current_index = index
+            # 更新访问时间
+            session = self.sessions[index]
+            self._touch_session(session.session_id)
+            # 如果超过最大缓存数，淘汰最久未访问的非当前会话
+            self._evict_if_needed()
 
     def get_session_names(self) -> List[str]:
         return [s.name for s in self.sessions]
@@ -193,15 +255,24 @@ class SessionManager(QObject):
         if self.current_index < 0:
             self.sessions.append(session)
             self.current_index = len(self.sessions) - 1
+            self._touch_session(session.session_id)
+            self._evict_if_needed()
             return
         if self.current_index >= len(self.sessions):
             self.sessions.append(session)
             self.current_index = len(self.sessions) - 1
+            self._touch_session(session.session_id)
+            self._evict_if_needed()
             return
         self.sessions[self.current_index] = session
+        self._touch_session(session.session_id)
+        self._evict_if_needed()
 
     def delete_session(self, index: int) -> bool:
         if 0 <= index < len(self.sessions):
+            session = self.sessions[index]
+            # 从访问记录中移除
+            self._last_access.pop(session.session_id, None)
             self.sessions.pop(index)
             if self.current_index >= len(self.sessions):
                 self.current_index = len(self.sessions) - 1

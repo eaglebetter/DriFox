@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 import base64
 import hashlib
-import json
+import orjson as json
 import math
 import re
 import urllib.parse
@@ -53,12 +53,13 @@ from qfluentwidgets.components.widgets.card_widget import (
     SimpleCardWidget,
 )
 
-from app.utils.message_content import (
+from app.core import (
     append_text_block,
     content_to_markdown,
     content_to_text,
-    ensure_content_blocks, make_tool_result_block,
+    ensure_content_blocks,
 )
+from app.core.message_content import make_tool_result_block
 from app.utils.utils import get_font_family_css, get_icon
 from app.widgets.render_helpers import (
     render_tool_block,
@@ -267,7 +268,7 @@ def _render_think_block(content: str, completed: bool = True) -> str:
 
 def _render_think_block_lightweight(content: str, completed: bool = True) -> str:
     """轻量级思考块渲染（用于超长思考内容）
-    
+
     与 _render_think_block 的区别：
     1. 不执行代码块处理（_strip_code_blocks），直接转义
     2. 不生成 block_key hash（节省计算）
@@ -367,7 +368,7 @@ def _render_tool_block_content(content: str) -> str:
     args_start = content.find("args:")
     result_search_start = 0  # 默认值
     tool_args_str = ""
-    
+
     if args_start != -1:
         brace_start = content.find("{", args_start)
         if brace_start != -1:
@@ -416,7 +417,7 @@ def _render_tool_block_content(content: str) -> str:
             tool_result = (result_content + remaining[:next_field_match.start()]).strip()
         else:
             tool_result = result_content.strip()
-    
+
     # 转义 result 中的换行符（参数预览和表格不支持多行显示）
     tool_result = tool_result.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\\n")
 
@@ -433,7 +434,7 @@ def _render_tool_block_content(content: str) -> str:
     else:
         # 没有 args，尝试从整个 content 中提取参数
         args_dict = _extract_args_by_regex(content)
-    
+
     # 转义参数中的换行符（参数预览和表格不支持多行显示）
     for key in args_dict:
         if isinstance(args_dict[key], str):
@@ -451,7 +452,7 @@ def _extract_args_by_regex(content: str) -> dict:
     """
     import re
     args = {}
-    
+
     # 1. 先尝试匹配数字类型参数（冒号后无引号）: "limit": 30
     number_params = ["limit", "offset"]
     for param in number_params:
@@ -460,10 +461,11 @@ def _extract_args_by_regex(content: str) -> dict:
         if match:
             num_str = match.group(1)
             args[param] = int(float(num_str)) if '.' not in num_str else float(num_str)
-    
+
     # 2. 匹配字符串参数（冒号后有引号）: "path": "xxx"
-    string_params = ["path", "oldString", "newString", "command", "url", "pattern", "query", "name", "_raw_args", "file_path", "old_string", "new_string"]
-    
+    string_params = ["path", "oldString", "newString", "command", "url", "pattern", "query", "name", "_raw_args",
+                     "file_path", "old_string", "new_string"]
+
     for param in string_params:
         # 查找 "param": " 后面开始的位置
         pattern = rf'"{param}"\s*:\s*"'
@@ -474,7 +476,7 @@ def _extract_args_by_regex(content: str) -> dict:
             # 策略：找到最后一个 " 后面紧跟 , 或 } 的位置
             i = start
             last_valid_end = -1  # 最后一个有效的字符串结束位置
-            
+
             while i < len(content):
                 c = content[i]
                 if c == '\\':
@@ -492,20 +494,20 @@ def _extract_args_by_regex(content: str) -> dict:
                     i += 1
                 else:
                     i += 1
-            
+
             # 提取到最后一个有效结束位置的内容
             if last_valid_end > 0:
                 value = content[start:last_valid_end]
             else:
                 # 没找到有效结束，取到文件末尾（去掉最后的 }）
                 value = content[start:].rstrip().rstrip('}')
-            
+
             # 清理截断标记
             value = value.replace('... [内容已截断]', '')
             # 替换真实换行为转义的 \n（用于显示）
             value = value.replace('\r\n', '\\n').replace('\r', '\\n').replace('\n', '\\n')
             args[param] = value
-    
+
     return args
 
 
@@ -790,12 +792,13 @@ class CodeWebViewer(QWebEngineView):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        from typing import List
         self._markdown_text = ""
         self._streaming = True
         self._is_js_ready = False
         self._last_rendered_html = ""
         self._last_rendered_markdown = ""
-        self._reasoning_content = ""  # DeepSeek thinking mode
+        self._reasoning_blocks: List[str] = []  # 多个独立思考块，每轮迭代一个
         self._min_render_interval = 50
         self._height_report_pending = False
         self._context_lost = False  # 上下文丢失标志
@@ -875,6 +878,34 @@ class CodeWebViewer(QWebEngineView):
         if event.type() == QTimerEvent and hasattr(self, '_context_lost_timer'):
             pass
         return super().event(event)
+
+    def wheelEvent(self, event: QWheelEvent):
+        # 获取滚动条（向上递归找 QScrollArea chat_scroll_area）
+        try:
+            widget = self
+            # 一直向上遍历父控件直到找到 chat_scroll_area
+            for _ in range(5):  # 最多找5层
+                if hasattr(widget, 'chat_scroll_area'):
+                    break
+                parent_widget = widget.parent()
+                if parent_widget is None:
+                    break
+                widget = parent_widget
+            
+            if hasattr(widget, 'chat_scroll_area'):
+                scroll_area = getattr(widget, 'chat_scroll_area')
+                if scroll_area:
+                    vbar = scroll_area.verticalScrollBar()
+                    if vbar and vbar.minimum() != vbar.maximum():
+                        # 让外部 ScrollArea 滚动
+                        delta = event.angleDelta().y()
+                        vbar.setValue(vbar.value() - delta // 2)
+                        event.accept()  # 标记事件已处理
+                        return
+        except Exception:
+            pass
+
+        super().wheelEvent(event)
 
     def setFixedSize(self, *args, **kwargs):
         """限制最大尺寸，防止 GPU 内存溢出"""
@@ -1445,9 +1476,14 @@ class CodeWebViewer(QWebEngineView):
                     syncExpandedAttrs(block, expand);
 
                     // 阻止 CSS transition 干扰
+                    const isCollapsing = !expand;
                     body.style.transition = 'none';
                     body.style.height = startHeight + 'px';
                     body.style.opacity = startOpacity;
+                    // 立即设置 overflow 防止内容泄漏
+                    body.style.overflow = 'hidden';
+                    // 折叠时立即设置高度，防止视觉抖动
+                    if (isCollapsing) body.style.height = '0px';
 
                     // 强制重绘
                     void body.offsetHeight;
@@ -1463,7 +1499,10 @@ class CodeWebViewer(QWebEngineView):
                         // 使用 easeOutQuad 缓动
                         const eased = 1 - (1 - progress) * (1 - progress);
 
-                        const currentHeight = startHeight + (endHeight - startHeight) * eased;
+                        // 折叠时 startHeight 已经是0，currentHeight 计算应该从0开始
+                        const currentHeight = isCollapsing 
+                            ? startHeight * (1 - eased)  // 从 startHeight 减少到 0
+                            : startHeight + (endHeight - startHeight) * eased;
                         const currentOpacity = startOpacity + (endOpacity - startOpacity) * eased;
 
                         body.style.height = currentHeight + 'px';
@@ -1472,15 +1511,24 @@ class CodeWebViewer(QWebEngineView):
                         if (progress < 1) {{
                             window._collapsibleAnimId = requestAnimationFrame(tick);
                         }} else {{
-                            // 动画结束
+                            // 动画结束：设置最终状态
                             body.style.height = expand ? 'auto' : '0px';
                             body.style.opacity = endOpacity;
-                            // 动画结束后只报告一次高度
-                            setTimeout(() => reportHeight(), 0);
+                            body.style.overflow = '';
+                            // 动画结束后重置高度报告标志
+                            _collapsibleHeightReporting = false;
+                            // 暂时不报告高度，测试抖动是否消失
+                            // setTimeout(() => reportHeight(), 80);
                         }}
                     }}
 
                     window._collapsibleAnimId = requestAnimationFrame(tick);
+                }}
+
+                // 折叠动画期间暂停高度报告，避免卡片抖动
+                let _collapsibleHeightReporting = false;
+                function startCollapsibleAnimation() {{
+                    _collapsibleHeightReporting = true;
                 }}
 
                 function restoreCollapsibleStates(root) {{
@@ -1545,6 +1593,17 @@ class CodeWebViewer(QWebEngineView):
                     const h = document.documentElement.getBoundingClientRect().height;
                     console.log('pywebview_height:' + h);
                 }}
+                // 防抖报告高度：动画期间暂停报告，只在动画结束后报告最终值
+                let _heightReportPending = false;
+                function reportHeightDebounced() {{
+                    if (_collapsibleHeightReporting) return;  // 动画期间暂停
+                    if (_heightReportPending) return;
+                    _heightReportPending = true;
+                    requestAnimationFrame(() => {{
+                        reportHeight();
+                        _heightReportPending = false;
+                    }});
+                }}
                 document.addEventListener('click', e => {{
                     const btn = e.target.closest('button[data-action]');
                     if (btn) {{
@@ -1559,6 +1618,8 @@ class CodeWebViewer(QWebEngineView):
                     if (summary) {{
                         const block = summary.closest('.cm-collapsible');
                         if (block) {{
+                            // 动画开始前暂停高度报告
+                            startCollapsibleAnimation();
                             animateCollapsible(block, block.dataset.expanded !== 'true');
                         }}
                         return;
@@ -1585,7 +1646,14 @@ class CodeWebViewer(QWebEngineView):
                 document.addEventListener('DOMContentLoaded', () => {{
                     console.log('pywebview_ready');
                     reportHeight();
-                    new ResizeObserver(() => requestAnimationFrame(reportHeight)).observe(document.body);
+                    // 使用防抖的 ResizeObserver，避免频繁触发高度更新
+                    let resizeTimeout = null;
+                    new ResizeObserver(() => {{
+                        // 动画期间跳过高度报告
+                        if (_collapsibleHeightReporting) return;
+                        if (resizeTimeout) clearTimeout(resizeTimeout);
+                        resizeTimeout = setTimeout(() => requestAnimationFrame(reportHeight), 50);
+                    }}).observe(document.body);
                 }});
                 window.addEventListener('load', () => {{
                     reportHeight();
@@ -1630,29 +1698,51 @@ class CodeWebViewer(QWebEngineView):
 
     def _render_markdown_to_html(self, raw_md: str) -> str:
         if not self._streaming:
+            # 非流式模式：为每个思考块渲染独立折叠框
+            # 思考内容长度阈值
+            LARGE_THINKING_THRESHOLD = 50 * 1024  # 50KB
+            
+            # 为每个思考块都渲染独立的折叠框
+            if self._reasoning_blocks:
+                for i, reasoning_block in enumerate(self._reasoning_blocks):
+                    if not reasoning_block:
+                        continue
+                        
+                    reasoning_size = len(reasoning_block.encode('utf-8'))
+                    if reasoning_size > LARGE_THINKING_THRESHOLD:
+                        # 超长思考：使用轻量级渲染策略
+                        think_html = _render_think_block_lightweight(reasoning_block, completed=True)
+                    else:
+                        # 普通长度：使用完整渲染
+                        think_html = _render_think_block(reasoning_block, completed=True)
+                    raw_md = think_html + raw_md
+            
+            # 现在处理 markdown 渲染，不再需要单独处理 reasoning
             return _render_markdown_to_html_cached(
                 raw_md,
-                getattr(self, "_reasoning_content", "") or "",
+                "",
             )
 
         # 流式模式下对思考内容的优化策略
-        reasoning = getattr(self, '_reasoning_content', '') or ''
-        
         # 思考内容长度阈值
         LARGE_THINKING_THRESHOLD = 50 * 1024  # 50KB
-        
-        # 检查思考内容是否过大
-        if reasoning:
-            reasoning_size = len(reasoning.encode('utf-8'))
-            
-            if reasoning_size > LARGE_THINKING_THRESHOLD:
-                # 超长思考：使用轻量级渲染策略
-                # 1. 使用简化的思考块 HTML（不包含完整代码块处理）
-                think_html = _render_think_block_lightweight(reasoning, completed=True)
-                raw_md = think_html + raw_md
-            else:
-                # 普通长度：使用完整渲染
-                think_html = _render_think_block(reasoning, completed=True)
+
+        # 为每个思考块都渲染独立的折叠框
+        if self._reasoning_blocks:
+            for i, reasoning_block in enumerate(self._reasoning_blocks):
+                if not reasoning_block:
+                    continue
+                    
+                is_last_block = (i == len(self._reasoning_blocks) - 1)
+                is_completed = not is_last_block or not self._streaming
+                
+                reasoning_size = len(reasoning_block.encode('utf-8'))
+                if reasoning_size > LARGE_THINKING_THRESHOLD:
+                    # 超长思考：使用轻量级渲染策略
+                    think_html = _render_think_block_lightweight(reasoning_block, completed=is_completed)
+                else:
+                    # 普通长度：使用完整渲染
+                    think_html = _render_think_block(reasoning_block, completed=is_completed)
                 raw_md = think_html + raw_md
 
         safe_md = _sanitize_incomplete_markdown(raw_md)
@@ -1702,7 +1792,7 @@ class CodeWebViewer(QWebEngineView):
 
             self._last_rendered_html = html_content
             self._height_report_pending = True
-            js_code = f"updateContent({json.dumps(html_content, ensure_ascii=False)});"
+            js_code = f"updateContent({json.dumps(html_content).decode('utf-8')});"
             self.page().runJavaScript(js_code)
         except RuntimeError:
             pass
@@ -1730,7 +1820,7 @@ class CodeWebViewer(QWebEngineView):
 
     def wheelEvent(self, event: QWheelEvent):
         # 获取滚动条（向上找 QScrollArea）
-        scroll_area = self.parent().parent.chat_scroll_area
+        scroll_area = self.parent().parent().parent.chat_scroll_area
         if scroll_area:
             vbar = scroll_area.verticalScrollBar()
             if vbar and vbar.minimum() != vbar.maximum():
@@ -1757,26 +1847,48 @@ class CodeWebViewer(QWebEngineView):
         for timer in timers_to_stop:
             try:
                 timer.stop()
+                timer.deleteLater()
             except RuntimeError:
                 pass
+
+        # 断开所有信号连接
+        try:
+            if hasattr(self._page, 'codeActionRequested'):
+                self._page.codeActionRequested.disconnect()
+            if hasattr(self._page, 'contextActionRequested'):
+                self._page.contextActionRequested.disconnect()
+            if hasattr(self._page, 'heightReported'):
+                self._page.heightReported.disconnect()
+            if hasattr(self._page, 'contentReady'):
+                self._page.contentReady.disconnect()
+            if hasattr(self._page, 'toolDiffRequested'):
+                self._page.toolDiffRequested.disconnect()
+            if hasattr(self._page, 'subAgentLogRequested'):
+                self._page.subAgentLogRequested.disconnect()
+            if hasattr(self._page, 'saveFileRequested'):
+                self._page.saveFileRequested.disconnect()
+        except Exception:
+            pass
 
         # 清理流式输出和渲染缓存
         self._streaming = False
         self._markdown_text = ""
         self._last_rendered_html = ""
         self._last_rendered_markdown = ""
-        self._reasoning_content = ""
+        self._reasoning_blocks = []
         self._is_js_ready = False
-        
+
         # 清理上下文状态
         self._context_lost = False
         self._height_report_pending = False
         self._resize_locked = False
 
-        # 清理页面
+        # 清理页面：先加载空白页释放资源
         try:
-            if self.page():
-                self.page().deleteLater()
+            self.setHtml("")
+            if hasattr(self, '_page'):
+                self._page.deleteLater()
+                delattr(self, '_page')
         except RuntimeError:
             pass
 
@@ -1889,10 +2001,10 @@ class PlainTextViewer(QWidget):
             self._resize_debounce_timer.stop()
         except RuntimeError:
             pass
-        
+
         # 清理文本缓存
         self._text = ""
-        
+
         # 清理 QTextEdit
         if hasattr(self, 'text_edit') and self.text_edit:
             try:
@@ -1934,7 +2046,7 @@ class MessageCard(SimpleCardWidget):
         self._streaming = False
         self._round_index: Optional[int] = None  # 用于卡片差异功能
         self._message_index: Optional[int] = None  # 用于卡片差异和撤销功能：消息在 session.messages 中的索引
-        self._reasoning_content = reasoning_content
+        self._reasoning_blocks = [reasoning_content] if reasoning_content else []
         self._anim_timer = QTimer(self)
         self._anim_timer.timeout.connect(self._update_anim)
         self._pulse_phase = 0.0
@@ -1958,6 +2070,12 @@ class MessageCard(SimpleCardWidget):
         self._options_were_visible_before_resize = False
         # WebEngine 上下文恢复标志
         self._webengine_needs_restore = False
+        # 懒渲染标志：未进入可视区域前不创建QWebEngine
+        self._lazy_rendered = False
+        self._pending_content: Optional[str] = None
+        self._viewer_container = QWidget(self)
+        self._viewer_layout = QVBoxLayout(self._viewer_container)
+        self._viewer_layout.setContentsMargins(0, 0, 0, 0)
         self._setup_ui()
 
     def _build_theme(self, role: str, error: bool = False) -> Dict[str, str]:
@@ -2115,8 +2233,11 @@ class MessageCard(SimpleCardWidget):
         if self.role == "user":
             self.viewer = PlainTextViewer(self)
             self.viewer.contentHeightChanged.connect(self._update_height)
-            main.addWidget(self.viewer)
-        else:
+            self._viewer_layout.addWidget(self.viewer)
+            main.addWidget(self._viewer_container)
+            self._lazy_rendered = True
+        elif self.role == "welcome":
+            # 欢迎卡片一开始就在可视区域，直接创建viewer不需要懒加载
             self.viewer = CodeWebViewer(self)
             self.viewer.codeActionRequested.connect(self.actionRequested.emit)
             self.viewer.contextActionRequested.connect(self.contextActionRequested.emit)
@@ -2127,7 +2248,19 @@ class MessageCard(SimpleCardWidget):
             # WebEngine 上下文丢失处理
             self.viewer.contextLost.connect(self._on_webengine_context_lost)
             self.viewer.contextRestored.connect(self._on_webengine_context_restored)
-            main.addWidget(self.viewer)
+            self.viewer._install_dialog_filter()
+            self._viewer_layout.addWidget(self.viewer)
+            main.addWidget(self._viewer_container)
+            self._lazy_rendered = True
+        else:
+            # 懒渲染：占位符，不立即创建QWebEngine，进入可视区域再创建
+            placeholder = QLabel("加载中...", self)
+            placeholder.setStyleSheet("color: #888888; font-size: 14px; padding: 8px;")
+            placeholder.setAlignment(Qt.AlignCenter)
+            self._viewer_layout.addWidget(placeholder)
+            main.addWidget(self._viewer_container)
+            self._lazy_rendered = False
+            self.viewer = None  # 懒加载，延后创建
             self.resize_placeholder = QFrame(self)
             self.resize_placeholder.setVisible(False)
             self.resize_placeholder.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
@@ -2366,6 +2499,14 @@ class MessageCard(SimpleCardWidget):
         if self.role == "user":
             return
 
+        # welcome 卡片不需要 resize placeholder
+        if self.role == "welcome":
+            return
+
+        # 懒渲染还没创建viewer，跳过
+        if self.viewer is None:
+            return
+
         if enabled:
             viewer_height = max(self.viewer.height(), self.viewer.minimumHeight(), 40)
             options_height = self.options_widget.sizeHint().height() if self.options_widget.isVisible() else 0
@@ -2418,6 +2559,38 @@ class MessageCard(SimpleCardWidget):
             return
         self.append_text(txt)
 
+    def ensure_rendered(self):
+        """如果还没渲染，懒加载创建QWebViewer并渲染内容"""
+        if self._lazy_rendered or self.role == "user":
+            return
+
+        # 移除占位符，创建真正的viewer
+        for i in reversed(range(self._viewer_layout.count())):
+            item = self._viewer_layout.itemAt(i)
+            if item and item.widget():
+                item.widget().deleteLater()
+
+        self.viewer = CodeWebViewer(self)
+        self.viewer.codeActionRequested.connect(self.actionRequested.emit)
+        self.viewer.contextActionRequested.connect(self.contextActionRequested.emit)
+        self.viewer.contentHeightChanged.connect(self._update_height)
+        self.viewer.toolDiffRequested.connect(self.toolDiffRequested.emit)
+        self.viewer.subAgentLogRequested.connect(self.subAgentLogRequested.emit)
+        self.viewer.saveFileRequested.connect(self.saveFileRequested.emit)
+        # WebEngine 上下文丢失处理
+        self.viewer.contextLost.connect(self._on_webengine_context_lost)
+        self.viewer.contextRestored.connect(self._on_webengine_context_restored)
+        # 安装对话框过滤
+        self.viewer._install_dialog_filter()
+
+        self._viewer_layout.addWidget(self.viewer)
+        self._lazy_rendered = True
+
+        # 如果有等待渲染的内容，现在渲染
+        if self._pending_content is not None:
+            self.set_content(self._pending_content)
+            self._pending_content = None
+
     def set_content(self, content: Any):
         if self.role == "assistant":
             self._content_data = ensure_content_blocks(content)
@@ -2425,6 +2598,11 @@ class MessageCard(SimpleCardWidget):
         else:
             self._content_data = str(content or "")
             rendered = self._content_data
+
+        if not self._lazy_rendered:
+            # 懒渲染阶段，保存内容等待进入可视区域
+            self._pending_content = content
+            return
 
         if hasattr(self.viewer, "_markdown_text"):
             self.viewer._markdown_text = rendered
@@ -2436,12 +2614,17 @@ class MessageCard(SimpleCardWidget):
         if self.role == "assistant":
             self._content_data = append_text_block(self._content_data, text)
             rendered = content_to_markdown(self._content_data)
+            if not self._lazy_rendered:
+                # 懒渲染阶段，内容会在ensure_rendered时一次性设置
+                self._pending_content = self._content_data
+                return
             self.viewer._markdown_text = rendered
             self.viewer._schedule_render(immediate=False)
             return
 
         self._content_data = str(self._content_data or "") + str(text or "")
-        self.viewer.append_chunk(str(text or ""))
+        if self.viewer:
+            self.viewer.append_chunk(str(text or ""))
 
     def append_tool_result(
             self,
@@ -2460,6 +2643,10 @@ class MessageCard(SimpleCardWidget):
                 tool_call_id=tool_call_id,
             )
         )
+        if not self._lazy_rendered:
+            # 懒渲染阶段，内容会在ensure_rendered时一次性设置
+            self._pending_content = self._content_data
+            return
         self.viewer._markdown_text = content_to_markdown(self._content_data)
         self.viewer._schedule_render(immediate=True)
 
@@ -2477,8 +2664,8 @@ class MessageCard(SimpleCardWidget):
             pass
 
     def set_reasoning_content(self, content: str):
-        """设置思考内容（用于 DeepSeek 思考模式）"""
-        self._reasoning_content = content
+        """设置思考内容（用于 DeepSeek 思考模式）- 兼容旧接口，放到第一个块"""
+        self._reasoning_blocks = [content]
         if content and hasattr(self.viewer, "_markdown_text"):
             # 刷新渲染以显示思考内容
             self.viewer._schedule_render(immediate=True)
@@ -2493,45 +2680,49 @@ class MessageCard(SimpleCardWidget):
         except RuntimeError:
             pass
 
-    def append_reasoning(self, text: str):
-        """追加思考内容（流式模式）
+    def start_new_thinking_block(self):
+        """开始一个新的思考块（每轮工具迭代调用一次）"""
+        self._reasoning_blocks.append("")
         
+    def append_reasoning(self, text: str):
+        """追加思考内容到当前最后一个思考块（流式模式）
+
         优化：使用防抖机制，避免每次片段都触发完整重渲染。
         对于超长思考，使用增量更新策略减少内存压力。
         """
-        if not hasattr(self.viewer, '_reasoning_content'):
-            return
-        
-        old_len = len(self._reasoning_content or '')
-        self._reasoning_content = (self._reasoning_content or '') + text
-        new_len = len(self._reasoning_content)
-        self.viewer._reasoning_content = self._reasoning_content
-        
-        # 思考内容长度阈值（超过此值使用增量更新策略）
+        # 如果还没有思考块，创建第一个
+        if not self._reasoning_blocks:
+            self._reasoning_blocks.append("")
+
+        old_total_len = sum(len(b) for b in self._reasoning_blocks)
+        self._reasoning_blocks[-1] += text
+        new_total_len = old_total_len + len(text)
+
+        # 思考内容总长度阈值（超过此值使用增量更新策略）
         LARGE_THINKING_THRESHOLD = 50 * 1024  # 50KB
-        
-        if new_len > LARGE_THINKING_THRESHOLD:
+
+        if new_total_len > LARGE_THINKING_THRESHOLD:
             # 超长思考：使用增量更新策略，避免完整重渲染
             self._update_thinking_incremental(text)
         else:
             # 普通长度：使用防抖机制，遵循流式模式渲染频率
             self.viewer._schedule_render(immediate=False)
-    
+
     def _update_thinking_incremental(self, new_text: str):
         """增量更新思考内容（用于超长思考）
 
-        直接通过 JavaScript 更新思考块内容，避免完整重渲染。
+        直接通过 JavaScript 更新最后一个思考块内容，避免完整重渲染。
         """
         if not hasattr(self.viewer, 'page'):
             return
-        
+
         try:
             # 对新内容进行转义和代码块清理
             escaped = escape(new_text)
             escaped = re.sub(r"```[\s\S]*?```", "", escaped)
             escaped = escaped.replace("`", "").replace("\r\n", " ").replace("\n", " ")
-            
-            # 直接更新思考块内容（通过 JS）
+
+            # 直接更新最后一个思考块内容（通过 JS）
             js_code = f"""
             (function() {{
                 const thinkContents = document.querySelectorAll('.think-content');
@@ -2593,7 +2784,8 @@ class MessageCard(SimpleCardWidget):
 
     def finish_streaming(self):
         try:
-            self.viewer.finish_streaming()
+            if self.viewer is not None and hasattr(self.viewer, 'finish_streaming'):
+                self.viewer.finish_streaming()
         except RuntimeError:
             pass
         self.stop_streaming_anim()
@@ -2630,7 +2822,7 @@ class MessageCard(SimpleCardWidget):
 
         # 清理大数据缓存
         self._content_data = None
-        self._reasoning_content = None
+        self._reasoning_blocks = None
         self._interactive_options = []
         self.context_tags = {}
 

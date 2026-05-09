@@ -116,7 +116,9 @@ class MemoryCardContent(QWidget):
         self._memory_manager = memory_manager  # 初始引用
         self._memories = []
         self._current_category = "agent_identity"
+        self._initialized = False  # 标记是否已从数据库加载
         self._init_ui()
+        # 初始化时不加载，等点击按钮时再加载
 
     def _get_memory_manager(self):
         """获取 memory_manager，优先使用注入的，否则从父窗口获取"""
@@ -350,21 +352,26 @@ class MemoryCardContent(QWidget):
                 break
             parent = parent.parent()
 
-    def _load_memories(self):
-        """加载记忆数据"""
+    def _load_memories(self, force_refresh=False):
+        """加载记忆数据
+        
+        Args:
+            force_refresh: 是否强制从数据库刷新。首次加载或显式刷新时才为 True
+        """
         self.list_widget.clear()
 
-        # 获取 memory_manager（只在首次加载或刷新时从数据库读取）
-        memory_mgr = self._get_memory_manager()
-        if not self._memories and memory_mgr:
-            # 首次加载或数据为空时，从数据库读取
-            all_memories = memory_mgr.get_user_memories()
-            if all_memories:
-                self._memories = list(all_memories)
+        # 只有首次加载或 force_refresh 时才从数据库读取
+        if not self._initialized or force_refresh:
+            memory_mgr = self._get_memory_manager()
+            if memory_mgr:
+                all_memories = memory_mgr.get_user_memories()
+                if all_memories:
+                    self._memories = list(all_memories)
+                else:
+                    self._memories = []
             else:
                 self._memories = []
-        elif not self._memories:
-            self._memories = []
+            self._initialized = True
 
         # 按分类组织记忆（使用本地 _memories，不再从数据库读取）
         category_memories = {k: [] for k in MEMORY_CATEGORIES_WIDGET}
@@ -451,6 +458,10 @@ class MemoryCardContent(QWidget):
 
     def _add_memory(self):
         """添加记忆（只添加到本地缓存，不立即保存）"""
+        # 确保已初始化
+        if not self._initialized:
+            self._load_memories(force_refresh=True)
+        
         content = self.input_edit.text().strip()
         if not content:
             return
@@ -469,15 +480,19 @@ class MemoryCardContent(QWidget):
             self._memories.append(new_entry)
 
         self.input_edit.clear()
-        self._load_memories()
+        self._refresh_list()
 
     def _delete_item(self, item_id: int):
         """删除记忆（只从本地缓存删除，不立即保存）"""
+        # 确保已初始化
+        if not self._initialized:
+            self._load_memories(force_refresh=True)
+            
         mem_idx = self._get_memory_index_from_item_id(item_id)
         if 0 <= mem_idx < len(self._memories):
             deleted_content = self._memories[mem_idx].get("content", "")[:30]
             self._memories.pop(mem_idx)
-            self._load_memories()
+            self._refresh_list()
 
     def _toggle_item(self, item_id: int, enabled: bool):
         """切换启用状态（只更新本地缓存，不立即保存）"""
@@ -522,6 +537,10 @@ class MemoryCardContent(QWidget):
 
     def _clear_disabled(self):
         """删除未启用（只更新本地缓存，不立即保存）"""
+        # 确保已初始化
+        if not self._initialized:
+            self._load_memories(force_refresh=True)
+            
         enabled_memories = []
         for mem in self._memories:
             if isinstance(mem, dict):
@@ -533,12 +552,76 @@ class MemoryCardContent(QWidget):
                 )
 
         self._memories = enabled_memories
-        self._load_memories()
+        self._refresh_list()
 
-        self._load_memories()
+    def _refresh_list(self):
+        """刷新列表显示（不从数据库读取，只用内存数据）"""
+        self.list_widget.clear()
+
+        # 按分类组织记忆（使用本地 _memories，不再从数据库读取）
+        category_memories = {k: [] for k in MEMORY_CATEGORIES_WIDGET}
+
+        for mem_idx, mem in enumerate(self._memories):
+            if isinstance(mem, dict):
+                content = mem.get("content", "")
+                enabled = mem.get("enabled", True)
+                source = mem.get("source", "manual")
+                confidence = mem.get("confidence", 0.8)
+                hit_count = mem.get("hit_count", 0)
+                last_used = mem.get("last_used_at", "")
+                category = mem.get("category", "task_preference")
+                meta_parts = [f"source={source}", f"conf={confidence:.2f}"]
+                if hit_count > 0:
+                    meta_parts.append(f"hits={hit_count}")
+                if last_used:
+                    days_ago = ""
+                    try:
+                        from datetime import datetime as dt
+
+                        used_date = dt.strptime(last_used, "%Y-%m-%d %H:%M:%S")
+                        days = (dt.now() - used_date).days
+                        if days == 0:
+                            days_ago = "today"
+                        elif days == 1:
+                            days_ago = "1d"
+                        else:
+                            days_ago = f"{days}d"
+                        meta_parts.append(f"used={days_ago}")
+                    except Exception:
+                        pass
+                meta_text = " | ".join(meta_parts)
+            else:
+                content = str(mem)
+                enabled = True
+                meta_text = "source=legacy"
+                category = "task_preference"
+
+            if category not in MEMORY_CATEGORIES_WIDGET:
+                category = "task_preference"
+
+            category_memories[category].append((mem_idx, content, enabled, meta_text))
+
+        # 显示当前分类的记忆
+        current_memories = category_memories.get(self._current_category, [])
+
+        for display_idx, (mem_idx, content, enabled, meta_text) in enumerate(current_memories):
+            item = QListWidgetItem()
+            item.setSizeHint(self._get_item_size())
+            widget = MemoryItemWidget(display_idx, content, enabled, meta_text)
+            widget.deleted.connect(self._delete_item)
+            widget.toggled.connect(self._toggle_item)
+            self.list_widget.addItem(item)
+            self.list_widget.setItemWidget(item, widget)
+
+        self._update_category_count_label()
+
+    def refresh_from_db(self):
+        """从数据库刷新记忆（点击长期记忆按钮时调用）"""
+        self._initialized = False
+        self._load_memories(force_refresh=True)
 
     def _save_memories(self):
-        """保存记忆"""
+        """保存记忆到数据库"""
         memory_mgr = self._get_memory_manager()
         if memory_mgr:
             memory_mgr.update_user_memories(self._memories)
@@ -546,7 +629,7 @@ class MemoryCardContent(QWidget):
 
     def load_memories(self):
         """外部调用刷新数据"""
-        self._load_memories()
+        self.refresh_from_db()
 
     def get_memories(self) -> list:
         return self._memories

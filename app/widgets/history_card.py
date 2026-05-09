@@ -554,14 +554,14 @@ class HistoryCard(QWidget):
             current_session_widget.deleteRequested.connect(self._on_card_deleted)
             current_session_widget.renameRequested.connect(self._on_card_renamed)
 
-        # 分离当前会话和其他会话
-        other_sessions = [s for i, s in enumerate(self._all_history) if i != self._current_index]
+        # 分离当前会话和其他会话（保存原始索引，避免后续O(n²)查找）
+        other_sessions = [(i, s) for i, s in enumerate(self._all_history) if i != self._current_index]
         grouped = {}
-        for session in other_sessions:
+        for original_index, session in other_sessions:
             category = self._get_date_category(session.get("last_time", ""))
             if category not in grouped:
                 grouped[category] = []
-            grouped[category].append(session)
+            grouped[category].append((original_index, session))
 
         order = ["今天", "昨天", "本周", "上周", "本月"]
         month_names = ["一月", "二月", "三月", "四月", "五月", "六月",
@@ -612,8 +612,7 @@ class HistoryCard(QWidget):
             header = _SectionHeader(section, len(sessions))
             layout.addWidget(header)
 
-            for session in sessions:
-                original_index = self._all_history.index(session)
+            for original_index, session in sessions:
                 messages = session.get("messages", [])
                 preview = get_message_preview(messages)
                 card = _HistoryItemCard(

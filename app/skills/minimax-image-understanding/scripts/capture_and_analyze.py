@@ -9,7 +9,7 @@
 """
 import os
 import sys
-import json
+import orjson as json
 import base64
 import ssl
 import urllib.request
@@ -148,7 +148,7 @@ def analyze_image(image_path, prompt=None, api_key=None):
     
     print("正在调用 MiniMax API 分析...")
     
-    data = json.dumps(payload, ensure_ascii=False).encode('utf-8')
+    data = json.dumps(payload)
     
     try:
         req = urllib.request.Request(url, data=data, headers=headers, method='POST')
@@ -161,7 +161,7 @@ def analyze_image(image_path, prompt=None, api_key=None):
             elif 'content' in result:
                 content = result['content']
             else:
-                content = json.dumps(result, indent=2, ensure_ascii=False)
+                content = json.dumps(result, option=json.OPT_INDENT_2).decode('utf-8')
             
             return {"success": True, "content": content}
             

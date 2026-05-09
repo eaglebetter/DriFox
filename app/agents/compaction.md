@@ -1,9 +1,12 @@
 ---
 description: 上下文压缩智能体，自动将长对话上下文压缩成简洁摘要。
-mode: primary
+mode: all
 hidden: true
 temperature: 0.1
 steps: 5
+inherit_history: true
+inherit_history_count: 300
+inherit_history_max_chars: 500
 permission:
   read: allow
   "*": deny

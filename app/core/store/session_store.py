@@ -8,7 +8,7 @@
 - 损坏隔离
 """
 
-import json
+import orjson as json
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -17,17 +17,34 @@ from typing import List, Dict, Optional, Any, Tuple
 from loguru import logger
 
 from app.utils.db_manager import DatabaseManager
-from app.utils.message_content import consolidate_messages
+from app.core.message_content import consolidate_messages
 
 
 class SessionStore:
-    """SQLite 会话存储层，提供原子性持久化"""
+    """SQLite 会话存储层，提供原子性持久化（单例模式）"""
 
     TABLE_NAME = "sessions"
     MEMORIES_TABLE = "memories"
     DB_FILENAME = "sessions.db"
 
+    _instance: Optional["SessionStore"] = None
+
+    def __new__(cls, db_dir: str = ".drifox"):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
+    @classmethod
+    def get_instance(cls, db_dir: str = ".drifox") -> "SessionStore":
+        """获取单例实例"""
+        if cls._instance is None:
+            cls._instance = cls(db_dir)
+        return cls._instance
+
     def __init__(self, db_dir: str = ".drifox"):
+        # 防止重复初始化
+        if hasattr(self, "_initialized") and self._initialized:
+            return
         self._db_dir = db_dir
         self._db_path = str(Path(db_dir) / self.DB_FILENAME)
         self._db: Optional[DatabaseManager] = None
@@ -50,10 +67,20 @@ class SessionStore:
                 self._db = DatabaseManager()
                 self._db.connect(self._db_path)
 
+                # ========== WAL 模式优化：提升并发读写性能 ==========
+                # WAL (Write-Ahead Logging) 模式：
+                # - 读写操作不再互相阻塞
+                # - 适合多窗口并发场景
+                # - 写入更快速（不需要每次都同步到磁盘）
+                self._db.execute_sql('PRAGMA journal_mode=WAL')
+                self._db.execute_sql('PRAGMA synchronous=NORMAL')  # WAL 下用 NORMAL 即可保证安全且更快
+                self._db.execute_sql('PRAGMA cache_size=-64000')  # 64MB 缓存，提升读取性能
+                self._db.execute_sql('PRAGMA temp_store=MEMORY')  # 临时表放内存
+                # ======================================================
+
                 # 创建会话表（TIMESTAMP 改为 TEXT 避免时区问题）
                 self._db.create_table(self.TABLE_NAME, [
                     {"name": "session_id", "type": "TEXT", "primary_key": True},
-                    {"name": "canvas_id", "type": "TEXT", "not_null": True},
                     {"name": "title", "type": "TEXT"},
                     {"name": "messages", "type": "TEXT"},  # JSON 序列化
                     {"name": "system_prompt", "type": "TEXT"},
@@ -66,19 +93,18 @@ class SessionStore:
 
                 # 创建索引
                 self._db.execute_sql(
-                    f'CREATE INDEX IF NOT EXISTS idx_canvas_id ON {self.TABLE_NAME}(canvas_id)'
-                )
-                self._db.execute_sql(
                     f'CREATE INDEX IF NOT EXISTS idx_updated ON {self.TABLE_NAME}(updated_at DESC)'
                 )
                 self._db.execute_sql(
                     f'CREATE INDEX IF NOT EXISTS idx_project ON {self.TABLE_NAME}(project)'
                 )
 
+                # 迁移：删除已废弃的 canvas_id 列（如果存在）
+                self._migrate_remove_canvas_id()
+
                 # 创建长期记忆表
                 self._db.create_table(self.MEMORIES_TABLE, [
                     {"name": "memory_id", "type": "TEXT", "primary_key": True},
-                    {"name": "canvas_id", "type": "TEXT", "not_null": True},
                     {"name": "content", "type": "TEXT"},
                     {"name": "enabled", "type": "INTEGER", "default": 1},
                     {"name": "confidence", "type": "REAL", "default": 0.8},
@@ -91,8 +117,11 @@ class SessionStore:
 
                 # 创建索引
                 self._db.execute_sql(
-                    f'CREATE INDEX IF NOT EXISTS idx_memories_canvas ON {self.MEMORIES_TABLE}(canvas_id)'
+                    f'CREATE INDEX IF NOT EXISTS idx_memories_id ON {self.MEMORIES_TABLE}(memory_id)'
                 )
+
+                # 迁移：删除已废弃的 canvas_id 列（如果存在）
+                self._migrate_remove_canvas_id()
 
                 # 创建文件操作记录表（撤销功能）
                 self._db.create_table("file_operations", [
@@ -141,6 +170,48 @@ class SessionStore:
         except Exception as e:
             logger.warning(f"[SessionStore] project 列迁移失败(可能已存在): {e}")
 
+    def _migrate_remove_canvas_id(self):
+        """迁移：删除已废弃的 canvas_id 列（如果存在）"""
+        if not self._db or not self._db.is_connected:
+            return
+        try:
+            # 迁移 sessions 表
+            columns = self._db.get_table_info(self.TABLE_NAME)
+            col_names = [c.get("name", "") for c in columns]
+            if "canvas_id" in col_names:
+                logger.info("[SessionStore] 迁移：删除 sessions 表的 canvas_id 列")
+                # SQLite 不支持 DROP COLUMN，需要重建表
+                self._db.execute_sql(f'''
+                    CREATE TABLE {self.TABLE_NAME}_temp AS
+                    SELECT session_id, title, messages, system_prompt,
+                           compaction_state, compaction_cache, message_count,
+                           project, created_at, updated_at
+                    FROM {self.TABLE_NAME}
+                ''')
+                self._db.execute_sql(f'DROP TABLE {self.TABLE_NAME}')
+                self._db.execute_sql(f'ALTER TABLE {self.TABLE_NAME}_temp RENAME TO {self.TABLE_NAME}')
+                self._db.execute_sql(f'CREATE INDEX IF NOT EXISTS idx_updated ON {self.TABLE_NAME}(updated_at DESC)')
+                self._db.execute_sql(f'CREATE INDEX IF NOT EXISTS idx_project ON {self.TABLE_NAME}(project)')
+                logger.info("[SessionStore] sessions 表 canvas_id 列迁移完成")
+            
+            # 迁移 memories 表
+            mem_columns = self._db.get_table_info(self.MEMORIES_TABLE)
+            mem_col_names = [c.get("name", "") for c in mem_columns]
+            if "canvas_id" in mem_col_names:
+                logger.info("[SessionStore] 迁移：删除 memories 表的 canvas_id 列")
+                self._db.execute_sql(f'''
+                    CREATE TABLE {self.MEMORIES_TABLE}_temp AS
+                    SELECT memory_id, content, enabled, confidence, category, source,
+                           last_accessed, created_at, updated_at
+                    FROM {self.MEMORIES_TABLE}
+                ''')
+                self._db.execute_sql(f'DROP TABLE {self.MEMORIES_TABLE}')
+                self._db.execute_sql(f'ALTER TABLE {self.MEMORIES_TABLE}_temp RENAME TO {self.MEMORIES_TABLE}')
+                self._db.execute_sql(f'CREATE INDEX IF NOT EXISTS idx_memories_canvas ON {self.MEMORIES_TABLE}(memory_id)')
+                logger.info("[SessionStore] memories 表 canvas_id 列迁移完成")
+        except Exception as e:
+            logger.warning(f"[SessionStore] canvas_id 列迁移失败(可能已不存在): {e}")
+
     @property
     def is_initialized(self) -> bool:
         return self._initialized and self._db is not None and self._db.is_connected
@@ -158,7 +229,6 @@ class SessionStore:
         Args:
             session: 会话数据字典，包含以下字段:
                 - session_id: str
-                - canvas_id: str
                 - title: str
                 - messages: List[Dict]
                 - system_prompt: str
@@ -183,24 +253,23 @@ class SessionStore:
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             session_data = {
                 "session_id": session_id,
-                "canvas_id": session.get("canvas_id", "default"),
                 "title": session.get("title", ""),
                 "project": session.get("project", "默认项目"),
-                "messages": json.dumps(session.get("messages", []), ensure_ascii=False),
+                "messages": json.dumps(session.get("messages", [])).decode('utf-8'),
                 "system_prompt": session.get("system_prompt", ""),
-                "compaction_state": json.dumps(session.get("compaction_state", {})),
-                "compaction_cache": json.dumps(session.get("compaction_cache", {})),
+                "compaction_state": json.dumps(session.get("compaction_state", {})).decode('utf-8'),
+                "compaction_cache": json.dumps(session.get("compaction_cache", {})).decode('utf-8'),
                 "message_count": session.get("message_count", 0),
             }
 
             # 使用 INSERT OR REPLACE，使用本地时间
             success, result = self._execute(f'''
                 INSERT OR REPLACE INTO {self.TABLE_NAME}
-                (session_id, canvas_id, title, project, messages, system_prompt,
+                (session_id, title, project, messages, system_prompt,
                  compaction_state, compaction_cache, message_count,
                  created_at, updated_at)
                 VALUES (
-                    :session_id, :canvas_id, :title, :project, :messages, :system_prompt,
+                    :session_id, :title, :project, :messages, :system_prompt,
                     :compaction_state, :compaction_cache, :message_count,
                     COALESCE((SELECT created_at FROM {self.TABLE_NAME} WHERE session_id = :session_id), :now),
                     :now
@@ -221,17 +290,16 @@ class SessionStore:
     def _dict_to_params(self, d: Dict) -> Tuple:
         """将字典转换为参数元组（按字段顺序）"""
         fields = [
-            "session_id", "canvas_id", "title", "project", "messages", "system_prompt",
+            "session_id", "title", "project", "messages", "system_prompt",
             "compaction_state", "compaction_cache", "message_count"
         ]
         return tuple(d.get(f) for f in fields)
 
-    def load_sessions(self, canvas_id: str, limit: int = 100) -> List[Dict]:
+    def load_sessions(self, limit: int = 100) -> List[Dict]:
         """
-        加载指定画布的会话列表（按更新时间倒序）
+        加载会话列表（按更新时间倒序）
 
         Args:
-            canvas_id: 画布 ID
             limit: 返回数量限制
 
         Returns:
@@ -244,10 +312,9 @@ class SessionStore:
         try:
             success, rows = self._execute(f'''
                 SELECT * FROM {self.TABLE_NAME}
-                WHERE canvas_id = ?
                 ORDER BY updated_at DESC
                 LIMIT ?
-            ''', (canvas_id, limit))
+            ''', (limit,))
 
             if not success:
                 logger.error(f"[SessionStore] 加载失败: {rows}")
@@ -258,7 +325,7 @@ class SessionStore:
                 session = self._row_to_session(row)
                 sessions.append(session)
 
-            logger.debug(f"[SessionStore] 加载 {len(sessions)} 条会话: canvas={canvas_id}")
+            logger.debug(f"[SessionStore] 加载 {len(sessions)} 条会话")
             return sessions
 
         except Exception as e:
@@ -336,13 +403,12 @@ class SessionStore:
 
         return session
 
-    def get_session_count(self, canvas_id: str) -> int:
-        """获取指定画布的会话数量"""
+    def get_session_count(self) -> int:
+        """获取会话数量"""
         if not self.is_initialized:
             return 0
         success, result = self._execute(
-            f'SELECT COUNT(*) FROM {self.TABLE_NAME} WHERE canvas_id = ?',
-            (canvas_id,)
+            f'SELECT COUNT(*) FROM {self.TABLE_NAME}'
         )
         if success and result:
             first = result[0]
@@ -352,18 +418,18 @@ class SessionStore:
                 return int(first[0]) if first[0] else 0
         return 0
 
-    def get_projects(self, canvas_id: str = "default") -> List[str]:
-        """获取指定画布下所有不重复的项目名"""
+    def get_projects(self) -> List[str]:
+        """获取所有不重复的项目名"""
         if not self.is_initialized:
             return ["默认项目"]
         try:
             success, rows = self._execute(
-                f'SELECT DISTINCT project FROM {self.TABLE_NAME} WHERE canvas_id = ? ORDER BY project',
-                (canvas_id,)
+                f'SELECT DISTINCT project FROM {self.TABLE_NAME} ORDER BY project'
             )
             if success and rows:
                 projects = [row[0] if isinstance(row, tuple) else row["project"] for row in rows]
-                return [p for p in projects if p]
+                # 过滤掉空项目名和已归档项目
+                return [p for p in projects if p and not p.startswith("__archived__/")]
             return ["默认项目"]
         except Exception as e:
             logger.error(f"[SessionStore] get_projects 异常: {e}")
@@ -383,14 +449,14 @@ class SessionStore:
             logger.error(f"[SessionStore] update_session_project 异常: {e}")
             return False
 
-    def get_sessions_by_project(self, canvas_id: str, project: str, limit: int = 100) -> List[Dict]:
+    def get_sessions_by_project(self, project: str, limit: int = 100) -> List[Dict]:
         """加载指定项目的会话列表"""
         if not self.is_initialized:
             return []
         try:
             success, rows = self._execute(
-                f'SELECT * FROM {self.TABLE_NAME} WHERE canvas_id = ? AND project = ? ORDER BY updated_at DESC LIMIT ?',
-                (canvas_id, project, limit)
+                f'SELECT * FROM {self.TABLE_NAME} WHERE project = ? ORDER BY updated_at DESC LIMIT ?',
+                (project, limit)
             )
             if not success:
                 return []
@@ -399,12 +465,12 @@ class SessionStore:
             logger.error(f"[SessionStore] get_sessions_by_project 异常: {e}")
             return []
 
-    def archive_sessions_by_project(self, canvas_id: str, project: str) -> int:
+    def archive_sessions_by_project(self, project: str) -> int:
         """归档指定项目的所有会话"""
         if not self.is_initialized:
             return 0
         try:
-            sessions = self.get_sessions_by_project(canvas_id, project, limit=1000)
+            sessions = self.get_sessions_by_project(project, limit=1000)
             count = 0
             for s in sessions:
                 sid = s.get("session_id")
@@ -450,7 +516,6 @@ class SessionStore:
                     # 检查是否已存在
                     existing = self.get_session(session_id)
                     if not existing:
-                        session["canvas_id"] = session.get("canvas_id", "default")
                         if self.save_session(session):
                             count += 1
 
@@ -470,13 +535,12 @@ class SessionStore:
 
     # ==================== 长期记忆操作 ====================
 
-    def save_memory(self, memory: Dict, canvas_id: str = "default") -> bool:
+    def save_memory(self, memory: Dict) -> bool:
         """
         保存单条长期记忆
 
         Args:
             memory: 记忆数据，包含 content, category, confidence, source 等
-            canvas_id: 画布 ID
 
         Returns:
             bool: 保存是否成功
@@ -498,12 +562,11 @@ class SessionStore:
 
         success, _ = self._execute(f'''
             INSERT OR REPLACE INTO {self.MEMORIES_TABLE}
-            (memory_id, canvas_id, content, enabled, confidence, category, source,
+            (memory_id, content, enabled, confidence, category, source,
              last_accessed, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             memory_id,
-            canvas_id,
             memory.get("content", ""),
             1 if memory.get("enabled", True) else 0,
             memory.get("confidence", 0.8),
@@ -516,7 +579,7 @@ class SessionStore:
 
         return success
 
-    def save_memories(self, memories: List[Dict], canvas_id: str = "default") -> bool:
+    def save_memories(self, memories: List[Dict]) -> bool:
         """批量保存记忆（全量替换，先清空再插入）"""
         if not self.is_initialized or not self._db:
             return False
@@ -530,12 +593,12 @@ class SessionStore:
             cursor = conn.cursor()
             cursor.execute("BEGIN TRANSACTION")
             
-            # 先清空该画布的所有记忆（确保删除操作生效）
-            cursor.execute(f'DELETE FROM {self.MEMORIES_TABLE} WHERE canvas_id = ?', (canvas_id,))
+            # 清空所有记忆
+            cursor.execute(f'DELETE FROM {self.MEMORIES_TABLE}')
             
             # 重新插入所有记忆
             for memory in memories:
-                self._save_memory_with_cursor(cursor, memory, canvas_id)
+                self._save_memory_with_cursor(cursor, memory)
             
             conn.commit()
             return True
@@ -544,7 +607,7 @@ class SessionStore:
             logger.error(f"[SessionStore] 批量保存记忆失败: {e}")
             return False
 
-    def _save_memory_with_cursor(self, cursor, memory: Dict, canvas_id: str):
+    def _save_memory_with_cursor(self, cursor, memory: Dict):
         """使用指定 cursor 保存记忆（不自动 commit）"""
         existing_id = memory.get("memory_id") or memory.get("id")
         if existing_id:
@@ -558,12 +621,11 @@ class SessionStore:
 
         cursor.execute(f'''
             INSERT OR REPLACE INTO {self.MEMORIES_TABLE}
-            (memory_id, canvas_id, content, enabled, confidence, category, source,
+            (memory_id, content, enabled, confidence, category, source,
              last_accessed, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             memory_id,
-            canvas_id,
             memory.get("content", ""),
             1 if memory.get("enabled", True) else 0,
             memory.get("confidence", 0.8),
@@ -574,11 +636,10 @@ class SessionStore:
             now,
         ))
 
-    def load_memories(self, canvas_id: str = "default", limit: int = 100, include_disabled: bool = False) -> List[Dict]:
+    def load_memories(self, limit: int = 100, include_disabled: bool = False) -> List[Dict]:
         """加载长期记忆列表
         
         Args:
-            canvas_id: 画布 ID
             limit: 返回数量限制
             include_disabled: 是否包含禁用的记忆
         """
@@ -588,17 +649,16 @@ class SessionStore:
         if include_disabled:
             success, rows = self._execute(f'''
                 SELECT * FROM {self.MEMORIES_TABLE}
-                WHERE canvas_id = ?
                 ORDER BY confidence DESC, updated_at DESC
                 LIMIT ?
-            ''', (canvas_id, limit))
+            ''', (limit,))
         else:
             success, rows = self._execute(f'''
                 SELECT * FROM {self.MEMORIES_TABLE}
-                WHERE canvas_id = ? AND enabled = 1
+                WHERE enabled = 1
                 ORDER BY confidence DESC, updated_at DESC
                 LIMIT ?
-            ''', (canvas_id, limit))
+            ''', (limit,))
 
         if not success:
             return []
@@ -632,24 +692,22 @@ class SessionStore:
         )
         return success
 
-    def clear_memories(self, canvas_id: str = "default") -> bool:
-        """清空指定画布的所有记忆"""
+    def clear_memories(self) -> bool:
+        """清空所有记忆"""
         if not self.is_initialized:
             return False
 
         success, _ = self._execute(
-            f'DELETE FROM {self.MEMORIES_TABLE} WHERE canvas_id = ?',
-            (canvas_id,)
+            f'DELETE FROM {self.MEMORIES_TABLE}'
         )
         return success
 
-    def migrate_memories_from_json(self, json_path: str, canvas_id: str = "default") -> int:
+    def migrate_memories_from_json(self, json_path: str) -> int:
         """
         从 JSON 文件迁移记忆到 SQLite
 
         Args:
             json_path: JSON 文件路径
-            canvas_id: 画布 ID
 
         Returns:
             int: 迁移的记忆数量
@@ -666,7 +724,7 @@ class SessionStore:
             memories = data.get("user_memories", [])
             count = 0
             for memory in memories:
-                if self.save_memory(memory, canvas_id):
+                if self.save_memory(memory):
                     count += 1
 
             logger.info(f"[SessionStore] 从 {json_path} 迁移了 {count} 条记忆")

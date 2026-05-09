@@ -247,6 +247,12 @@ class ToolExecutor:
                 "[ToolExecutor] Session messages getter attached to BuiltinTools"
             )
 
+    def set_agent_manager(self, agent_manager):
+        """设置 AgentManager 实例，用于动态生成工具 schema"""
+        if self._builtin_tools:
+            self._builtin_tools.set_agent_manager(agent_manager)
+            logger.info("[ToolExecutor] AgentManager attached to BuiltinTools")
+
     # 工具必需参数定义
     REQUIRED_ARGS = {
         "read": ["path"],
@@ -411,7 +417,8 @@ class ToolExecutor:
             "todowrite": lambda: self._builtin_tools.todo_write(args.get("todos", [])),
             "todoread": lambda: self._builtin_tools.todo_read(),
             "task_batch": lambda: self._builtin_tools.task_execute_batch(
-                args.get("tasks", [])
+                args.get("tasks", []),
+                args.get("share_context", True),
             ),
             "task_status": lambda: self._builtin_tools.task_status(
                 args.get("task_ids"),

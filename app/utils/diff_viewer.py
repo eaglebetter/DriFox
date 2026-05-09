@@ -6,6 +6,7 @@ Git Diff 差异对比模块
 样式 100% 复刻 GitHub 网页合并差异审核界面
 """
 
+import orjson as json
 import difflib
 import re
 from pathlib import Path
@@ -778,8 +779,6 @@ class DiffHtmlGenerator:
     @classmethod
     def _generate_file_data_json(cls, files: List[Dict]) -> str:
         """生成文件数据 JSON（用于懒加载），只存储 diff 行数据，前端按需生成 HTML"""
-        import json
-
         files_data = []
         for i, file_info in enumerate(files):
             file_id = f"file-{i}"
@@ -798,7 +797,8 @@ class DiffHtmlGenerator:
                 "lines": file_info["lines"]
             })
 
-        return json.dumps(files_data, ensure_ascii=False)
+        result = json.dumps(files_data).decode('utf-8')
+        return result
 
     @classmethod
     def _generate_file_block_header(cls, file_info: Dict, file_id: str) -> str:

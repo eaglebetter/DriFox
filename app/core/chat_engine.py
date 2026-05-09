@@ -2,7 +2,7 @@
 """
 聊天引擎模块 - 处理 LLM 对话的核心逻辑
 """
-import json
+import orjson as json
 from datetime import datetime
 from typing import Dict, List, Optional, Any, Callable
 
@@ -11,27 +11,25 @@ from openai import OpenAI
 
 from app.core.provider_profile import (
     get_provider_profile,
-    supports_vision as provider_supports_vision,
 )
 from app.tools import get_builtin_tools_schema
-
-from app.utils.chat_session import (
+from app.core.chat_session import (
     ChatSession,
     SessionManager,
 )
-from app.utils.message_content import (
+from app.utils.config import Settings
+from app.core.message_content import (
     consolidate_messages,
     content_to_text,
 )
-from app.utils.retry_helper import (
+from app.core.retry_helper import (
     create_api_call_with_retry,
 )
-from app.utils.token_estimator import (
+from app.core.token_estimator import (
     estimate_tokens,
     count_messages_tokens,
 )
-from app.utils.worker import OpenAIChatWorker
-from app.utils.config import Settings
+from app.core.workers import OpenAIChatWorker
 
 MAX_HISTORY_SNIPPET_CHARS = 1200
 RECENT_HISTORY_MIN_MESSAGES = 6
@@ -74,6 +72,8 @@ class ChatEngine:
         self._current_worker: Optional[OpenAIChatWorker] = None
         self._is_streaming = False
         self._callbacks: Dict[str, Callable] = {}
+        # 会话级权限自动允许缓存（整个会话生命周期保存，不受worker新建影响）
+        self._session_permission_cache: Dict[str, bool] = {}
         self._current_agent: Optional[str] = "plan"
         
         # API 模式专用：直接回调（绕过 Qt 信号-槽，避免跨线程事件循环问题）
@@ -199,13 +199,41 @@ class ChatEngine:
     ):
         self._emit("permission_approval_requested", tool_call_id, tool_name, arguments)
 
-    def approve_tool_permission(self, tool_call_id: str, auto_allow: bool = False):
+    def approve_tool_permission(self, tool_call_id: str, auto_allow: bool = False, session_allow: bool = False):
         if self._current_worker:
-            self._current_worker.approve_permission(tool_call_id, auto_allow)
+            self._current_worker.approve_permission(tool_call_id, auto_allow, session_allow)
+            # 如果是会话级允许，同时更新到 chat_engine 的持久缓存中
+            if session_allow and self._current_worker and hasattr(self._current_worker, "_permission_pending"):
+                pending = getattr(self._current_worker, "_permission_pending", None)
+                if pending and "tool_name" in pending:
+                    tool_name = pending["tool_name"]
+                    self._session_permission_cache[tool_name] = True
+                    logger.info(f"[Permission] 会话缓存已持久化到 ChatEngine: tool={tool_name}")
+            # 同步最新缓存到 chat_engine
+            if self._current_worker and hasattr(self._current_worker, "_session_permission_cache"):
+                worker_cache = getattr(self._current_worker, "_session_permission_cache", {})
+                if worker_cache != self._session_permission_cache:
+                    self._session_permission_cache = worker_cache.copy()
+                    logger.info(f"[Permission] 同步会话缓存到 ChatEngine: {len(self._session_permission_cache)} 项")
 
     def deny_tool_permission(self, tool_call_id: str):
         if self._current_worker:
             self._current_worker.deny_permission(tool_call_id)
+
+    def clear_session_permission_cache(self, tool_name: str = None):
+        """清除会话级权限缓存"""
+        # 先清除 chat_engine 中的持久缓存
+        if tool_name:
+            if tool_name in self._session_permission_cache:
+                del self._session_permission_cache[tool_name]
+        else:
+            self._session_permission_cache = {}
+        # 再清除当前 worker 中的缓存
+        if self._current_worker:
+            if tool_name:
+                self._current_worker.set_session_permission_cache(tool_name, False)
+            else:
+                self._current_worker._session_permission_cache = self._session_permission_cache.copy()
 
     def _truncate_with_head_tail(self, content: str, max_length: int) -> str:
         """
@@ -846,7 +874,7 @@ class ChatEngine:
                 self._current_agent
             )
         else:
-            available_tools = get_builtin_tools_schema()
+            available_tools = get_builtin_tools_schema(self._get_agent_manager())
 
         self._start_worker(messages, llm_config, available_tools)
         return True
@@ -861,7 +889,7 @@ class ChatEngine:
 
         if self._current_agent:
             full_system_prompt = self._get_agent_manager().get_agent_system_prompt(
-                self._current_agent
+                self._current_agent, is_subagent_call=False
             )
         else:
             full_system_prompt = self._get_agent_manager().get_unified_system_prompt()
@@ -1023,9 +1051,7 @@ class ChatEngine:
         llm_config: Dict,
         tools: List[Dict],
     ):
-        # 启动新 worker 前，先彻底清理旧的 worker
-        if self._current_worker:
-            self.cleanup_worker()
+        self.cleanup_worker()
         
         compaction_prompt = ""
         compaction_config = {}
@@ -1047,6 +1073,10 @@ class ChatEngine:
             compaction_prompt=compaction_prompt,
             compaction_config=compaction_config,
         )
+
+        # 同步chat_engine保存的会话级权限缓存到新worker
+        if hasattr(self._current_worker, "_session_permission_cache"):
+            self._current_worker._session_permission_cache = self._session_permission_cache.copy()
 
         # API 模式：直接调用回调（不使用 Qt 信号-槽，避免跨线程事件循环问题）
         # API 模式下 worker 运行在没有 Qt 事件循环的线程中，Qt 信号无法传递
@@ -1077,6 +1107,10 @@ class ChatEngine:
     def _on_reasoning_content_received(self, reasoning_piece: str):
         """DeepSeek 思考内容接收"""
         self._emit("reasoning_content_received", reasoning_piece)
+
+    def _on_reasoning_finished(self):
+        """DeepSeek 思考内容结束"""
+        self._emit("reasoning_finished")
 
     def _on_tool_call_started(
         self, tool_call_id: str, tool_name: str, arguments: dict, round_id: str

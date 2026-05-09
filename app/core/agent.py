@@ -31,6 +31,9 @@ class Agent:
     top_p: Optional[float] = None
     prompt: str = ""
     tools: Dict[str, bool] = field(default_factory=dict)
+    inherit_history: bool = False  # 是否继承主智能体历史消息
+    inherit_history_count: Optional[int] = None  # 继承最近 N 条消息，None 表示全部
+    inherit_history_max_chars: Optional[int] = 500  # 每条消息最大字符数
 
     @classmethod
     def from_dict(cls, data: Dict) -> "Agent":
@@ -51,6 +54,9 @@ class Agent:
             top_p=data.get("top_p"),
             prompt=data.get("prompt", ""),
             tools=tools,
+            inherit_history=data.get("inherit_history", False),
+            inherit_history_count=data.get("inherit_history_count"),
+            inherit_history_max_chars=data.get("inherit_history_max_chars", 500),
         )
 
     def to_dict(self) -> Dict:
@@ -78,6 +84,12 @@ class Agent:
             result["prompt"] = self.prompt
         if self.tools:
             result["tools"] = self.tools
+        if self.inherit_history:
+            result["inherit_history"] = True
+        if self.inherit_history_count is not None:
+            result["inherit_history_count"] = self.inherit_history_count
+        if self.inherit_history_max_chars != 500:
+            result["inherit_history_max_chars"] = self.inherit_history_max_chars
         return result
 
     def is_primary(self) -> bool:
@@ -293,6 +305,29 @@ class AgentManager:
         agents = self.list_subagents(include_hidden=include_hidden)
         return [a.name for a in agents]
 
+    def get_available_subagents_for_prompt(self, include_hidden: bool = False) -> str:
+        """
+        获取可用于主智能体提示词中的子智能体列表（格式化文本）。
+        
+        用于主智能体提示词动态注入可用子智能体信息，避免硬编码。
+        
+        Returns:
+            格式化子智能体列表文本，格式：
+            ## Available Subagents
+            - name: description
+            - name: description
+            ...
+        """
+        agents = self.list_subagents(include_hidden=include_hidden)
+        if not agents:
+            return ""
+        
+        lines = ["## Available Subagents\n可直接使用的子智能体列表："]
+        for a in agents:
+            lines.append(f"- **{a.name}**: {a.description}")
+        
+        return "\n".join(lines)
+
     def get_agent_tools_schema(
         self, agent_name: str, global_permission: Optional[Dict[str, Any]] = None
     ) -> List[Dict]:
@@ -300,7 +335,7 @@ class AgentManager:
         if not agent:
             return []
 
-        all_tools = get_builtin_tools_schema()
+        all_tools = get_builtin_tools_schema(self)  # 传递 agent_manager 用于动态生成
 
         # 【新增】子智能体禁止使用 question 工具（需要用户交互，不支持）
         if agent.is_subagent():
@@ -319,7 +354,22 @@ class AgentManager:
 
         return filtered_tools
 
-    def get_agent_system_prompt(self, agent_name: str, base_prompt: str = "") -> str:
+    def get_agent_system_prompt(
+        self,
+        agent_name: str,
+        base_prompt: str = "",
+        is_subagent_call: bool = False,
+    ) -> str:
+        """
+        获取智能体的系统提示词。
+        
+        Args:
+            agent_name: 智能体名称
+            base_prompt: 基础提示词（通常为 skill 内容）
+            is_subagent_call: 是否为子智能体调用上下文。
+                - True: 主智能体通过 task_batch 调用子智能体（子智能体看到的是任务描述，不是完整上下文）
+                - False: 主智能体自身运行，或子智能体独立运行
+        """
         agent = self.get_agent(agent_name)
         if not agent:
             return base_prompt
@@ -351,11 +401,21 @@ class AgentManager:
 - 如果已经有 todo，优先沿用现有执行上下文。
 """.strip()
 
-        # 根据智能体类型选择约束
-        if agent.is_subagent():
+        # 【核心修复】根据 is_subagent_call 区分调用上下文
+        # 场景1: 主智能体自身运行（primary mode，is_subagent_call=False）
+        # 场景2: 主智能体通过 task_batch 调用子智能体（子智能体看到任务描述，is_subagent_call=True）
+        # 场景3: 子智能体独立运行（subagent mode，is_subagent_call=False）
+        
+        if is_subagent_call:
+            # 场景2：被主智能体调用，子智能体看到的是任务描述
             role_constraints = subagent_constraints
         else:
+            # 场景1：主智能体运行
             role_constraints = primary_constraints
+            # 主智能体需要动态注入可用子智能体列表
+            subagents_info = self.get_available_subagents_for_prompt()
+            if subagents_info:
+                global_contract = global_contract + "\n\n" + subagents_info
 
         if agent.prompt:
             return "\n\n".join(

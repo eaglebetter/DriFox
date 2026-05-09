@@ -13,8 +13,7 @@ from qfluentwidgets import (
     SpinBox,
     SwitchButton,
     PasswordLineEdit,
-    ComboBox, SimpleCardWidget,
-)
+    ComboBox, )
 
 from app.constants import (
     PARAM_UI_MAP,
@@ -23,7 +22,7 @@ from app.constants import (
 from app.widgets.searchable_editable_combobox import SearchableEditableComboBox
 
 
-class ModelConfigCard(SimpleCardWidget):
+class ModelConfigCard(QWidget):
     """模型配置卡片内容 - 有变化自动保存"""
 
     configApplied = pyqtSignal(dict)
@@ -41,8 +40,8 @@ class ModelConfigCard(SimpleCardWidget):
 
     def _setup_ui(self):
         self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(0, 4, 0, 4)
-        self.layout.setSpacing(6)  # 恢复行间距
+        self.layout.setContentsMargins(4, 0, 4, 0)
+        self.layout.setSpacing(3)  # 恢复行间距
 
     def _clear_layout(self, layout):
         """递归清理 layout"""
