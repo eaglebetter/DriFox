@@ -117,6 +117,8 @@ class MemoryCardContent(QWidget):
         self._memories = []
         self._current_category = "agent_identity"
         self._init_ui()
+        # 初始化时加载记忆数据
+        self._load_memories()
 
     def _get_memory_manager(self):
         """获取 memory_manager，优先使用注入的，否则从父窗口获取"""
@@ -354,16 +356,15 @@ class MemoryCardContent(QWidget):
         """加载记忆数据"""
         self.list_widget.clear()
 
-        # 获取 memory_manager（只在首次加载或刷新时从数据库读取）
+        # 每次打开都从数据库重新读取，确保数据最新
         memory_mgr = self._get_memory_manager()
-        if not self._memories and memory_mgr:
-            # 首次加载或数据为空时，从数据库读取
+        if memory_mgr:
             all_memories = memory_mgr.get_user_memories()
             if all_memories:
                 self._memories = list(all_memories)
             else:
                 self._memories = []
-        elif not self._memories:
+        else:
             self._memories = []
 
         # 按分类组织记忆（使用本地 _memories，不再从数据库读取）

@@ -21,13 +21,30 @@ from app.core.message_content import consolidate_messages
 
 
 class SessionStore:
-    """SQLite 会话存储层，提供原子性持久化"""
+    """SQLite 会话存储层，提供原子性持久化（单例模式）"""
 
     TABLE_NAME = "sessions"
     MEMORIES_TABLE = "memories"
     DB_FILENAME = "sessions.db"
 
+    _instance: Optional["SessionStore"] = None
+
+    def __new__(cls, db_dir: str = ".drifox"):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
+    @classmethod
+    def get_instance(cls, db_dir: str = ".drifox") -> "SessionStore":
+        """获取单例实例"""
+        if cls._instance is None:
+            cls._instance = cls(db_dir)
+        return cls._instance
+
     def __init__(self, db_dir: str = ".drifox"):
+        # 防止重复初始化
+        if hasattr(self, "_initialized") and self._initialized:
+            return
         self._db_dir = db_dir
         self._db_path = str(Path(db_dir) / self.DB_FILENAME)
         self._db: Optional[DatabaseManager] = None
@@ -49,6 +66,17 @@ class SessionStore:
                 # 使用 DatabaseManager（单例模式）
                 self._db = DatabaseManager()
                 self._db.connect(self._db_path)
+
+                # ========== WAL 模式优化：提升并发读写性能 ==========
+                # WAL (Write-Ahead Logging) 模式：
+                # - 读写操作不再互相阻塞
+                # - 适合多窗口并发场景
+                # - 写入更快速（不需要每次都同步到磁盘）
+                self._db.execute_sql('PRAGMA journal_mode=WAL')
+                self._db.execute_sql('PRAGMA synchronous=NORMAL')  # WAL 下用 NORMAL 即可保证安全且更快
+                self._db.execute_sql('PRAGMA cache_size=-64000')  # 64MB 缓存，提升读取性能
+                self._db.execute_sql('PRAGMA temp_store=MEMORY')  # 临时表放内存
+                # ======================================================
 
                 # 创建会话表（TIMESTAMP 改为 TEXT 避免时区问题）
                 self._db.create_table(self.TABLE_NAME, [
