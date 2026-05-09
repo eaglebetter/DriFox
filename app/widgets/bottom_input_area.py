@@ -1,8 +1,9 @@
 # 大模型输入框
 import re
+import os
 from pathlib import Path
 
-from PyQt5.QtCore import Qt, pyqtSignal, QTimer, QRect, QPoint, QSize, QPropertyAnimation, QEasingCurve
+from PyQt5.QtCore import Qt, pyqtSignal, QTimer, QRect, QPoint, QSize
 from PyQt5.QtGui import QKeyEvent, QKeySequence, QDragEnterEvent, QDropEvent, QTextCursor, QPainter, QFont, QColor, QTextCharFormat
 from PyQt5.QtWidgets import QShortcut, QTextEdit, QWidget, QVBoxLayout, QListWidget, QListWidgetItem, QApplication, QLabel
 from PyQt5.QtWidgets import QGraphicsDropShadowEffect
@@ -511,45 +512,52 @@ class SendableTextEdit(TextEdit):
 
     def _on_at_trigger_check(self):
         """检测 @ 触发"""
-        cursor = self.textCursor()
-        text = self.toPlainText()
-        cursor_pos = cursor.position()
-        if cursor_pos - 1 > len(text):
-            return
-        if cursor_pos > 0 and text[cursor_pos - 1] == "@":
-            # 找到 @ 的位置
-            self._at_trigger_pos = cursor_pos - 1
+        try:
+            cursor = self.textCursor()
+            text = self.toPlainText()
+            cursor_pos = cursor.position()
+            
+            # 安全检查：确保位置有效
+            if cursor_pos < 0 or cursor_pos > len(text):
+                return
+                
+            if cursor_pos > 0 and cursor_pos - 1 < len(text) and text[cursor_pos - 1] == "@":
+                # 找到 @ 的位置
+                self._at_trigger_pos = cursor_pos - 1
 
-            # 显示补全弹窗
-            skills = get_local_skills()
-            self._completer_popup.load_skills(skills, "")
-            self._show_completer_popup()
-        elif self._completer_popup.isVisible():
-            # 检查是否还在 @ 后面
-            text_before_cursor = text[:cursor_pos]
-            last_at = text_before_cursor.rfind("@")
-            if last_at == -1:
-                self._completer_popup.hide()
-            else:
-                # 计算 @ 后面的内容
-                query = text_before_cursor[last_at + 1:]
-                # 如果有空格则关闭
-                if " " in query or "\n" in query:
+                # 显示补全弹窗
+                skills = get_local_skills()
+                self._completer_popup.load_skills(skills, "")
+                self._show_completer_popup()
+            elif self._completer_popup.isVisible():
+                # 检查是否还在 @ 后面
+                text_before_cursor = text[:cursor_pos] if cursor_pos <= len(text) else text
+                last_at = text_before_cursor.rfind("@")
+                if last_at == -1:
                     self._completer_popup.hide()
                 else:
-                    # 重新加载并调整位置
-                    old_height = self._completer_popup.height()
-                    self._completer_popup.load_skills(get_local_skills(), query)
-                    new_height = self._completer_popup.height()
-                    
-                    # 如果高度变化，重新计算位置
-                    if old_height != new_height and hasattr(self._completer_popup, '_show_below'):
-                        # 获取当前光标位置重新定位
-                        rect = self.cursorRect()
-                        viewport_pos = self.viewport().mapToGlobal(QPoint(0, 0))
-                        cursor_x = viewport_pos.x() + rect.left()
-                        cursor_y = viewport_pos.y() + rect.top()
-                        self._completer_popup.show_at_cursor(self, QPoint(cursor_x, cursor_y))
+                    # 计算 @ 后面的内容
+                    query = text_before_cursor[last_at + 1:] if last_at + 1 <= len(text_before_cursor) else ""
+                    # 如果有空格则关闭
+                    if " " in query or "\n" in query:
+                        self._completer_popup.hide()
+                    else:
+                        # 重新加载并调整位置
+                        old_height = self._completer_popup.height()
+                        self._completer_popup.load_skills(get_local_skills(), query)
+                        new_height = self._completer_popup.height()
+                        
+                        # 如果高度变化，重新计算位置
+                        if old_height != new_height and hasattr(self._completer_popup, '_show_below'):
+                            # 获取当前光标位置重新定位
+                            rect = self.cursorRect()
+                            viewport_pos = self.viewport().mapToGlobal(QPoint(0, 0))
+                            cursor_x = viewport_pos.x() + rect.left()
+                            cursor_y = viewport_pos.y() + rect.top()
+                            self._completer_popup.show_at_cursor(self, QPoint(cursor_x, cursor_y))
+        except Exception:
+            # 确保任何错误都不会导致崩溃
+            pass
 
     def _show_completer_popup(self):
         """显示补全弹窗，位置紧贴光标"""
@@ -718,159 +726,172 @@ class SendableTextEdit(TextEdit):
 
     def insertFromMimeData(self, source):
         """重写以处理拖放的文本格式化和高亮"""
-        import os
-        
-        # 首先检查是否是真正的文件拖拽（通过 URLs）
-        is_file_drop = False
-        component_path = ""
-        extension_path = ""
-        
-        if source.hasUrls():
-            # 这是真正的文件拖拽
-            urls = source.urls()
-            if urls:
-                # 取第一个 URL 作为主文件
-                component_path = urls[0].toLocalFile()
-                # 如果有多个 URL，第二个作为扩展资源路径
-                if len(urls) > 1:
-                    extension_path = urls[1].toLocalFile()
-                is_file_drop = True
-        elif source.hasText():
-            text = source.text()
+        try:
+            # 首先检查是否是真正的文件拖拽（通过 URLs）
+            is_file_drop = False
+            component_path = ""
+            extension_path = ""
             
-            # 对于文本内容，严格判断是否是文件路径
-            # 只有完全符合路径格式且实际存在的路径才被认为是文件
-            
-            if "file:/" in text:
-                # 包含 file:/ 的可能是文件路径
-                lines = text.split("\n")
-                candidate_component = lines[0] if lines else ""
-                candidate_extension = lines[1] if len(lines) > 1 else ""
-                
-                # 去除 file:/ 前缀
-                candidate_component = re.sub(r'^file:/{1,3}', '', candidate_component)
-                candidate_extension = re.sub(r'^file:/{1,3}', '', candidate_extension)
-                
-                # 验证路径是否存在
-                if os.path.exists(candidate_component):
-                    component_path = candidate_component
-                    extension_path = candidate_extension
+            if source.hasUrls():
+                # 这是真正的文件拖拽
+                urls = source.urls()
+                if urls:
+                    # 取第一个 URL 作为主文件
+                    component_path = urls[0].toLocalFile()
+                    # 如果有多个 URL，第二个作为扩展资源路径
+                    if len(urls) > 1:
+                        extension_path = urls[1].toLocalFile()
                     is_file_drop = True
-            elif "\n" in text:
-                # 有换行符时，检查是否是合法的文件路径
-                lines = text.split("\n")
-                if len(lines) >= 1 and lines[0]:
-                    candidate_path = lines[0]
-                    # 严格判断：必须是绝对路径且实际存在
-                    if os.path.isabs(candidate_path) and os.path.exists(candidate_path):
-                        component_path = candidate_path
-                        extension_path = lines[1] if len(lines) > 1 else ""
-                        # 同样检查扩展路径
-                        if extension_path and not os.path.exists(extension_path):
-                            extension_path = ""
-                        is_file_drop = True
-        
-        if is_file_drop and component_path:
-            # 保存默认格式
-            cursor = self.textCursor()
-            default_format = QTextCharFormat()  # 创建干净的默认格式
+            elif source.hasText():
+                text = source.text()
+                
+                # 对于文本内容，严格判断是否是文件路径
+                # 只有完全符合路径格式且实际存在的路径才被认为是文件
+                
+                if "file:/" in text:
+                    # 包含 file:/ 的可能是文件路径
+                    try:
+                        lines = text.split("\n")
+                        candidate_component = lines[0] if lines else ""
+                        candidate_extension = lines[1] if len(lines) > 1 else ""
+                        
+                        # 去除 file:/ 前缀
+                        candidate_component = re.sub(r'^file:/{1,3}', '', candidate_component)
+                        candidate_extension = re.sub(r'^file:/{1,3}', '', candidate_extension)
+                        
+                        # 验证路径是否存在
+                        if candidate_component and os.path.exists(candidate_component):
+                            component_path = candidate_component
+                            extension_path = candidate_extension
+                            is_file_drop = True
+                    except Exception:
+                        # 任何解析错误都不作为文件处理
+                        pass
+                elif "\n" in text:
+                    # 有换行符时，检查是否是合法的文件路径
+                    try:
+                        lines = text.split("\n")
+                        if len(lines) >= 1 and lines[0]:
+                            candidate_path = lines[0]
+                            # 严格判断：必须是绝对路径且实际存在
+                            if candidate_path and os.path.isabs(candidate_path) and os.path.exists(candidate_path):
+                                component_path = candidate_path
+                                extension_path = lines[1] if len(lines) > 1 else ""
+                                # 同样检查扩展路径
+                                if extension_path and not os.path.exists(extension_path):
+                                    extension_path = ""
+                                is_file_drop = True
+                    except Exception:
+                        # 任何解析错误都不作为文件处理
+                        pass
             
-            # 先插入一个空格占位符，用默认格式
-            cursor.insertText(" ", default_format)
+            if is_file_drop and component_path:
+                try:
+                    # 保存默认格式
+                    cursor = self.textCursor()
+                    default_format = QTextCharFormat()  # 创建干净的默认格式
+                    
+                    # 先插入一个空格占位符，用默认格式
+                    cursor.insertText(" ", default_format)
+                    
+                    # 准备要插入的文件路径文本
+                    insert_text = f"路径: {component_path}"
+                    if extension_path:
+                        insert_text += f"\n扩展资源路径: {extension_path}"
+                    
+                    # 记录文件路径的起始位置
+                    path_start = cursor.position()
+                    
+                    # 插入文件路径文本
+                    cursor.insertText(insert_text)
+                    
+                    # 记录文件路径的结束位置
+                    path_end = cursor.position()
+                    
+                    # 高亮显示拖入的文件路径
+                    cursor.setPosition(path_start)
+                    cursor.setPosition(path_end, QTextCursor.KeepAnchor)
+                    
+                    # 创建高亮格式 - 使用和技能一样的金色
+                    highlight_format = QTextCharFormat()
+                    highlight_format.setForeground(QColor("#C9A85C"))
+                    highlight_format.setFontWeight(700)
+                    cursor.setCharFormat(highlight_format)
+                    
+                    # 最后再插入一个空格，用默认格式
+                    cursor.setPosition(path_end)
+                    cursor.clearSelection()
+                    cursor.insertText(" ", default_format)
+                    
+                    # 确保光标在最后，使用默认格式
+                    final_pos = cursor.position()
+                    cursor.setPosition(final_pos)
+                    cursor.setCharFormat(default_format)
+                    self.setTextCursor(cursor)
+                    
+                    # 确保输入框有焦点
+                    self.setFocus(Qt.OtherFocusReason)
+                    
+                    return
+                except Exception:
+                    # 如果文件路径插入失败，回退到默认处理
+                    pass
             
-            # 准备要插入的文件路径文本
-            insert_text = f"路径: {component_path}"
-            if extension_path:
-                insert_text += f"\n扩展资源路径: {extension_path}"
+            # 其他情况使用默认处理
+            super().insertFromMimeData(source)
             
-            # 记录文件路径的起始位置
-            path_start = cursor.position()
-            
-            # 插入文件路径文本
-            cursor.insertText(insert_text)
-            
-            # 记录文件路径的结束位置
-            path_end = cursor.position()
-            
-            # 高亮显示拖入的文件路径
-            cursor.setPosition(path_start)
-            cursor.setPosition(path_end, QTextCursor.KeepAnchor)
-            
-            # 创建高亮格式 - 使用和技能一样的金色
-            highlight_format = QTextCharFormat()
-            highlight_format.setForeground(QColor("#C9A85C"))
-            highlight_format.setFontWeight(700)
-            cursor.setCharFormat(highlight_format)
-            
-            # 最后再插入一个空格，用默认格式
-            cursor.setPosition(path_end)
-            cursor.clearSelection()
-            cursor.insertText(" ", default_format)
-            
-            # 确保光标在最后，使用默认格式
-            final_pos = cursor.position()
-            cursor.setPosition(final_pos)
-            cursor.setCharFormat(default_format)
-            self.setTextCursor(cursor)
-            
-            # 确保输入框有焦点
-            self.setFocus(Qt.OtherFocusReason)
-            
-            return
-        
-        # 其他情况使用默认处理
-        super().insertFromMimeData(source)
+        except Exception as e:
+            # 捕获所有异常，确保应用不会崩溃
+            try:
+                # 发生任何错误时，回退到默认处理
+                super().insertFromMimeData(source)
+            except Exception:
+                # 最后的保障
+                pass
 
     def _setup_glow_effect(self):
         """设置发光效果"""
-        self._glow_effect = QGraphicsDropShadowEffect(self)
-        self._glow_effect.setBlurRadius(0)
-        self._glow_effect.setColor(QColor(201, 168, 92, 0))
-        self._glow_effect.setOffset(0, 0)
-        self.setGraphicsEffect(self._glow_effect)
+        try:
+            self._glow_effect = QGraphicsDropShadowEffect(self)
+            self._glow_effect.setBlurRadius(0)
+            self._glow_effect.setColor(QColor(201, 168, 92, 0))
+            self._glow_effect.setOffset(0, 0)
+            self.setGraphicsEffect(self._glow_effect)
+        except Exception:
+            self._glow_effect = None
         
     def _animate_glow(self, target_blur, target_alpha, duration=300):
         """动画发光效果"""
         if not self._glow_effect:
             return
-            
-        # 使用 QPropertyAnimation 来平滑过渡
-        # 由于 QGraphicsDropShadowEffect 的属性不是 Qt 属性，我们手动动画
-        current_blur = self._glow_effect.blurRadius()
-        current_color = self._glow_effect.color()
-        current_alpha = current_color.alpha()
         
-        steps = max(1, duration // 16)  # 60fps
-        blur_step = (target_blur - current_blur) / steps
-        alpha_step = (target_alpha - current_alpha) / steps
-        
-        def animate_step(step=0):
-            if step >= steps:
-                self._glow_effect.setBlurRadius(target_blur)
-                color = QColor(201, 168, 92, target_alpha)
-                self._glow_effect.setColor(color)
-                return
-                
-            new_blur = current_blur + blur_step * (step + 1)
-            new_alpha = int(current_alpha + alpha_step * (step + 1))
-            self._glow_effect.setBlurRadius(new_blur)
-            color = QColor(201, 168, 92, new_alpha)
+        try:
+            # 直接设置最终状态，避免复杂动画可能导致的问题
+            self._glow_effect.setBlurRadius(target_blur)
+            color = QColor(201, 168, 92, target_alpha)
             self._glow_effect.setColor(color)
-            
-            QTimer.singleShot(16, lambda: animate_step(step + 1))
-        
-        animate_step()
+        except Exception:
+            # 发光效果失败时安全忽略
+            pass
 
     def focusInEvent(self, event):
-        super().focusInEvent(event)
-        # 激活发光效果
-        self._animate_glow(25, 180, 250)
-        QTimer.singleShot(0, self._ensure_cursor_visible)
+        try:
+            super().focusInEvent(event)
+            # 激活发光效果
+            self._animate_glow(25, 180, 250)
+            QTimer.singleShot(0, self._ensure_cursor_visible)
+        except Exception:
+            # 确保即使出错也不会崩溃
+            pass
         
     def focusOutEvent(self, event):
-        super().focusOutEvent(event)
-        # 取消发光效果
-        self._animate_glow(0, 0, 200)
+        try:
+            super().focusOutEvent(event)
+            # 取消发光效果
+            self._animate_glow(0, 0, 200)
+        except Exception:
+            # 确保即使出错也不会崩溃
+            pass
 
     def _ensure_cursor_visible(self):
         cursor = self.textCursor()
