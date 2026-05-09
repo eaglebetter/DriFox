@@ -753,17 +753,26 @@ class ChatEngine:
         }
         result_messages = [summary_message] + recent_messages
 
-        while (
-            len(result_messages) > 1
-            and count_messages_tokens(result_messages) > target_limit
-        ):
-            if len(recent_messages) > 1:
-                recent_messages.pop(0)
-                result_messages = [summary_message] + recent_messages
-                continue
+        # ========== 性能优化: O(n²) → O(n) ==========
+        # 原代码: while count_messages_tokens(result_messages) > target_limit
+        # 问题: 每次迭代都重新计算整个列表的 tokens (O(n))，循环 O(n) 次 = O(n²)
+        # 解决: 增量计算，追踪当前 token 数，每次只计算被移除消息的 token 数
+        summary_tokens = count_messages_tokens([summary_message])
+        current_tokens = count_messages_tokens(result_messages)
+        kept_count = len(recent_messages)
 
+        while current_tokens > target_limit and len(recent_messages) > 1:
+            removed = recent_messages.pop(0)
+            removed_tokens = count_messages_tokens([removed])
+            current_tokens -= removed_tokens
+            kept_count -= 1
+
+        if current_tokens > target_limit:
+            # 只能保留 summary
             result_messages = [summary_message]
-            break
+            kept_count = 0
+        # ===========================================
+
         return (
             result_messages,
             self._make_compaction_state(
@@ -772,8 +781,8 @@ class ChatEngine:
                 kind="plain",
                 original_count=len(normalized),
                 summarized_count=len(compacted),
-                kept_count=len(recent_messages),
-                summary_count=count_messages_tokens(compacted) - count_messages_tokens([summary_message]),
+                kept_count=kept_count,
+                summary_count=count_messages_tokens(compacted) - summary_tokens,
                 note=f"已压缩 {len(compacted)} 条较早消息",
             ),
             self._make_compaction_cache(
@@ -782,7 +791,7 @@ class ChatEngine:
                 cutoff_index=len(compacted),
                 source_message_count=len(normalized),
                 summarized_count=len(compacted),
-                tail_count=len(recent_messages),
+                tail_count=kept_count,
                 budget_tokens=history_budget,
                 summary_message=summary_message,
             ),
