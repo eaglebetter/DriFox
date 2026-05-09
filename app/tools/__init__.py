@@ -185,10 +185,6 @@ class BuiltinTools(QObject):
     def task_execute_batch(self, tasks: List[Dict], share_context: bool = False):
         return self._task_tools.task_execute_batch(tasks, share_context)
 
-    # def task_wait(self, task_ids: List[str], timeout: int = 1800, poll_interval: float = 0.1):
-    #     # 已禁用，改为自动回调机制
-    #     pass
-
     def task_status(self, task_ids: str = None, with_log: bool = False, with_result: bool = True):
         return self._task_tools.task_status(task_ids, with_log, with_result)
 
