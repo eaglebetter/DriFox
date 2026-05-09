@@ -360,7 +360,7 @@ def get_skill_by_name(name: str) -> dict | None:
     return None
 
 
-class SendableTextEdit(QTextEdit):
+class SendableTextEdit(TextEdit):
     sendMessageRequested = pyqtSignal()
     stopMessageRequested = pyqtSignal()
     clearRequested = pyqtSignal()
@@ -479,6 +479,10 @@ class SendableTextEdit(QTextEdit):
         """)
         self.textChanged.connect(self._on_text_changed)
         self.textChanged.connect(self._on_at_trigger_check)
+
+        # 关闭 qfluentwidgets TextEdit 焦点时的底部高亮
+        if hasattr(self, 'layer'):
+            self.layer.hide()
 
         self._setup_keyboard_shortcuts()
 
@@ -724,24 +728,39 @@ class SendableTextEdit(QTextEdit):
             if extension_path:
                 insert_text += f"\n扩展资源路径: {extension_path}"
 
-            # 获取当前文本和光标位置
-            current_text = self.toPlainText()
+            # 获取当前光标位置
             cursor = self.textCursor()
-
-            # 记录当前光标位置
             cursor_pos = cursor.position()
 
             # 在当前光标位置插入文本
             cursor.insertText(insert_text)
 
-            # 重置光标到插入后的位置（保持在此位置，可以自由移动）
-            cursor.setPosition(cursor_pos + len(insert_text))
-            self.setTextCursor(cursor)
-
             self._on_text_changed()
+            
+            # 计算新的光标位置
+            new_cursor_pos = cursor_pos + len(insert_text)
+            
+            # 关键修复：确保输入框保持焦点，并正确设置光标
+            # 先接受事件
             event.acceptProposedAction()
+            
+            # 使用 QTimer 延迟处理，避免在 dropEvent 处理期间干扰焦点状态
+            QTimer.singleShot(10, lambda: self._restore_input_state(new_cursor_pos))
         else:
             super().dropEvent(event)
+    
+    def _restore_input_state(self, cursor_pos: int):
+        """恢复输入框状态，确保光标可以正常闪烁和移动"""
+        # 确保输入框拥有焦点
+        self.setFocus(Qt.MouseFocusReason)
+        
+        # 重新设置光标位置
+        cursor = self.textCursor()
+        cursor.setPosition(cursor_pos)
+        self.setTextCursor(cursor)
+        
+        # 确保光标可见
+        self.ensureCursorVisible()
 
     def focusInEvent(self, event):
         super().focusInEvent(event)
