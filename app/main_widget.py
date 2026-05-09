@@ -3,12 +3,12 @@ import ctypes
 import gc
 import os
 import time
+import orjson as json
+import sip
+
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any, Optional
-
-import orjson as json
-import sip
 from PyQt5.QtCore import (
     QTimer,
     pyqtSignal,
@@ -53,11 +53,7 @@ from app.core import (
     TopicSummaryTask,
 )
 from app.core.agent import AgentManager
-from app.tool_window import (
-    ToolWindow,
-    DockPosition,
-    DockCategory,
-)
+from app.tool_window import ToolWindow
 from app.utils.config import Settings
 from app.utils.diff_viewer import (
     DiffHtmlGenerator,
@@ -125,10 +121,6 @@ from app.widgets.ui_helpers import add_message_to_layout, refresh_history_card_i
 class OpenAIChatToolWindow(ToolWindow):
     name = "飘狐 DriFox"
     icon = get_icon("drifox")
-    singleton = True
-    default_position = DockPosition.TOP
-    CATEGORIES = [DockCategory.PROJECT]
-    display_order = 30
     session_manager = None
     _valid_configs: Dict[str, Dict[str, Any]] = {}
     history_manager = None
