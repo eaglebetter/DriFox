@@ -27,12 +27,11 @@ from PyQt5.QtWidgets import (
     QButtonGroup, QFrame, QScrollArea,
 )
 from loguru import logger
-from qfluentwidgets import InfoBar, InfoBarPosition
 from qfluentwidgets import (
     setFont,
     FluentIcon,
     SingleDirectionScrollArea,
-    TransparentToolButton, StrongBodyLabel,
+    TransparentToolButton, StrongBodyLabel, InfoBar, InfoBarPosition,
 )
 
 from app.constants import (
@@ -430,7 +429,7 @@ class OpenAIChatToolWindow(ToolWindow):
             # 验证 self 和 homepage 是否有效
             try:
                 if sip.isdeleted(self) or sip.isdeleted(self.homepage):
-                    from qfluentwidgets import InfoBar
+                    
                     InfoBar.error("窗口错误", "主窗口已关闭，无法创建新窗口", parent=self, position=InfoBarPosition.TOP)
                     return
             except Exception:
@@ -510,13 +509,13 @@ class OpenAIChatToolWindow(ToolWindow):
 
             # 在 show() 之前再次检查 popup 是否仍然有效
             if sip.isdeleted(popup):
-                from qfluentwidgets import InfoBar
+                
                 InfoBar.error("复制失败", "窗口创建失败，请重试", parent=self, position=InfoBarPosition.TOP)
                 return
 
             popup.show()
         except Exception as e:
-            from qfluentwidgets import InfoBar
+            
 
             InfoBar.error("复制失败", str(e), parent=self, position=InfoBarPosition.TOP)
 
@@ -580,7 +579,7 @@ class OpenAIChatToolWindow(ToolWindow):
             self._connect_opacity_signal()
             return
         self._session_initialized = True
-
+        QTimer.singleShot(0, self._load_agent_list)
         # 如果有分支数据，延迟调用分支会话处理，避免与 _restore_latest_or_create_session 冲突
         if getattr(self, "_branch_session_data", None):
             QTimer.singleShot(50, self._apply_branch_or_create_session)
@@ -774,7 +773,6 @@ class OpenAIChatToolWindow(ToolWindow):
 
         self._settings_popup = LLMSettingsCard(self)
         self._settings_popup.setVisible(False)
-        self._settings_popup.closed.connect(self._on_settings_closed)
         self._settings_popup.configChanged.connect(self._load_model_configs)
 
         # 连接服务商添加/编辑信号
@@ -1185,11 +1183,6 @@ class OpenAIChatToolWindow(ToolWindow):
         self._settings_popup.raise_()
         self._settings_popup.activateWindow()
 
-    def _on_settings_closed(self):
-        """设置卡片关闭时的回调"""
-        # 可以在这里添加一些清理逻辑
-        pass
-
     def _on_provider_edit_saved(self, provider_name: str, provider_info: dict):
         """服务商编辑保存后的回调"""
         saved_providers = self.cfg.llm_saved_providers.value or {}
@@ -1206,7 +1199,6 @@ class OpenAIChatToolWindow(ToolWindow):
 
         # 刷新配置
         self._load_model_configs()
-        from qfluentwidgets import InfoBar, InfoBarPosition
         InfoBar.success("已保存", f"服务商 '{provider_name}' 已保存", parent=self, duration=2000,
                         position=InfoBarPosition.TOP)
 
@@ -1781,9 +1773,6 @@ class OpenAIChatToolWindow(ToolWindow):
         self._current_agent = agent_name
         self.backend.switch_agent(agent_name)
         self._update_agent_status(agent_name)
-        # 已禁用：切换智能体时不再自动显示介绍卡片
-        # if not getattr(self, "_suppress_agent_intro", False):
-        #     self._show_agent_intro(agent_name)
 
     def _show_agent_intro(self, agent_name: str):
         """显示智能体介绍卡片"""
@@ -2958,9 +2947,7 @@ class OpenAIChatToolWindow(ToolWindow):
         card = MessageCard(
             parent=self,
             role="user",
-            timestamp=timestamp,
-            tag_params=tag_params
-                       or {},
+            timestamp=timestamp
         )
         card._round_index = user_round_index
         card.update_content(content)
@@ -3528,8 +3515,6 @@ class OpenAIChatToolWindow(ToolWindow):
                     result = self.backend.file_recorder.rollback_operations(selected_ops)
                     self._show_undo_result(result)
 
-        user_input = card.get_plain_text()
-        context_tags = card.context_tags.copy()
         if not self._truncate_session_from_user_round(round_index=round_index, card=card):
             return
 
@@ -4695,7 +4680,7 @@ class OpenAIChatToolWindow(ToolWindow):
         if not self.history_manager:
             return
             
-        from qfluentwidgets import InfoBar
+        
         # 后端执行归档
         count = self.history_manager.archive_project(project_name)
         
@@ -4754,7 +4739,7 @@ class OpenAIChatToolWindow(ToolWindow):
             return
         # 数据已经在 MemoryCardContent 中通过 memory_manager 保存
         # 这里只显示提示信息
-        from qfluentwidgets import InfoBar
+        
         InfoBar.success("已保存", "长期记忆已更新", parent=self, duration=1500, position=InfoBarPosition.TOP)
 
     def _on_memory_updated(self, memories: list):
