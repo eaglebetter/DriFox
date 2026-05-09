@@ -173,7 +173,8 @@ class HistoryManager:
 
         self._history_sessions = self._history_sessions[: self._history_limit]
 
-                # 持久化
+        # 持久化到 SQLite
+        self._persist_session(session_record)
 
     def _persist_session(self, session_record: Dict):
         """持久化单个会话（延迟保存）"""

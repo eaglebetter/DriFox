@@ -4820,8 +4820,8 @@ class OpenAIChatToolWindow(ToolWindow):
         else:
             self._hide_main_popups()  # 隐藏其他主面板
             self._memory_card.show()
-            # 刷新数据
-            self._memory_card_popup.load_memories()
+            # 从数据库刷新记忆
+            self._memory_card_popup.refresh_from_db()
 
     def _on_memory_card_saved(self, memories: list):
         """记忆卡片保存后的回调"""
