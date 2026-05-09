@@ -271,9 +271,6 @@ class OpenAIChatToolWindow(ToolWindow):
         # 初始化子智能体管理器
         self._init_sub_agent_manager()
 
-        # 初始化子智能体日志存储
-        self._init_sub_agent_log_store()
-
         # 初始化历史管理器
         self.cfg = Settings.get_instance()
         self._current_project = self.cfg.current_project.value

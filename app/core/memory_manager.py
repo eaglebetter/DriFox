@@ -266,7 +266,7 @@ class MemoryManagerCore:
             memory_data["last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
             with open(self._memory_file, "wb") as f:
-                f.write(json.dumps(memory_data, option=orjson.OPT_INDENT_2))
+                f.write(json.dumps(memory_data, option=json.OPT_INDENT_2))
 
             logger.info(f"[MemoryManager] Memory saved successfully")
             return True

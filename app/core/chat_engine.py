@@ -25,27 +25,11 @@ from app.core.message_content import (
 from app.core.retry_helper import (
     create_api_call_with_retry,
 )
-from app.core.token_estimator import (
-    estimate_tokens,
-    count_messages_tokens,
-)
+from app.core.token_estimator import count_messages_tokens, estimate_tokens
 from app.core.workers import OpenAIChatWorker
 
 MAX_HISTORY_SNIPPET_CHARS = 1200
 RECENT_HISTORY_MIN_MESSAGES = 6
-
-
-def estimate_tokens_from_messages(messages: List[Dict]) -> int:
-    """
-    计算消息列表的 token 总数 (向后兼容接口)
-    """
-    if not messages:
-        return 0
-    return count_messages_tokens(messages)
-
-
-def _normalize_message_content(content: Any) -> str:
-    return content_to_text(content).strip()
 
 
 class ChatEngine:
@@ -362,7 +346,7 @@ class ChatEngine:
         # 预计算每条消息内容的长度比例，用于智能分配配额
         contents = []
         for msg in messages:
-            content = _normalize_message_content(msg.get("content", ""))
+            content = content_to_text(msg.get("content", "")).strip()
             if not content:
                 content = ""
             single_line = " ".join(content.split())
@@ -421,7 +405,7 @@ class ChatEngine:
         transcript_lines = []
         for msg in messages or []:
             role = msg.get("role", "unknown")
-            content = _normalize_message_content(msg.get("content", ""))
+            content = content_to_text(msg.get("content", "")).strip()
             if not content:
                 continue
             single_line = " ".join(content.split())
@@ -544,7 +528,7 @@ class ChatEngine:
         soft_limit = self._get_compaction_soft_limit(history_budget)
         target_limit = self._get_compaction_target_limit(history_budget)
 
-        if estimate_tokens_from_messages(history_messages) <= soft_limit:
+        if count_messages_tokens(history_messages) <= soft_limit:
             return (
                 history_messages,
                 self._make_compaction_state(
@@ -564,7 +548,7 @@ class ChatEngine:
         i = len(history_messages) - 1
         while i >= 0:
             msg = history_messages[i]
-            msg_tokens = estimate_tokens_from_messages([msg])
+            msg_tokens = count_messages_tokens([msg])
             role = msg.get("role")
 
             # 构建当前消息的完整配对集合
@@ -634,7 +618,7 @@ class ChatEngine:
                 original_count=len(history_messages),
                 summarized_count=len(compacted),
                 kept_count=len(recent_messages),
-                summary_count=estimate_tokens_from_messages(compacted) - estimate_tokens_from_messages([summary_message]),
+                summary_count=count_messages_tokens(compacted) - count_messages_tokens([summary_message]),
                 note=f"已压缩 {len(compacted)} 条含工具历史消息",
             ),
             self._make_compaction_cache(
@@ -666,7 +650,7 @@ class ChatEngine:
         if not normalized:
             return [], self._make_compaction_state(), self._make_compaction_cache()
 
-        if estimate_tokens_from_messages(normalized) <= soft_limit:
+        if count_messages_tokens(normalized) <= soft_limit:
             return (
                 normalized,
                 self._make_compaction_state(
@@ -684,7 +668,7 @@ class ChatEngine:
                     cached.get("summary_message"),
                     *normalized[cutoff_index:],
                 ]
-                if estimate_tokens_from_messages(cached_messages) <= soft_limit:
+                if count_messages_tokens(cached_messages) <= soft_limit:
                     summarized_count = int(
                         cached.get("summarized_count", cutoff_index) or cutoff_index
                     )
@@ -724,7 +708,7 @@ class ChatEngine:
         recent_tokens = 0
         min_recent_tokens = int(target_limit * 0.85)
         for msg in reversed(normalized):
-            msg_tokens = estimate_tokens_from_messages([msg])
+            msg_tokens = count_messages_tokens([msg])
             if recent_messages and recent_tokens + msg_tokens > target_limit:
                 break
             recent_messages.insert(0, msg)
@@ -771,7 +755,7 @@ class ChatEngine:
 
         while (
             len(result_messages) > 1
-            and estimate_tokens_from_messages(result_messages) > target_limit
+            and count_messages_tokens(result_messages) > target_limit
         ):
             if len(recent_messages) > 1:
                 recent_messages.pop(0)
@@ -789,7 +773,7 @@ class ChatEngine:
                 original_count=len(normalized),
                 summarized_count=len(compacted),
                 kept_count=len(recent_messages),
-                summary_count=estimate_tokens_from_messages(compacted) - estimate_tokens_from_messages([summary_message]),
+                summary_count=count_messages_tokens(compacted) - count_messages_tokens([summary_message]),
                 note=f"已压缩 {len(compacted)} 条较早消息",
             ),
             self._make_compaction_cache(
@@ -1036,7 +1020,7 @@ class ChatEngine:
 
         messages = self._build_messages(session, llm_config)
         budget_tokens = max(1, self._get_context_budget(llm_config))
-        used_tokens = estimate_tokens_from_messages(messages)
+        used_tokens = count_messages_tokens(messages)
         percent = max(0, min(100, int((used_tokens / budget_tokens) * 100)))
         return {
             "used_tokens": used_tokens,

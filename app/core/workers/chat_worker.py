@@ -3,6 +3,7 @@
 Chat Worker - OpenAI 对话执行器
 """
 
+import copy
 import orjson as json
 import re
 import time
@@ -83,7 +84,6 @@ def _try_fix_malformed_json_arguments(raw_args: str, tool_name: str) -> Tuple[Op
                 content_value = content_value.rstrip('"').rstrip()
 
                 if content_value:
-                    import copy
                     try:
                         test_json = copy.deepcopy(args)
                         test_json["content"] = content_value
