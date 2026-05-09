@@ -707,60 +707,30 @@ class SendableTextEdit(TextEdit):
         else:
             super().keyPressEvent(event)
 
-    def dragEnterEvent(self, event: QDragEnterEvent):
-        if event.mimeData().hasText():
-            event.acceptProposedAction()
-        else:
-            super().dragEnterEvent(event)
+    def insertFromMimeData(self, source):
+        """重写以处理拖放的文本格式化"""
+        if source.hasText():
+            text = source.text()
+            if text and ("file:/" in text or "\n" in text):
+                # 看起来是拖放的文件路径
+                lines = text.split("\n")
+                component_path = lines[0] if lines else ""
+                extension_path = lines[1] if len(lines) > 1 else ""
 
-    def dropEvent(self, event: QDropEvent):
-        text = event.mimeData().text()
-        if text:
-            lines = text.split("\n")
-            component_path = lines[0] if lines else ""
-            extension_path = lines[1] if len(lines) > 1 else ""
+                # 统一去除 file:/ 或 file:/// 前缀
+                component_path = re.sub(r'^file:/{1,3}', '', component_path)
+                extension_path = re.sub(r'^file:/{1,3}', '', extension_path)
 
-            # 统一去除 file:/ 或 file:/// 前缀
-            component_path = re.sub(r'^file:/{1,3}', '', component_path)
-            extension_path = re.sub(r'^file:/{1,3}', '', extension_path)
-
-            insert_text = f"路径: {component_path}"
-            if extension_path:
-                insert_text += f"\n扩展资源路径: {extension_path}"
-
-            # 获取当前光标位置
-            cursor = self.textCursor()
-            cursor_pos = cursor.position()
-
-            # 在当前光标位置插入文本
-            cursor.insertText(insert_text)
-
-            self._on_text_changed()
-            
-            # 计算新的光标位置
-            new_cursor_pos = cursor_pos + len(insert_text)
-            
-            # 关键修复：确保输入框保持焦点，并正确设置光标
-            # 先接受事件
-            event.acceptProposedAction()
-            
-            # 使用 QTimer 延迟处理，避免在 dropEvent 处理期间干扰焦点状态
-            QTimer.singleShot(10, lambda: self._restore_input_state(new_cursor_pos))
-        else:
-            super().dropEvent(event)
-    
-    def _restore_input_state(self, cursor_pos: int):
-        """恢复输入框状态，确保光标可以正常闪烁和移动"""
-        # 确保输入框拥有焦点
-        self.setFocus(Qt.MouseFocusReason)
+                insert_text = f"路径: {component_path}"
+                if extension_path:
+                    insert_text += f"\n扩展资源路径: {extension_path}"
+                
+                # 使用标准的插入方法
+                self.insertPlainText(insert_text)
+                return
         
-        # 重新设置光标位置
-        cursor = self.textCursor()
-        cursor.setPosition(cursor_pos)
-        self.setTextCursor(cursor)
-        
-        # 确保光标可见
-        self.ensureCursorVisible()
+        # 其他情况使用默认处理
+        super().insertFromMimeData(source)
 
     def focusInEvent(self, event):
         super().focusInEvent(event)
