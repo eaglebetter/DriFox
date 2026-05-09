@@ -69,7 +69,7 @@ class MemoryManagerCore:
 
         if use_sqlite:
             try:
-                self._session_store = SessionStore(db_dir=".drifox")
+                self._session_store = SessionStore.get_instance(db_dir=".drifox")
                 if self._session_store.is_initialized:
                     self._use_sqlite = True
                     logger.info("[MemoryManager] SQLite 存储已启用")

@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-import sip
 import ctypes
 import gc
 import os
@@ -9,6 +8,7 @@ from pathlib import Path
 from typing import Dict, List, Any, Optional
 
 import orjson as json
+import sip
 from PyQt5.QtCore import (
     QTimer,
     pyqtSignal,
@@ -64,9 +64,6 @@ from app.utils.diff_viewer import (
     DiffViewerWindow,
 )
 from app.utils.file_operation_recorder import FileOperationRecorder
-from app.utils.history_manager import (
-    HistoryManager,
-)
 from app.utils.utils import get_icon, get_font_family_css
 from app.widgets.base_settings_card import (
     BaseSettingsCard,
@@ -181,6 +178,7 @@ class OpenAIChatToolWindow(ToolWindow):
         )
 
         # 从后端获取组件（前端只负责 UI 逻辑）
+        self.history_manager = self.backend.history_manager
         self.session_store = self.backend.session_store
         self.session_manager = self.backend.session_manager
         self._chat_engine = self.backend.chat_engine
@@ -277,7 +275,9 @@ class OpenAIChatToolWindow(ToolWindow):
         self._init_sub_agent_log_store()
 
         # 初始化历史管理器
-        self._initialize_history_manager()
+        self.cfg = Settings.get_instance()
+        self._current_project = self.cfg.current_project.value
+        self._project_label.setText(self._current_project)
 
         # 应用退出时自动保存
         app = QApplication.instance()
@@ -335,8 +335,6 @@ class OpenAIChatToolWindow(ToolWindow):
         # 初始化子智能体日志存储（在 ChatEngine 之后）
         self._init_sub_agent_log_store()
 
-        self._initialize_history_manager()
-
     def _init_sub_agent_log_store(self):
         """初始化子智能体日志存储"""
         from app.core import SubAgentLogStore
@@ -352,9 +350,6 @@ class OpenAIChatToolWindow(ToolWindow):
         except Exception as e:
             logger.error(f"[LLMChatter] 子智能体日志存储初始化失败: {e}")
 
-        # # 自动启动 LLM API 服务
-        # self._init_llm_api_service()
-
     def _init_llm_api_service(self):
         """初始化 LLM API 服务"""
         from app.utils.config import Settings
@@ -363,8 +358,6 @@ class OpenAIChatToolWindow(ToolWindow):
             APISessionHandler,
             is_service_running,
         )
-
-        setting = Settings.get_instance()
 
         # 注册服务商列表获取回调
         def get_providers_list():
@@ -375,10 +368,10 @@ class OpenAIChatToolWindow(ToolWindow):
         LLMAPIService.set_session_handler(self._api_session_handler)
 
         # 根据配置决定是否启动服务
-        if setting.llm_api_enabled.value:
+        if self.cfg.llm_api_enabled.value:
             if not is_service_running():
                 service = LLMAPIService()
-                service.port = setting.llm_api_port.value
+                service.port = self.cfg.llm_api_port.value
                 service.start(background=True)
         else:
             # 确保服务未启动
@@ -570,9 +563,7 @@ class OpenAIChatToolWindow(ToolWindow):
         selected_name = self._current_provider_name if self._current_provider_name else (
             list(self._valid_configs.keys())[0] if self._valid_configs else "")
 
-        setting = Settings.get_instance()
-
-        saved_providers = setting.llm_saved_providers.value or {}
+        saved_providers = self.cfg.llm_saved_providers.value or {}
         if selected_name in saved_providers:
             return saved_providers[selected_name].copy()
 
@@ -1179,14 +1170,13 @@ class OpenAIChatToolWindow(ToolWindow):
         """从弹窗选中模型后切换"""
         self._current_provider_name = provider_name
         self._current_model_name = model_name
-        setting = Settings.get_instance()
-        setting.set(setting.llm_selected_model, provider_name, save=True)
+        self.cfg.set(self.cfg.llm_selected_model, provider_name, save=True)
 
         # 更新 saved_providers 中的模型名称
-        saved_providers = setting.llm_saved_providers.value or {}
+        saved_providers = self.cfg.llm_saved_providers.value or {}
         if provider_name in saved_providers:
             saved_providers[provider_name]["模型名称"] = model_name
-            setting.set(setting.llm_saved_providers, saved_providers, save=True)
+            self.cfg.set(self.cfg.llm_saved_providers, saved_providers, save=True)
 
         # 更新 _valid_configs 确保 ChatEngine 能读到最新配置
         self._valid_configs[provider_name] = saved_providers.get(provider_name, {}).copy()
@@ -1277,11 +1267,9 @@ class OpenAIChatToolWindow(ToolWindow):
 
     def _on_provider_edit_saved(self, provider_name: str, provider_info: dict):
         """服务商编辑保存后的回调"""
-        from app.utils.config import Settings
-        setting = Settings.get_instance()
-        saved_providers = setting.llm_saved_providers.value or {}
+        saved_providers = self.cfg.llm_saved_providers.value or {}
         saved_providers[provider_name] = provider_info
-        setting.set(setting.llm_saved_providers, saved_providers, save=True)
+        self.cfg.set(self.cfg.llm_saved_providers, saved_providers, save=True)
 
         # 隐藏服务商编辑卡片，显示设置卡片
         self._provider_edit_card.hide()
@@ -1378,9 +1366,8 @@ class OpenAIChatToolWindow(ToolWindow):
     def _load_model_config_to_card(self):
         """加载当前模型配置到卡片（仅参数配置，不显示连接信息）"""
         current_name = self._current_provider_name if self._current_provider_name else "无"
-        setting = Settings.get_instance()
 
-        saved_providers = setting.llm_saved_providers.value or {}
+        saved_providers = self.cfg.llm_saved_providers.value or {}
         provider_config = saved_providers.get(current_name, {})
         custom_vars = getattr(self.homepage, "global_variables", None)
         if current_name in (
@@ -1727,12 +1714,12 @@ class OpenAIChatToolWindow(ToolWindow):
 
         if is_free_provider:
             # 只更新参数，保留连接信息
-            saved_providers = Settings.get_instance().llm_saved_providers.value or {}
+            saved_providers = self.cfg.llm_saved_providers.value or {}
             old_config = saved_providers.get(current_name, self._valid_configs.get(current_name, {}))
             old_config.update(new_config)
             self._valid_configs[current_name] = old_config
             saved_providers[current_name] = old_config
-            Settings.get_instance().set(Settings.get_instance().llm_saved_providers, saved_providers, save=True)
+            self.cfg.set(self.cfg.llm_saved_providers, saved_providers, save=True)
             self._load_model_configs()
             InfoBar.success("已保存", "配置已保存到本地。", parent=self, duration=1500, position=InfoBarPosition.TOP)
         else:
@@ -1763,22 +1750,11 @@ class OpenAIChatToolWindow(ToolWindow):
                 )
 
     def _load_model_configs(self):
-        setting = Settings.get_instance()
-        saved_model = setting.llm_selected_model.value
+        saved_model = self.cfg.llm_selected_model.value
         old_provider = self._current_provider_name
         old_model = self._current_model_name
 
         self._valid_configs.clear()
-
-        setting = Settings.get_instance()
-        default_config = {
-            "模型名称": setting.llm_model.value,
-            "API_KEY": setting.llm_api_key.value,
-            "API_URL": setting.llm_api_base.value,
-            "最大Token": setting.llm_max_tokens.value,
-            "温度": setting.llm_temperature.value,
-            "启用技能": setting.llm_enabled_skills.value,
-        }
         try:
             custom_vars = getattr(self.homepage, "global_variables", None)
             if custom_vars and hasattr(custom_vars, "custom"):
@@ -1790,7 +1766,7 @@ class OpenAIChatToolWindow(ToolWindow):
         except Exception as e:
             logger.error(f"[ERROR] 加载自定义模型配置失败: {e}")
 
-        saved_providers = setting.llm_saved_providers.value or {}
+        saved_providers = self.cfg.llm_saved_providers.value or {}
         for provider_name in saved_providers:
             config = saved_providers[provider_name].copy()
             config.pop("备注", None)
@@ -2140,14 +2116,6 @@ class OpenAIChatToolWindow(ToolWindow):
 
         finally:
             self._is_virtual_recycling = False
-
-    def _initialize_history_manager(self):
-        self.history_manager = HistoryManager()
-        # 从配置加载上次选中的项目
-        from app.utils.config import Settings
-        cfg = Settings.get_instance()
-        self._current_project = cfg.current_project.value
-        self._project_label.setText(self._current_project)
 
     def _restore_latest_session(self) -> bool:
         if not self.history_manager:
@@ -4328,14 +4296,13 @@ class OpenAIChatToolWindow(ToolWindow):
         return None
 
     def _notify_if_inactive(self, title: str, message: str):
-        setting = Settings.get_instance()
-        if not setting.llm_notify_enabled.value:
+        if not self.cfg.llm_notify_enabled.value:
             return
 
         if not self._should_show_inactive_notification():
             return
 
-        sound_type = setting.llm_notify_sound.value
+        sound_type = self.cfg.llm_notify_sound.value
         if sound_type != "none":
             QApplication.beep()
 
@@ -4777,11 +4744,8 @@ class OpenAIChatToolWindow(ToolWindow):
         """切换到选中的项目"""
         self._current_project = project
         self._project_label.setText(project)
-        # 保存到配置
-        from app.utils.config import Settings
-        cfg = Settings.get_instance()
-        cfg.current_project.value = project
-        cfg.save()
+        self.cfg.current_project.value = project
+        self.cfg.save()
         # 刷新历史面板（切换项目过滤）
         self._current_history_project = project
         self._history_popup_card.set_current_project(project)
@@ -4794,10 +4758,8 @@ class OpenAIChatToolWindow(ToolWindow):
         self._current_project = project
         self._project_label.setText(project)
         # 保存到配置
-        from app.utils.config import Settings
-        cfg = Settings.get_instance()
-        cfg.current_project.value = project
-        cfg.save()
+        self.cfg.current_project.value = project
+        self.cfg.save()
         # 刷新历史面板
         self._history_popup_card.refreshRequested.emit()
         # 自动触发新建会话
@@ -4819,10 +4781,8 @@ class OpenAIChatToolWindow(ToolWindow):
                 self._current_project = default_project
                 self._project_label.setText(default_project)
                 # 保存到配置
-                from app.utils.config import Settings
-                cfg = Settings.get_instance()
-                cfg.current_project.value = default_project
-                cfg.save()
+                self.cfg.current_project.value = default_project
+                self.cfg.save()
                 # 创建新会话
                 self._create_new_session()
             else:

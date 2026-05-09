@@ -15,6 +15,7 @@ from app.core.chat_engine import ChatEngine
 from app.core.chat_session import SessionManager, ChatSession
 from app.core.memory_manager import MemoryManagerCore
 from app.core.tool_executor import ToolExecutor
+from app.utils.history_manager import HistoryManager
 
 
 class ChatBackend(QObject):
@@ -64,6 +65,7 @@ class ChatBackend(QObject):
         self._memory_manager: Optional[MemoryManagerCore] = None
         self._sub_agent_manager = None
         self._session_store = None
+        self._history_manager = None
         
         # 配置回调
         self._get_model_config: Optional[Callable] = None
@@ -107,6 +109,10 @@ class ChatBackend(QObject):
     @property
     def session_store(self):
         return self._session_store
+
+    @property
+    def history_manager(self):
+        return self._history_manager
     
     # ========== 初始化 ==========
     
@@ -128,7 +134,7 @@ class ChatBackend(QObject):
         self._get_model_config = get_model_config
         
         # 1. 创建 SessionManager
-        self._session_store = SessionStore()
+        self._session_store = SessionStore.get_instance()
         self._session_manager = SessionManager()
         self._session_manager.create_new_session()
         logger.info("[ChatBackend] SessionManager 创建完成")
@@ -158,6 +164,8 @@ class ChatBackend(QObject):
             get_memory_context=getattr(self, '_build_memory_context', None),
         )
         logger.info("[ChatBackend] ChatEngine 创建完成")
+
+        self._history_manager = HistoryManager()
         
         self._initialized = True
         logger.info("[ChatBackend] 初始化完成")

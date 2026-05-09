@@ -42,7 +42,7 @@ class FileOperationRecorder:
     }
 
     def __init__(self, session_store: Optional[SessionStore] = None):
-        self._session_store = session_store or SessionStore(db_dir=".drifox")
+        self._session_store = session_store or SessionStore.get_instance(db_dir=".drifox")
         self._backup_base_dir = Path(".drifox") / "backups"
 
     def is_tracked_operation(self, tool_name: str) -> bool:

@@ -20,7 +20,7 @@ from pathlib import Path
 from loguru import logger
 from PyQt5.QtCore import QTimer
 
-from app.core import consolidate_messages, content_to_text
+from app.core.message_content import consolidate_messages, content_to_text
 from app.core.store import SessionStore
 from app.utils.utils import serialize_for_json, deserialize_from_json
 
@@ -66,7 +66,7 @@ class HistoryManager:
 
         if use_sqlite:
             try:
-                self._session_store = SessionStore(db_dir=".drifox")
+                self._session_store = SessionStore.get_instance()
                 if self._session_store.is_initialized:
                     self._use_sqlite = True
                     logger.info(f"[HistoryManager] SQLite 存储已启用")
