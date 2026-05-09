@@ -13,6 +13,9 @@ from PyQt5.QtGui import QPixmap
 from PyQt5.QtWidgets import QLabel
 from loguru import logger
 
+from app.widgets import MessageCard
+
+
 __all__ = [
     # 代码保存辅助
     "LANG_EXT_MAP",
@@ -791,7 +794,7 @@ def find_last_assistant_card(chat_layout) -> Any:
         最后一个 assistant 卡片，或 None
     """
     # 延迟导入避免循环依赖
-    from app.widgets.message_card import MessageCard
+    
     
     for i in range(chat_layout.count() - 1, -1, -1):
         item = chat_layout.itemAt(i)
@@ -818,7 +821,7 @@ def count_user_cards_in_layout(chat_layout) -> int:
         用户消息卡片数量
     """
     # 延迟导入避免循环依赖
-    from app.widgets.message_card import MessageCard
+    
     
     count = 0
     for i in range(chat_layout.count()):
@@ -846,7 +849,7 @@ def collect_message_cards_from_layout(
         卡片列表
     """
     # 延迟导入避免循环依赖
-    from app.widgets.message_card import MessageCard
+    
     
     cards = []
     for i in range(chat_layout.count()):
@@ -875,7 +878,7 @@ def collect_user_card_widgets(chat_layout) -> list:
         用户卡片 widget 列表
     """
     # 延迟导入避免循环依赖
-    from app.widgets.message_card import MessageCard
+    
     
     widgets = []
     for i in range(chat_layout.count()):
@@ -1241,8 +1244,6 @@ def find_user_card_at_index(chat_layout, target_index: int) -> Any:
         找到的卡片或 None
     """
     # 延迟导入避免循环依赖
-    from app.widgets.message_card import MessageCard
-    
     pair_index = 0
     for i in range(chat_layout.count()):
         item = chat_layout.itemAt(i)
@@ -1598,8 +1599,6 @@ def create_assistant_card_widget(
     Returns:
         配置好的 MessageCard
     """
-    from app.widgets.message_card import MessageCard
-    
     card = MessageCard(parent=parent, role="assistant", timestamp=timestamp)
     card._round_index = round_index
     # 新创建的assistant卡片肯定在可视区，确保立即渲染

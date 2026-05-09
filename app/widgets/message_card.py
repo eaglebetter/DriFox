@@ -2031,14 +2031,12 @@ class MessageCard(SimpleCardWidget):
             role: str,
             timestamp: str = None,
             parent=None,
-            tag_params: dict = None,
             error: bool = False,
             reasoning_content: str = "",
     ):
         super().__init__(parent)
         self.parent = parent
         self.role = role
-        self.context_tags = tag_params or {}
         self.timestamp = timestamp or datetime.now().strftime("%Y-%m-%d %H:%M")
         self.error = error
         self._interactive_options: List[dict] = []
@@ -2463,7 +2461,7 @@ class MessageCard(SimpleCardWidget):
         if self.role == "welcome":
             horizontal_margin = 20
         elif self.role == "user":
-            horizontal_margin = 120
+            horizontal_margin = 180
         else:
             horizontal_margin = 72
 
@@ -2824,7 +2822,6 @@ class MessageCard(SimpleCardWidget):
         self._content_data = None
         self._reasoning_blocks = None
         self._interactive_options = []
-        self.context_tags = {}
 
     def closeEvent(self, e):
         self.cleanup()
@@ -2873,7 +2870,7 @@ def create_welcome_card(
             if recent:
                 title = escape(recent.get("title", "未命名会话"))
                 session_id = escape(recent.get("session_id", ""))
-                last_time = escape(recent.get("last_time", ""))
+                last_time = escape(recent.get("last_time") or "")
                 left_cell = f'<span class="context-tag session-tag" data-type="session" data-session-id="{session_id}" data-action="session">{title}<span class="session-time">{last_time}</span></span>'
             else:
                 left_cell = "-"

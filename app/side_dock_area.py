@@ -550,15 +550,6 @@ class ToolPopupDialog(QDialog):
         self.deleteLater()
         super().closeEvent(event)
 
-    def eventFilter(self, obj, event):
-        if obj == self._popup_btn and event.type() == QEvent.Enter:
-            self._popup_btn.setStyleSheet(
-                "background-color: #e81123; border-radius: 4px;"
-            )
-        elif obj == self._popup_btn and event.type() == QEvent.Leave:
-            self._popup_btn.setStyleSheet("")
-        return super().eventFilter(obj, event)
-
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)

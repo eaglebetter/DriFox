@@ -8,11 +8,15 @@ import orjson as json
 import re
 from html import escape
 
-# 预编译正则表达式
+# 预编译正则表达式（模块级别缓存，避免重复编译）
 _CODE_BLOCK_PATTERN = re.compile(r"```[\w]*\n")
 _CODE_BLOCK_FINAL_PATTERN = re.compile(r"```")
 # 匹配 HTML 代码块标签
 _HTML_CODE_BLOCK_PATTERN = re.compile(r"<(pre|code)[^>]*>.*?</\1>", re.DOTALL | re.IGNORECASE)
+# HTML 标签清理正则（避免每次调用 re.sub）
+_HTML_TAG_PATTERN = re.compile(r"<[^>]+>")
+# Null 字符清理（编译一次，多次使用）
+_NULL_CHAR = '\x00'  # 避免 str.replace 被重复调用
 
 
 def format_tool_block(
@@ -52,10 +56,10 @@ def _escape_text_for_plain(text: str) -> str:
     text = _CODE_BLOCK_FINAL_PATTERN.sub("", text)
     # 3. 移除独立的反引号
     text = text.replace("`", "")
-    # 4. 移除 HTML 标签（用于清理残留的 HTML 标记）
-    text = re.sub(r"<[^>]+>", "", text)
+    # 4. 移除 HTML 标签（使用预编译正则）
+    text = _HTML_TAG_PATTERN.sub("", text)
     # 5. 移除可能造成渲染问题的特殊空白字符
-    text = text.replace("\x00", "")  # 移除 null 字符
+    text = text.replace(_NULL_CHAR, "")  # 移除 null 字符
     # 6. 规范化换行符并转义为字面量（用于不支持多行的显示）
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     text = text.replace("\n", "\\n")  # 换行符转为字面量 \n

@@ -6,7 +6,7 @@ from PyQt5.QtCore import QObject
 from app.core.message_content import consolidate_messages
 
 # 默认最大缓存会话数（内存中同时保留的会话）
-DEFAULT_MAX_CACHED_SESSIONS = 5
+DEFAULT_MAX_CACHED_SESSIONS = 15
 
 
 class ChatSession:
