@@ -708,7 +708,7 @@ class SendableTextEdit(TextEdit):
             super().keyPressEvent(event)
 
     def insertFromMimeData(self, source):
-        """重写以处理拖放的文本格式化"""
+        """重写以处理拖放的文本格式化和高亮"""
         if source.hasText():
             text = source.text()
             if text and ("file:/" in text or "\n" in text):
@@ -721,12 +721,51 @@ class SendableTextEdit(TextEdit):
                 component_path = re.sub(r'^file:/{1,3}', '', component_path)
                 extension_path = re.sub(r'^file:/{1,3}', '', extension_path)
 
+                # 保存默认格式
+                cursor = self.textCursor()
+                default_format = QTextCharFormat()  # 创建干净的默认格式
+                
+                # 先插入一个空格占位符，用默认格式
+                cursor.insertText(" ", default_format)
+                
+                # 准备要插入的文件路径文本
                 insert_text = f"路径: {component_path}"
                 if extension_path:
                     insert_text += f"\n扩展资源路径: {extension_path}"
                 
-                # 使用标准的插入方法
-                self.insertPlainText(insert_text)
+                # 记录文件路径的起始位置
+                path_start = cursor.position()
+                
+                # 插入文件路径文本
+                cursor.insertText(insert_text)
+                
+                # 记录文件路径的结束位置
+                path_end = cursor.position()
+                
+                # 高亮显示拖入的文件路径
+                cursor.setPosition(path_start)
+                cursor.setPosition(path_end, QTextCursor.KeepAnchor)
+                
+                # 创建高亮格式 - 使用和技能一样的金色
+                highlight_format = QTextCharFormat()
+                highlight_format.setForeground(QColor("#C9A85C"))
+                highlight_format.setFontWeight(700)
+                cursor.setCharFormat(highlight_format)
+                
+                # 最后再插入一个空格，用默认格式
+                cursor.setPosition(path_end)
+                cursor.clearSelection()
+                cursor.insertText(" ", default_format)
+                
+                # 确保光标在最后，使用默认格式
+                final_pos = cursor.position()
+                cursor.setPosition(final_pos)
+                cursor.setCharFormat(default_format)
+                self.setTextCursor(cursor)
+                
+                # 确保输入框有焦点
+                self.setFocus(Qt.OtherFocusReason)
+                
                 return
         
         # 其他情况使用默认处理
