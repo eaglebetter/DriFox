@@ -589,14 +589,11 @@ class OpenAIChatToolWindow(ToolWindow):
             return
         self._session_initialized = True
 
-        workflow_name = getattr(self.homepage, "workflow_name", None)
-        QTimer.singleShot(0, self._load_agent_list)
-
         # 如果有分支数据，延迟调用分支会话处理，避免与 _restore_latest_or_create_session 冲突
         if getattr(self, "_branch_session_data", None):
             QTimer.singleShot(50, self._apply_branch_or_create_session)
         else:
-            QTimer.singleShot(0, self._restore_latest_or_create_session)
+            QTimer.singleShot(0, self._create_new_session)
 
         QTimer.singleShot(100, self._load_model_configs)
         self._connect_opacity_signal()
@@ -652,15 +649,6 @@ class OpenAIChatToolWindow(ToolWindow):
         if self._provider_edit_card:
             self._provider_edit_card.set_opacity(opacity)
 
-    def _restore_latest_or_create_session(self):
-        # 如果是新复制的窗口，跳过历史会话恢复
-        if getattr(self, "_skip_restore_history", False):
-            self._create_new_session()
-            return
-        if self._restore_latest_session():
-            return
-        self._create_new_session()
-
     def _apply_branch_or_create_session(self):
         """处理分支会话或创建新会话"""
         branch_data = getattr(self, "_branch_session_data", None)
@@ -714,58 +702,6 @@ class OpenAIChatToolWindow(ToolWindow):
         # 滚动到底部
         QTimer.singleShot(50, self._scroll_to_bottom)
         QTimer.singleShot(150, self._scroll_to_bottom)
-
-    def _create_new_session(self):
-        # 停止当前对话并清理
-        if self._is_streaming and self._chat_engine:
-            self._chat_engine.stop()
-            self._is_streaming = False
-            self._toggle_send_stop(False)
-        elif self._chat_engine:
-            # 即使不在流式输出，也要清理 worker
-            self._chat_engine.cleanup_worker()
-
-        try:
-            self._auto_save_current_session()
-        except Exception:
-            logger.exception(
-                "Failed to auto-save current session before creating a new one"
-            )
-
-        # 保存后清理旧会话的内存（messages 列表是主要内存消耗）
-        old_session = self.session_manager.get_current_session()
-        old_session_id = self._current_session_id
-
-        # 切换会话前彻底清理卡片
-        self._cache_current_session_cards()
-        # 只重置会话状态，保留 tool_executor
-        if self.backend.tool_executor:
-            self._tool_executor.reset_session_state()
-
-        session = self.session_manager.create_new_session()
-        self._current_session_id = session.session_id
-        self._history_preview_messages = None
-        self._clear_chat_area()
-
-        # 清理旧会话的消息数据，释放内存（会话已保存到历史记录）
-        if old_session and old_session_id:
-            old_session.messages = []
-            old_session.compaction_state = {}
-            old_session.compaction_cache = {}
-
-        self.title_edit.setText("新对话")
-        self.node_preview.clear_nodes()
-        if self._todo_floating_widget:
-            self._todo_floating_widget.clear()
-        if self.backend.tool_executor:
-            self.backend.clear_todo_list()
-            self._tool_executor.set_session_context(self._current_session_id)
-        if self._question_floating_widget:
-            self._question_floating_widget.clear()
-        self._question_tool_call_id = None
-        self._load_agent_list()
-        QTimer.singleShot(0, self._show_initial_welcome)
-        self._refresh_context_usage_indicator()
 
     def setup_ui(self):
         layout = QVBoxLayout(self)

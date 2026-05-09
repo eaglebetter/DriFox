@@ -126,7 +126,7 @@ def main():
     chat_window._skip_restore_history = True
 
     # 延迟初始化会话
-    QTimer.singleShot(100, chat_window._restore_latest_or_create_session)
+    QTimer.singleShot(100, chat_window._create_new_session)
 
     popup.show()
 
