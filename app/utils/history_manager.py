@@ -60,6 +60,21 @@ class HistoryManager:
         # 初始化存储
         self._init_storage()
 
+    def _deduplicate_history_sessions(self):
+        """去重历史会话列表，保持最新的一个"""
+        seen_ids = set()
+        unique_sessions = []
+        # 倒序遍历，保留最新的（后面的是更新的）
+        for session in reversed(self._history_sessions):
+            session_id = session.get("session_id")
+            if session_id not in seen_ids:
+                seen_ids.add(session_id)
+                unique_sessions.insert(0, session)  # 插回开头保持顺序
+        removed = len(self._history_sessions) - len(unique_sessions)
+        if removed > 0:
+            logger.warning(f"[HistoryManager] 移除了 {removed} 个重复会话")
+        self._history_sessions = unique_sessions
+
     def _init_storage(self):
         """初始化存储层"""
         use_sqlite = os.environ.get("LLM_SESSION_SQLITE", "1") == "1"
@@ -73,6 +88,9 @@ class HistoryManager:
 
                     # 从 SQLite 加载
                     self._history_sessions = self._session_store.get_sessions(limit=500)
+
+                    # 去重
+                    self._deduplicate_history_sessions()
 
                     # 检查是否需要迁移旧 JSON 数据
                     self._migrate_if_needed()
@@ -282,6 +300,9 @@ class HistoryManager:
 
     def get_history_list(self, project: str = None) -> List[Dict]:
         """获取历史会话列表，可选按项目过滤，按最后对话时间排序"""
+        # 先去重
+        self._deduplicate_history_sessions()
+        
         sessions = self._history_sessions
         if project:
             sessions = [s for s in sessions if s.get("project", "默认项目") == project]
