@@ -69,11 +69,10 @@ class ToolExecutor:
             pass
         return True
 
-    @property
-    def todo_list(self):
-        """获取待办事项列表"""
+    def get_todos(self):
+        """获取待办事项列表（返回副本）"""
         if self._builtin_tools:
-            return self._builtin_tools.todo_list
+            return self._builtin_tools.get_todos()
         return []
 
     def clear_todo_list(self):

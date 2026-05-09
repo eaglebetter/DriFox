@@ -2873,7 +2873,7 @@ def create_welcome_card(
             if recent:
                 title = escape(recent.get("title", "未命名会话"))
                 session_id = escape(recent.get("session_id", ""))
-                last_time = escape(recent.get("last_time", ""))
+                last_time = escape(recent.get("last_time") or "")
                 left_cell = f'<span class="context-tag session-tag" data-type="session" data-session-id="{session_id}" data-action="session">{title}<span class="session-time">{last_time}</span></span>'
             else:
                 left_cell = "-"

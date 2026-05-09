@@ -72,8 +72,7 @@ class HistoryManager:
                     logger.info(f"[HistoryManager] SQLite 存储已启用")
 
                     # 从 SQLite 加载
-                    self._history_sessions = self._session_store.load_sessions(
-                    )
+                    self._history_sessions = self._session_store.get_sessions(limit=500)
 
                     # 检查是否需要迁移旧 JSON 数据
                     self._migrate_if_needed()

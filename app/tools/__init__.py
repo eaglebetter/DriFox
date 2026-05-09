@@ -69,13 +69,9 @@ class BuiltinTools(QObject):
     def task_tools(self):
         return self._task_tools
 
-    @property
-    def todo_list(self):
-        return self._task_tools._todo_list
-
-    @property
-    def canvas_tools(self):
-        return self._canvas_tools
+    def get_todos(self):
+        """获取待办事项列表（返回副本，防止外部直接修改内部状态）"""
+        return list(self._task_tools._todo_list)
 
     @property
     def diagnostics_tools(self):

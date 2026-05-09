@@ -4196,7 +4196,7 @@ class OpenAIChatToolWindow(ToolWindow):
             self._tool_floating_widget.finish_tool(content[:200], success)
 
         if tool_name in ("todowrite", "todoread"):
-            todos = self.backend.todo_list
+            todos = self.backend.get_todos()
             self._todo_floating_widget.update_todos(todos)
             self._todo_floating_widget.setVisible(True)
 

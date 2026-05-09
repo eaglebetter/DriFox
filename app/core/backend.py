@@ -248,11 +248,10 @@ class ChatBackend(QObject):
         if self._tool_executor:
             self._tool_executor.clear_todo_list()
     
-    @property
-    def todo_list(self):
-        """获取待办列表"""
+    def get_todos(self):
+        """获取待办列表（返回副本）"""
         if self._tool_executor:
-            return self._tool_executor.todo_list
+            return self._tool_executor.get_todos()
         return []
     
     @property

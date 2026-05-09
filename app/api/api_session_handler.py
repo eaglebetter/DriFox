@@ -112,7 +112,7 @@ class APIHistoryManager:
         """从 SQLite 加载会话到内存"""
         if self._session_store and self._session_store.is_initialized:
             try:
-                self._api_sessions = self._session_store.load_sessions(limit=100)
+                self._api_sessions = self._session_store.get_sessions(limit=100)
                 logger.debug(f"[APIHistoryManager] 从 SQLite 加载 {len(self._api_sessions)} 条会话")
             except Exception as e:
                 logger.error(f"[APIHistoryManager] 加载失败: {e}")
