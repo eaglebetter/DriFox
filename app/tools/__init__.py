@@ -436,7 +436,8 @@ def get_builtin_tools_schema(agent_manager=None) -> List[Dict]:
             "type": "function",
             "function": {
                 "name": "read",
-                "description": "读取文件内容。可选带行号输出方便定位编辑。",
+                "description": "读取文件内容，返回指定范围的代码片段。",
+                            # 注意：编辑时请从原始代码复制 oldString，不要包含行号前缀
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -453,7 +454,7 @@ def get_builtin_tools_schema(agent_manager=None) -> List[Dict]:
                         },
                         "show_line_numbers": {
                             "type": "boolean",
-                            "description": "是否显示行号，用于定位编辑",
+                            "description": "是否显示行号（不建议在编辑时使用，可能导致 oldString 匹配失败）",
                             "default": False,
                         },
                     },

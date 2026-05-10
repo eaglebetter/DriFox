@@ -7,7 +7,6 @@ from datetime import datetime
 from typing import Dict, List, Optional, Any, Callable
 
 from loguru import logger
-from openai import OpenAI
 
 from app.core.permission_cache import PermissionCache
 from app.core.provider_profile import (
@@ -21,16 +20,10 @@ from app.core.chat_session import (
 from app.utils.config import Settings
 from app.core.message_content import (
     consolidate_messages,
-    content_to_text,
-)
-from app.core.retry_helper import (
-    create_api_call_with_retry,
 )
 from app.core.token_estimator import count_messages_tokens, estimate_tokens
 from app.core.workers import OpenAIChatWorker
-
-MAX_HISTORY_SNIPPET_CHARS = 1200
-RECENT_HISTORY_MIN_MESSAGES = 6
+from app.core.history_compactor import HistoryCompactor
 
 
 class ChatEngine:
@@ -65,64 +58,15 @@ class ChatEngine:
         self._worker_callbacks = worker_callbacks or {}
         self._api_mode = api_mode
         
-        # ========== 性能优化：HTTP 客户端和配置缓存 ==========
-        self._compaction_http_client: Optional[OpenAI] = None  # 压缩摘要专用客户端
-        self._compaction_cache_config: Optional[str] = None  # 缓存配置标识
+        self._compactor = HistoryCompactor(
+            get_model_config=get_model_config,
+            agent_manager=agent_manager,
+        )
 
-    def _make_compaction_state(
-        self,
-        active: bool = False,
-        source: str = "history",
-        kind: str = "",
-        original_count: int = 0,
-        summarized_count: int = 0,
-        kept_count: int = 0,
-        summary_count: int = 0,
-        note: str = "",
-    ) -> Dict[str, Any]:
-        return {
-            "active": bool(active),
-            "source": source,
-            "kind": kind,
-            "original_count": int(original_count or 0),
-            "summarized_count": int(summarized_count or 0),
-            "kept_count": int(kept_count or 0),
-            "summary_count": int(summary_count or 0),
-            "note": note or "",
-        }
-
-    def _make_compaction_cache(
-        self,
-        active: bool = False,
-        kind: str = "",
-        cutoff_index: int = 0,
-        source_message_count: int = 0,
-        summarized_count: int = 0,
-        tail_count: int = 0,
-        budget_tokens: int = 0,
-        summary_message: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
-        return {
-            "active": bool(active),
-            "kind": kind or "",
-            "cutoff_index": int(cutoff_index or 0),
-            "source_message_count": int(source_message_count or 0),
-            "summarized_count": int(summarized_count or 0),
-            "tail_count": int(tail_count or 0),
-            "budget_tokens": int(budget_tokens or 0),
-            "summary_message": dict(summary_message)
-            if isinstance(summary_message, dict)
-            else None,
-            "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            if active
-            else "",
-        }
-
-    def _get_compaction_soft_limit(self, history_budget: int) -> int:
-        return max(1, int(history_budget * 0.7))
-
-    def _get_compaction_target_limit(self, history_budget: int) -> int:
-        return max(1, int(history_budget * 0.5))
+    @property
+    def compactor(self) -> 'HistoryCompactor':
+        """暴露压缩器供外部使用（如工具迭代中压缩）"""
+        return self._compactor
 
     def _get_agent_manager(self):
         return self._agent_manager
@@ -202,448 +146,6 @@ class ChatEngine:
             self._permission_cache.deny(tool_name)
         else:
             self._permission_cache.clear_session()
-
-    def _adaptive_truncate_content(
-        self,
-        content: str,
-        position: int,
-        total: int,
-        target_total_length: Optional[int] = None,
-        min_keep_ratio: float = 0.2,
-        max_keep_ratio: float = 0.7,
-        max_keep_length: int = 1000,
-        content_ratios: Optional[List[float]] = None,
-    ) -> str:
-        """
-        根据消息位置自适应截断内容。
-
-        遗忘曲线模型：越久远的消息截断越多，保留越少；
-        越近的消息截断越少，保留越多。
-
-        Args:
-            content: 原始内容
-            position: 消息在列表中的索引（0=最旧）
-            total: 消息总数
-            target_total_length: 目标总长度（上下文限制的60%-70%）
-            min_keep_ratio: 最旧消息的最小保留比例（默认15%）
-            max_keep_ratio: 最新消息的最大保留比例（默认65%）
-            max_keep_length: 最大保留长度（默认1000，防止工具结果过长）
-            content_ratios: 预计算的内容比例列表（用于整体调整）
-
-        Returns:
-            截断后的内容，保留首尾关键信息
-        """
-        content_len = len(content)
-
-        # 如果内容本身就小于等于 max_keep_length，不截断
-        if content_len <= max_keep_length:
-            return content
-
-        keep_length: int
-
-        # 自适应模式：根据目标总长度分配每条消息的配额
-        # 每条消息的配额需要根据位置和内容比例调整
-
-        # 计算基础配额
-        base_quota = target_total_length / total
-
-        # 根据位置计算权重（遗忘曲线，指数衰减）
-        position_ratio = position / max(total - 1, 1)
-        # 使用平方根让曲线更平滑，避免极端值
-        weight = min_keep_ratio + (max_keep_ratio - min_keep_ratio) * (position_ratio ** 0.5)
-
-        # 计算该消息的目标配额
-        target_quota = base_quota * weight
-
-        # 如果有内容比例参考，进行调整
-        if content_ratios and len(content_ratios) == total:
-            # 长内容多分配，短内容少分配（按比例）
-            msg_ratio = content_ratios[position]
-            avg_ratio = 1.0 / total
-            # 调整系数：长内容适当多给，短内容适当少给
-            ratio_factor = 0.5 + 0.5 * (msg_ratio / max(avg_ratio, 0.001))
-            target_quota *= ratio_factor
-        keep_length = int(target_quota)
-
-        # 应用 max_keep_length 限制
-        keep_length = min(keep_length, max_keep_length)
-
-        # 最少保留 20 字符
-        keep_length = max(keep_length, 20)
-
-        # 如果计算出的保留长度大于等于内容长度，不截断
-        if keep_length >= content_len:
-            return content
-
-        # 首尾保留策略：保留前40%和后40%
-        head_ratio = 0.4
-        head_length = int(keep_length * head_ratio)
-        tail_length = int(keep_length * head_ratio)
-
-        head = content[:head_length]
-        tail = content[-tail_length:] if tail_length > 0 else ""
-
-        return f"{head}...[{keep_length}字]...{tail}"
-
-    def _summarize_compacted_messages(
-        self,
-        messages: List[Dict[str, str]],
-        allow_llm_summary: bool = False,
-        history_budget: Optional[int] = None,
-    ) -> str:
-        if not messages:
-            return ""
-
-        llm_summary = ""
-        if allow_llm_summary:
-            llm_summary = self._summarize_compacted_messages_with_agent(messages)
-        if llm_summary:
-            return llm_summary
-
-        summary_lines = [
-            "## Earlier Conversation Summary",
-            "以下是为节省上下文窗口而压缩的较早对话，请把它当作已确认的历史上下文继续工作。",
-        ]
-
-        total_messages = len(messages)
-
-        # 预计算每条消息内容的长度比例，用于智能分配配额
-        contents = []
-        for msg in messages:
-            content = content_to_text(msg.get("content", "")).strip()
-            if not content:
-                content = ""
-            single_line = " ".join(content.split())
-            contents.append(single_line)
-
-        total_content_length = sum(len(c) for c in contents)
-        content_ratios = [
-            len(c) / total_content_length if total_content_length > 0 else 1 / total_messages
-            for c in contents
-        ]
-
-        # 计算目标总长度（上下文限制的60%-70%）
-        target_total_length: Optional[int] = None
-        if history_budget is not None and history_budget > 0:
-            target_total_length = int(history_budget * 0.6)
-
-        for idx, msg in enumerate(messages):
-            role = msg.get("role")
-            content = contents[idx] if idx < len(contents) else ""
-
-            # 自适应截断：越旧的消息截断越多
-            content = self._adaptive_truncate_content(
-                content,
-                position=idx,
-                total=total_messages,
-                target_total_length=target_total_length,
-                content_ratios=content_ratios if total_content_length > 1000 else None,
-            )
-
-            if role == "user":
-                summary_lines.append("# User")
-                summary_lines.append(f"{content}")
-            elif role == "assistant":
-                summary_lines.append("# Assistant")
-                summary_lines.append(f"{content}")
-            elif role == "tool":
-                tool_name = msg.get("name", "")
-                summary_lines.append("# Tool")
-                args = self._adaptive_truncate_content(
-                    json.dumps(msg.get("arguments", "")),
-                    position=idx,
-                    total=total_messages,
-                    target_total_length=target_total_length,
-                    content_ratios=content_ratios if total_content_length > 1000 else None,
-                )
-                summary_lines.append(f"{tool_name}:\n args:{args}\nresult:{content}")
-
-        summary_lines.append(
-            "### Compression Note\n如果后续细节与当前上下文冲突，以最近保留的原始消息和最新任务状态为准。"
-        )
-        return "\n".join(summary_lines)
-
-    def _build_compaction_agent_messages(
-        self, messages: List[Dict[str, Any]]
-    ) -> List[Dict[str, str]]:
-        transcript_lines = []
-        for msg in messages or []:
-            role = msg.get("role", "unknown")
-            content = content_to_text(msg.get("content", "")).strip()
-            if not content:
-                continue
-            single_line = " ".join(content.split())
-            if role == "tool":
-                tool_name = msg.get("name") or msg.get("tool_call_id") or "tool"
-                transcript_lines.append(f"[tool:{tool_name}] {single_line[:1200]}")
-            else:
-                transcript_lines.append(f"[{role}] {single_line[:1200]}")
-
-        prompt = (
-            "请压缩下面的较早对话，使后续模型可以继续当前编码任务。\n\n"
-            "输出要求：\n"
-            "1. 使用 Markdown。\n"
-            "2. 优先保留：任务目标、已完成工作、关键文件/模块、关键工具结果、当前剩余问题。\n"
-            "3. 不要只重复用户原始提问。\n"
-            "4. 删除寒暄、重复探索、低价值调试细节。\n"
-            "5. 如果信息不足，不要编造。\n\n"
-            "【待压缩对话】\n" + "\n".join(transcript_lines)
-        )
-
-        system_prompt = ""
-        if self._agent_manager and self._agent_manager.get_agent("compaction"):
-            system_prompt = self._agent_manager.get_agent_system_prompt("compaction")
-        if not system_prompt:
-            system_prompt = (
-                "你是一个上下文压缩专家，负责提炼后续继续执行编码任务所需的摘要。"
-            )
-
-        return [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": prompt},
-        ]
-
-    def _summarize_compacted_messages_with_agent(
-        self, messages: List[Dict[str, Any]]
-    ) -> str:
-        if not messages:
-            return ""
-
-        llm_config = self._get_model_config() or {}
-        api_key = str(llm_config.get("API_KEY", "") or "").strip()
-        base_url = llm_config.get("API_URL") or None
-        auth_type = llm_config.get("认证方式", "bearer")
-        if not api_key and auth_type != "none":
-            return ""
-
-        compaction_config = {}
-        if self._agent_manager and self._agent_manager.get_agent("compaction"):
-            compaction_config = self._agent_manager.get_agent_config("compaction")
-
-        model = str(
-            compaction_config.get("model") or llm_config.get("模型名称", "gpt-4o")
-        )
-        
-        # 性能优化：复用 HTTP 客户端
-        client = self._get_compaction_http_client(api_key, base_url, auth_type)
-
-        req_kwargs: Dict[str, Any] = {
-            "model": model,
-            "messages": self._build_compaction_agent_messages(messages),
-            "stream": False,
-            "max_tokens": 1200,
-        }
-        temperature = compaction_config.get("temperature")
-        if temperature is not None:
-            req_kwargs["temperature"] = temperature
-        top_p = compaction_config.get("top_p")
-        if top_p is not None:
-            req_kwargs["top_p"] = top_p
-
-        try:
-
-            def create_task():
-                return client.chat.completions.create(**req_kwargs)
-
-            resp = create_api_call_with_retry(client, create_task)
-            content = (resp.choices[0].message.content or "").strip()
-            return content
-        except Exception as exc:
-            logger.warning(
-                f"[Compaction] Agent summarization failed, fallback to heuristic: {exc}"
-            )
-            return ""
-    
-    def _get_compaction_http_client(self, api_key: str, base_url: str, auth_type: str) -> OpenAI:
-        """获取或创建压缩摘要专用的 HTTP 客户端（复用）"""
-        config_key = f"{auth_type}:{api_key[:8]}:{base_url}"
-        
-        if (self._compaction_http_client is not None and 
-            self._compaction_cache_config == config_key):
-            return self._compaction_http_client
-        
-        self._compaction_http_client = OpenAI(
-            api_key=api_key if api_key and auth_type != "none" else "dummy",
-            base_url=base_url,
-            timeout=60.0,
-        )
-        self._compaction_cache_config = config_key
-        return self._compaction_http_client
-
-    def _compact_history_messages(
-        self,
-        history_messages: List[Dict[str, Any]],
-        history_budget: int,
-        existing_cache: Optional[Dict[str, Any]] = None,
-        allow_llm_summary: bool = False,
-    ) -> tuple[List[Dict[str, Any]], Dict[str, Any], Dict[str, Any]]:
-        if not history_messages or history_budget <= 0:
-            return [], self._make_compaction_state(), self._make_compaction_cache()
-
-        normalized = consolidate_messages(history_messages)
-        soft_limit = self._get_compaction_soft_limit(history_budget)
-        target_limit = self._get_compaction_target_limit(history_budget)
-
-        if not normalized:
-            return [], self._make_compaction_state(), self._make_compaction_cache()
-
-        if count_messages_tokens(normalized) <= soft_limit:
-            return (
-                normalized,
-                self._make_compaction_state(
-                    original_count=len(normalized),
-                    kept_count=len(normalized),
-                ),
-                self._make_compaction_cache(),
-            )
-
-        cached = existing_cache or {}
-        if cached.get("active") and cached.get("summary_message"):
-            cutoff_index = int(cached.get("cutoff_index", 0) or 0)
-            if 0 < cutoff_index <= len(normalized):
-                cached_messages = [
-                    cached.get("summary_message"),
-                    *normalized[cutoff_index:],
-                ]
-                if count_messages_tokens(cached_messages) <= soft_limit:
-                    summarized_count = int(
-                        cached.get("summarized_count", cutoff_index) or cutoff_index
-                    )
-                    tail_count = len(normalized) - cutoff_index
-                    return (
-                        cached_messages,
-                        self._make_compaction_state(
-                            active=True,
-                            source="history",
-                            kind=str(cached.get("kind", "plain") or "plain"),
-                            original_count=len(normalized),
-                            summarized_count=summarized_count,
-                            kept_count=tail_count,
-                            summary_count=1,
-                            note=f"复用已压缩摘要，覆盖 {summarized_count} 条较早消息",
-                        ),
-                        self._make_compaction_cache(
-                            active=True,
-                            kind=str(cached.get("kind", "plain") or "plain"),
-                            cutoff_index=cutoff_index,
-                            source_message_count=len(normalized),
-                            summarized_count=summarized_count,
-                            tail_count=tail_count,
-                            budget_tokens=history_budget,
-                            summary_message=cached.get("summary_message"),
-                        ),
-                    )
-
-        if not history_messages or history_budget <= 0:
-            return [], self._make_compaction_state(), self._make_compaction_cache()
-
-        soft_limit = self._get_compaction_soft_limit(history_budget)
-        target_limit = self._get_compaction_target_limit(history_budget)
-
-        if count_messages_tokens(history_messages) <= soft_limit:
-            return (
-                history_messages,
-                self._make_compaction_state(
-                    original_count=len(history_messages),
-                    kept_count=len(history_messages),
-                ),
-                self._make_compaction_cache(),
-            )
-
-        # 从后向前收集 recent_messages，确保不拆分 tool_calls 配对
-        recent_messages: List[Dict[str, Any]] = []
-        recent_tokens = 0
-
-        # 跟踪当前未完成的 tool 响应（assistant 的 tool_result）
-        pending_tool_results: set = set()
-
-        i = len(history_messages) - 1
-        while i >= 0:
-            msg = history_messages[i]
-            msg_tokens = count_messages_tokens([msg])
-            role = msg.get("role")
-
-            # 构建当前消息的完整配对集合
-            if role == "assistant":
-                # 收集这个 assistant 消息发起的 tool_calls
-                tool_calls = msg.get("tool_calls", [])
-                for tc in tool_calls:
-                    if tc.get("id") in pending_tool_results:
-                        pending_tool_results.discard(tc.get("id"))
-
-            elif role == "tool":
-                pending_tool_results.add(msg.get("tool_call_id"))
-
-            # 把消息加入 recent（从后向前插入）
-            recent_messages.insert(0, msg)
-            recent_tokens += msg_tokens
-
-            # 检查 token 限制
-            token_exceeded = (
-                recent_messages
-                and recent_tokens + msg_tokens > target_limit
-            )
-
-            # 如果 token 超限且不会拆分配对，则停止
-            if token_exceeded and not pending_tool_results:
-                break
-
-            i -= 1
-
-        if len(recent_messages) == len(history_messages):
-            return (
-                recent_messages,
-                self._make_compaction_state(
-                    original_count=len(history_messages),
-                    kept_count=len(recent_messages),
-                ),
-                self._make_compaction_cache(),
-            )
-
-        compacted = history_messages[: len(history_messages) - len(recent_messages)]
-
-        # 计算 summary 可用的空间 = budget - recent_tokens - summary_message 开销
-        summary_budget = history_budget - recent_tokens - 500  # 500 是基础开销
-
-        compact_summary = self._summarize_compacted_messages(
-            compacted, allow_llm_summary=allow_llm_summary, history_budget=summary_budget
-        )
-        if not compact_summary:
-            return (
-                recent_messages,
-                self._make_compaction_state(
-                    original_count=len(history_messages),
-                    kept_count=len(recent_messages),
-                ),
-                self._make_compaction_cache(),
-            )
-
-        summary_message = {"role": "assistant", "content": compact_summary}
-        result_messages = [summary_message] + recent_messages
-
-        return (
-            result_messages,
-            self._make_compaction_state(
-                active=True,
-                source="history",
-                kind="structured",
-                original_count=len(history_messages),
-                summarized_count=len(compacted),
-                kept_count=len(recent_messages),
-                summary_count=count_messages_tokens(compacted) - count_messages_tokens([summary_message]),
-                note=f"已压缩 {len(compacted)} 条含工具历史消息",
-            ),
-            self._make_compaction_cache(
-                active=True,
-                kind="structured",
-                cutoff_index=len(compacted),
-                source_message_count=len(history_messages),
-                summarized_count=len(compacted),
-                tail_count=len(recent_messages),
-                budget_tokens=history_budget,
-                summary_message=summary_message,
-            ),
-        )
 
     def set_callback(self, event: str, callback: Callable):
         self._callbacks[event] = callback
@@ -800,7 +302,7 @@ class ChatEngine:
             max_context_tokens - estimate_tokens(latest_user_message) - 200
         )
         history_for_api, compaction_state, compaction_cache = (
-            self._compact_history_messages(
+            self._compactor.compact(
                 history_messages,
                 available_history_budget,
                 existing_cache=getattr(session, "compaction_cache", None),
@@ -876,7 +378,7 @@ class ChatEngine:
                 "used_tokens": 0,
                 "budget_tokens": 0,
                 "percent": 0,
-                "compaction": self._make_compaction_state(),
+                "compaction": self._compactor._make_state(),
                 "normal_tokens": 0,
                 "compacted_tokens": 0,
             }
