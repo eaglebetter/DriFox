@@ -96,7 +96,7 @@ class Agent:
         return self.mode in ("primary", "all")
 
     def is_subagent(self) -> bool:
-        return self.mode in ("subagent")
+        return self.mode in ("subagent", "all")
 
     def is_hidden(self) -> bool:
         return self.hidden
