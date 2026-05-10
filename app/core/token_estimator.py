@@ -23,6 +23,9 @@ except ImportError:
     tiktoken = None
 
 
+# 预编译正则表达式
+_CHINESE_PATTERN = re.compile(r'[\u4e00-\u9fff]')
+
 # 编码映射
 ENCODING_MAPPING = {
     # OpenAI 模型
@@ -81,7 +84,7 @@ def _fast_estimate_tokens(text: str) -> int:
     text_len = len(text)
     
     # 统计中文字符
-    chinese_chars = len(re.findall(r'[\u4e00-\u9fff]', text))
+    chinese_chars = len(_CHINESE_PATTERN.findall(text))
     non_chinese = text_len - chinese_chars
     
     # 中文每2字符算1 token，英文/其他每4字符算1 token

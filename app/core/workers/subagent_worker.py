@@ -19,7 +19,7 @@ from openai import OpenAI
 from app.core.provider_profile import get_provider_profile
 
 # ========== 性能优化：预编译正则表达式 ==========
-_THINKING_PATTERN = re.compile(r"<think>[\s\S]*?")  # 过滤思考内容
+_THINKING_PATTERN = re.compile(r"<think>[\s\S]*?</think>")  # 过滤完整思考块
 
 
 class SubAgentExecutor(QThread):
@@ -280,8 +280,7 @@ class SubAgentExecutor(QThread):
         """过滤掉思考内容，只保留纯回复"""
         if not content:
             return content
-        pattern = r"<think>[\s\S]*?</think>"
-        return re.sub(pattern, "", content)
+        return _THINKING_PATTERN.sub("", content)
 
     def _parse_tool_arguments_json(self, raw_arguments: Any):
         if isinstance(raw_arguments, dict):

@@ -62,6 +62,13 @@ def kill_proc_tree(pid):
         pass
 
 
+# 预编译 ANSI 处理正则表达式
+_ANSI_CURSOR_PATTERN = re.compile(r"\x1b\[[0-9;]*[ABCDHfJKmnsu]")
+_ANSI_COLOR_PATTERN = re.compile(r"\x1b\[([0-9;]*)m")
+_ANSI_RESET_PATTERN = re.compile(r"\x1b\[0m")
+_ANSI_REMAINS_PATTERN = re.compile(r"\x1b\[[0-9;]*m")
+
+
 def ansi_to_html(text):
     """
     将 ANSI 颜色代码转换为 HTML span 标签
@@ -70,7 +77,7 @@ def ansi_to_html(text):
         return ""
 
     # 移除光标控制序列（如 \x1b[2K）
-    text = re.sub(r"\x1b\[[0-9;]*[ABCDHfJKmnsu]", "", text)
+    text = _ANSI_CURSOR_PATTERN.sub("", text)
 
     # 处理颜色代码
     def replace_ansi(match):
@@ -95,13 +102,13 @@ def ansi_to_html(text):
             return "<span>"
 
     # 替换 ANSI 开始序列 \x1b[...m
-    text = re.sub(r"\x1b\[([0-9;]*)m", replace_ansi, text)
+    text = _ANSI_COLOR_PATTERN.sub(replace_ansi, text)
 
     # 替换 ANSI 结束序列 \x1b[0m 为 </span>
-    text = re.sub(r"\x1b\[0m", "</span>", text)
+    text = _ANSI_RESET_PATTERN.sub("</span>", text)
 
     # 处理剩余的 ANSI 序列（清理）
-    text = re.sub(r"\x1b\[[0-9;]*m", "", text)
+    text = _ANSI_REMAINS_PATTERN.sub("", text)
 
     # 转换换行符
     text = text.replace("\n", "<br>")

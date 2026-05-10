@@ -25,6 +25,9 @@ from app.core.store import SessionStore
 from app.utils.utils import serialize_for_json, deserialize_from_json
 
 
+# 预编译文件名清理正则
+_SANITIZE_FILENAME_PATTERN = re.compile(r'[<>:"/\\|?*]')
+
 
 def merge_session_messages(messages: List[Dict]) -> List[Dict]:
     return consolidate_messages(messages or [])
@@ -32,7 +35,7 @@ def merge_session_messages(messages: List[Dict]) -> List[Dict]:
 
 def sanitize_filename(name: str) -> str:
     """移除文件名中不合法的字符"""
-    return re.sub(r'[<>:"/\\|?*]', "_", name)
+    return _SANITIZE_FILENAME_PATTERN.sub("_", name)
 
 
 class HistoryManager:
