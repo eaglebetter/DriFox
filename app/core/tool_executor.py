@@ -4,6 +4,7 @@
 """
 from loguru import logger
 from typing import Dict, Optional, Callable
+import json
 
 from app.tools import BuiltinTools, ToolResult
 from app.utils.file_operation_recorder import (
@@ -413,10 +414,13 @@ class ToolExecutor:
             ),
             "todowrite": lambda: self._builtin_tools.todo_write(args.get("todos", [])),
             "todoread": lambda: self._builtin_tools.todo_read(),
-            "task_batch": lambda: self._builtin_tools.task_execute_batch(
-                args.get("tasks", []),
-                args.get("share_context", True),
-            ),
+            "task_batch": lambda: (
+                # 【修复】处理 tasks 可能是 JSON 字符串的情况
+                lambda tasks_val: self._builtin_tools.task_execute_batch(
+                    json.loads(tasks_val) if isinstance(tasks_val, str) else (tasks_val or []),
+                    args.get("share_context", True),
+                )
+            )(args.get("tasks", [])),
             "task_status": lambda: self._builtin_tools.task_status(
                 args.get("task_ids"),
                 args.get("with_log", False),

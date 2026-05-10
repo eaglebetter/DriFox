@@ -337,9 +337,10 @@ class AgentManager:
 
         all_tools = get_builtin_tools_schema(self)  # 传递 agent_manager 用于动态生成
 
-        # 【新增】子智能体禁止使用 question 工具（需要用户交互，不支持）
+        # 【新增】子智能体禁止使用交互和嵌套子智能体工具（需要用户交互或发布子智能体，不支持）
+        forbidden_tools = {"question", "task_batch", "task_status"}
         if agent.is_subagent():
-            all_tools = [t for t in all_tools if t["function"]["name"].lower() != "question"]
+            all_tools = [t for t in all_tools if t["function"]["name"].lower() not in forbidden_tools]
 
         perm_resolver = PermissionResolver(
             agent.permission, global_permission or {}, agent.tools
@@ -386,8 +387,8 @@ class AgentManager:
         subagent_constraints = """
 ## 子智能体约束
 - 【禁止】使用 `question` 工具（需要用户交互，不支持）
+- 【禁止】使用 `task_batch` 和 `task_status` 工具（子智能体不能再发布子智能体）
 - 【禁止】使用 `todowrite` 工具（避免与主智能体冲突）
-- 【禁止】调用 task/task_batch/task_wait 工具（不允许嵌套子智能体）
 - 【必须】任务一次性执行完毕，不支持中途暂停或等待用户确认
 - 【必须】独立完成任务，不需要主智能体介入
 - 如果遇到不确定的情况，根据已有信息做出合理假设并继续执行
