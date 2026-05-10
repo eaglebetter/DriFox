@@ -2,28 +2,28 @@
 """
 聊天引擎模块 - 处理 LLM 对话的核心逻辑
 """
-import orjson as json
 from datetime import datetime
 from typing import Dict, List, Optional, Any, Callable
 
 from loguru import logger
 
-from app.core.permission_cache import PermissionCache
-from app.core.provider_profile import (
-    get_provider_profile,
-)
-from app.tools import get_builtin_tools_schema
+from app.core.agent import PermissionResolver
 from app.core.chat_session import (
     ChatSession,
     SessionManager,
 )
-from app.utils.config import Settings
+from app.core.history_compactor import HistoryCompactor
 from app.core.message_content import (
     consolidate_messages,
 )
+from app.core.permission_cache import PermissionCache
+from app.core.provider_profile import (
+    get_provider_profile,
+)
 from app.core.token_estimator import count_messages_tokens, estimate_tokens
 from app.core.workers import OpenAIChatWorker
-from app.core.history_compactor import HistoryCompactor
+from app.tools import get_builtin_tools_schema
+from app.utils.config import Settings
 
 
 class ChatEngine:
@@ -81,10 +81,6 @@ class ChatEngine:
             return "allow"
 
         try:
-            from app.core.agent import (
-                PermissionResolver,
-            )
-
             agent = agent_manager.get_agent(self._current_agent)
             if not agent:
                 logger.warning(f"[_check_tool_permission] Agent not found: {self._current_agent}")
@@ -133,8 +129,6 @@ class ChatEngine:
         if self._current_worker:
             # 转发给 Worker 处理
             self._current_worker.approve_permission(tool_call_id, auto_allow, session_allow)
-            # 如果是会话级允许，Worker 内部会更新 PermissionCache
-            # 不需要额外同步，因为 Worker 和 ChatEngine 共享同一个 PermissionCache
 
     def deny_tool_permission(self, tool_call_id: str):
         if self._current_worker:
@@ -173,8 +167,6 @@ class ChatEngine:
 
     def switch_agent(self, agent_name: Optional[str]):
         agent_manager = self._get_agent_manager()
-        session = self._session_manager.get_current_session()
-
         if agent_name is None or agent_name.lower() in ("default", "通用"):
             self._current_agent = "plan"
             logger.info("[ChatEngine] Switched to default agent: plan")
