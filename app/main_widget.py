@@ -1157,6 +1157,8 @@ class OpenAIChatToolWindow(ToolWindow):
             snapshot.get("used_tokens", 0),
             snapshot.get("budget_tokens", 0),
             snapshot.get("compaction", {}),
+            snapshot.get("normal_tokens", 0),
+            snapshot.get("compacted_tokens", 0),
         )
 
     def _update_balance_display(self):

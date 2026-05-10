@@ -785,7 +785,11 @@ class ChatEngine:
         self._callbacks[event] = callback
 
     def _emit(self, event: str, *args, **kwargs):
+        # API 模式优先使用 _worker_callbacks
         callback = self._callbacks.get(event)
+        if not callback and self._api_mode:
+            callback = self._worker_callbacks.get(event)
+        
         if callback:
             callback(*args, **kwargs)
 
@@ -1009,17 +1013,43 @@ class ChatEngine:
                 "budget_tokens": 0,
                 "percent": 0,
                 "compaction": self._make_compaction_state(),
+                "normal_tokens": 0,
+                "compacted_tokens": 0,
             }
 
         messages = self._build_messages(session, llm_config)
         budget_tokens = max(1, self._get_context_budget(llm_config))
         used_tokens = count_messages_tokens(messages)
         percent = max(0, min(100, int((used_tokens / budget_tokens) * 100)))
+        
+        # 计算普通上下文和压缩上下文的 token 分解
+        compaction = dict(getattr(session, "compaction_state", {}) or {})
+        normal_tokens = used_tokens
+        compacted_tokens = 0
+        
+        if compaction.get("active"):
+            # 有压缩时，从 compaction_cache 获取摘要消息的 token 数
+            compaction_cache = getattr(session, "compaction_cache", {}) or {}
+            summary_msg = compaction_cache.get("summary_message")
+            if summary_msg:
+                compacted_tokens = count_messages_tokens([summary_msg])
+                normal_tokens = used_tokens - compacted_tokens
+            else:
+                # 如果没有缓存的摘要消息，基于比例估算
+                summarized_count = compaction.get("summarized_count", 0)
+                kept_count = compaction.get("kept_count", 0)
+                total_count = summarized_count + kept_count
+                if total_count > 0:
+                    compacted_tokens = int(used_tokens * summarized_count / total_count * 0.3)  # 压缩后约为原来的30%
+                    normal_tokens = used_tokens - compacted_tokens
+        
         return {
             "used_tokens": used_tokens,
             "budget_tokens": budget_tokens,
             "percent": percent,
-            "compaction": dict(getattr(session, "compaction_state", {}) or {}),
+            "compaction": compaction,
+            "normal_tokens": normal_tokens,
+            "compacted_tokens": compacted_tokens,
         }
 
     def _start_worker(
@@ -1074,7 +1104,15 @@ class ChatEngine:
             )
 
         self._current_worker.start()
-        self._emit("stream_started")
+        
+        # API 模式：engine 也需要在主线程发射事件（用于 stream_started）
+        if self._api_mode:
+            import threading
+            def emit_later():
+                import time
+                time.sleep(0.1)
+                self._emit("stream_started")
+            threading.Thread(target=emit_later, daemon=True).start()
 
     def _on_content_received(self, content_piece: str):
         self._emit("content_received", content_piece)
