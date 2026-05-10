@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 import base64
 import hashlib
-import orjson as json
 import math
 import re
 import urllib.parse
@@ -10,6 +9,7 @@ from functools import lru_cache
 from html import escape
 from typing import List, Dict, Any, Optional
 
+import orjson as json
 from PyQt5.QtCore import (
     Qt,
     QTimer,
@@ -38,7 +38,6 @@ from PyQt5.QtWidgets import (
     QSizePolicy,
     QTextEdit,
 )
-from loguru import logger
 from markdown import Markdown
 from pygments import highlight
 from pygments.formatters import HtmlFormatter
@@ -79,7 +78,7 @@ DEFAULT_COLOR = "#888888"
 # ======== 预编译的正则表达式（提升到模块级别，避免重复编译）=======
 _CODE_BLOCK_PATTERN = re.compile(r"```(\w*)\n(.*?)```", re.DOTALL)
 _CODE_BLOCK_WITH_LANG_PATTERN = re.compile(r"<pre><code(?:\s+class=\"([^\"]*)\")?>(.*?)</code></pre>", re.DOTALL)
-_CONTEXT_LINK_PATTERN = re.compile(r"`*\[([^\[\]]+?)\]\(([^)\s]+)\)`*")
+_CONTEXT_LINK_PATTERN = re.compile(r"\[([^\]]+)\]\((ask|jump|create|generate|view|session)(?:\|([^)]*))?\)")
 _CODE_BLOCK_CODE_PATTERN = re.compile(r"```[\w]*\n")
 _CODE_BLOCK_END_PATTERN = re.compile(r"```\n")
 _CODE_BLOCK_FINAL_PATTERN = re.compile(r"```")
@@ -658,9 +657,6 @@ def get_random_greeting() -> str:
     """获取随机欢迎语"""
     import random
     return random.choice(WELCOME_GREETINGS)
-
-
-_CONTEXT_LINK_PATTERN = re.compile(r"\[([^\]]+)\]\((ask|jump|create|generate|view|session)(?:\|([^)]*))?\)")
 
 
 def _inject_context_links(md_text: str) -> str:
