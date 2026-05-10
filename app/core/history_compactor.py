@@ -115,7 +115,6 @@ class HistoryCompactor:
             return [], self._make_state(), self._make_cache()
 
         soft_limit = self._get_soft_limit(budget)
-        target_limit = self._get_target_limit(budget)
         
         # 消息规范化
         normalized = consolidate_messages(messages)
@@ -326,14 +325,13 @@ class HistoryCompactor:
         # ========== 尾保留（从后向前） ==========
         recent_messages: List[Dict[str, Any]] = []
         recent_tokens = 0
-        pending_tool_results: set = set()
+        pending_tool_results: set = set()  # 等待找到对应 assistant 的 tool_call_id
 
         i = len(normalized) - 1
         while i >= 0:
             msg = normalized[i]
             msg_tokens = count_messages_tokens([msg])
             role = msg.get("role")
-
             # 工具调用配对保护
             if role == "assistant":
                 tool_calls = msg.get("tool_calls", [])
@@ -387,7 +385,7 @@ class HistoryCompactor:
                 self._make_cache(),
             )
 
-        summary_message = {"role": "assistant", "content": compact_summary}
+        summary_message = {"role": "user", "content": compact_summary}
         result_messages = [summary_message] + recent_messages
 
         # ========== 确保不超目标限制 ==========

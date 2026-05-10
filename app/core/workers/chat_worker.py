@@ -128,7 +128,7 @@ class OpenAIChatWorker(QThread):
 
         # 直接回调模式（API 层使用，已迁移到事件总线）
         # 保留以兼容旧的直接回调接口
-        self._legacy_direct_callbacks: Dict[str, Callable] = {}
+        self._legacy_legacy_direct_callbacks: Dict[str, Callable] = {}
 
     def _build_api_messages_cache(self) -> List[Dict[str, Any]]:
         """
@@ -170,10 +170,6 @@ class OpenAIChatWorker(QThread):
     def event_bus(self) -> WorkerEventBus:
         """获取事件总线实例"""
         return self._event_bus
-    
-    def _emit_compaction_status(self, state: Dict) -> None:
-        """发射压缩状态变更事件"""
-        self._emit_with_callback("compaction_status_changed", self.compaction_status_changed, state)
     
     def _emit_via_event_bus(self, event: WorkerEvent, *args, **kwargs) -> None:
         """通过事件总线发射事件
@@ -244,7 +240,7 @@ class OpenAIChatWorker(QThread):
         Args:
             callbacks: 回调字典，键为信号名，值为回调函数
         """
-        self._legacy_direct_callbacks = callbacks
+        self._legacy_legacy_direct_callbacks = callbacks
         # 将回调注册到事件总线
         for signal_name, callback in callbacks.items():
             event = self._signal_name_to_event(signal_name)
@@ -577,7 +573,7 @@ class OpenAIChatWorker(QThread):
                             current_messages = compacted
                             self._last_compaction_state = state
                             self._compaction_cache = cache
-                            # 重建 API 消息缓存
+                            # 重建 API 消息缓存（转换格式）
                             self._api_messages_cache = current_messages
                             self._emit_compaction_status(state)
 
@@ -998,16 +994,6 @@ class OpenAIChatWorker(QThread):
                 if is_tool_call_order_error and attempt < max_retries - 1:
                     # 自动修复 tool result 顺序问题
                     logger.warning(f"[API] 检测到 tool call result 顺序错误 (2013)，尝试自动修复...")
-
-                    # 打印最近的消息用于调试
-                    recent_msgs = req_kwargs["messages"][-10:] if len(req_kwargs["messages"]) > 10 else req_kwargs[
-                        "messages"]
-                    for i, msg in enumerate(recent_msgs):
-                        role = msg.get("role", "?")
-                        has_tc = "tool_calls" in msg
-                        tc_ids = [tc.get("id", "") for tc in msg.get("tool_calls", [])] if has_tc else []
-                        tc_id = msg.get("tool_call_id", "") if role == "tool" else ""
-
                     fixed_messages, was_fixed = self._fix_tool_result_order(req_kwargs["messages"])
 
                     if was_fixed:
@@ -1047,7 +1033,6 @@ class OpenAIChatWorker(QThread):
                     logger.error(f"[API] Error response body: {resp_body[:500]}")
                 raise
             except Exception as e:
-                last_error = e
                 error_str = str(e)
                 error_type = type(e).__name__
 
@@ -1333,7 +1318,7 @@ class OpenAIChatWorker(QThread):
                         {"success": False, "content": None, "error": "用户中止"},
                     )(),
                 )
-                if not self._direct_callbacks:
+                if not self._legacy_direct_callbacks:
                     QApplication.processEvents()
                 self._is_cancelled = True
                 return None
@@ -1387,7 +1372,7 @@ class OpenAIChatWorker(QThread):
                                 tool_call_id, tool_name, preview_args,
                                 error_result
                             )
-                            if not self._direct_callbacks:
+                            if not self._legacy_direct_callbacks:
                                 QApplication.processEvents()
                             results.append({
                                 "role": "tool",
@@ -1434,7 +1419,7 @@ class OpenAIChatWorker(QThread):
                                 tool_call_id, tool_name, preview_args,
                                 error_result
                             )
-                            if not self._direct_callbacks:
+                            if not self._legacy_direct_callbacks:
                                 QApplication.processEvents()
                             results.append({
                                 "role": "tool",
@@ -1469,7 +1454,7 @@ class OpenAIChatWorker(QThread):
                     tool_call_id, tool_name, arguments,
                     error_result
                 )
-                if not self._direct_callbacks:
+                if not self._legacy_direct_callbacks:
                     QApplication.processEvents()
                 results.append({
                     "role": "tool",
@@ -1493,7 +1478,7 @@ class OpenAIChatWorker(QThread):
                     self.tool_call_started,
                     tool_call_id, tool_name, arguments, round_id
                 )
-                if not self._direct_callbacks:
+                if not self._legacy_direct_callbacks:
                     QApplication.processEvents()
 
             if tool_name == "question":
@@ -1539,7 +1524,7 @@ class OpenAIChatWorker(QThread):
                             and not self._is_cancelled
                             and not self._tool_execution_cancelled
                     ):
-                        if not self._direct_callbacks:
+                        if not self._legacy_direct_callbacks:
                             QApplication.processEvents()
                         time.sleep(0.1)
 
@@ -1561,7 +1546,7 @@ class OpenAIChatWorker(QThread):
                                 },
                             )(),
                         )
-                        if not self._direct_callbacks:
+                        if not self._legacy_direct_callbacks:
                             QApplication.processEvents()
                         self._is_cancelled = True
                         return None
@@ -1582,7 +1567,7 @@ class OpenAIChatWorker(QThread):
                                 },
                             )(),
                         )
-                        if not self._direct_callbacks:
+                        if not self._legacy_direct_callbacks:
                             QApplication.processEvents()
                         results.append(
                             {
@@ -1625,14 +1610,14 @@ class OpenAIChatWorker(QThread):
                     self.tool_result_received,
                     tool_call_id, tool_name, arguments, cancelled_result
                 )
-                if not self._legacy_direct_callbacks:
+                if not self._legacy_legacy_direct_callbacks:
                     QApplication.processEvents()
                 self._is_cancelled = True
                 return None
 
             self._emit_with_callback("tool_result_received", self.tool_result_received, tool_call_id, tool_name,
                                      arguments, result)
-            if not self._legacy_direct_callbacks:
+            if not self._legacy_legacy_direct_callbacks:
                 QApplication.processEvents()
             results.append(
                 {

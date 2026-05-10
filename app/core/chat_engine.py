@@ -267,8 +267,6 @@ class ChatEngine:
             )
 
         session.system_prompt = full_system_content
-
-        max_context_tokens = self._get_context_budget(llm_config)
         normalized_session_messages = consolidate_messages(
             session.get_context_messages()
         )
@@ -291,14 +289,12 @@ class ChatEngine:
                 messages[0]["content"] = (
                     messages[0]["content"] + "\n\n" + memory_context
                 )
-        available_history_budget = (
-            max_context_tokens - estimate_tokens(latest_user_message) - 200
-        )
+        budget = self._compactor.get_budget(llm_config)
         history_for_api, compaction_state, compaction_cache = anyio.run(
             anyio.to_thread.run_sync,
             lambda: self._compactor.compact(
                 history_messages,
-                available_history_budget,
+                budget,
                 existing_cache=getattr(session, "compaction_cache", None),
                 allow_llm_summary=allow_llm_summary,
             )
