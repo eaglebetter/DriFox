@@ -134,7 +134,7 @@ class SubAgentExecutor(QThread):
             system_prompt = self.agent_manager.get_agent_system_prompt(
                 self.agent_name, is_subagent_call=self.is_subagent_call
             )
-            tools = self.agent_manager.get_agent_tools_schema(self.agent_name)
+            tools = self.agent_manager.get_agent_tools_schema(self.agent_name, is_subagent_call=self.is_subagent_call)
 
             messages = [{"role": "system", "content": system_prompt}]
 

@@ -96,7 +96,7 @@ class Agent:
         return self.mode in ("primary", "all")
 
     def is_subagent(self) -> bool:
-        return self.mode in ("subagent", "all")
+        return self.mode in ("subagent")
 
     def is_hidden(self) -> bool:
         return self.hidden
@@ -329,7 +329,7 @@ class AgentManager:
         return "\n".join(lines)
 
     def get_agent_tools_schema(
-            self, agent_name: str, global_permission: Optional[Dict[str, Any]] = None
+            self, agent_name: str, global_permission: Optional[Dict[str, Any]] = None, is_subagent_call: bool = False
     ) -> List[Dict]:
         agent = self.get_agent(agent_name)
         if not agent:
@@ -339,7 +339,7 @@ class AgentManager:
 
         # 【新增】子智能体禁止使用交互和嵌套子智能体工具（需要用户交互或发布子智能体，不支持）
         forbidden_tools = {"question", "task_batch", "task_status"}
-        if agent.is_subagent():
+        if is_subagent_call:
             all_tools = [t for t in all_tools if t["function"]["name"].lower() not in forbidden_tools]
 
         perm_resolver = PermissionResolver(
