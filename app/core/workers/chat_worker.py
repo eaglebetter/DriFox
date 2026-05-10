@@ -58,6 +58,8 @@ class OpenAIChatWorker(QThread):
             compaction_prompt: str = "",
             compaction_config: Dict = None,
             permission_cache: PermissionCache = None,
+            compactor=None,
+            initial_compaction_cache: Dict = None,
     ):
         super().__init__()
         self.messages = messages
@@ -107,6 +109,10 @@ class OpenAIChatWorker(QThread):
             "note": "",
         }
         self._current_session_messages = list(self.session_messages)
+
+        # ========== 工具迭代中压缩支持 ==========
+        self._compactor = compactor
+        self._compaction_cache = initial_compaction_cache
 
         # ========== 性能优化：API 消息缓存 ==========
         # 缓存已转换的 API 消息，避免每次 API 调用都重新处理所有消息
@@ -164,6 +170,10 @@ class OpenAIChatWorker(QThread):
     def event_bus(self) -> WorkerEventBus:
         """获取事件总线实例"""
         return self._event_bus
+    
+    def _emit_compaction_status(self, state: Dict) -> None:
+        """发射压缩状态变更事件"""
+        self._emit_with_callback("compaction_status_changed", self.compaction_status_changed, state)
     
     def _emit_via_event_bus(self, event: WorkerEvent, *args, **kwargs) -> None:
         """通过事件总线发射事件
@@ -488,7 +498,7 @@ class OpenAIChatWorker(QThread):
                 if self._is_cancelled:
                     return
 
-                # 每次 API 调用前，清理上一轮的中间状态
+                # 每次 API 调用前：1. 清理中间状态  2. 检查压缩
                 self._clear_pending_response_state()
 
                 # 使用 API 消息缓存（首次会重建，后续复用）
@@ -552,6 +562,24 @@ class OpenAIChatWorker(QThread):
                 self._append_to_api_cache(response_sequence)
                 self._emit_with_callback("finished_with_messages", self.finished_with_messages,
                                          current_session_messages)
+                # ========== 工具迭代中压缩 ==========
+                # 在每次 API 调用前检查是否需要压缩
+                if self._compactor:
+                    budget = self._compactor.get_budget(self.llm_config)
+                    if self._compactor.should_compact(current_messages, budget):
+                        compacted, state, cache = self._compactor.compact(
+                            current_messages,
+                            budget,
+                            existing_cache=self._compaction_cache,
+                            allow_llm_summary=False,  # 工具迭代中只用启发式，避免嵌套 LLM 调用
+                        )
+                        if compacted != current_messages:
+                            current_messages = compacted
+                            self._last_compaction_state = state
+                            self._compaction_cache = cache
+                            # 重建 API 消息缓存
+                            self._api_messages_cache = current_messages
+                            self._emit_compaction_status(state)
 
                 self._check_and_notify_stage_change()
 

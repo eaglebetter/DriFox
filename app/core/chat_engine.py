@@ -439,7 +439,9 @@ class ChatEngine:
             permission_check_callback=self._check_tool_permission,
             compaction_prompt=compaction_prompt,
             compaction_config=compaction_config,
-            permission_cache=self._permission_cache,  # 共享同一个 PermissionCache
+            permission_cache=self._permission_cache,
+            compactor=self._compactor,
+            initial_compaction_cache=getattr(session, "compaction_cache", None),
         )
         # 无需同步缓存，因为共享同一个 PermissionCache 实例
 
