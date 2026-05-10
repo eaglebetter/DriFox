@@ -197,11 +197,9 @@ class HistoryManager:
         self._persist_session(session_record)
 
     def _persist_session(self, session_record: Dict):
-        """持久化单个会话（延迟保存）"""
+        """持久化单个会话（延迟保存到 SQLite）"""
         if self._use_sqlite and self._session_store:
             self._schedule_save(session_record.get("session_id"))
-        else:
-            self._save_to_disk_json()
 
     def _build_session_record(
         self,
@@ -272,10 +270,6 @@ class HistoryManager:
             if msg.get("role") == "user":
                 count += 1
         return count
-
-    def _save_to_disk_json(self):
-        """保存到 JSON 文件（回退模式）- 不再使用"""
-        pass
 
     def load_latest_session(self) -> Optional[Dict]:
         if not self._history_sessions:
@@ -640,22 +634,26 @@ class HistoryManager:
             self._save_timer = QTimer.singleShot(self._save_delay_ms, self._do_save)
 
     def _do_save(self):
-        """延迟保存会话"""
-        if self._use_sqlite and self._session_store:
-            # SQLite 模式下保存指定会话或所有会话
-            pending_id = getattr(self, '_pending_save_session_id', None)
-            if not pending_id:
-                logger.debug("[HistoryManager] 无待保存会话，跳过")
-                self._save_timer = None
-                self._pending_save_session_id = None
-                return
-            logger.debug(f"[HistoryManager] 保存会话: pending_id={pending_id}")
-            for session in self._history_sessions:
-                if session.get("session_id") == pending_id:
-                    self._session_store.save_session(session)
-                    break
-        else:
-            self._save_to_disk_json()
+        """延迟保存会话到 SQLite"""
+        if not (self._use_sqlite and self._session_store):
+            logger.debug("[HistoryManager] SQLite 未就绪，跳过保存")
+            self._save_timer = None
+            self._pending_save_session_id = None
+            return
+
+        pending_id = getattr(self, '_pending_save_session_id', None)
+        if not pending_id:
+            logger.debug("[HistoryManager] 无待保存会话，跳过")
+            self._save_timer = None
+            self._pending_save_session_id = None
+            return
+
+        logger.debug(f"[HistoryManager] 保存会话: pending_id={pending_id}")
+        for session in self._history_sessions:
+            if session.get("session_id") == pending_id:
+                self._session_store.save_session(session)
+                break
+
         self._save_timer = None
         self._pending_save_session_id = None
 
