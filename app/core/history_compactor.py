@@ -391,6 +391,7 @@ class HistoryCompactor:
             )
 
         summary_message = {"role": "user", "content": compact_summary}
+        recent_messages = recent_messages[1:] if recent_messages[0]["role"] == "tool" else recent_messages
         result_messages = [summary_message] + recent_messages
         current_tokens = count_messages_tokens(result_messages)
         kept_count = len(recent_messages)
@@ -559,7 +560,7 @@ class HistoryCompactor:
         越旧的消息，保留越少
         """
         if messages[0]["content"].startswith("## Earlier Conversation Summary"):
-            summary_lines = messages[0]["content"]
+            summary_lines = [messages[0]["content"]]
         else:
             summary_lines = [
                 "## Earlier Conversation Summary",
