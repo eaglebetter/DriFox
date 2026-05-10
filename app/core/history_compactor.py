@@ -236,7 +236,7 @@ class HistoryCompactor:
         return {
             "active": bool(active),
             "source": source,
-            "kind": kind or ("structured" if self._has_tool_calls() else "plain"),
+            "kind": "structured",
             "original_count": int(original_count or 0),
             "summarized_count": int(summarized_count or 0),
             "kept_count": int(kept_count or 0),
@@ -267,15 +267,6 @@ class HistoryCompactor:
             "summary_message": dict(summary_message) if isinstance(summary_message, dict) else None,
             "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S") if active else "",
         }
-
-    def _has_tool_calls(self, messages: Optional[List[Dict]] = None) -> bool:
-        """检测是否包含工具调用"""
-        for msg in (messages or []):
-            if msg.get("role") == "tool":
-                return True
-            if msg.get("role") == "assistant" and msg.get("tool_calls"):
-                return True
-        return False
 
     def _try_use_cache(
         self,
@@ -420,7 +411,7 @@ class HistoryCompactor:
             self._make_state(
                 active=True,
                 source="history",
-                kind="structured" if self._has_tool_calls(compacted) else "plain",
+                kind="structured",
                 original_count=len(normalized),
                 summarized_count=len(compacted),
                 kept_count=kept_count,
@@ -429,7 +420,7 @@ class HistoryCompactor:
             ),
             self._make_cache(
                 active=True,
-                kind="structured" if self._has_tool_calls(compacted) else "plain",
+                kind="structured",
                 cutoff_index=len(compacted),
                 source_message_count=len(normalized),
                 summarized_count=len(compacted),

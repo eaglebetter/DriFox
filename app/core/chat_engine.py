@@ -2,6 +2,7 @@
 """
 聊天引擎模块 - 处理 LLM 对话的核心逻辑
 """
+import anyio
 from datetime import datetime
 from typing import Dict, List, Optional, Any, Callable
 
@@ -293,8 +294,9 @@ class ChatEngine:
         available_history_budget = (
             max_context_tokens - estimate_tokens(latest_user_message) - 200
         )
-        history_for_api, compaction_state, compaction_cache = (
-            self._compactor.compact(
+        history_for_api, compaction_state, compaction_cache = anyio.run(
+            anyio.to_thread.run_sync,
+            lambda: self._compactor.compact(
                 history_messages,
                 available_history_budget,
                 existing_cache=getattr(session, "compaction_cache", None),
