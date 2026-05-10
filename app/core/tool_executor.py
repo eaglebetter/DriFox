@@ -6,6 +6,7 @@ import orjson
 
 from loguru import logger
 from typing import Dict, Optional, Callable
+import json
 
 from app.tools import BuiltinTools, ToolResult
 from app.utils.file_operation_recorder import (

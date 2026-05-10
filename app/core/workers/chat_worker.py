@@ -24,6 +24,7 @@ from app.core.message_content import consolidate_messages, append_text_block, me
 from app.core.permission_cache import PermissionCache
 from app.core.provider_profile import get_provider_profile
 from app.core.tool_call_parser import smart_parse_arguments
+from app.core.workers.worker_event_bus import WorkerEventBus, WorkerEvent
 
 
 class OpenAIChatWorker(QThread):
@@ -110,8 +111,15 @@ class OpenAIChatWorker(QThread):
         self._api_messages_cache: Optional[List[Dict[str, Any]]] = None
         self._api_messages_built = False  # 是否已完成初始构建
 
-        # API 模式专用：直接回调（绕过 Qt 信号-槽）
-        self._direct_callbacks: Dict[str, Callable] = {}
+        # 事件总线：统一的事件通知机制，替代 PyQt Signal + direct_callback 双重模式
+        self._event_bus = WorkerEventBus()
+
+        # 向后兼容：保留 PyQt Signal，但通过 EventBus 统一发射
+        # UI 层连接这些 signal，事件总线负责分发到所有订阅者
+
+        # 直接回调模式（API 层使用，已迁移到事件总线）
+        # 保留以兼容旧的直接回调接口
+        self._legacy_direct_callbacks: Dict[str, Callable] = {}
 
     def _build_api_messages_cache(self) -> List[Dict[str, Any]]:
         """
@@ -149,43 +157,86 @@ class OpenAIChatWorker(QThread):
                     continue
                 self._api_messages_cache.append(api_msg)
 
-    def set_direct_callbacks(self, callbacks: Dict[str, Callable]) -> None:
-        """设置直接回调（API 模式专用，绕过 Qt 信号-槽）
-
+    @property
+    def event_bus(self) -> WorkerEventBus:
+        """获取事件总线实例"""
+        return self._event_bus
+    
+    def _emit_via_event_bus(self, event: WorkerEvent, *args, **kwargs) -> None:
+        """通过事件总线发射事件
+        
+        推荐使用此方法替代 _emit_with_callback。
+        事件总线会自动将事件分发给所有订阅者。
+        
         Args:
-            callbacks: 回调字典，键为信号名，值为回调函数
+            event: 事件类型
+            *args, **kwargs: 事件数据
         """
-        self._direct_callbacks = callbacks
-
+        self._event_bus.emit(event, *args, **kwargs)
+    
+    def _emit_with_callback(self, signal_name: str, signal, *args) -> None:
+        """发射信号并尝试直接回调（已废弃，推荐使用 _emit_via_event_bus）
+        
+        兼容旧接口，内部使用事件总线分发事件。
+        
+        Args:
+            signal_name: 信号名（用于查找直接回调）
+            signal: Qt 信号对象（保留用于向后兼容）
+            *args: 传递给回调/信号的参数
+        """
+        # 映射 signal_name 到 WorkerEvent
+        event = self._signal_name_to_event(signal_name)
+        if event:
+            self._emit_via_event_bus(event, *args)
+        
+        # 向后兼容：仍然发射 PyQt Signal（UI 层依赖）
+        if signal is not None:
+            signal.emit(*args)
+    
+    def _signal_name_to_event(self, signal_name: str) -> Optional[WorkerEvent]:
+        """将 signal name 映射到 WorkerEvent"""
+        mapping = {
+            "content_received": WorkerEvent.CONTENT_RECEIVED,
+            "reasoning_content_received": WorkerEvent.REASONING_RECEIVED,
+            "finished_with_content": WorkerEvent.FINISHED_WITH_CONTENT,
+            "finished_with_messages": WorkerEvent.FINISHED_WITH_MESSAGES,
+            "compaction_status_changed": WorkerEvent.COMPACTION_STATUS,
+            "tool_call_started": WorkerEvent.TOOL_CALL_STARTED,
+            "tool_result_received": WorkerEvent.TOOL_RESULT_RECEIVED,
+            "question_asked": WorkerEvent.QUESTION_ASKED,
+            "permission_approval_requested": WorkerEvent.PERMISSION_REQUESTED,
+            "error_occurred": WorkerEvent.ERROR,
+        }
+        return mapping.get(signal_name)
+    
     def _emit_direct(self, signal_name: str, *args) -> None:
-        """直接调用回调（API 模式，替代 Qt 信号发射）
-
+        """直接调用回调（API 模式，已废弃）
+        
+        保留以兼容旧的直接回调接口。新代码应使用事件总线。
+        
         Args:
             signal_name: 信号名
             *args: 传递给回调的参数
         """
-        callback = self._direct_callbacks.get(signal_name)
-        if callback:
-            try:
-                callback(*args)
-            except Exception as e:
-                from loguru import logger
-                logger.error(f"[Worker] Direct callback error for {signal_name}: {e}")
+        # 兼容旧的直接回调机制（通过事件总线）
+        event = self._signal_name_to_event(signal_name)
+        if event:
+            self._emit_via_event_bus(event, *args)
+        else:
+            logger.warning(f"[Worker] Unknown signal name: {signal_name}")
 
-    def _emit_with_callback(self, signal_name: str, signal, *args) -> None:
-        """发射信号并尝试直接回调（API 模式优先使用直接回调）
-
+    def set_direct_callbacks(self, callbacks: Dict[str, Callable]) -> None:
+        """设置直接回调（已废弃，推荐订阅事件总线）
+        
         Args:
-            signal_name: 信号名（用于查找直接回调）
-            signal: Qt 信号对象
-            *args: 传递给回调/信号的参数
+            callbacks: 回调字典，键为信号名，值为回调函数
         """
-        # API 模式：优先使用直接回调（避免 Qt 信号跨线程问题）
-        if self._direct_callbacks:
-            self._emit_direct(signal_name, *args)
-        # UI 模式：发射 Qt 信号
-        if signal is not None:
-            signal.emit(*args)
+        self._legacy_direct_callbacks = callbacks
+        # 将回调注册到事件总线
+        for signal_name, callback in callbacks.items():
+            event = self._signal_name_to_event(signal_name)
+            if event:
+                self._event_bus.subscribe(event, callback)
 
     def cancel(self):
         self._is_cancelled = True
@@ -273,8 +324,8 @@ class OpenAIChatWorker(QThread):
         # 清理工具列表引用
         self.tools = []
 
-        # 清理回调
-        self._direct_callbacks = {}
+        #
+        self._legacy_direct_callbacks = {}
 
         # 清理问题/回答状态
         self._pending_answer = None
@@ -1543,14 +1594,14 @@ class OpenAIChatWorker(QThread):
                     self.tool_result_received,
                     tool_call_id, tool_name, arguments, cancelled_result
                 )
-                if not self._direct_callbacks:
+                if not self._legacy_direct_callbacks:
                     QApplication.processEvents()
                 self._is_cancelled = True
                 return None
 
             self._emit_with_callback("tool_result_received", self.tool_result_received, tool_call_id, tool_name,
                                      arguments, result)
-            if not self._direct_callbacks:
+            if not self._legacy_direct_callbacks:
                 QApplication.processEvents()
             results.append(
                 {
