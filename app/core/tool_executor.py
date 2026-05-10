@@ -2,6 +2,8 @@
 """
 工具执行器模块 - 统一处理各种工具调用
 """
+import orjson
+
 from loguru import logger
 from typing import Dict, Optional, Callable
 
@@ -97,11 +99,11 @@ class ToolExecutor:
             except Exception as e:
                 logger.warning(f"[ToolExecutor] Failed to cleanup builtin_tools: {e}")
             self._builtin_tools = None
-        
+
         # 清理文件操作记录器
         if self._file_recorder:
             self._file_recorder = None
-        
+
         # 清理会话上下文
         self._session_id = None
         self._call_id = None
@@ -167,7 +169,6 @@ class ToolExecutor:
         if path.startswith("file:"):
             # 移除 file: 前缀，处理单斜杠或双斜杠
             path = re.sub(r'^file:/{1,3}', '', path)
-
 
         # 获取完整的文件路径
         if hasattr(self._builtin_tools, "_file_tools"):
@@ -413,10 +414,13 @@ class ToolExecutor:
             ),
             "todowrite": lambda: self._builtin_tools.todo_write(args.get("todos", [])),
             "todoread": lambda: self._builtin_tools.todo_read(),
-            "task_batch": lambda: self._builtin_tools.task_execute_batch(
-                args.get("tasks", []),
-                args.get("share_context", True),
-            ),
+            "task_batch": lambda: (
+                # 【修复】处理 tasks 可能是 JSON 字符串的情况
+                lambda tasks_val: self._builtin_tools.task_execute_batch(
+                    orjson.loads(tasks_val) if isinstance(tasks_val, str) else (tasks_val or []),
+                    args.get("share_context", True),
+                )
+            )(args.get("tasks", [])),
             "task_status": lambda: self._builtin_tools.task_status(
                 args.get("task_ids"),
                 args.get("with_log", False),
@@ -447,29 +451,29 @@ class ToolExecutor:
     def _execute_grep_async(self, args: dict, cancelled_ref: list = None) -> ToolResult:
         """
         异步执行 grep，使用子线程，完成后返回结果
-        
+
         Args:
             args: 工具参数
             cancelled_ref: 取消标志引用 [bool]
-        
+
         Returns:
             ToolResult: 执行结果
         """
         if not self._builtin_tools or not self._builtin_tools._file_tools:
             return ToolResult(False, error="FileTools not available")
-        
+
         pattern = args.get("pattern", "")
         path = args.get("path", "")
         include = args.get("include")
-        
+
         # 使用 FileTools 的异步接口
         result_holder = [None]
         finished = [False]
-        
+
         def on_grep_done(result):
             result_holder[0] = result
             finished[0] = True
-        
+
         # 启动异步 grep
         self._builtin_tools._file_tools.grep_files(
             pattern=pattern,
@@ -477,58 +481,58 @@ class ToolExecutor:
             include=include,
             callback=on_grep_done
         )
-        
+
         # 使用定时器循环处理主线程事件，这样取消信号可以被处理
         def wait_for_result():
             from PyQt5.QtWidgets import QApplication
             QApplication.processEvents()
-            
+
             if finished[0]:
                 return
-            
+
             # 检查取消标志
             if cancelled_ref is not None and cancelled_ref[0]:
                 self._builtin_tools._file_tools.cancel()
                 result_holder[0] = ToolResult(False, error="用户中止")
                 finished[0] = True
                 return
-            
+
             # 继续等待
             from PyQt5.QtCore import QTimer
             QTimer.singleShot(50, wait_for_result)
-        
+
         wait_for_result()
-        
+
         # 等待完成
         while not finished[0]:
             from PyQt5.QtWidgets import QApplication
             QApplication.processEvents()
             import time
             time.sleep(0.05)
-        
+
         return result_holder[0] if result_holder[0] else ToolResult(False, error="Grep failed")
 
     def _execute_webfetch_async(self, args: dict, cancelled_ref: list = None) -> ToolResult:
         """异步执行网页抓取"""
         if not self._builtin_tools or not self._builtin_tools._web_tools:
             return ToolResult(False, error="WebTools not available")
-        
+
         url = args.get("url", "")
         format = args.get("format", "markdown")
         max_chars = args.get("max_chars", 26000)
-        
+
         result_holder = [None]
         finished = [False]
-        
+
         def on_fetch_done(result):
             result_holder[0] = result
             finished[0] = True
-        
+
         self._builtin_tools._web_tools.fetch_web(
             url=url, format=format, max_chars=max_chars,
             callback=on_fetch_done, cancelled_ref=cancelled_ref
         )
-        
+
         def wait_for_result():
             from PyQt5.QtWidgets import QApplication
             QApplication.processEvents()
@@ -539,37 +543,37 @@ class ToolExecutor:
                 return
             from PyQt5.QtCore import QTimer
             QTimer.singleShot(50, wait_for_result)
-        
+
         wait_for_result()
-        
+
         while not finished[0]:
             from PyQt5.QtWidgets import QApplication
             QApplication.processEvents()
             import time
             time.sleep(0.05)
-        
+
         return result_holder[0] if result_holder[0] else ToolResult(False, error="WebFetch failed")
 
     def _execute_websearch_async(self, args: dict, cancelled_ref: list = None) -> ToolResult:
         """异步执行网络搜索"""
         if not self._builtin_tools or not self._builtin_tools._web_tools:
             return ToolResult(False, error="WebTools not available")
-        
+
         query = args.get("query", "")
         num_results = args.get("num_results", 10)
-        
+
         result_holder = [None]
         finished = [False]
-        
+
         def on_search_done(result):
             result_holder[0] = result
             finished[0] = True
-        
+
         self._builtin_tools._web_tools.search_web(
             query=query, num_results=num_results,
             callback=on_search_done, cancelled_ref=cancelled_ref
         )
-        
+
         def wait_for_result():
             from PyQt5.QtWidgets import QApplication
             QApplication.processEvents()
@@ -580,15 +584,15 @@ class ToolExecutor:
                 return
             from PyQt5.QtCore import QTimer
             QTimer.singleShot(50, wait_for_result)
-        
+
         wait_for_result()
-        
+
         while not finished[0]:
             from PyQt5.QtWidgets import QApplication
             QApplication.processEvents()
             import time
             time.sleep(0.05)
-        
+
         return result_holder[0] if result_holder[0] else ToolResult(False, error="WebSearch failed")
 
     def set_sub_agent_manager(self, sub_agent_manager):

@@ -122,10 +122,10 @@ class PermissionResolver:
     }
 
     def __init__(
-        self,
-        permission_config: Dict[str, Any],
-        global_config: Optional[Dict[str, Any]] = None,
-        tools_config: Optional[Union[Dict[str, bool], List[str]]] = None,
+            self,
+            permission_config: Dict[str, Any],
+            global_config: Optional[Dict[str, Any]] = None,
+            tools_config: Optional[Union[Dict[str, bool], List[str]]] = None,
     ) -> None:
         self._config = permission_config
         self._global = global_config or {}
@@ -308,9 +308,9 @@ class AgentManager:
     def get_available_subagents_for_prompt(self, include_hidden: bool = False) -> str:
         """
         获取可用于主智能体提示词中的子智能体列表（格式化文本）。
-        
+
         用于主智能体提示词动态注入可用子智能体信息，避免硬编码。
-        
+
         Returns:
             格式化子智能体列表文本，格式：
             ## Available Subagents
@@ -321,15 +321,15 @@ class AgentManager:
         agents = self.list_subagents(include_hidden=include_hidden)
         if not agents:
             return ""
-        
+
         lines = ["## Available Subagents\n可直接使用的子智能体列表："]
         for a in agents:
             lines.append(f"- **{a.name}**: {a.description}")
-        
+
         return "\n".join(lines)
 
     def get_agent_tools_schema(
-        self, agent_name: str, global_permission: Optional[Dict[str, Any]] = None
+            self, agent_name: str, global_permission: Optional[Dict[str, Any]] = None
     ) -> List[Dict]:
         agent = self.get_agent(agent_name)
         if not agent:
@@ -337,9 +337,10 @@ class AgentManager:
 
         all_tools = get_builtin_tools_schema(self)  # 传递 agent_manager 用于动态生成
 
-        # 【新增】子智能体禁止使用 question 工具（需要用户交互，不支持）
+        # 【新增】子智能体禁止使用交互和嵌套子智能体工具（需要用户交互或发布子智能体，不支持）
+        forbidden_tools = {"question", "task_batch", "task_status"}
         if agent.is_subagent():
-            all_tools = [t for t in all_tools if t["function"]["name"].lower() != "question"]
+            all_tools = [t for t in all_tools if t["function"]["name"].lower() not in forbidden_tools]
 
         perm_resolver = PermissionResolver(
             agent.permission, global_permission or {}, agent.tools
@@ -355,14 +356,14 @@ class AgentManager:
         return filtered_tools
 
     def get_agent_system_prompt(
-        self,
-        agent_name: str,
-        base_prompt: str = "",
-        is_subagent_call: bool = False,
+            self,
+            agent_name: str,
+            base_prompt: str = "",
+            is_subagent_call: bool = False,
     ) -> str:
         """
         获取智能体的系统提示词。
-        
+
         Args:
             agent_name: 智能体名称
             base_prompt: 基础提示词（通常为 skill 内容）
@@ -386,8 +387,8 @@ class AgentManager:
         subagent_constraints = """
 ## 子智能体约束
 - 【禁止】使用 `question` 工具（需要用户交互，不支持）
+- 【禁止】使用 `task_batch` 和 `task_status` 工具（子智能体不能再发布子智能体）
 - 【禁止】使用 `todowrite` 工具（避免与主智能体冲突）
-- 【禁止】调用 task/task_batch/task_wait 工具（不允许嵌套子智能体）
 - 【必须】任务一次性执行完毕，不支持中途暂停或等待用户确认
 - 【必须】独立完成任务，不需要主智能体介入
 - 如果遇到不确定的情况，根据已有信息做出合理假设并继续执行
@@ -405,7 +406,7 @@ class AgentManager:
         # 场景1: 主智能体自身运行（primary mode，is_subagent_call=False）
         # 场景2: 主智能体通过 task_batch 调用子智能体（子智能体看到任务描述，is_subagent_call=True）
         # 场景3: 子智能体独立运行（subagent mode，is_subagent_call=False）
-        
+
         if is_subagent_call:
             # 场景2：被主智能体调用，子智能体看到的是任务描述
             role_constraints = subagent_constraints
@@ -512,11 +513,11 @@ Use the tools available to you based on your permissions.
         }
 
     def check_permission(
-        self,
-        agent_name: str,
-        tool: str,
-        pattern: str = "*",
-        global_permission: Optional[Dict[str, Any]] = None,
+            self,
+            agent_name: str,
+            tool: str,
+            pattern: str = "*",
+            global_permission: Optional[Dict[str, Any]] = None,
     ) -> str:
         agent = self.get_agent(agent_name)
         if not agent:

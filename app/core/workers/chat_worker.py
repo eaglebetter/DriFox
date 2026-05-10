@@ -853,7 +853,7 @@ class OpenAIChatWorker(QThread):
             logger.warning(f"[ToolCall恢复] 尝试恢复工具参数时出错: {e}")
             return None
 
-    def _make_api_call(self, messages: List[Dict], use_cache: bool = True) -> bool:
+    def _make_api_call(self, messages: List[Dict], use_cache: bool = True) -> (bool, bool):
         """
         发起 API 调用。
 
