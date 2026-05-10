@@ -1517,8 +1517,8 @@ class CodeWebViewer(QWebEngineView):
                             body.style.overflow = '';
                             // 动画结束后重置高度报告标志
                             _collapsibleHeightReporting = false;
-                            // 暂时不报告高度，测试抖动是否消失
-                            // setTimeout(() => reportHeight(), 80);
+                            // 动画结束后延迟报告高度，确保 CSS transition 完成
+                            setTimeout(() => reportHeight(), 80);
                         }}
                     }}
 

@@ -176,8 +176,6 @@ class ToolExecutor:
             from pathlib import Path
             full_path = Path(path).resolve()
 
-
-
         # 记录操作（内部会处理文件不存在的情况）
         try:
             backup_path = self._file_recorder.record_operation(
@@ -430,14 +428,7 @@ class ToolExecutor:
                 args.get("question", ""),
                 args.get("options"),
                 args.get("multiple", False),
-            ),
-            "list_webhooks": lambda: self._builtin_tools.list_canvases(),
-            "trigger_webhook": lambda: self._builtin_tools.trigger_canvas(
-                args.get("endpoint", ""),
-                args.get("data"),
-                args.get("callback_url"),
-                args.get("timeout", 300),
-            ),
+            )
         }
 
         executor = tool_map.get(tool_name)
@@ -450,9 +441,6 @@ class ToolExecutor:
                 return result
             except Exception as e:
                 return ToolResult(False, error=f"Execution error: {str(e)}")
-
-        if self._canvas_tools_executor and tool_name.startswith("canvas_"):
-            return self._execute_canvas_tool(tool_name, args)
 
         return ToolResult(False, error=f"Unknown tool: {tool_name}")
 
