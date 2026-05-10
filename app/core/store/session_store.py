@@ -289,37 +289,6 @@ class SessionStore:
             logger.error(f"[SessionStore] get_session_count 异常: {e}")
             return 0
 
-    def migrate_from_json(self, json_path: str) -> int:
-        """从 JSON 文件迁移数据到 SQLite"""
-        from app.utils.utils import deserialize_from_json
-        import json as json_module
-
-        if not self.is_initialized:
-            return 0
-
-        try:
-            with open(json_path, "r", encoding="utf-8") as f:
-                data = deserialize_from_json(json_module.load(f))
-
-            if not isinstance(data, list):
-                return 0
-
-            count = 0
-            for session in data:
-                session_id = session.get("session_id")
-                if session_id:
-                    existing = self.get_session(session_id)
-                    if not existing:
-                        if self.save_session(session):
-                            count += 1
-
-            logger.info(f"[SessionStore] 从 {json_path} 迁移了 {count} 条会话")
-            return count
-
-        except Exception as e:
-            logger.error(f"[SessionStore] 迁移失败: {e}")
-            return 0
-
     # ==================== 长期记忆操作（委托给 MemoryRepository）====================
 
     def save_memory(self, memory: Dict) -> bool:

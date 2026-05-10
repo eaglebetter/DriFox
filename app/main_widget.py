@@ -696,7 +696,7 @@ class OpenAIChatToolWindow(ToolWindow):
 
     def setup_ui(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setContentsMargins(0, 0, 4, 0)
         layout.setSpacing(1)
 
         self.setStyleSheet(WINDOW_STYLE)
@@ -1157,6 +1157,8 @@ class OpenAIChatToolWindow(ToolWindow):
             snapshot.get("used_tokens", 0),
             snapshot.get("budget_tokens", 0),
             snapshot.get("compaction", {}),
+            snapshot.get("normal_tokens", 0),
+            snapshot.get("compacted_tokens", 0),
         )
 
     def _update_balance_display(self):
@@ -3024,7 +3026,9 @@ class OpenAIChatToolWindow(ToolWindow):
         self._sync_node_preview_to_scroll()
 
     def _sync_node_preview_to_scroll(self):
-        """根据当前滚动位置同步时间线节点的高亮和进度条"""
+        """根据当前滚动位置同步时间线节点的高亮和进度条
+        新逻辑：进度条显示节点与节点之间的进度，和实际卡片高度绑定
+        """
         # 加载历史时抑制滚动同步
         if self._suppress_scroll_sync_count > 0:
             self._suppress_scroll_sync_count -= 1
@@ -3056,18 +3060,12 @@ class OpenAIChatToolWindow(ToolWindow):
             return
 
         scroll_bar = self.chat_scroll_area.verticalScrollBar()
-        viewport_height = self.chat_scroll_area.viewport().height()
         visible_top = scroll_bar.value()
-        visible_bottom = visible_top + viewport_height
-        scroll_max = scroll_bar.maximum()
 
-        # 核心逻辑：遍历 _message_batch 找到所有 user 批次，
-        # 对比每个批次对应卡片的 y 坐标，确定哪个 user 在可视区域内
-        highlighted_index = -1
-
-        # 遍历 _message_batch 中的 user 批次，找到可视区域内最靠近顶部的
+        # 收集所有已渲染用户卡片的位置信息
+        user_card_info = []
         user_node_index = 0  # 节点预览中的索引
-        best_y = None
+        
         for batch_idx, batch in enumerate(self._message_batch):
             if not batch or batch[0].get("role") != "user":
                 continue
@@ -3081,26 +3079,79 @@ class OpenAIChatToolWindow(ToolWindow):
                     if sip.isdeleted(card):
                         continue
                     if isinstance(card, MessageCard) and card.role == "user":
-                        card_y = card.y()
-                        card_bottom = card_y + card.height()
-                        # 卡片在可视区域内
-                        if card_bottom > visible_top and card_y < visible_bottom:
-                            if best_y is None or card_y < best_y:
-                                best_y = card_y
-                                highlighted_index = user_node_index
+                        user_card_info.append({
+                            'index': user_node_index,
+                            'y': card.y(),
+                            'bottom': card.y() + card.height()
+                        })
                         break
-
             user_node_index += 1
 
-        # fallback：使用滚动比例估算
-        if highlighted_index < 0 and scroll_max > 0:
-            scroll_ratio = visible_top / scroll_max
+        # 如果没有找到任何已渲染卡片，fallback到估算
+        if not user_card_info and scroll_bar.maximum() > 0:
+            scroll_ratio = visible_top / scroll_bar.maximum()
             highlighted_index = int(round(scroll_ratio * (total_nodes - 1)))
+            progress_position = highlighted_index
+        else:
+            # 找到当前可视区域所在的节点区间
+            # 找出当前可视top落在哪个区间 [user_i, user_{i+1}]
+            current_segment_index = -1
+            for i in range(len(user_card_info)):
+                if i < len(user_card_info) - 1:
+                    # 当前区间是从这个user卡片开始，到下一个user卡片之前
+                    # 包含这个user问题和它对应的所有大模型回答卡片
+                    segment_start_y = user_card_info[i]['y']
+                    segment_end_y = user_card_info[i+1]['y']
+                    
+                    if visible_top < segment_end_y:
+                        current_segment_index = i
+                        break
+                else:
+                    # 最后一个节点，一直到最后
+                    current_segment_index = i
+                    break
+            
+            # 计算进度
+            if current_segment_index >= 0:
+                start_node_index = user_card_info[current_segment_index]['index']
+                start_y = user_card_info[current_segment_index]['y']
+                
+                if current_segment_index < len(user_card_info) - 1:
+                    end_y = user_card_info[current_segment_index + 1]['y']
+                    end_node_index = user_card_info[current_segment_index + 1]['index']
+                else:
+                    # 最后一个区间，使用最后一个卡片的bottom作为终点
+                    if len(user_card_info) > 0:
+                        last_item = user_card_info[-1]
+                        end_y = last_item['bottom'] + 500  # 增加一点余量
+                        end_node_index = last_item['index']
+                    else:
+                        end_y = start_y
+                        end_node_index = start_node_index
+                
+                # 计算在当前区间的比例
+                if end_y > start_y:
+                    segment_progress = (visible_top - start_y) / (end_y - start_y)
+                else:
+                    segment_progress = 0
+                    
+                # 转换到节点坐标
+                progress_position = start_node_index + segment_progress
+                visible_node_index = start_node_index
+            else:
+                # 都没找到，fallback
+                progress_position = 0
+                visible_node_index = 0
+                highlighted_index = 0
+            
+            highlighted_index = visible_node_index
 
+        # 确保在有效范围内
+        progress_position = max(0, min(progress_position, total_nodes - 1))
         highlighted_index = max(0, min(highlighted_index, total_nodes - 1))
 
         # 更新进度条和高亮节点
-        self.node_preview.set_progress_position(highlighted_index)
+        self.node_preview.set_progress_position(progress_position)
         if highlighted_index != self._last_visible_user_pair_index:
             self._last_visible_user_pair_index = highlighted_index
             self.node_preview.set_visible_node(highlighted_index)

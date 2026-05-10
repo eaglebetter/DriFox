@@ -18,6 +18,8 @@ import uuid
 from typing import Optional, Dict, Any, List, Callable, AsyncGenerator
 from loguru import logger
 
+from app.core import ChatSession
+
 
 class StreamContext:
     """流式请求上下文（线程安全）"""
@@ -463,9 +465,6 @@ class APISessionHandler:
     def create_session(self, title: str = "") -> Optional[Dict[str, Any]]:
         """创建新会话（只创建在 API 独立的存储中，不影响 UI）"""
         try:
-            from app.llm_chatter.utils.chat_session import (
-                ChatSession,
-            )
             
             # 在 API 独立的内存中创建（不影响 UI）
             session = ChatSession(name=title or "API 对话")
@@ -520,10 +519,6 @@ class APISessionHandler:
                 session_data = self.history_manager.get_session_by_session_id(session_id)
                 
                 if session_data:
-                    # 从 SQLite 数据恢复会话
-                    from app.llm_chatter.utils.chat_session import (
-                        ChatSession,
-                    )
                     session = ChatSession.from_dict({
                         "session_id": session_data.get("session_id", session_id),
                         "name": session_data.get("title", "未命名"),
@@ -549,9 +544,6 @@ class APISessionHandler:
         API 模式下直接替换引擎内部的 session_manager 的当前会话，
         不经过共享的 session_manager，避免影响 UI。
         """
-        from app.llm_chatter.utils.chat_session import (
-            ChatSession,
-        )
         # 创建一个深拷贝，避免修改原对象
         session_copy = ChatSession.from_dict({
             "session_id": session.session_id,

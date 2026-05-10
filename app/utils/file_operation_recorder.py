@@ -5,6 +5,7 @@
 用于记录文件操作并在需要时回滚
 """
 
+import re
 import shutil
 from dataclasses import dataclass
 from datetime import datetime
@@ -12,6 +13,9 @@ from pathlib import Path
 from typing import List, Dict, Optional, Tuple
 
 from loguru import logger
+
+# 预编译文件名清理正则
+_SANITIZE_FILENAME_PATTERN = re.compile(r'[<>:"/\\|?*]')
 
 from app.core.store import SessionStore
 
@@ -347,5 +351,4 @@ class FileOperationRecorder:
 
     def _sanitize_filename(self, filename: str) -> str:
         """移除文件名中不合法的字符"""
-        import re
-        return re.sub(r'[<>:"/\\|?*]', "_", filename)
+        return _SANITIZE_FILENAME_PATTERN.sub("_", filename)

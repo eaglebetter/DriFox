@@ -23,14 +23,13 @@ LLM Chatter HTTP API 服务
 - POST /chat/stop                   - 停止当前流式请求
 """
 
-import asyncio
-import orjson as json
 import threading
-from typing import Optional, Dict, Any, List, Callable
+from typing import Optional, Dict, Any
+
+import orjson as json
 
 # 注册 QProcess::ExitStatus 元类型，解决跨线程信号连接问题
 # PyInstaller 打包后必须注册，否则 QProcess::finished 信号跨线程连接会失败
-from PyQt5.QtCore import QProcess
 try:
     qRegisterMetaType("QProcess::ExitStatus")
 except NameError:

@@ -25,6 +25,9 @@ from app.core.store import SessionStore
 from app.utils.utils import serialize_for_json, deserialize_from_json
 
 
+# 预编译文件名清理正则
+_SANITIZE_FILENAME_PATTERN = re.compile(r'[<>:"/\\|?*]')
+
 
 def merge_session_messages(messages: List[Dict]) -> List[Dict]:
     return consolidate_messages(messages or [])
@@ -32,7 +35,7 @@ def merge_session_messages(messages: List[Dict]) -> List[Dict]:
 
 def sanitize_filename(name: str) -> str:
     """移除文件名中不合法的字符"""
-    return re.sub(r'[<>:"/\\|?*]', "_", name)
+    return _SANITIZE_FILENAME_PATTERN.sub("_", name)
 
 
 class HistoryManager:
@@ -60,6 +63,21 @@ class HistoryManager:
         # 初始化存储
         self._init_storage()
 
+    def _deduplicate_history_sessions(self):
+        """去重历史会话列表，保持最新的一个"""
+        seen_ids = set()
+        unique_sessions = []
+        # 倒序遍历，保留最新的（后面的是更新的）
+        for session in reversed(self._history_sessions):
+            session_id = session.get("session_id")
+            if session_id not in seen_ids:
+                seen_ids.add(session_id)
+                unique_sessions.insert(0, session)  # 插回开头保持顺序
+        removed = len(self._history_sessions) - len(unique_sessions)
+        if removed > 0:
+            logger.warning(f"[HistoryManager] 移除了 {removed} 个重复会话")
+        self._history_sessions = unique_sessions
+
     def _init_storage(self):
         """初始化存储层"""
         use_sqlite = os.environ.get("LLM_SESSION_SQLITE", "1") == "1"
@@ -73,6 +91,9 @@ class HistoryManager:
 
                     # 从 SQLite 加载
                     self._history_sessions = self._session_store.get_sessions(limit=500)
+
+                    # 去重
+                    self._deduplicate_history_sessions()
 
                     # 检查是否需要迁移旧 JSON 数据
                     self._migrate_if_needed()
@@ -176,11 +197,9 @@ class HistoryManager:
         self._persist_session(session_record)
 
     def _persist_session(self, session_record: Dict):
-        """持久化单个会话（延迟保存）"""
+        """持久化单个会话（延迟保存到 SQLite）"""
         if self._use_sqlite and self._session_store:
             self._schedule_save(session_record.get("session_id"))
-        else:
-            self._save_to_disk_json()
 
     def _build_session_record(
         self,
@@ -252,10 +271,6 @@ class HistoryManager:
                 count += 1
         return count
 
-    def _save_to_disk_json(self):
-        """保存到 JSON 文件（回退模式）- 不再使用"""
-        pass
-
     def load_latest_session(self) -> Optional[Dict]:
         if not self._history_sessions:
             return None
@@ -282,6 +297,9 @@ class HistoryManager:
 
     def get_history_list(self, project: str = None) -> List[Dict]:
         """获取历史会话列表，可选按项目过滤，按最后对话时间排序"""
+        # 先去重
+        self._deduplicate_history_sessions()
+        
         sessions = self._history_sessions
         if project:
             sessions = [s for s in sessions if s.get("project", "默认项目") == project]
@@ -616,22 +634,26 @@ class HistoryManager:
             self._save_timer = QTimer.singleShot(self._save_delay_ms, self._do_save)
 
     def _do_save(self):
-        """延迟保存会话"""
-        if self._use_sqlite and self._session_store:
-            # SQLite 模式下保存指定会话或所有会话
-            pending_id = getattr(self, '_pending_save_session_id', None)
-            if not pending_id:
-                logger.debug("[HistoryManager] 无待保存会话，跳过")
-                self._save_timer = None
-                self._pending_save_session_id = None
-                return
-            logger.debug(f"[HistoryManager] 保存会话: pending_id={pending_id}")
-            for session in self._history_sessions:
-                if session.get("session_id") == pending_id:
-                    self._session_store.save_session(session)
-                    break
-        else:
-            self._save_to_disk_json()
+        """延迟保存会话到 SQLite"""
+        if not (self._use_sqlite and self._session_store):
+            logger.debug("[HistoryManager] SQLite 未就绪，跳过保存")
+            self._save_timer = None
+            self._pending_save_session_id = None
+            return
+
+        pending_id = getattr(self, '_pending_save_session_id', None)
+        if not pending_id:
+            logger.debug("[HistoryManager] 无待保存会话，跳过")
+            self._save_timer = None
+            self._pending_save_session_id = None
+            return
+
+        logger.debug(f"[HistoryManager] 保存会话: pending_id={pending_id}")
+        for session in self._history_sessions:
+            if session.get("session_id") == pending_id:
+                self._session_store.save_session(session)
+                break
+
         self._save_timer = None
         self._pending_save_session_id = None
 

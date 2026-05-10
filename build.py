@@ -31,7 +31,7 @@ if platform.system() == "Windows":
     if icon_path.exists():
         icon_arg = f"--icon={icon_path}"
 elif platform.system() == "Darwin":
-    icon_path = Path(base_dir) / "icons" / "logoico.ico"
+    icon_path = Path(base_dir) / "icons" / "drifox.ico"
     if icon_path.exists():
         icon_arg = f"--icon={icon_path}"
 

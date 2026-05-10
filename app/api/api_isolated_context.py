@@ -16,6 +16,8 @@ import threading
 from typing import Optional, Dict, List, Callable, Any
 from loguru import logger
 
+from app.core import SessionManager, ChatSession
+
 
 class IsolatedChatContext:
     """API 隔离上下文 - 封装完全独立的组件实例
@@ -63,11 +65,6 @@ class IsolatedChatContext:
 
     def _create_session_manager(self, target_session) -> Any:
         """创建独立的 SessionManager"""
-        from app.llm_chatter.utils.chat_session import (
-            SessionManager,
-            ChatSession,
-        )
-        
         manager = SessionManager()
         
         if target_session:
@@ -110,9 +107,6 @@ class IsolatedChatContext:
         if ui_tool_executor and ui_tool_executor._builtin_tools:
             executor._builtin_tools = ui_tool_executor._builtin_tools
             
-            # 复制其他可共享的配置
-            if ui_tool_executor._canvas_tools_executor:
-                executor._canvas_tools_executor = ui_tool_executor._canvas_tools_executor
         
         # 设置隔离的 session 上下文
         current_session = self._session_manager.get_current_session()

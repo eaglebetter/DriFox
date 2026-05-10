@@ -21,8 +21,13 @@ from openai import (
 )
 
 from app.core.message_content import consolidate_messages, append_text_block, messages_to_api, to_api_message
+from app.core.permission_cache import PermissionCache
 from app.core.provider_profile import get_provider_profile
 from app.core.tool_call_parser import smart_parse_arguments
+from app.core.workers.worker_event_bus import WorkerEventBus, WorkerEvent
+
+# 预编译正则表达式
+_VALID_IDENTIFIER_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
 
 class OpenAIChatWorker(QThread):
@@ -52,6 +57,9 @@ class OpenAIChatWorker(QThread):
             permission_check_callback=None,
             compaction_prompt: str = "",
             compaction_config: Dict = None,
+            permission_cache: PermissionCache = None,
+            compactor=None,
+            initial_compaction_cache: Dict = None,
     ):
         super().__init__()
         self.messages = messages
@@ -74,8 +82,8 @@ class OpenAIChatWorker(QThread):
         self._answer_event = Event()
         self._permission_pending = None
         self._permission_approved = False
-        self._round_permission_cache = {}  # 该轮对话内自动允许
-        self._session_permission_cache = {}  # 本次会话内自动允许
+        # 权限缓存：使用注入的 PermissionCache 实例
+        self._permission_cache = permission_cache or PermissionCache()
         self._previewed_tool_call_ids = set()
         self._current_tool_calls = {}  # 改成字典
         self._tool_calls_buffer = {}
@@ -102,14 +110,25 @@ class OpenAIChatWorker(QThread):
         }
         self._current_session_messages = list(self.session_messages)
 
+        # ========== 工具迭代中压缩支持 ==========
+        self._compactor = compactor
+        self._compaction_cache = initial_compaction_cache
+
         # ========== 性能优化：API 消息缓存 ==========
         # 缓存已转换的 API 消息，避免每次 API 调用都重新处理所有消息
         # 只在首次构建，之后增量追加
         self._api_messages_cache: Optional[List[Dict[str, Any]]] = None
         self._api_messages_built = False  # 是否已完成初始构建
 
-        # API 模式专用：直接回调（绕过 Qt 信号-槽）
-        self._direct_callbacks: Dict[str, Callable] = {}
+        # 事件总线：统一的事件通知机制，替代 PyQt Signal + direct_callback 双重模式
+        self._event_bus = WorkerEventBus()
+
+        # 向后兼容：保留 PyQt Signal，但通过 EventBus 统一发射
+        # UI 层连接这些 signal，事件总线负责分发到所有订阅者
+
+        # 直接回调模式（API 层使用，已迁移到事件总线）
+        # 保留以兼容旧的直接回调接口
+        self._legacy_legacy_direct_callbacks: Dict[str, Callable] = {}
 
     def _build_api_messages_cache(self) -> List[Dict[str, Any]]:
         """
@@ -147,43 +166,86 @@ class OpenAIChatWorker(QThread):
                     continue
                 self._api_messages_cache.append(api_msg)
 
-    def set_direct_callbacks(self, callbacks: Dict[str, Callable]) -> None:
-        """设置直接回调（API 模式专用，绕过 Qt 信号-槽）
-
+    @property
+    def event_bus(self) -> WorkerEventBus:
+        """获取事件总线实例"""
+        return self._event_bus
+    
+    def _emit_via_event_bus(self, event: WorkerEvent, *args, **kwargs) -> None:
+        """通过事件总线发射事件
+        
+        推荐使用此方法替代 _emit_with_callback。
+        事件总线会自动将事件分发给所有订阅者。
+        
         Args:
-            callbacks: 回调字典，键为信号名，值为回调函数
+            event: 事件类型
+            *args, **kwargs: 事件数据
         """
-        self._direct_callbacks = callbacks
-
+        self._event_bus.emit(event, *args, **kwargs)
+    
+    def _emit_with_callback(self, signal_name: str, signal, *args) -> None:
+        """发射信号并尝试直接回调（已废弃，推荐使用 _emit_via_event_bus）
+        
+        兼容旧接口，内部使用事件总线分发事件。
+        
+        Args:
+            signal_name: 信号名（用于查找直接回调）
+            signal: Qt 信号对象（保留用于向后兼容）
+            *args: 传递给回调/信号的参数
+        """
+        # 映射 signal_name 到 WorkerEvent
+        event = self._signal_name_to_event(signal_name)
+        if event:
+            self._emit_via_event_bus(event, *args)
+        
+        # 向后兼容：仍然发射 PyQt Signal（UI 层依赖）
+        if signal is not None:
+            signal.emit(*args)
+    
+    def _signal_name_to_event(self, signal_name: str) -> Optional[WorkerEvent]:
+        """将 signal name 映射到 WorkerEvent"""
+        mapping = {
+            "content_received": WorkerEvent.CONTENT_RECEIVED,
+            "reasoning_content_received": WorkerEvent.REASONING_RECEIVED,
+            "finished_with_content": WorkerEvent.FINISHED_WITH_CONTENT,
+            "finished_with_messages": WorkerEvent.FINISHED_WITH_MESSAGES,
+            "compaction_status_changed": WorkerEvent.COMPACTION_STATUS,
+            "tool_call_started": WorkerEvent.TOOL_CALL_STARTED,
+            "tool_result_received": WorkerEvent.TOOL_RESULT_RECEIVED,
+            "question_asked": WorkerEvent.QUESTION_ASKED,
+            "permission_approval_requested": WorkerEvent.PERMISSION_REQUESTED,
+            "error_occurred": WorkerEvent.ERROR,
+        }
+        return mapping.get(signal_name)
+    
     def _emit_direct(self, signal_name: str, *args) -> None:
-        """直接调用回调（API 模式，替代 Qt 信号发射）
-
+        """直接调用回调（API 模式，已废弃）
+        
+        保留以兼容旧的直接回调接口。新代码应使用事件总线。
+        
         Args:
             signal_name: 信号名
             *args: 传递给回调的参数
         """
-        callback = self._direct_callbacks.get(signal_name)
-        if callback:
-            try:
-                callback(*args)
-            except Exception as e:
-                from loguru import logger
-                logger.error(f"[Worker] Direct callback error for {signal_name}: {e}")
+        # 兼容旧的直接回调机制（通过事件总线）
+        event = self._signal_name_to_event(signal_name)
+        if event:
+            self._emit_via_event_bus(event, *args)
+        else:
+            logger.warning(f"[Worker] Unknown signal name: {signal_name}")
 
-    def _emit_with_callback(self, signal_name: str, signal, *args) -> None:
-        """发射信号并尝试直接回调（API 模式优先使用直接回调）
-
+    def set_direct_callbacks(self, callbacks: Dict[str, Callable]) -> None:
+        """设置直接回调（已废弃，推荐订阅事件总线）
+        
         Args:
-            signal_name: 信号名（用于查找直接回调）
-            signal: Qt 信号对象
-            *args: 传递给回调/信号的参数
+            callbacks: 回调字典，键为信号名，值为回调函数
         """
-        # API 模式：优先使用直接回调（避免 Qt 信号跨线程问题）
-        if self._direct_callbacks:
-            self._emit_direct(signal_name, *args)
-        # UI 模式：发射 Qt 信号
-        if signal is not None:
-            signal.emit(*args)
+        self._legacy_legacy_direct_callbacks = callbacks
+        # 将回调注册到事件总线
+        for signal_name, callback in callbacks.items():
+            event = self._signal_name_to_event(signal_name)
+            if event:
+                self._event_bus.subscribe(event, callback)
 
     def cancel(self):
         self._is_cancelled = True
@@ -271,8 +333,8 @@ class OpenAIChatWorker(QThread):
         # 清理工具列表引用
         self.tools = []
 
-        # 清理回调
-        self._direct_callbacks = {}
+        #
+        self._legacy_direct_callbacks = {}
 
         # 清理问题/回答状态
         self._pending_answer = None
@@ -339,7 +401,7 @@ class OpenAIChatWorker(QThread):
             if cn_key in ["API_KEY", "API_URL", "模型名称", "系统提示", "启用技能"]:
                 continue
             en_key = mapping.get(cn_key)
-            if not en_key and re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", cn_key):
+            if not en_key and _VALID_IDENTIFIER_PATTERN.match(cn_key):
                 en_key = cn_key
             if not en_key or en_key in skip_params:
                 continue
@@ -386,9 +448,9 @@ class OpenAIChatWorker(QThread):
     def set_session_permission_cache(self, tool_name: str, allowed: bool = True):
         """设置会话级权限缓存（本次会话允许）"""
         if allowed:
-            self._session_permission_cache[tool_name] = True
-        elif tool_name in self._session_permission_cache:
-            del self._session_permission_cache[tool_name]
+            self._permission_cache.allow_session(tool_name)
+        else:
+            self._permission_cache.deny(tool_name)
 
     def approve_permission(self, tool_call_id: str, auto_allow: bool = False, session_allow: bool = False):
         from loguru import logger
@@ -398,11 +460,9 @@ class OpenAIChatWorker(QThread):
         ):
             tool_name = self._permission_pending.get("tool_name", "")
             if auto_allow:
-                self._round_permission_cache[tool_name] = True
-                logger.info(f"[Permission] 设置轮缓存: tool={tool_name}")
+                self._permission_cache.allow_round(tool_name)
             if session_allow:
-                self._session_permission_cache[tool_name] = True
-                logger.info(f"[Permission] 设置会话缓存: tool={tool_name}")
+                self._permission_cache.allow_session(tool_name)
             self._permission_approved = True
             self._permission_pending = None
 
@@ -427,14 +487,34 @@ class OpenAIChatWorker(QThread):
             self._api_messages_cache = None  # 重置缓存，下次 API 调用时重建
             self._api_messages_built = False
 
-            # 开始新对话时，清理该轮缓存，但保留会话级缓存
-            self._round_permission_cache = {}
-
+            # 开始新对话时，清理 round 缓存，但保留 session 缓存
+            self._permission_cache.clear_round()
+            budget = self._compactor.get_budget(self.llm_config)
             while not self._is_cancelled:
                 if self._is_cancelled:
                     return
 
-                # 每次 API 调用前，清理上一轮的中间状态
+                # ========== 工具迭代中压缩 ==========
+                # 在每次 API 调用前检查是否需要压缩
+                if self._compactor:
+
+                    if self._compactor.should_compact(current_messages, budget):
+                        compacted, state, cache = self._compactor.compact(
+                            current_messages,
+                            budget,
+                            existing_cache=self._compaction_cache,
+                            allow_llm_summary=False,  # 工具迭代中只用启发式，避免嵌套 LLM 调用
+                        )
+                        if compacted != current_messages:
+                            logger.info(compacted)
+                            current_messages = compacted
+                            self._last_compaction_state = state
+                            self._compaction_cache = cache
+                            # 重建 API 消息缓存（转换格式）
+                            self._api_messages_cache = current_messages
+                            self._emit_compaction_status(state)
+
+                # 每次 API 调用前：1. 清理中间状态  2. 检查压缩
                 self._clear_pending_response_state()
 
                 # 使用 API 消息缓存（首次会重建，后续复用）
@@ -490,6 +570,7 @@ class OpenAIChatWorker(QThread):
                     self._pending_answer = None
                     self._answer_event.clear()
                     continue
+
                 response_sequence = self._build_response_message_sequence(tool_results)
                 current_messages.extend(response_sequence)
                 current_session_messages.extend(response_sequence)
@@ -498,7 +579,6 @@ class OpenAIChatWorker(QThread):
                 self._append_to_api_cache(response_sequence)
                 self._emit_with_callback("finished_with_messages", self.finished_with_messages,
                                          current_session_messages)
-
                 self._check_and_notify_stage_change()
 
                 QCoreApplication.processEvents()
@@ -508,8 +588,8 @@ class OpenAIChatWorker(QThread):
             logger.exception("请求失败!")
             self._handle_error(e)
         finally:
-            # 工具执行完成后，清理该轮权限缓存（为下一轮 API 调用做准备）
-            self._round_permission_cache = {}
+            # 工具执行完成后，清理 round 缓存（为下一轮 API 调用做准备）
+            self._permission_cache.clear_round()
 
     def _build_response_message_sequence(self, tool_results=None) -> List[Dict]:
         now_ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -853,7 +933,7 @@ class OpenAIChatWorker(QThread):
             logger.warning(f"[ToolCall恢复] 尝试恢复工具参数时出错: {e}")
             return None
 
-    def _make_api_call(self, messages: List[Dict], use_cache: bool = True) -> bool:
+    def _make_api_call(self, messages: List[Dict], use_cache: bool = True) -> (bool, bool):
         """
         发起 API 调用。
 
@@ -916,16 +996,6 @@ class OpenAIChatWorker(QThread):
                 if is_tool_call_order_error and attempt < max_retries - 1:
                     # 自动修复 tool result 顺序问题
                     logger.warning(f"[API] 检测到 tool call result 顺序错误 (2013)，尝试自动修复...")
-
-                    # 打印最近的消息用于调试
-                    recent_msgs = req_kwargs["messages"][-10:] if len(req_kwargs["messages"]) > 10 else req_kwargs[
-                        "messages"]
-                    for i, msg in enumerate(recent_msgs):
-                        role = msg.get("role", "?")
-                        has_tc = "tool_calls" in msg
-                        tc_ids = [tc.get("id", "") for tc in msg.get("tool_calls", [])] if has_tc else []
-                        tc_id = msg.get("tool_call_id", "") if role == "tool" else ""
-
                     fixed_messages, was_fixed = self._fix_tool_result_order(req_kwargs["messages"])
 
                     if was_fixed:
@@ -965,7 +1035,6 @@ class OpenAIChatWorker(QThread):
                     logger.error(f"[API] Error response body: {resp_body[:500]}")
                 raise
             except Exception as e:
-                last_error = e
                 error_str = str(e)
                 error_type = type(e).__name__
 
@@ -1251,7 +1320,7 @@ class OpenAIChatWorker(QThread):
                         {"success": False, "content": None, "error": "用户中止"},
                     )(),
                 )
-                if not self._direct_callbacks:
+                if not self._legacy_direct_callbacks:
                     QApplication.processEvents()
                 self._is_cancelled = True
                 return None
@@ -1305,7 +1374,7 @@ class OpenAIChatWorker(QThread):
                                 tool_call_id, tool_name, preview_args,
                                 error_result
                             )
-                            if not self._direct_callbacks:
+                            if not self._legacy_direct_callbacks:
                                 QApplication.processEvents()
                             results.append({
                                 "role": "tool",
@@ -1352,7 +1421,7 @@ class OpenAIChatWorker(QThread):
                                 tool_call_id, tool_name, preview_args,
                                 error_result
                             )
-                            if not self._direct_callbacks:
+                            if not self._legacy_direct_callbacks:
                                 QApplication.processEvents()
                             results.append({
                                 "role": "tool",
@@ -1387,7 +1456,7 @@ class OpenAIChatWorker(QThread):
                     tool_call_id, tool_name, arguments,
                     error_result
                 )
-                if not self._direct_callbacks:
+                if not self._legacy_direct_callbacks:
                     QApplication.processEvents()
                 results.append({
                     "role": "tool",
@@ -1411,7 +1480,7 @@ class OpenAIChatWorker(QThread):
                     self.tool_call_started,
                     tool_call_id, tool_name, arguments, round_id
                 )
-                if not self._direct_callbacks:
+                if not self._legacy_direct_callbacks:
                     QApplication.processEvents()
 
             if tool_name == "question":
@@ -1435,13 +1504,10 @@ class OpenAIChatWorker(QThread):
                 return None
 
             if self.permission_check_callback:
-                # 优先检查该轮缓存，再检查会话级缓存，最后才检查权限
-                if tool_name in self._round_permission_cache:
+                # 使用 PermissionCache 检查缓存，缓存命中则直接允许
+                if self._permission_cache.is_allowed(tool_name):
                     permission_result = "allow"
-                    logger.info(f"[Permission] 使用轮缓存: tool={tool_name}")
-                elif tool_name in self._session_permission_cache:
-                    permission_result = "allow"
-                    logger.info(f"[Permission] 使用会话缓存: tool={tool_name}")
+                    logger.info(f"[Permission] 使用缓存: tool={tool_name}")
                 else:
                     permission_result = self.permission_check_callback(
                         tool_name, arguments
@@ -1460,7 +1526,7 @@ class OpenAIChatWorker(QThread):
                             and not self._is_cancelled
                             and not self._tool_execution_cancelled
                     ):
-                        if not self._direct_callbacks:
+                        if not self._legacy_direct_callbacks:
                             QApplication.processEvents()
                         time.sleep(0.1)
 
@@ -1482,7 +1548,7 @@ class OpenAIChatWorker(QThread):
                                 },
                             )(),
                         )
-                        if not self._direct_callbacks:
+                        if not self._legacy_direct_callbacks:
                             QApplication.processEvents()
                         self._is_cancelled = True
                         return None
@@ -1503,7 +1569,7 @@ class OpenAIChatWorker(QThread):
                                 },
                             )(),
                         )
-                        if not self._direct_callbacks:
+                        if not self._legacy_direct_callbacks:
                             QApplication.processEvents()
                         results.append(
                             {
@@ -1546,14 +1612,14 @@ class OpenAIChatWorker(QThread):
                     self.tool_result_received,
                     tool_call_id, tool_name, arguments, cancelled_result
                 )
-                if not self._direct_callbacks:
+                if not self._legacy_legacy_direct_callbacks:
                     QApplication.processEvents()
                 self._is_cancelled = True
                 return None
 
             self._emit_with_callback("tool_result_received", self.tool_result_received, tool_call_id, tool_name,
                                      arguments, result)
-            if not self._direct_callbacks:
+            if not self._legacy_legacy_direct_callbacks:
                 QApplication.processEvents()
             results.append(
                 {

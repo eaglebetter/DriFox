@@ -84,12 +84,7 @@ class MemoryManagerCore:
 
         # 回退到 JSON 模式
         self._use_sqlite = False
-        self._ensure_memory_file()
         logger.info("[MemoryManager] JSON 存储模式")
-
-    def _ensure_memory_file(self):
-        """确保记忆文件存在 - SQLite 模式下不再使用"""
-        self._memory_file = None
 
     def _migrate_if_needed(self):
         """迁移旧 JSON 数据到 SQLite"""

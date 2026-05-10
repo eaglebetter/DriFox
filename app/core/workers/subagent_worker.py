@@ -19,7 +19,8 @@ from openai import OpenAI
 from app.core.provider_profile import get_provider_profile
 
 # ========== 性能优化：预编译正则表达式 ==========
-_THINKING_PATTERN = re.compile(r"<think>[\s\S]*?")  # 过滤思考内容
+_THINKING_PATTERN = re.compile(r"<think>[\s\S]*?</think>")  # 过滤完整思考块
+_VALID_IDENTIFIER_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")  # 验证标识符格式
 
 
 class SubAgentExecutor(QThread):
@@ -133,7 +134,7 @@ class SubAgentExecutor(QThread):
             system_prompt = self.agent_manager.get_agent_system_prompt(
                 self.agent_name, is_subagent_call=self.is_subagent_call
             )
-            tools = self.agent_manager.get_agent_tools_schema(self.agent_name)
+            tools = self.agent_manager.get_agent_tools_schema(self.agent_name, is_subagent_call=self.is_subagent_call)
 
             messages = [{"role": "system", "content": system_prompt}]
 
@@ -280,8 +281,7 @@ class SubAgentExecutor(QThread):
         """过滤掉思考内容，只保留纯回复"""
         if not content:
             return content
-        pattern = r"<think>[\s\S]*?</think>"
-        return re.sub(pattern, "", content)
+        return _THINKING_PATTERN.sub("", content)
 
     def _parse_tool_arguments_json(self, raw_arguments: Any):
         if isinstance(raw_arguments, dict):
@@ -325,7 +325,7 @@ class SubAgentExecutor(QThread):
                 continue
 
             en_key = mapping.get(cn_key)
-            if not en_key and re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", cn_key):
+            if not en_key and _VALID_IDENTIFIER_PATTERN.match(cn_key):
                 en_key = cn_key
             if not en_key:
                 continue
