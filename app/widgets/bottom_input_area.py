@@ -3,6 +3,9 @@ import re
 import os
 from pathlib import Path
 
+# 预编译正则表达式
+_FILE_PREFIX_PATTERN = re.compile(r'^file:/{1,3}')
+
 from PyQt5.QtCore import Qt, pyqtSignal, QTimer, QRect, QPoint, QSize
 from PyQt5.QtGui import QKeyEvent, QKeySequence, QDragEnterEvent, QDropEvent, QTextCursor, QPainter, QFont, QColor, QTextCharFormat
 from PyQt5.QtWidgets import QShortcut, QTextEdit, QWidget, QVBoxLayout, QListWidget, QListWidgetItem, QApplication, QLabel
@@ -756,8 +759,8 @@ class SendableTextEdit(TextEdit):
                         candidate_extension = lines[1] if len(lines) > 1 else ""
                         
                         # 去除 file:/ 前缀
-                        candidate_component = re.sub(r'^file:/{1,3}', '', candidate_component)
-                        candidate_extension = re.sub(r'^file:/{1,3}', '', candidate_extension)
+                        candidate_component = _FILE_PREFIX_PATTERN.sub('', candidate_component)
+                        candidate_extension = _FILE_PREFIX_PATTERN.sub('', candidate_extension)
                         
                         # 验证路径是否存在
                         if candidate_component and os.path.exists(candidate_component):

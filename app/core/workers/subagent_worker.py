@@ -20,6 +20,7 @@ from app.core.provider_profile import get_provider_profile
 
 # ========== 性能优化：预编译正则表达式 ==========
 _THINKING_PATTERN = re.compile(r"<think>[\s\S]*?</think>")  # 过滤完整思考块
+_VALID_IDENTIFIER_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")  # 验证标识符格式
 
 
 class SubAgentExecutor(QThread):
@@ -324,7 +325,7 @@ class SubAgentExecutor(QThread):
                 continue
 
             en_key = mapping.get(cn_key)
-            if not en_key and re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", cn_key):
+            if not en_key and _VALID_IDENTIFIER_PATTERN.match(cn_key):
                 en_key = cn_key
             if not en_key:
                 continue

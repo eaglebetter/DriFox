@@ -13,6 +13,9 @@ from openai import OpenAI
 from app.core.memory_manager import MEMORY_CATEGORIES
 from app.core.retry_helper import create_api_call_with_retry
 
+# 预编译正则表达式
+_JSON_OBJECT_PATTERN = re.compile(r"\{[^{}]*\}", re.DOTALL)
+
 
 class TopicSummaryTask(QRunnable):
     """异步生成话题摘要任务 - 支持增量摘要和长期记忆判断"""
@@ -166,7 +169,7 @@ class TopicSummaryTask(QRunnable):
 
             resp = create_api_call_with_retry(client, create_task)
             raw_response = resp.choices[0].message.content.strip()
-            json_match = re.search(r"\{[^{}]*\}", raw_response, re.DOTALL)
+            json_match = _JSON_OBJECT_PATTERN.search(raw_response)
             if json_match:
                 result = json.loads(json_match.group())
                 callback_data = {

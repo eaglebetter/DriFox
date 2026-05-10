@@ -26,6 +26,9 @@ from app.core.provider_profile import get_provider_profile
 from app.core.tool_call_parser import smart_parse_arguments
 from app.core.workers.worker_event_bus import WorkerEventBus, WorkerEvent
 
+# 预编译正则表达式
+_VALID_IDENTIFIER_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+
 
 class OpenAIChatWorker(QThread):
     content_received = pyqtSignal(str)
@@ -392,7 +395,7 @@ class OpenAIChatWorker(QThread):
             if cn_key in ["API_KEY", "API_URL", "模型名称", "系统提示", "启用技能"]:
                 continue
             en_key = mapping.get(cn_key)
-            if not en_key and re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", cn_key):
+            if not en_key and _VALID_IDENTIFIER_PATTERN.match(cn_key):
                 en_key = cn_key
             if not en_key or en_key in skip_params:
                 continue

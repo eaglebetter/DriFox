@@ -15,6 +15,9 @@ from datetime import datetime
 
 from loguru import logger
 
+# 预编译正则表达式
+_HUNK_HEADER_PATTERN = re.compile(r"@@ -(\d+),?\d* \+(\d+),?\d* @@")
+
 
 class DiffHtmlGenerator:
     """Git Diff HTML 生成器 - GitHub 风格 100% 复刻"""
@@ -827,7 +830,7 @@ class DiffHtmlGenerator:
 
         for line in lines:
             if line.startswith("@@"):
-                match = re.search(r"@@ -(\d+),?\d* \+(\d+),?\d* @@", line)
+                match = _HUNK_HEADER_PATTERN.search(line)
                 if match:
                     old_line_num = int(match.group(1))
                     new_line_num = int(match.group(2))

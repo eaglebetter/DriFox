@@ -13,6 +13,9 @@ PatchApplier 模块 - unified diff 格式补丁应用器
 import re
 from typing import Dict, List, Tuple
 
+# 预编译hunk头信息正则
+_HUNK_HEADER_PATTERN = re.compile(r"@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
+
 
 class PatchApplierError(Exception):
     """PatchApplier 专用异常"""
@@ -50,7 +53,7 @@ class PatchApplier:
                 i += 1
                 continue
 
-            m = re.match(r"@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@", line)
+            m = _HUNK_HEADER_PATTERN.match(line)
             if not m:
                 i += 1
                 continue

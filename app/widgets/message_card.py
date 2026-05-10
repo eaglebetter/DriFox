@@ -82,6 +82,17 @@ _CONTEXT_LINK_PATTERN = re.compile(r"\[([^\]]+)\]\((ask|jump|create|generate|vie
 _CODE_BLOCK_CODE_PATTERN = re.compile(r"```[\w]*\n")
 _CODE_BLOCK_END_PATTERN = re.compile(r"```\n")
 _CODE_BLOCK_FINAL_PATTERN = re.compile(r"```")
+# 预编译常用正则
+_LINK_DETECTION_PATTERN = re.compile(r"\[[^\[\]]+\]\([^)\s]+\)")
+_CODE_BLOCK_REMOVE_PATTERN = re.compile(r"```[\s\S]*?```", re.DOTALL)
+_MULTIPLE_SPACES_PATTERN = re.compile(r" +")
+_PRE_CONTENT_PATTERN = re.compile(r"<pre[^>]*>(.*?)</pre>", re.DOTALL)
+_TOOL_NAME_PATTERN = re.compile(r"^name:\s*(.+?)\s*$", re.MULTILINE)
+_TOOL_ARGS_LINE_PATTERN = re.compile(r"args:\s*(\{[^}]*\})")
+_TOOL_SUCCESS_PATTERN = re.compile(r"^success:\s*(.+?)\s*$", re.MULTILINE)
+_TOOL_ID_PATTERN = re.compile(r"^tool_call_id:\s*(.+?)\s*$", re.MULTILINE)
+_TOOL_RESULT_PATTERN = re.compile(r"^result:\s*(.*)$", re.MULTILINE)
+_NEXT_FIELD_PATTERN = re.compile(r"\n\w+:")
 
 
 def get_markdown_instance():
@@ -99,7 +110,7 @@ def _unwrap_code_blocks_with_context_links(md_text: str) -> str:
     def replacer(match):
         lang_part = match.group(1) or ""
         code_content = match.group(2)
-        if re.search(r"\[[^\[\]]+\]\([^)\s]+\)", code_content) and lang_part not in (
+        if _LINK_DETECTION_PATTERN.search(code_content) and lang_part not in (
                 "python"
         ):
             return code_content
@@ -119,13 +130,13 @@ def _strip_code_blocks(text: str) -> str:
     思考框内不需要代码编辑框，直接显示纯文本。
     """
     # 匹配完整的代码块，包括内容
-    text = re.sub(r"```[\s\S]*?```", "", text)
+    text = _CODE_BLOCK_REMOVE_PATTERN.sub("", text)
     # 移除剩余的反引号
     text = text.replace("`", "")
     # 将换行符替换为空格，让内容自然填充，避免多余空行
     text = text.replace("\r\n", " ").replace("\n", " ")
     # 合并多余空格
-    text = re.sub(r" +", " ", text)
+    text = _MULTIPLE_SPACES_PATTERN.sub(" ", text)
     return text.strip()
 
 
@@ -163,7 +174,7 @@ def _wrap_code_blocks_with_copy_button_web(html: str) -> str:
             )
             highlighted = highlight(copy_text, lexer, formatter)
             # 提取 <pre> 内部内容
-            pre_match = re.search(r"<pre[^>]*>(.*?)</pre>", highlighted, re.DOTALL)
+            pre_match = _PRE_CONTENT_PATTERN.search(highlighted)
             if pre_match:
                 inner_code_html = pre_match.group(1)
             else:
@@ -359,7 +370,7 @@ def _render_tool_block_content(content: str) -> str:
     content = content.strip()
 
     # ========== 解析 name ==========
-    name_match = re.search(r"^name:\s*(.+?)\s*$", content, re.MULTILINE)
+    name_match = _TOOL_NAME_PATTERN.search(content)
     if name_match:
         tool_name = name_match.group(1).strip()
 
@@ -388,7 +399,7 @@ def _render_tool_block_content(content: str) -> str:
                 # JSON 未正确闭合，回退到单行解析
                 tool_args_str = ""
                 # 尝试找到 args: 后的内容作为替代
-                line_match = re.search(r"args:\s*(\{[^}]*\})", content)
+                line_match = _TOOL_ARGS_LINE_PATTERN.search(content)
                 if line_match:
                     tool_args_str = line_match.group(1)
                     result_search_start = args_start + len(line_match.group(0))
@@ -397,21 +408,21 @@ def _render_tool_block_content(content: str) -> str:
             tool_args_str = line[args_start + 5:].strip()
             result_search_start = args_start + len(line)
     # ========== 解析 success ==========
-    success_match = re.search(r"^success:\s*(.+?)\s*$", content, re.MULTILINE)
+    success_match = _TOOL_SUCCESS_PATTERN.search(content)
     if success_match:
         tool_success = success_match.group(1).strip().lower() == "true"
 
     # ========== 解析 tool_call_id ==========
-    id_match = re.search(r"^tool_call_id:\s*(.+?)\s*$", content, re.MULTILINE)
+    id_match = _TOOL_ID_PATTERN.search(content)
     if id_match:
         tool_call_id = id_match.group(1).strip()
 
     # ========== 解析 result ==========
-    result_line_match = re.search(r"^result:\s*(.*)$", content[result_search_start:], re.MULTILINE)
+    result_line_match = _TOOL_RESULT_PATTERN.search(content[result_search_start:])
     if result_line_match:
         result_content = result_line_match.group(1)
         remaining = content[result_search_start + result_line_match.end():]
-        next_field_match = re.search(r"\n\w+:", remaining)
+        next_field_match = _NEXT_FIELD_PATTERN.search(remaining)
         if next_field_match:
             tool_result = (result_content + remaining[:next_field_match.start()]).strip()
         else:
@@ -2713,7 +2724,7 @@ class MessageCard(SimpleCardWidget):
         try:
             # 对新内容进行转义和代码块清理
             escaped = escape(new_text)
-            escaped = re.sub(r"```[\s\S]*?```", "", escaped)
+            escaped = _CODE_BLOCK_REMOVE_PATTERN.sub("", escaped)
             escaped = escaped.replace("`", "").replace("\r\n", " ").replace("\n", " ")
 
             # 直接更新最后一个思考块内容（通过 JS）

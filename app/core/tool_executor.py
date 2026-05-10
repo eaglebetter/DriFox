@@ -3,10 +3,13 @@
 工具执行器模块 - 统一处理各种工具调用
 """
 import orjson
+import re
 
 from loguru import logger
 from typing import Dict, Optional, Callable
-import json
+
+# 预编译正则表达式
+_FILE_PREFIX_PATTERN = re.compile(r'^file:/{1,3}')
 
 from app.tools import BuiltinTools, ToolResult
 from app.utils.file_operation_recorder import (
@@ -166,10 +169,9 @@ class ToolExecutor:
         logger.debug(f"[ToolExecutor] 准备记录文件操作: tool={tool_name}, path={path}")
 
         # 处理 URL 格式的文件路径 (如 file:/D:/xxx 或 file:///D:/xxx)
-        import re
         if path.startswith("file:"):
             # 移除 file: 前缀，处理单斜杠或双斜杠
-            path = re.sub(r'^file:/{1,3}', '', path)
+            path = _FILE_PREFIX_PATTERN.sub('', path)
 
         # 获取完整的文件路径
         if hasattr(self._builtin_tools, "_file_tools"):
