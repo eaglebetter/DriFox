@@ -558,11 +558,13 @@ class HistoryCompactor:
         
         越旧的消息，保留越少
         """
-        summary_lines = [
-            "## Earlier Conversation Summary",
-            "以下是为节省上下文窗口而压缩的较早对话，请把它当作已确认的历史上下文继续工作。",
-        ]
-
+        if messages[0]["content"].startswith("## Earlier Conversation Summary"):
+            summary_lines = messages[0]["content"]
+        else:
+            summary_lines = [
+                "## Earlier Conversation Summary",
+                "以下是为节省上下文窗口而压缩的较早对话，请把它当作已确认的历史上下文继续工作。",
+            ]
         total_messages = len(messages)
         if total_messages == 0:
             return ""
@@ -616,9 +618,6 @@ class HistoryCompactor:
                 prefix = "[🔒] " if tool_name in PROTECTED_TOOLS else ""
                 summary_lines.append(f"{prefix}# Tool\n{tool_name}:\n{content}")
 
-        summary_lines.append(
-            "\n### Compression Note\n如果后续细节与当前上下文冲突，以最近保留的原始消息和最新任务状态为准。"
-        )
         return "\n".join(summary_lines)
 
     def _adaptive_truncate(
