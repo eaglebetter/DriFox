@@ -203,26 +203,6 @@ class ChatEngine:
         else:
             self._permission_cache.clear_session()
 
-    def _truncate_with_head_tail(self, content: str, max_length: int) -> str:
-        """
-        首尾保留截断：保留内容开头和结尾，中间截断。
-        适用于工具返回等长内容，保留关键结果。
-        """
-        if len(content) <= max_length:
-            return content
-
-        # 头尾各保留 40%，中间截断
-        head_length = int(max_length * 0.4)
-        tail_length = int(max_length * 0.4)
-
-        # 确保头尾不重叠
-        if head_length + tail_length >= max_length:
-            return content[:max_length]
-
-        head = content[:head_length]
-        tail = content[-tail_length:]
-        return f"{head}...[{len(content)}字截断]...{tail}"
-
     def _adaptive_truncate_content(
         self,
         content: str,
@@ -490,22 +470,70 @@ class ChatEngine:
         self._compaction_cache_config = config_key
         return self._compaction_http_client
 
-    def _has_structured_tool_history(
-        self, history_messages: List[Dict[str, Any]]
-    ) -> bool:
-        for msg in history_messages:
-            if msg.get("role") == "tool":
-                return True
-            if msg.get("role") == "assistant" and msg.get("tool_calls"):
-                return True
-        return False
-
-    def _compact_structured_history_messages(
+    def _compact_history_messages(
         self,
         history_messages: List[Dict[str, Any]],
         history_budget: int,
+        existing_cache: Optional[Dict[str, Any]] = None,
         allow_llm_summary: bool = False,
     ) -> tuple[List[Dict[str, Any]], Dict[str, Any], Dict[str, Any]]:
+        if not history_messages or history_budget <= 0:
+            return [], self._make_compaction_state(), self._make_compaction_cache()
+
+        normalized = consolidate_messages(history_messages)
+        soft_limit = self._get_compaction_soft_limit(history_budget)
+        target_limit = self._get_compaction_target_limit(history_budget)
+
+        if not normalized:
+            return [], self._make_compaction_state(), self._make_compaction_cache()
+
+        if count_messages_tokens(normalized) <= soft_limit:
+            return (
+                normalized,
+                self._make_compaction_state(
+                    original_count=len(normalized),
+                    kept_count=len(normalized),
+                ),
+                self._make_compaction_cache(),
+            )
+
+        cached = existing_cache or {}
+        if cached.get("active") and cached.get("summary_message"):
+            cutoff_index = int(cached.get("cutoff_index", 0) or 0)
+            if 0 < cutoff_index <= len(normalized):
+                cached_messages = [
+                    cached.get("summary_message"),
+                    *normalized[cutoff_index:],
+                ]
+                if count_messages_tokens(cached_messages) <= soft_limit:
+                    summarized_count = int(
+                        cached.get("summarized_count", cutoff_index) or cutoff_index
+                    )
+                    tail_count = len(normalized) - cutoff_index
+                    return (
+                        cached_messages,
+                        self._make_compaction_state(
+                            active=True,
+                            source="history",
+                            kind=str(cached.get("kind", "plain") or "plain"),
+                            original_count=len(normalized),
+                            summarized_count=summarized_count,
+                            kept_count=tail_count,
+                            summary_count=1,
+                            note=f"复用已压缩摘要，覆盖 {summarized_count} 条较早消息",
+                        ),
+                        self._make_compaction_cache(
+                            active=True,
+                            kind=str(cached.get("kind", "plain") or "plain"),
+                            cutoff_index=cutoff_index,
+                            source_message_count=len(normalized),
+                            summarized_count=summarized_count,
+                            tail_count=tail_count,
+                            budget_tokens=history_budget,
+                            summary_message=cached.get("summary_message"),
+                        ),
+                    )
+
         if not history_messages or history_budget <= 0:
             return [], self._make_compaction_state(), self._make_compaction_cache()
 
@@ -612,170 +640,6 @@ class ChatEngine:
                 source_message_count=len(history_messages),
                 summarized_count=len(compacted),
                 tail_count=len(recent_messages),
-                budget_tokens=history_budget,
-                summary_message=summary_message,
-            ),
-        )
-
-    def _compact_history_messages(
-        self,
-        history_messages: List[Dict[str, Any]],
-        history_budget: int,
-        existing_cache: Optional[Dict[str, Any]] = None,
-        allow_llm_summary: bool = False,
-    ) -> tuple[List[Dict[str, Any]], Dict[str, Any], Dict[str, Any]]:
-        if not history_messages or history_budget <= 0:
-            return [], self._make_compaction_state(), self._make_compaction_cache()
-
-        normalized = consolidate_messages(history_messages)
-        soft_limit = self._get_compaction_soft_limit(history_budget)
-        target_limit = self._get_compaction_target_limit(history_budget)
-
-        if not normalized:
-            return [], self._make_compaction_state(), self._make_compaction_cache()
-
-        if count_messages_tokens(normalized) <= soft_limit:
-            return (
-                normalized,
-                self._make_compaction_state(
-                    original_count=len(normalized),
-                    kept_count=len(normalized),
-                ),
-                self._make_compaction_cache(),
-            )
-
-        cached = existing_cache or {}
-        if cached.get("active") and cached.get("summary_message"):
-            cutoff_index = int(cached.get("cutoff_index", 0) or 0)
-            if 0 < cutoff_index <= len(normalized):
-                cached_messages = [
-                    cached.get("summary_message"),
-                    *normalized[cutoff_index:],
-                ]
-                if count_messages_tokens(cached_messages) <= soft_limit:
-                    summarized_count = int(
-                        cached.get("summarized_count", cutoff_index) or cutoff_index
-                    )
-                    tail_count = len(normalized) - cutoff_index
-                    return (
-                        cached_messages,
-                        self._make_compaction_state(
-                            active=True,
-                            source="history",
-                            kind=str(cached.get("kind", "plain") or "plain"),
-                            original_count=len(normalized),
-                            summarized_count=summarized_count,
-                            kept_count=tail_count,
-                            summary_count=1,
-                            note=f"复用已压缩摘要，覆盖 {summarized_count} 条较早消息",
-                        ),
-                        self._make_compaction_cache(
-                            active=True,
-                            kind=str(cached.get("kind", "plain") or "plain"),
-                            cutoff_index=cutoff_index,
-                            source_message_count=len(normalized),
-                            summarized_count=summarized_count,
-                            tail_count=tail_count,
-                            budget_tokens=history_budget,
-                            summary_message=cached.get("summary_message"),
-                        ),
-                    )
-
-        if self._has_structured_tool_history(normalized):
-            return self._compact_structured_history_messages(
-                normalized,
-                history_budget,
-                allow_llm_summary=allow_llm_summary,
-            )
-
-        recent_messages: List[Dict[str, str]] = []
-        recent_tokens = 0
-        min_recent_tokens = int(target_limit * 0.85)
-        for msg in reversed(normalized):
-            msg_tokens = count_messages_tokens([msg])
-            if recent_messages and recent_tokens + msg_tokens > target_limit:
-                break
-            recent_messages.insert(0, msg)
-            recent_tokens += msg_tokens
-            if (
-                len(recent_messages) >= RECENT_HISTORY_MIN_MESSAGES
-                and recent_tokens >= min_recent_tokens
-            ):
-                break
-
-        if len(recent_messages) == len(normalized):
-            return (
-                recent_messages,
-                self._make_compaction_state(
-                    original_count=len(normalized),
-                    kept_count=len(recent_messages),
-                ),
-                self._make_compaction_cache(),
-            )
-
-        compacted = normalized[: len(normalized) - len(recent_messages)]
-
-        # 计算 summary 可用的空间 = budget - recent_tokens - summary_message 开销
-        summary_budget = history_budget - recent_tokens - 500
-
-        compact_summary = self._summarize_compacted_messages(
-            compacted, allow_llm_summary=allow_llm_summary, history_budget=summary_budget
-        )
-        if not compact_summary:
-            return (
-                recent_messages,
-                self._make_compaction_state(
-                    original_count=len(normalized),
-                    kept_count=len(recent_messages),
-                ),
-                self._make_compaction_cache(),
-            )
-
-        summary_message = {
-            "role": "assistant",
-            "content": compact_summary,
-        }
-        result_messages = [summary_message] + recent_messages
-
-        # ========== 性能优化: O(n²) → O(n) ==========
-        # 原代码: while count_messages_tokens(result_messages) > target_limit
-        # 问题: 每次迭代都重新计算整个列表的 tokens (O(n))，循环 O(n) 次 = O(n²)
-        # 解决: 增量计算，追踪当前 token 数，每次只计算被移除消息的 token 数
-        summary_tokens = count_messages_tokens([summary_message])
-        current_tokens = count_messages_tokens(result_messages)
-        kept_count = len(recent_messages)
-
-        while current_tokens > target_limit and len(recent_messages) > 1:
-            removed = recent_messages.pop(0)
-            removed_tokens = count_messages_tokens([removed])
-            current_tokens -= removed_tokens
-            kept_count -= 1
-
-        if current_tokens > target_limit:
-            # 只能保留 summary
-            result_messages = [summary_message]
-            kept_count = 0
-        # ===========================================
-
-        return (
-            result_messages,
-            self._make_compaction_state(
-                active=True,
-                source="history",
-                kind="plain",
-                original_count=len(normalized),
-                summarized_count=len(compacted),
-                kept_count=kept_count,
-                summary_count=count_messages_tokens(compacted) - summary_tokens,
-                note=f"已压缩 {len(compacted)} 条较早消息",
-            ),
-            self._make_compaction_cache(
-                active=True,
-                kind="plain",
-                cutoff_index=len(compacted),
-                source_message_count=len(normalized),
-                summarized_count=len(compacted),
-                tail_count=kept_count,
                 budget_tokens=history_budget,
                 summary_message=summary_message,
             ),
