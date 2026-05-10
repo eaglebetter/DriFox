@@ -392,23 +392,8 @@ class HistoryCompactor:
 
         summary_message = {"role": "user", "content": compact_summary}
         result_messages = [summary_message] + recent_messages
-
-        # ========== 确保不超目标限制 ==========
         current_tokens = count_messages_tokens(result_messages)
         kept_count = len(recent_messages)
-        
-        while current_tokens > target_limit and len(recent_messages) > 1:
-            removed = recent_messages.pop(0)
-            removed_tokens = count_messages_tokens([removed])
-            current_tokens -= removed_tokens
-            kept_count -= 1
-        
-        if current_tokens > target_limit:
-            result_messages = [summary_message]
-            kept_count = 0
-
-        result_messages = [summary_message] + recent_messages
-
         return (
             result_messages,
             self._make_state(
