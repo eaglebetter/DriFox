@@ -16,6 +16,8 @@ import threading
 from typing import Optional, Dict, List, Callable, Any
 from loguru import logger
 
+from app.core import SessionManager, ChatSession
+
 
 class IsolatedChatContext:
     """API 隔离上下文 - 封装完全独立的组件实例
@@ -63,11 +65,6 @@ class IsolatedChatContext:
 
     def _create_session_manager(self, target_session) -> Any:
         """创建独立的 SessionManager"""
-        from app.llm_chatter.utils.chat_session import (
-            SessionManager,
-            ChatSession,
-        )
-        
         manager = SessionManager()
         
         if target_session:
