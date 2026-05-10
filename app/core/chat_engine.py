@@ -9,6 +9,7 @@ from typing import Dict, List, Optional, Any, Callable
 from loguru import logger
 from openai import OpenAI
 
+from app.core.permission_cache import PermissionCache
 from app.core.provider_profile import (
     get_provider_profile,
 )
@@ -56,8 +57,8 @@ class ChatEngine:
         self._current_worker: Optional[OpenAIChatWorker] = None
         self._is_streaming = False
         self._callbacks: Dict[str, Callable] = {}
-        # 会话级权限自动允许缓存（整个会话生命周期保存，不受worker新建影响）
-        self._session_permission_cache: Dict[str, bool] = {}
+        # 权限缓存：整个会话生命周期保存，不受 worker 新建影响
+        self._permission_cache = PermissionCache()
         self._current_agent: Optional[str] = "plan"
         
         # API 模式专用：直接回调（绕过 Qt 信号-槽，避免跨线程事件循环问题）
@@ -184,21 +185,12 @@ class ChatEngine:
         self._emit("permission_approval_requested", tool_call_id, tool_name, arguments)
 
     def approve_tool_permission(self, tool_call_id: str, auto_allow: bool = False, session_allow: bool = False):
+        """批准工具权限请求"""
         if self._current_worker:
+            # 转发给 Worker 处理
             self._current_worker.approve_permission(tool_call_id, auto_allow, session_allow)
-            # 如果是会话级允许，同时更新到 chat_engine 的持久缓存中
-            if session_allow and self._current_worker and hasattr(self._current_worker, "_permission_pending"):
-                pending = getattr(self._current_worker, "_permission_pending", None)
-                if pending and "tool_name" in pending:
-                    tool_name = pending["tool_name"]
-                    self._session_permission_cache[tool_name] = True
-                    logger.info(f"[Permission] 会话缓存已持久化到 ChatEngine: tool={tool_name}")
-            # 同步最新缓存到 chat_engine
-            if self._current_worker and hasattr(self._current_worker, "_session_permission_cache"):
-                worker_cache = getattr(self._current_worker, "_session_permission_cache", {})
-                if worker_cache != self._session_permission_cache:
-                    self._session_permission_cache = worker_cache.copy()
-                    logger.info(f"[Permission] 同步会话缓存到 ChatEngine: {len(self._session_permission_cache)} 项")
+            # 如果是会话级允许，Worker 内部会更新 PermissionCache
+            # 不需要额外同步，因为 Worker 和 ChatEngine 共享同一个 PermissionCache
 
     def deny_tool_permission(self, tool_call_id: str):
         if self._current_worker:
@@ -206,18 +198,10 @@ class ChatEngine:
 
     def clear_session_permission_cache(self, tool_name: str = None):
         """清除会话级权限缓存"""
-        # 先清除 chat_engine 中的持久缓存
         if tool_name:
-            if tool_name in self._session_permission_cache:
-                del self._session_permission_cache[tool_name]
+            self._permission_cache.deny(tool_name)
         else:
-            self._session_permission_cache = {}
-        # 再清除当前 worker 中的缓存
-        if self._current_worker:
-            if tool_name:
-                self._current_worker.set_session_permission_cache(tool_name, False)
-            else:
-                self._current_worker._session_permission_cache = self._session_permission_cache.copy()
+            self._permission_cache.clear_session()
 
     def _truncate_with_head_tail(self, content: str, max_length: int) -> str:
         """
@@ -1065,11 +1049,9 @@ class ChatEngine:
             permission_check_callback=self._check_tool_permission,
             compaction_prompt=compaction_prompt,
             compaction_config=compaction_config,
+            permission_cache=self._permission_cache,  # 共享同一个 PermissionCache
         )
-
-        # 同步chat_engine保存的会话级权限缓存到新worker
-        if hasattr(self._current_worker, "_session_permission_cache"):
-            self._current_worker._session_permission_cache = self._session_permission_cache.copy()
+        # 无需同步缓存，因为共享同一个 PermissionCache 实例
 
         # API 模式：直接调用回调（不使用 Qt 信号-槽，避免跨线程事件循环问题）
         # API 模式下 worker 运行在没有 Qt 事件循环的线程中，Qt 信号无法传递

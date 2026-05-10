@@ -21,6 +21,7 @@ from openai import (
 )
 
 from app.core.message_content import consolidate_messages, append_text_block, messages_to_api, to_api_message
+from app.core.permission_cache import PermissionCache
 from app.core.provider_profile import get_provider_profile
 from app.core.tool_call_parser import smart_parse_arguments
 
@@ -52,6 +53,7 @@ class OpenAIChatWorker(QThread):
             permission_check_callback=None,
             compaction_prompt: str = "",
             compaction_config: Dict = None,
+            permission_cache: PermissionCache = None,
     ):
         super().__init__()
         self.messages = messages
@@ -74,8 +76,8 @@ class OpenAIChatWorker(QThread):
         self._answer_event = Event()
         self._permission_pending = None
         self._permission_approved = False
-        self._round_permission_cache = {}  # 该轮对话内自动允许
-        self._session_permission_cache = {}  # 本次会话内自动允许
+        # 权限缓存：使用注入的 PermissionCache 实例
+        self._permission_cache = permission_cache or PermissionCache()
         self._previewed_tool_call_ids = set()
         self._current_tool_calls = {}  # 改成字典
         self._tool_calls_buffer = {}
@@ -386,9 +388,9 @@ class OpenAIChatWorker(QThread):
     def set_session_permission_cache(self, tool_name: str, allowed: bool = True):
         """设置会话级权限缓存（本次会话允许）"""
         if allowed:
-            self._session_permission_cache[tool_name] = True
-        elif tool_name in self._session_permission_cache:
-            del self._session_permission_cache[tool_name]
+            self._permission_cache.allow_session(tool_name)
+        else:
+            self._permission_cache.deny(tool_name)
 
     def approve_permission(self, tool_call_id: str, auto_allow: bool = False, session_allow: bool = False):
         from loguru import logger
@@ -398,11 +400,9 @@ class OpenAIChatWorker(QThread):
         ):
             tool_name = self._permission_pending.get("tool_name", "")
             if auto_allow:
-                self._round_permission_cache[tool_name] = True
-                logger.info(f"[Permission] 设置轮缓存: tool={tool_name}")
+                self._permission_cache.allow_round(tool_name)
             if session_allow:
-                self._session_permission_cache[tool_name] = True
-                logger.info(f"[Permission] 设置会话缓存: tool={tool_name}")
+                self._permission_cache.allow_session(tool_name)
             self._permission_approved = True
             self._permission_pending = None
 
@@ -427,8 +427,8 @@ class OpenAIChatWorker(QThread):
             self._api_messages_cache = None  # 重置缓存，下次 API 调用时重建
             self._api_messages_built = False
 
-            # 开始新对话时，清理该轮缓存，但保留会话级缓存
-            self._round_permission_cache = {}
+            # 开始新对话时，清理 round 缓存，但保留 session 缓存
+            self._permission_cache.clear_round()
 
             while not self._is_cancelled:
                 if self._is_cancelled:
@@ -508,8 +508,8 @@ class OpenAIChatWorker(QThread):
             logger.exception("请求失败!")
             self._handle_error(e)
         finally:
-            # 工具执行完成后，清理该轮权限缓存（为下一轮 API 调用做准备）
-            self._round_permission_cache = {}
+            # 工具执行完成后，清理 round 缓存（为下一轮 API 调用做准备）
+            self._permission_cache.clear_round()
 
     def _build_response_message_sequence(self, tool_results=None) -> List[Dict]:
         now_ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -1435,13 +1435,10 @@ class OpenAIChatWorker(QThread):
                 return None
 
             if self.permission_check_callback:
-                # 优先检查该轮缓存，再检查会话级缓存，最后才检查权限
-                if tool_name in self._round_permission_cache:
+                # 使用 PermissionCache 检查缓存，缓存命中则直接允许
+                if self._permission_cache.is_allowed(tool_name):
                     permission_result = "allow"
-                    logger.info(f"[Permission] 使用轮缓存: tool={tool_name}")
-                elif tool_name in self._session_permission_cache:
-                    permission_result = "allow"
-                    logger.info(f"[Permission] 使用会话缓存: tool={tool_name}")
+                    logger.info(f"[Permission] 使用缓存: tool={tool_name}")
                 else:
                     permission_result = self.permission_check_callback(
                         tool_name, arguments
