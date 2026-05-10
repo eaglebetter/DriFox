@@ -42,6 +42,10 @@ TARGET_LIMIT_RATIO = 0.5  # 压缩目标
 MIN_RECENT_TOKEN_RATIO = 0.85  # 最小保留 token 比例
 SUMMARY_OVERHEAD = 500  # 摘要基础开销
 
+# ========== 工具保护配置 ==========
+# 不应被压缩的工具列表（这些工具的内容需要完整保留）
+PROTECTED_TOOLS = {"skill"}  # 可以添加更多工具
+
 
 class HistoryCompactor:
     """
@@ -332,6 +336,7 @@ class HistoryCompactor:
             msg = normalized[i]
             msg_tokens = count_messages_tokens([msg])
             role = msg.get("role")
+            
             # 工具调用配对保护
             if role == "assistant":
                 tool_calls = msg.get("tool_calls", [])
@@ -599,14 +604,22 @@ class HistoryCompactor:
             role = msg.get("role")
             content = contents[idx] if idx < len(contents) else ""
 
-            # 自适应截断：越旧截断越多
-            content = self._adaptive_truncate(
-                content,
-                position=idx,
-                total=total_messages,
-                target_total=target_total_length,
-                ratios=content_ratios if total_content_length > 1000 else None,
-            )
+            # 对于受保护的工具（如 skill），保留完整内容不截断
+            is_protected_tool = False
+            if role == "tool":
+                tool_name = msg.get("name", "")
+                if tool_name in PROTECTED_TOOLS:
+                    is_protected_tool = True
+
+            # 自适应截断：越旧截断越多（受保护工具除外）
+            if not is_protected_tool:
+                content = self._adaptive_truncate(
+                    content,
+                    position=idx,
+                    total=total_messages,
+                    target_total=target_total_length,
+                    ratios=content_ratios if total_content_length > 1000 else None,
+                )
 
             if role == "user":
                 summary_lines.append(f"# User\n{content}")
@@ -614,7 +627,9 @@ class HistoryCompactor:
                 summary_lines.append(f"# Assistant\n{content}")
             elif role == "tool":
                 tool_name = msg.get("name", "")
-                summary_lines.append(f"# Tool\n{tool_name}:\n{content}")
+                # 标记受保护的工具
+                prefix = "[🔒] " if tool_name in PROTECTED_TOOLS else ""
+                summary_lines.append(f"{prefix}# Tool\n{tool_name}:\n{content}")
 
         summary_lines.append(
             "\n### Compression Note\n如果后续细节与当前上下文冲突，以最近保留的原始消息和最新任务状态为准。"
