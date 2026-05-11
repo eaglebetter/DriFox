@@ -1109,6 +1109,8 @@ class OpenAIChatWorker(QThread):
         tool_calls_found = False
         tool_args_pending = True
         reasoning_started_this_call = False  # 本轮 API 调用是否已发射 thinking_started
+        _reasoning_batch = ""  # 批量积累 reasoning，减少信号频率
+        _reasoning_batch_time = time.time()  # 上次发射时间
         chunk_count = 0  # chunk 计数器，用于定期 yield 主线程
         for chunk in response:
             if self._is_cancelled:
@@ -1208,7 +1210,13 @@ class OpenAIChatWorker(QThread):
                     self._emit_with_callback("thinking_started", self.thinking_started)
                 # 性能优化：使用 list append 代替字符串拼接
                 self._reasoning_chunks.append(reasoning_delta)
-                self._emit_with_callback("reasoning_content_received", self.reasoning_content_received, reasoning_delta)
+                # 批量发送：积累到 10 字符或 50ms 才 emit，避免高频信号堵塞 Qt 事件队列
+                _reasoning_batch += reasoning_delta
+                now = time.time()
+                if len(_reasoning_batch) >= 10 or (now - _reasoning_batch_time) > 0.05:
+                    self._emit_with_callback("reasoning_content_received", self.reasoning_content_received, _reasoning_batch)
+                    _reasoning_batch = ""
+                    _reasoning_batch_time = now
 
             if content:
                 # 性能优化：使用 list append + join 代替字符串拼接
@@ -1223,6 +1231,10 @@ class OpenAIChatWorker(QThread):
             chunk_count += 1
             if chunk_count % 5 == 0:
                 QCoreApplication.processEvents()
+
+        # 冲刷剩余的 reasoning batch
+        if _reasoning_batch:
+            self._emit_with_callback("reasoning_content_received", self.reasoning_content_received, _reasoning_batch)
 
         # 处理等待完整参数的 tool_calls（超长 arguments 场景）
         # 在所有 chunk 接收完成后，再次尝试解析仍处于等待状态的 tool_calls

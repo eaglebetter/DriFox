@@ -3,6 +3,7 @@ import base64
 import hashlib
 import math
 import re
+import time
 import urllib.parse
 from datetime import datetime
 from functools import lru_cache
@@ -805,6 +806,7 @@ class CodeWebViewer(QWebEngineView):
         self._is_js_ready = False
         self._last_rendered_html = ""
         self._last_rendered_markdown = ""
+        self._lazy_markdown_cb = None  # 懒回调：渲染时才生成 markdown，避免高频 content_to_markdown
         self._min_render_interval = 50
         self._height_report_pending = False
         self._context_lost = False  # 上下文丢失标志
@@ -1753,13 +1755,28 @@ class CodeWebViewer(QWebEngineView):
         try:
             if not self.page():
                 return
-            if self._markdown_text == self._last_rendered_markdown:
+            import time as _t
+            _t0 = _t.time()
+            # 懒加载：通过回调获取最新 markdown（避免每次 reasoning chunk 都调用 content_to_markdown）
+            if self._lazy_markdown_cb:
+                _tcb0 = _t.time()
+                fresh_md = self._lazy_markdown_cb()
+                _tcb = (_t.time() - _tcb0) * 1000
+                if fresh_md == self._last_rendered_markdown:
+                    if not self._height_report_pending:
+                        self._height_report_pending = True
+                        self._resize_timer.start()
+                    return
+                self._markdown_text = fresh_md
+            elif self._markdown_text == self._last_rendered_markdown:
                 if not self._height_report_pending:
                     self._height_report_pending = True
                     self._resize_timer.start()
                 return
 
+            _tr0 = _t.time()
             html_content = self._render_markdown_to_html(self._markdown_text)
+            _tr = (_t.time() - _tr0) * 1000
             self._last_rendered_markdown = self._markdown_text
             if html_content == self._last_rendered_html:
                 if not self._height_report_pending:
@@ -1770,7 +1787,12 @@ class CodeWebViewer(QWebEngineView):
             self._last_rendered_html = html_content
             self._height_report_pending = True
             js_code = f"updateContent({json.dumps(html_content).decode('utf-8')});"
+            _tjs0 = _t.time()
             self.page().runJavaScript(js_code)
+            _tjs = (_t.time() - _tjs0) * 1000
+            _total = (_t.time() - _t0) * 1000
+            if _total > 10:
+                print(f"[DIAG] _perform_update: cb={_tcb:.0f}ms render={_tr:.0f}ms js={_tjs:.0f}ms total={_total:.0f}ms len={len(self._markdown_text)}", flush=True)
         except RuntimeError:
             pass
 
@@ -2052,6 +2074,7 @@ class MessageCard(SimpleCardWidget):
         # 标记：内容刚加载到viewer，首次heightChanged后滚动并清除
         self._content_just_loaded = False
         self._pending_content: Optional[str] = None
+        self._reasoning_total_len = 0  # reasoning 内容总长度计数器，避免每次遍历
         self._viewer_container = QWidget(self)
         self._viewer_layout = QVBoxLayout(self._viewer_container)
         self._viewer_layout.setContentsMargins(0, 0, 0, 0)
@@ -2218,6 +2241,7 @@ class MessageCard(SimpleCardWidget):
         elif self.role == "welcome":
             # 欢迎卡片一开始就在可视区域，直接创建viewer不需要懒加载
             self.viewer = CodeWebViewer(self)
+            self.viewer._lazy_markdown_cb = lambda: content_to_markdown(self._content_data)
             self.viewer.codeActionRequested.connect(self.actionRequested.emit)
             self.viewer.contextActionRequested.connect(self.contextActionRequested.emit)
             self.viewer.contentHeightChanged.connect(self._update_height)
@@ -2555,6 +2579,7 @@ class MessageCard(SimpleCardWidget):
                     item.widget().deleteLater()
 
             self.viewer = CodeWebViewer(self)
+            self.viewer._lazy_markdown_cb = lambda: content_to_markdown(self._content_data)
             self.viewer.codeActionRequested.connect(self.actionRequested.emit)
             self.viewer.contextActionRequested.connect(self.contextActionRequested.emit)
             self.viewer.contentHeightChanged.connect(self._update_height)
@@ -2611,10 +2636,13 @@ class MessageCard(SimpleCardWidget):
             if not self._lazy_rendered:
                 self._pending_content = self._content_data
                 return
+            t_md = time.time()
             rendered = content_to_markdown(self._content_data)
+            md_ms = (time.time() - t_md) * 1000
             self.viewer._markdown_text = rendered
             self.viewer._schedule_render(immediate=False)
             self._content_just_loaded = True
+            print(f"[DIAG] append_text: md_gen={md_ms:.1f}ms", flush=True)
             return
 
         self._content_data = str(self._content_data or "") + str(text or "")
@@ -2690,30 +2718,32 @@ class MessageCard(SimpleCardWidget):
         将 reasoning 直接写入 _content_data 的 reasoning block，
         使其与文本、工具结果按实际发生顺序交错渲染。
         """
+        t0 = time.time()
         # 查找或创建最后一个 reasoning block
         if not self._content_data or self._content_data[-1].get("type") != "reasoning":
             self._content_data.append({"type": "reasoning", "content": text})
         else:
             self._content_data[-1]["content"] = (self._content_data[-1].get("content", "") or "") + text
+        self._reasoning_total_len += len(text)
 
-        # 思考内容总长度
-        reasoning_len = sum(
-            len(b.get("content", "") or "")
-            for b in self._content_data
-            if isinstance(b, dict) and b.get("type") == "reasoning"
-        )
         LARGE_THINKING_THRESHOLD = 50 * 1024  # 50KB
 
         if not self._lazy_rendered:
             self._pending_content = self._content_data
             return
 
-        if reasoning_len > LARGE_THINKING_THRESHOLD:
+        if self._reasoning_total_len > LARGE_THINKING_THRESHOLD:
             # 超长思考：使用增量更新策略，避免完整重渲染
             self._update_thinking_incremental(text)
         else:
-            # 普通长度：走正常的 markdown 渲染流程
-            self.viewer._markdown_text = content_to_markdown(self._content_data)
+            # 优化：只在渲染定时器未激活时才调用 content_to_markdown（避免高频重复计算）
+            # 渲染定时器激活时，下轮 _perform_update 会通过 _lazy_markdown_cb 获取最新数据
+            if not self.viewer._render_timer.isActive():
+                t_md = time.time()
+                self.viewer._markdown_text = content_to_markdown(self._content_data)
+                md_ms = (time.time() - t_md) * 1000
+                total_ms = (time.time() - t0) * 1000
+                print(f"[DIAG] append_reasoning: md_gen={md_ms:.1f}ms len={len(text)} total={total_ms:.1f}ms", flush=True)
             self.viewer._schedule_render(immediate=False)
 
     def _update_thinking_incremental(self, new_text: str):
