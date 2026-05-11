@@ -2032,6 +2032,7 @@ class MessageCard(SimpleCardWidget):
     subAgentLogRequested = pyqtSignal(str)  # task_ids (comma-separated)
     cardDiffRequested = pyqtSignal(int)  # message_index（消息在 session.messages 中的索引）
     saveFileRequested = pyqtSignal(str, str)  # code, lang
+    lazyRenderCompleted = pyqtSignal()  # 懒渲染完成信号，用于通知滚动保持
 
     def __init__(
             self,
@@ -2564,37 +2565,51 @@ class MessageCard(SimpleCardWidget):
             return
         self.append_text(txt)
 
-    def ensure_rendered(self):
-        """如果还没渲染，懒加载创建QWebViewer并渲染内容"""
+    def ensure_rendered(self, delay_ms: int = 0):
+        """如果还没渲染，懒加载创建QWebViewer并渲染内容
+        
+        Args:
+            delay_ms: 延迟加载毫秒数。默认0立即加载，>0则延迟加载并发送信号
+        """
         if self._lazy_rendered or self.role == "user":
             return
 
-        # 移除占位符，创建真正的viewer
-        for i in reversed(range(self._viewer_layout.count())):
-            item = self._viewer_layout.itemAt(i)
-            if item and item.widget():
-                item.widget().deleteLater()
+        def _do_ensure_rendered():
+            # 移除占位符，创建真正的viewer
+            for i in reversed(range(self._viewer_layout.count())):
+                item = self._viewer_layout.itemAt(i)
+                if item and item.widget():
+                    item.widget().deleteLater()
 
-        self.viewer = CodeWebViewer(self)
-        self.viewer.codeActionRequested.connect(self.actionRequested.emit)
-        self.viewer.contextActionRequested.connect(self.contextActionRequested.emit)
-        self.viewer.contentHeightChanged.connect(self._update_height)
-        self.viewer.toolDiffRequested.connect(self.toolDiffRequested.emit)
-        self.viewer.subAgentLogRequested.connect(self.subAgentLogRequested.emit)
-        self.viewer.saveFileRequested.connect(self.saveFileRequested.emit)
-        # WebEngine 上下文丢失处理
-        self.viewer.contextLost.connect(self._on_webengine_context_lost)
-        self.viewer.contextRestored.connect(self._on_webengine_context_restored)
-        # 安装对话框过滤
-        self.viewer._install_dialog_filter()
+            self.viewer = CodeWebViewer(self)
+            self.viewer.codeActionRequested.connect(self.actionRequested.emit)
+            self.viewer.contextActionRequested.connect(self.contextActionRequested.emit)
+            self.viewer.contentHeightChanged.connect(self._update_height)
+            self.viewer.toolDiffRequested.connect(self.toolDiffRequested.emit)
+            self.viewer.subAgentLogRequested.connect(self.subAgentLogRequested.emit)
+            self.viewer.saveFileRequested.connect(self.saveFileRequested.emit)
+            # WebEngine 上下文丢失处理
+            self.viewer.contextLost.connect(self._on_webengine_context_lost)
+            self.viewer.contextRestored.connect(self._on_webengine_context_restored)
+            # 安装对话框过滤
+            self.viewer._install_dialog_filter()
 
-        self._viewer_layout.addWidget(self.viewer)
-        self._lazy_rendered = True
+            self._viewer_layout.addWidget(self.viewer)
+            self._lazy_rendered = True
 
-        # 如果有等待渲染的内容，现在渲染
-        if self._pending_content is not None:
-            self.set_content(self._pending_content)
-            self._pending_content = None
+            # 如果有等待渲染的内容，现在渲染
+            if self._pending_content is not None:
+                self.set_content(self._pending_content)
+                self._pending_content = None
+            
+            # 通知懒渲染完成，让父组件可以修正滚动位置
+            self.lazyRenderCompleted.emit()
+
+        if delay_ms > 0:
+            # 延迟加载，批量处理减少卡顿
+            QTimer.singleShot(delay_ms, _do_ensure_rendered)
+        else:
+            _do_ensure_rendered()
 
     def set_content(self, content: Any):
         if self.role == "assistant":

@@ -217,6 +217,8 @@ class OpenAIChatToolWindow(ToolWindow):
         self._bottom_anchor_timer.setInterval(80)
         self._bottom_anchor_timer.timeout.connect(self._maintain_bottom_anchor)
         self._suppress_scroll_sync_count = 0  # 加载历史时抑制滚动同步的计数器
+        self._loading_session = False  # 加载会话标志，用于懒渲染期间保持滚动位置
+        self._pending_lazy_cards: List[MessageCard] = []  # 待处理的懒渲染卡片队列
         # resize 防抖定时器 - 性能优化：增加防抖时间减少卡顿
         self._resize_debounce_timer = QTimer(self)
         self._resize_debounce_timer.setSingleShot(True)
@@ -1921,6 +1923,7 @@ class OpenAIChatToolWindow(ToolWindow):
                           self._visible_batch_start:self._visible_batch_end
                           ]
         self._suspend_auto_scroll = not initial
+        self._loading_session = True  # 标记加载状态，懒渲染期间保持滚动
         try:
             self._render_message_to_card(
                 visible_batches,
@@ -1929,14 +1932,10 @@ class OpenAIChatToolWindow(ToolWindow):
         finally:
             self._suspend_auto_scroll = False
 
-        # 延迟滚动，确保卡片渲染完成后再滚动到底部
-        # 使用多次滚动确保卡片高度变化后仍能保持在底部
-        self._scroll_to_bottom(sticky_ms=900)
+        # 节点预览和滚动同步在懒渲染完成后处理
         self._update_node_preview()
-        # 滚动完成后同步时间线节点到最后一个（延迟执行确保卡片渲染完成）
         QTimer.singleShot(100, self._sync_node_preview_to_last)
         self._refresh_context_usage_indicator()
-        # 会话切换加载完成后，延迟触发垃圾回收释放未使用内存
         QTimer.singleShot(500, lambda: gc.collect())
 
     def _has_more_history_batches(self) -> bool:
@@ -2423,17 +2422,52 @@ class OpenAIChatToolWindow(ToolWindow):
             # 保存卡片引用到 batch_cards
             self._batch_cards[global_batch_index] = cards if cards else None
 
-            # 如果当前batch在可视范围内，确保已经渲染（懒渲染需要主动触发）
-            if cards and (self._visible_batch_start <= global_batch_index < self._visible_batch_end):
+        # 批量处理懒渲染：渲染完所有卡片后再统一触发，避免每次都触发滚动
+        # 收集需要懒渲染的卡片
+        pending_lazy_cards = []
+        for batch_idx in range(batch_offset, batch_offset + len(batches)):
+            if batch_idx >= len(self._batch_cards):
+                break
+            cards = self._batch_cards[batch_idx]
+            if cards:
                 for card in cards:
-                    if isinstance(card, MessageCard):
-                        card.ensure_rendered()
+                    if isinstance(card, MessageCard) and not getattr(card, '_lazy_rendered', False):
+                        pending_lazy_cards.append(card)
+        
+        # 批量触发懒渲染，使用延迟加载减少卡顿
+        if pending_lazy_cards:
+            self._pending_lazy_cards = pending_lazy_cards
+            QTimer.singleShot(0, self._process_next_lazy_card)
 
     def _get_rendered_message_cards(self) -> List[MessageCard]:
         def is_user_or_assistant(widget):
             return widget.role in ("user", "assistant")
 
         return collect_message_cards_from_layout(self.chat_layout, is_user_or_assistant)
+
+    def _process_next_lazy_card(self):
+        """分批处理懒渲染卡片，每次处理一个卡片并触发滚动
+        关键：每次渲染完成后立即同步滚动，不依赖定时器延迟
+        """
+        if not self._pending_lazy_cards:
+            # 所有懒渲染完成
+            self._loading_session = False
+            return
+        
+        card = self._pending_lazy_cards.pop(0)
+        # 检查卡片是否仍然有效
+        if self._is_widget_alive(card) and not getattr(card, '_lazy_rendered', False):
+            card.ensure_rendered()
+        
+        # 每次渲染完一个卡片后立即同步滚动到底部，无论加载多慢都生效
+        # 直接设置滚动条值，不依赖定时器
+        if self._loading_session:
+            scroll_bar = self.chat_scroll_area.verticalScrollBar()
+            scroll_bar.setValue(scroll_bar.maximum())
+        
+        # 继续处理下一个
+        if self._pending_lazy_cards:
+            self._process_next_lazy_card()
 
     def _get_current_user_round_index(self) -> int:
         """获取当前 user message 应该是第几个 user（从 0 开始）
@@ -3938,6 +3972,9 @@ class OpenAIChatToolWindow(ToolWindow):
         scroll_bar = self.chat_scroll_area.verticalScrollBar()
         if scroll_bar.value() < scroll_bar.maximum() - 20:
             scroll_bar.setValue(scroll_bar.maximum())
+            # 懒渲染可能需要更长时间，延迟再次检查
+            if self._bottom_anchor_deadline > time.monotonic():
+                QTimer.singleShot(300, self._ensure_at_bottom)
 
     def _maintain_bottom_anchor(self):
         if self._bottom_anchor_deadline <= time.monotonic():
@@ -3949,8 +3986,8 @@ class OpenAIChatToolWindow(ToolWindow):
         self._bottom_anchor_timer.start()
 
     def _on_message_card_height_changed(self, _height: int):
-        # 卡片高度变化时，如果正在加载会话或正在流式输出，保持底部
-        if self._bottom_anchor_deadline > time.monotonic() or self._is_streaming:
+        # 卡片高度变化时，如果正在加载会话、懒渲染期间或正在流式输出，保持底部
+        if self._bottom_anchor_deadline > time.monotonic() or self._is_streaming or self._loading_session:
             self._pending_scroll_to_bottom = True
             self._scroll_bottom_timer.start()
 

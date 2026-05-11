@@ -1601,9 +1601,8 @@ def create_assistant_card_widget(
     """
     card = MessageCard(parent=parent, role="assistant", timestamp=timestamp)
     card._round_index = round_index
-    # 新创建的assistant卡片肯定在可视区，确保立即渲染
+    # 新建的assistant卡片在可视区，确保立即渲染（流式输出需要）
     card.ensure_rendered()
-    # 懒渲染：viewer现在已经创建，安装dialog filter
     if card.viewer is not None:
         card.viewer._install_dialog_filter()
     
