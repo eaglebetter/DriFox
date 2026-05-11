@@ -33,6 +33,7 @@ _VALID_IDENTIFIER_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 class OpenAIChatWorker(QThread):
     content_received = pyqtSignal(str)
     reasoning_content_received = pyqtSignal(str)  # DeepSeek thinking mode
+    thinking_started = pyqtSignal()  # 新一轮思考开始（多轮工具迭代时每轮触发）
     error_occurred = pyqtSignal(str)
     finished_with_content = pyqtSignal(str)
     finished_with_messages = pyqtSignal(list)
@@ -1107,6 +1108,8 @@ class OpenAIChatWorker(QThread):
         self._tool_calls_buffer = {}
         tool_calls_found = False
         tool_args_pending = True
+        reasoning_started_this_call = False  # 本轮 API 调用是否已发射 thinking_started
+        chunk_count = 0  # chunk 计数器，用于定期 yield 主线程
         for chunk in response:
             if self._is_cancelled:
                 return False, False  # 返回元组而不是单个布尔值
@@ -1200,6 +1203,9 @@ class OpenAIChatWorker(QThread):
             # 提取 reasoning_content (DeepSeek V4 thinking mode)
             reasoning_delta = getattr(delta, "reasoning_content", None)
             if reasoning_delta:
+                if not reasoning_started_this_call:
+                    reasoning_started_this_call = True
+                    self._emit_with_callback("thinking_started", self.thinking_started)
                 # 性能优化：使用 list append 代替字符串拼接
                 self._reasoning_chunks.append(reasoning_delta)
                 self._emit_with_callback("reasoning_content_received", self.reasoning_content_received, reasoning_delta)
@@ -1211,6 +1217,12 @@ class OpenAIChatWorker(QThread):
                     self._response_content_blocks, content
                 )
                 self._emit_with_callback("content_received", self.content_received, content)
+
+            # 每处理 5 个 chunk 就让渡一次 CPU，确保主线程能及时处理排队的 Qt 信号
+            # 避免 content_received 等信号堆积到工具执行完毕后一次性处理
+            chunk_count += 1
+            if chunk_count % 5 == 0:
+                QCoreApplication.processEvents()
 
         # 处理等待完整参数的 tool_calls（超长 arguments 场景）
         # 在所有 chunk 接收完成后，再次尝试解析仍处于等待状态的 tool_calls

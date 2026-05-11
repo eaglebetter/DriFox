@@ -805,7 +805,6 @@ class CodeWebViewer(QWebEngineView):
         self._is_js_ready = False
         self._last_rendered_html = ""
         self._last_rendered_markdown = ""
-        self._reasoning_blocks: List[str] = []  # 多个独立思考块，每轮迭代一个
         self._min_render_interval = 50
         self._height_report_pending = False
         self._context_lost = False  # 上下文丢失标志
@@ -1704,55 +1703,29 @@ class CodeWebViewer(QWebEngineView):
             self._schedule_render()
 
     def _render_markdown_to_html(self, raw_md: str) -> str:
+        """渲染 markdown 到 HTML。
+        
+        reasoning 现在作为 <think> 标签嵌入在 raw_md 中（由 content_to_markdown 生成），
+        与文本、工具结果按实际顺序交错排列，不再需要单独的 _reasoning_blocks 逻辑。
+        """
         if not self._streaming:
-            # 非流式模式：为每个思考块渲染独立折叠框
-            # 思考内容长度阈值
-            LARGE_THINKING_THRESHOLD = 50 * 1024  # 50KB
-            
-            # 为每个思考块都渲染独立的折叠框
-            if self._reasoning_blocks:
-                for i, reasoning_block in enumerate(self._reasoning_blocks):
-                    if not reasoning_block:
-                        continue
-                        
-                    reasoning_size = len(reasoning_block.encode('utf-8'))
-                    if reasoning_size > LARGE_THINKING_THRESHOLD:
-                        # 超长思考：使用轻量级渲染策略
-                        think_html = _render_think_block_lightweight(reasoning_block, completed=True)
-                    else:
-                        # 普通长度：使用完整渲染
-                        think_html = _render_think_block(reasoning_block, completed=True)
-                    raw_md = think_html + raw_md
-            
-            # 现在处理 markdown 渲染，不再需要单独处理 reasoning
+            # 非流式模式：直接渲染，所有 <think> 都是已完成的
             return _render_markdown_to_html_cached(
                 raw_md,
                 "",
             )
 
-        # 流式模式下对思考内容的优化策略
-        # 思考内容长度阈值
-        LARGE_THINKING_THRESHOLD = 50 * 1024  # 50KB
+        # 流式模式：最后一个 <think> 块可能未完成
+        # 临时去掉最后一个 </think>，让 _inject_think_cards 将其渲染为 "正在思考..."
+        streaming_md = raw_md
+        if self._streaming:
+            last_think_close = streaming_md.rfind("</think>")
+            last_think_open = streaming_md.rfind("<think>")
+            # 如果最后一个 <think> 有闭合标签，去掉它表示未完成
+            if last_think_close > last_think_open and last_think_open != -1:
+                streaming_md = streaming_md[:last_think_close] + streaming_md[last_think_close + len("</think>"):]
 
-        # 为每个思考块都渲染独立的折叠框
-        if self._reasoning_blocks:
-            for i, reasoning_block in enumerate(self._reasoning_blocks):
-                if not reasoning_block:
-                    continue
-                    
-                is_last_block = (i == len(self._reasoning_blocks) - 1)
-                is_completed = not is_last_block or not self._streaming
-                
-                reasoning_size = len(reasoning_block.encode('utf-8'))
-                if reasoning_size > LARGE_THINKING_THRESHOLD:
-                    # 超长思考：使用轻量级渲染策略
-                    think_html = _render_think_block_lightweight(reasoning_block, completed=is_completed)
-                else:
-                    # 普通长度：使用完整渲染
-                    think_html = _render_think_block(reasoning_block, completed=is_completed)
-                raw_md = think_html + raw_md
-
-        safe_md = _sanitize_incomplete_markdown(raw_md)
+        safe_md = _sanitize_incomplete_markdown(streaming_md)
         safe_md = _unwrap_code_blocks_with_context_links(safe_md)
         safe_md = _inject_context_links(safe_md)
         processed_md = _inject_think_cards(safe_md, self._streaming is False)
@@ -1882,7 +1855,6 @@ class CodeWebViewer(QWebEngineView):
         self._markdown_text = ""
         self._last_rendered_html = ""
         self._last_rendered_markdown = ""
-        self._reasoning_blocks = []
         self._is_js_ready = False
 
         # 清理上下文状态
@@ -2049,10 +2021,12 @@ class MessageCard(SimpleCardWidget):
         self.error = error
         self._interactive_options: List[dict] = []
         self._content_data: Any = [] if role == "assistant" else ""
+        # 将 reasoning_content 转为 _content_data 的 reasoning block
+        if role == "assistant" and reasoning_content:
+            self._content_data.append({"type": "reasoning", "content": reasoning_content})
         self._streaming = False
         self._round_index: Optional[int] = None  # 用于卡片差异功能
         self._message_index: Optional[int] = None  # 用于卡片差异和撤销功能：消息在 session.messages 中的索引
-        self._reasoning_blocks = [reasoning_content] if reasoning_content else []
         self._anim_timer = QTimer(self)
         self._anim_timer.timeout.connect(self._update_anim)
         self._pulse_phase = 0.0
@@ -2689,10 +2663,10 @@ class MessageCard(SimpleCardWidget):
             pass
 
     def set_reasoning_content(self, content: str):
-        """设置思考内容（用于 DeepSeek 思考模式）- 兼容旧接口，放到第一个块"""
-        self._reasoning_blocks = [content]
+        """设置思考内容（用于 DeepSeek 思考模式）- 作为 reasoning block 写入 _content_data"""
+        self._content_data.insert(0, {"type": "reasoning", "content": content})
         if content and hasattr(self.viewer, "_markdown_text"):
-            # 刷新渲染以显示思考内容
+            self.viewer._markdown_text = content_to_markdown(self._content_data)
             self.viewer._schedule_render(immediate=True)
 
     def set_html_direct(self, html: str):
@@ -2706,31 +2680,43 @@ class MessageCard(SimpleCardWidget):
             pass
 
     def start_new_thinking_block(self):
-        """开始一个新的思考块（每轮工具迭代调用一次）"""
-        self._reasoning_blocks.append("")
+        """开始一个新的思考块（每轮工具迭代调用一次）
+        
+        将 reasoning 作为 _content_data 的一个 block，
+        与文本、工具结果自然交错排列。
+        """
+        self._content_data.append({"type": "reasoning", "content": ""})
         
     def append_reasoning(self, text: str):
         """追加思考内容到当前最后一个思考块（流式模式）
 
-        优化：使用防抖机制，避免每次片段都触发完整重渲染。
-        对于超长思考，使用增量更新策略减少内存压力。
+        将 reasoning 直接写入 _content_data 的 reasoning block，
+        使其与文本、工具结果按实际发生顺序交错渲染。
         """
-        # 如果还没有思考块，创建第一个
-        if not self._reasoning_blocks:
-            self._reasoning_blocks.append("")
+        # 查找或创建最后一个 reasoning block
+        if not self._content_data or self._content_data[-1].get("type") != "reasoning":
+            self._content_data.append({"type": "reasoning", "content": text})
+        else:
+            self._content_data[-1]["content"] = (self._content_data[-1].get("content", "") or "") + text
 
-        old_total_len = sum(len(b) for b in self._reasoning_blocks)
-        self._reasoning_blocks[-1] += text
-        new_total_len = old_total_len + len(text)
-
-        # 思考内容总长度阈值（超过此值使用增量更新策略）
+        # 思考内容总长度
+        reasoning_len = sum(
+            len(b.get("content", "") or "")
+            for b in self._content_data
+            if isinstance(b, dict) and b.get("type") == "reasoning"
+        )
         LARGE_THINKING_THRESHOLD = 50 * 1024  # 50KB
 
-        if new_total_len > LARGE_THINKING_THRESHOLD:
+        if not self._lazy_rendered:
+            self._pending_content = self._content_data
+            return
+
+        if reasoning_len > LARGE_THINKING_THRESHOLD:
             # 超长思考：使用增量更新策略，避免完整重渲染
             self._update_thinking_incremental(text)
         else:
-            # 普通长度：使用防抖机制，遵循流式模式渲染频率
+            # 普通长度：走正常的 markdown 渲染流程
+            self.viewer._markdown_text = content_to_markdown(self._content_data)
             self.viewer._schedule_render(immediate=False)
 
     def _update_thinking_incremental(self, new_text: str):
@@ -2847,7 +2833,6 @@ class MessageCard(SimpleCardWidget):
 
         # 清理大数据缓存
         self._content_data = None
-        self._reasoning_blocks = None
         self._interactive_options = []
 
     def closeEvent(self, e):
