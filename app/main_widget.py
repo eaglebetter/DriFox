@@ -3964,18 +3964,25 @@ class OpenAIChatToolWindow(ToolWindow):
         if self._bottom_anchor_deadline > time.monotonic():
             self._bottom_anchor_timer.start()
         else:
-            # 即使anchor到期，也再延迟一次检查，防止懒渲染卡片高度变化导致没到底
-            QTimer.singleShot(150, self._ensure_at_bottom)
+            # 即使anchor到期，也再延迟多次检查，防止多批懒渲染卡片撑开高度导致没到底
+            QTimer.singleShot(150, lambda: self._ensure_at_bottom(retries=3))
         # 加载完成后抑制滚动同步，避免节点跑到渲染的卡片数量位置
         self._suppress_scroll_sync_count = 0
 
-    def _ensure_at_bottom(self):
-        """确保滚动条在底部，用于懒渲染卡片高度变化后的二次修正"""
+    def _ensure_at_bottom(self, retries: int = 3):
+        """确保滚动条在底部，用于懒渲染卡片高度变化后的二次修正
+        
+        Args:
+            retries: 剩余重试次数，即使 bottom anchor 过期，也重试几次处理懒加载
+        """
         scroll_bar = self.chat_scroll_area.verticalScrollBar()
         if scroll_bar.value() < scroll_bar.maximum() - 20:
             scroll_bar.setValue(scroll_bar.maximum())
             # 懒渲染可能需要更长时间，延迟再次检查
-            if self._bottom_anchor_deadline > time.monotonic():
+            # 如果还有重试次数，即使 bottom anchor 过期也继续重试
+            if retries > 0:
+                QTimer.singleShot(300, lambda: self._ensure_at_bottom(retries - 1))
+            elif self._bottom_anchor_deadline > time.monotonic():
                 QTimer.singleShot(300, self._ensure_at_bottom)
 
     def _maintain_bottom_anchor(self):
@@ -3991,13 +3998,49 @@ class OpenAIChatToolWindow(ToolWindow):
         """卡片高度变化时的滚动处理
         仅当卡片 _content_just_loaded 标记为 True 时触发滚动并清除标记。
         这样内容加载触发的高度变化会滚底，而用户折叠操作不会。
+        
+        修复规则：
+        1. 如果正在往顶部加载历史批次（用户主动向上滚动） → 不滚动
+        2. 如果这是整个会话最后一张卡片 → 强制滚动到底（初始加载完成保证到最底端）
+        3. 如果正在流式输出 → 滚动到底
+        4. 如果滚动条已经在底部附近 → 滚动到底
         """
         sender = self.sender()
         if not isinstance(sender, MessageCard):
             return
         if not sender._content_just_loaded:
             return
-        self._scroll_to_bottom()
+        
+        # 如果正在往顶部加载历史批次（用户主动向上滚动触发），不滚动到底部
+        if self._is_loading_history_batches:
+            sender._content_just_loaded = False
+            return
+        
+        # 检查是否是整个会话的最后一张卡片
+        is_last_card = False
+        if hasattr(self, '_batch_cards') and self._batch_cards:
+            # 遍历最后一个非空批次
+            for batch in reversed(self._batch_cards):
+                if batch is not None and batch:
+                    # 检查当前 sender 是否在最后批次中
+                    if sender in batch:
+                        # 检查是否是最后批次的最后一张卡片
+                        if sender is batch[-1]:
+                            is_last_card = True
+                    break
+        
+        # 判断规则
+        if is_last_card or self._is_streaming:
+            # 如果是最后一张卡片，或者正在流式输出 → 强制滚底
+            self._scroll_to_bottom()
+        else:
+            scroll_bar = self.chat_scroll_area.verticalScrollBar()
+            max_val = scroll_bar.maximum()
+            current_val = scroll_bar.value()
+            # 如果滚动条已经在底部附近 → 滚底
+            if max_val - current_val < 50:
+                self._scroll_to_bottom()
+        
         sender._content_just_loaded = False
 
     def handle_recommended_question(self, content: str, action: str):
