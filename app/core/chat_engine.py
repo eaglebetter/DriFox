@@ -186,6 +186,7 @@ class ChatEngine:
     def send_message(
         self,
         user_text: str,
+        *args,
         **kwargs
     ) -> bool:
         if self._is_streaming:

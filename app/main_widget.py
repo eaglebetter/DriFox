@@ -3987,10 +3987,17 @@ class OpenAIChatToolWindow(ToolWindow):
         self._bottom_anchor_timer.start()
 
     def _on_message_card_height_changed(self, _height: int):
-        # 卡片高度变化时，如果正在加载会话、懒渲染期间或正在流式输出，保持底部
-        if self._bottom_anchor_deadline > time.monotonic() or self._is_streaming or self._loading_session:
-            self._pending_scroll_to_bottom = True
-            self._scroll_bottom_timer.start()
+        """卡片高度变化时的滚动处理
+        仅当卡片 _content_just_loaded 标记为 True 时触发滚动并清除标记。
+        这样内容加载触发的高度变化会滚底，而用户折叠操作不会。
+        """
+        sender = self.sender()
+        if not isinstance(sender, MessageCard):
+            return
+        if not sender._content_just_loaded:
+            return
+        self._scroll_to_bottom()
+        sender._content_just_loaded = False
 
     def handle_recommended_question(self, content: str, action: str):
         if action == "ask":
@@ -4216,7 +4223,7 @@ class OpenAIChatToolWindow(ToolWindow):
 
         # 绕过 streaming 检查直接发送
         self.backend.chat_engine._is_streaming = False
-        self._chat_engine.send_message(callback_text, {"source": "subagent_callback"})
+        self._chat_engine.send_message(callback_text)
 
     def _on_sub_agent_finished(self, task_id: str, result: str):
         """单个子智能体执行完成"""

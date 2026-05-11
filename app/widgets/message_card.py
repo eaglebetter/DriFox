@@ -2078,6 +2078,8 @@ class MessageCard(SimpleCardWidget):
         self._webengine_needs_restore = False
         # 懒渲染标志：未进入可视区域前不创建QWebEngine
         self._lazy_rendered = False
+        # 标记：内容刚加载到viewer，首次heightChanged后滚动并清除
+        self._content_just_loaded = False
         self._pending_content: Optional[str] = None
         self._viewer_container = QWidget(self)
         self._viewer_layout = QVBoxLayout(self._viewer_container)
@@ -2629,6 +2631,7 @@ class MessageCard(SimpleCardWidget):
             self.viewer._schedule_render(immediate=True)
         elif hasattr(self.viewer, "set_text"):
             self.viewer.set_text(rendered)
+        self._content_just_loaded = True
 
     def append_text(self, text: str):
         if self.role == "assistant":
@@ -2640,11 +2643,13 @@ class MessageCard(SimpleCardWidget):
             rendered = content_to_markdown(self._content_data)
             self.viewer._markdown_text = rendered
             self.viewer._schedule_render(immediate=False)
+            self._content_just_loaded = True
             return
 
         self._content_data = str(self._content_data or "") + str(text or "")
         if self.viewer:
             self.viewer.append_chunk(str(text or ""))
+            self._content_just_loaded = True
 
     def append_tool_result(
             self,
