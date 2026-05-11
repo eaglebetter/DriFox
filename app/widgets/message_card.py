@@ -1791,8 +1791,6 @@ class CodeWebViewer(QWebEngineView):
             self.page().runJavaScript(js_code)
             _tjs = (_t.time() - _tjs0) * 1000
             _total = (_t.time() - _t0) * 1000
-            if _total > 10:
-                print(f"[DIAG] _perform_update: cb={_tcb:.0f}ms render={_tr:.0f}ms js={_tjs:.0f}ms total={_total:.0f}ms len={len(self._markdown_text)}", flush=True)
         except RuntimeError:
             pass
 
