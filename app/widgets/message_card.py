@@ -2618,11 +2618,11 @@ class MessageCard(SimpleCardWidget):
     def append_text(self, text: str):
         if self.role == "assistant":
             self._content_data = append_text_block(self._content_data, text)
-            rendered = content_to_markdown(self._content_data)
+            # 优化：懒渲染模式下直接跳过 markdown 渲染，避免不必要的计算
             if not self._lazy_rendered:
-                # 懒渲染阶段，内容会在ensure_rendered时一次性设置
                 self._pending_content = self._content_data
                 return
+            rendered = content_to_markdown(self._content_data)
             self.viewer._markdown_text = rendered
             self.viewer._schedule_render(immediate=False)
             return
@@ -2648,8 +2648,8 @@ class MessageCard(SimpleCardWidget):
                 tool_call_id=tool_call_id,
             )
         )
+        # 优化：懒渲染模式下直接跳过 markdown 渲染，避免不必要的计算
         if not self._lazy_rendered:
-            # 懒渲染阶段，内容会在ensure_rendered时一次性设置
             self._pending_content = self._content_data
             return
         self.viewer._markdown_text = content_to_markdown(self._content_data)

@@ -336,8 +336,8 @@ class ToolExecutor:
         tool_map = {
             "read": lambda: self._builtin_tools.read_file(
                 path=args.get("path"),  # 统一使用 path
-                offset=args.get("offset", 1),
-                limit=args.get("limit", 500),  # 建议默认值设为 500，防止 Token 溢出
+                offset=int(args.get("offset")) if args.get("offset") is not None else 1,
+                limit=int(args.get("limit")) if args.get("limit") is not None else 500,
                 show_line_numbers=args.get("show_line_numbers", False),
             ),
             "write": lambda: self._builtin_tools.write_file(

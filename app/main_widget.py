@@ -191,6 +191,8 @@ class OpenAIChatToolWindow(ToolWindow):
         self._message_batch: List[List[Dict[str, Any]]] = []
         # 存储每个batch对应的UI卡片：None表示已回收（只存数据不存UI）
         self._batch_cards: List[Optional[List[MessageCard]]] = []
+        # 前缀和缓存：_user_prefix[i] = 前 i 个 batch 中有多少个 user（用于 O(1) 的 round_index 计算）
+        self._user_prefix_cache: List[int] = []
         self._visible_batch_start = 0
         self._visible_batch_end = 0
         self._is_loading_history_batches = False
@@ -1878,6 +1880,8 @@ class OpenAIChatToolWindow(ToolWindow):
         self._message_batch = group_messages_for_display(session.messages)
         # 初始化 batch_cards：每个batch对应一个卡片列表，None表示已回收
         self._batch_cards = [None for _ in self._message_batch]
+        # 重建 user 前缀和缓存（用于 O(1) 的 round_index 计算）
+        self._build_user_prefix_cache()
         self._visible_batch_end = len(self._message_batch)
         self._visible_batch_start = max(
             0, self._visible_batch_end - self._initial_visible_batch_count
@@ -2241,6 +2245,8 @@ class OpenAIChatToolWindow(ToolWindow):
             else None
         )
         self._message_batch = group_messages_for_display(session.messages)
+        # 重建 user 前缀和缓存（用于 O(1) 的 round_index 计算）
+        self._build_user_prefix_cache()
         self._visible_batch_start = max(
             0, int(cache_entry.get("visible_batch_start", 0))
         )
@@ -2307,6 +2313,8 @@ class OpenAIChatToolWindow(ToolWindow):
         - 对于 user batch：round_index = 前面有多少个 user batch
         - 对于 assistant batch：round_index = 前面有多少个 user batch - 1
 
+        优化：使用前缀和缓存实现 O(1) 复杂度（每次 _message_batch 更新时重建缓存）
+
         Args:
             batch_index: batch 在 _message_batch 中的索引
             batch_offset: 当前加载批次的起始偏移量（用于分批加载历史消息）
@@ -2316,25 +2324,34 @@ class OpenAIChatToolWindow(ToolWindow):
         """
         global_batch_index = batch_index
 
-        # 统计 global_batch_index 之前有多少个 user batch
-        user_count = 0
-        for idx in range(global_batch_index):
-            if idx >= len(self._message_batch):
-                break
-            batch = self._message_batch[idx]
-            if batch and batch[0].get("role") == "user":
-                user_count += 1
+        # 边界检查
+        if global_batch_index >= len(self._message_batch):
+            return 0
 
-        # 对于 assistant batch，round_index 需要减 1
-        # 这是因为 assistant 属于它前面那个 user 的 round
-        current_batch = None
-        if global_batch_index < len(self._message_batch):
-            current_batch = self._message_batch[global_batch_index]
+        # 使用前缀和缓存 O(1) 获取 user 数量
+        user_count = self._user_prefix_cache[global_batch_index]
 
-        if current_batch and current_batch[0].get("role") != "user":
+        # 对于 assistant/tool batch，round_index 需要减 1
+        current_role = self._message_batch[global_batch_index][0].get("role")
+        if current_role != "user":
             user_count = max(0, user_count - 1)
 
         return user_count
+
+    def _build_user_prefix_cache(self) -> None:
+        """
+        构建 user 数量的前缀和缓存数组
+
+        _user_prefix_cache[i] = 前 i 个 batch 中有多少个 user
+        prefix[0] = 0（表示"前 0 个 batch 中的 user 数量"）
+        prefix 长度 = len(_message_batch) + 1
+        """
+        self._user_prefix_cache = [0]
+        for batch in self._message_batch:
+            is_user = batch and batch[0].get("role") == "user"
+            self._user_prefix_cache.append(
+                self._user_prefix_cache[-1] + (1 if is_user else 0)
+            )
 
     def _render_message_to_card(
             self,
@@ -3421,6 +3438,8 @@ class OpenAIChatToolWindow(ToolWindow):
 
         # === 4. 同步 _message_batch ===
         self._message_batch = group_messages_for_display(session.messages)
+        # 重建 user 前缀和缓存
+        self._build_user_prefix_cache()
 
         # === 5. 保存 session ===
         self._persist_session_after_mutation()
@@ -3503,6 +3522,8 @@ class OpenAIChatToolWindow(ToolWindow):
 
         # === 3. 同步 _message_batch ===
         self._message_batch = group_messages_for_display(session.messages)
+        # 重建 user 前缀和缓存
+        self._build_user_prefix_cache()
 
         # === 4. 保存 session ===
         if self._current_session_id != session.session_id:
