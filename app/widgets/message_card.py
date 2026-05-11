@@ -1715,15 +1715,12 @@ class CodeWebViewer(QWebEngineView):
                 "",
             )
 
-        # 流式模式：最后一个 <think> 块可能未完成
-        # 临时去掉最后一个 </think>，让 _inject_think_cards 将其渲染为 "正在思考..."
-        streaming_md = raw_md
-        if self._streaming:
-            last_think_close = streaming_md.rfind("</think>")
-            last_think_open = streaming_md.rfind("<think>")
-            # 如果最后一个 <think> 有闭合标签，去掉它表示未完成
-            if last_think_close > last_think_open and last_think_open != -1:
-                streaming_md = streaming_md[:last_think_close] + streaming_md[last_think_close + len("</think>"):]
+        # 流式模式：仅在最后一个块是 reasoning 时，去掉其闭合标签
+        # 判断标准：markdown 以 </think> 结尾（说明最后一个块恰好是 reasoning）
+        streaming_md = raw_md.rstrip()
+        if self._streaming and streaming_md.endswith("</think>"):
+            # 末尾正好是 reasoning 块的闭合标签，去掉它表示该块尚未完成
+            streaming_md = streaming_md[:-len("</think>")].rstrip()
 
         safe_md = _sanitize_incomplete_markdown(streaming_md)
         safe_md = _unwrap_code_blocks_with_context_links(safe_md)
