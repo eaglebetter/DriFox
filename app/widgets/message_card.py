@@ -2777,11 +2777,19 @@ class MessageCard(SimpleCardWidget):
         使其与文本、工具结果按实际发生顺序交错渲染。
         """
         t0 = time.time()
-        # 查找或创建最后一个 reasoning block
-        if not self._content_data or self._content_data[-1].get("type") != "reasoning":
-            self._content_data.append({"type": "reasoning", "content": text})
+        # 查找最后一个 reasoning block（不管是否在末尾，避免 content 先到导致新增到末尾）
+        last_reasoning_idx = -1
+        for i in reversed(range(len(self._content_data))):
+            if self._content_data[i].get("type") == "reasoning":
+                last_reasoning_idx = i
+                break
+        
+        if last_reasoning_idx >= 0:
+            # 找到已有的最后一个 reasoning 块，追加内容
+            self._content_data[last_reasoning_idx]["content"] = (self._content_data[last_reasoning_idx].get("content", "") or "") + text
         else:
-            self._content_data[-1]["content"] = (self._content_data[-1].get("content", "") or "") + text
+            # 未找到，新增 reasoning 块
+            self._content_data.append({"type": "reasoning", "content": text})
         self._reasoning_total_len += len(text)
 
         LARGE_THINKING_THRESHOLD = 50 * 1024  # 50KB
@@ -2794,10 +2802,11 @@ class MessageCard(SimpleCardWidget):
         self._content_just_loaded = True
 
         if self._reasoning_total_len > LARGE_THINKING_THRESHOLD:
-            # 超长思考：使用增量更新策略，避免完整重渲染
+            # 超长思考：增量更新提供即时文字，同时定期全量渲染保持 DOM 结构正确
+            # （多轮推理时新思考块在 DOM 中不存在，增量会错误追加到旧块）
             self._update_thinking_incremental(text)
-            # 设置懒回调，确保 finish_streaming 时能产生完整标记以关闭思考块
             self.viewer._lazy_markdown_cb = lambda: content_to_markdown(self._content_data)
+            self.viewer._schedule_render(immediate=False)
         else:
             # 性能优化：通过 _lazy_markdown_cb 将 content_to_markdown 延迟到
             # _perform_update 执行（渲染定时器自带防抖，多 chunk 合并转换一次）
