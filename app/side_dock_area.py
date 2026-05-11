@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+import platform
+import os
 from PyQt5.QtCore import Qt, QSize, QTimer, QEvent, QPoint, pyqtSignal
 from PyQt5.QtGui import QPainter, QColor, QIcon
 from PyQt5.QtWidgets import (
@@ -12,6 +14,7 @@ from PyQt5.QtWidgets import (
     QApplication,
     QStyle,
 )
+from loguru import logger
 from qfluentwidgets import (
     isDarkTheme,
     FluentIcon as FIF,
@@ -268,6 +271,7 @@ class ToolPopupDialog(QDialog):
         self._restore_btn = None
         self._normal_geometry = None
         self._is_closing = False
+        self._was_minimized = False  # 标记是否刚从最小化恢复
         self._geometry_save_timer = QTimer(self)
         self._geometry_save_timer.setSingleShot(True)
         self._geometry_save_timer.setInterval(300)  # 增加防抖，减少频繁保存
@@ -277,7 +281,7 @@ class ToolPopupDialog(QDialog):
         self._edge_size = 6  # 边缘检测区域宽度
         self.setWindowTitle(tool_instance.name)
         self.setWindowFlags(
-            Qt.Dialog
+            Qt.Window
             | Qt.FramelessWindowHint
             | Qt.WindowSystemMenuHint
             | Qt.WindowStaysOnTopHint
@@ -307,7 +311,11 @@ class ToolPopupDialog(QDialog):
         self._min_btn = TransparentToolButton(get_icon("最小化"), self)
         self._min_btn.setFixedSize(24, 24)
         self._min_btn.setToolTip("最小化")
-        self._min_btn.clicked.connect(self.showMinimized)
+        # macOS: 使用 hide/show 代替 showMinimized/showNormal
+        if platform.system() == "Darwin":
+            self._min_btn.clicked.connect(self.hide)
+        else:
+            self._min_btn.clicked.connect(self.showMinimized)
         title_bar.add_popup_button(self._min_btn)
 
         # 隐藏标题栏的锁定按钮，改用独立的 LockButtonWidget
@@ -339,6 +347,11 @@ class ToolPopupDialog(QDialog):
 
         # 连接标题栏锁定信号（用于同步状态）
         title_bar.lockRequested.connect(self._on_title_bar_lock_changed)
+
+        # macOS: 始终安装事件过滤器监听应用激活（Dock 点击）
+        if platform.system() == "Darwin":
+            QApplication.instance().installEventFilter(self)
+            logger.info("[DockRestore] EventFilter installed for macOS Dock restore")
 
     def _on_title_bar_lock_changed(self, locked: bool):
         """响应标题栏锁定信号，同步到独立锁定按钮"""
@@ -549,6 +562,33 @@ class ToolPopupDialog(QDialog):
         
         self.deleteLater()
         super().closeEvent(event)
+
+    def changeEvent(self, event):
+        """监听窗口状态变化"""
+        super().changeEvent(event)
+        if event.type() == QEvent.WindowStateChange:
+            logger.debug(f"[DockRestore] WindowStateChange - isMinimized={self.isMinimized()}, isVisible={self.isVisible()}")
+            if platform.system() == "Darwin":
+                # macOS: 如果窗口被隐藏了，尝试恢复
+                if not self.isVisible():
+                    logger.info("[DockRestore] Window hidden on macOS, showing...")
+                    self._restore_geometry()
+                    self.show()
+                    self.activateWindow()
+                    self.raise_()
+                    if self._lock_btn_widget:
+                        self._sync_lock_btn_position()
+                        self._lock_btn_widget.show()
+
+    def _restore_geometry(self):
+        """恢复窗口几何信息"""
+        from PyQt5.QtCore import QSettings
+
+        settings = QSettings("WorkFlowGUI", "ToolPopup")
+        key = f"popup_geometry_{self.tool_instance.name}"
+        geometry = settings.value(key)
+        if geometry:
+            self.restoreGeometry(geometry)
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -779,6 +819,24 @@ class ToolPopupDialog(QDialog):
             )
         elif obj == self._popup_btn and event.type() == QEvent.Leave:
             self._popup_btn.setStyleSheet("")
+        
+        # macOS: 监听应用激活事件，当 Dock 图标被点击时恢复窗口
+        if platform.system() == "Darwin":
+            if event.type() == QEvent.ApplicationActivate:
+                logger.info(f"[DockRestore] ApplicationActivate - isMinimized={self.isMinimized()}, isVisible={self.isVisible()}")
+                if self.isMinimized() or not self.isVisible():
+                    logger.info("[DockRestore] Restoring from minimized/hidden...")
+                    self._was_minimized = False
+                    self._restore_geometry()
+                    self.show()
+                    self.activateWindow()
+                    self.raise_()
+                    self.setFocus()
+                    if self._lock_btn_widget:
+                        self._sync_lock_btn_position()
+                        self._lock_btn_widget.show()
+                    logger.info("[DockRestore] Restored via ApplicationActivate")
+        
         return super().eventFilter(obj, event)
 
     def enterEvent(self, e):

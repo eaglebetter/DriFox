@@ -224,9 +224,10 @@ class TaskTools:
 
     def load_skill(self, name: str) -> ToolResult:
         try:
+            from app.utils.utils import get_app_data_dir
             search_paths = [
                 Path(__file__).parent.parent / "skills" / name / f"SKILL.md",
-                Path(".drifox") / "skills" / name / f"SKILL.md",
+                get_app_data_dir() / "skills" / name / f"SKILL.md",
                 Path.home() / ".agents" / "skills" / name / f"SKILL.md",
             ]
             found_path = None
@@ -255,10 +256,11 @@ class TaskTools:
     def list_skills(self) -> ToolResult:
         try:
             import yaml
+            from app.utils.utils import get_app_data_dir
 
             skills_dirs = [
                 Path(__file__).parent.parent / "skills",
-                Path(".drifox") / "skills",
+                get_app_data_dir() / "skills",
                 Path.home() / ".agents" / "skills",
             ]
             results = []

@@ -45,9 +45,13 @@ class SessionStore:
         return cls._instance
 
     @classmethod
-    def get_instance(cls, db_dir: str = ".drifox") -> "SessionStore":
+    def get_instance(cls, db_dir: str = None) -> "SessionStore":
         """获取单例实例"""
         if cls._instance is None:
+            # 使用默认数据目录
+            if db_dir is None:
+                from app.utils.utils import get_app_data_dir
+                db_dir = str(get_app_data_dir())
             cls._instance = cls(db_dir)
         return cls._instance
 

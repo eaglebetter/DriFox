@@ -46,8 +46,9 @@ class FileOperationRecorder:
     }
 
     def __init__(self, session_store: Optional[SessionStore] = None):
-        self._session_store = session_store or SessionStore.get_instance(db_dir=".drifox")
-        self._backup_base_dir = Path(".drifox") / "backups"
+        self._session_store = session_store or SessionStore.get_instance()
+        from app.utils.utils import get_app_data_dir
+        self._backup_base_dir = get_app_data_dir() / "backups"
 
     def is_tracked_operation(self, tool_name: str) -> bool:
         """判断是否为需要记录的操作"""

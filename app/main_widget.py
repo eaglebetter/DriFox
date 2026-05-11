@@ -326,13 +326,13 @@ class OpenAIChatToolWindow(ToolWindow):
     def _init_sub_agent_log_store(self):
         """初始化子智能体日志存储"""
         from app.core import SubAgentLogStore
-        import os
+        from app.utils.utils import get_app_data_dir
 
         try:
-            db_path = os.path.join(".drifox", "sessions.db")
+            db_path = get_app_data_dir() / "sessions.db"
 
             log_store = SubAgentLogStore()
-            log_store.init(db_path)
+            log_store.init(str(db_path))
             self._sub_agent_manager.set_log_store(log_store)
             logger.info(f"[LLMChatter] 子智能体日志存储初始化完成")
         except Exception as e:
@@ -2375,7 +2375,6 @@ class OpenAIChatToolWindow(ToolWindow):
                 user_card = self._append_user_message(
                     content,
                     timestamp=timestamp,
-                    tag_params=batch[0].get("params", {}),
                     scroll=False,
                     insert_index=insert_index,
                     user_round_index=round_index,
@@ -2932,7 +2931,6 @@ class OpenAIChatToolWindow(ToolWindow):
             self,
             content: str,
             timestamp: str = None,
-            tag_params: dict = None,
             scroll: bool = True,
             insert_index: Optional[int] = None,
             user_round_index: Optional[int] = None,
@@ -4016,10 +4014,8 @@ class OpenAIChatToolWindow(ToolWindow):
 
         self._hide_welcome_cards()
 
-        context_params = {}
-
         self.input_area.clear()
-        self._append_user_message(user_text, tag_params=context_params)
+        self._append_user_message(user_text)
 
         assistant_card = self._append_assistant_message()
 
@@ -4032,7 +4028,7 @@ class OpenAIChatToolWindow(ToolWindow):
             self._tool_executor.set_session_context(session.session_id)
 
         # 如果 send_message 返回 False（通常是 LLM 配置无效），回滚 UI 状态
-        if not self.backend.send_message_to_engine(user_text, context_params):
+        if not self.backend.send_message_to_engine(user_text):
             self._is_streaming = False
             self._toggle_send_stop(False)
             assistant_card.deleteLater()
@@ -4066,8 +4062,6 @@ class OpenAIChatToolWindow(ToolWindow):
     def _on_tool_call_started(
             self, tool_call_id: str, tool_name: str, arguments: dict, round_id: str = None
     ):
-        import time
-
         self._current_tool_start_time = time.time()
         self._current_tool_call_id = tool_call_id
         self._current_tool_name = tool_name
@@ -4730,8 +4724,7 @@ class OpenAIChatToolWindow(ToolWindow):
         """归档项目处理"""
         if not self.history_manager:
             return
-            
-        
+
         # 后端执行归档
         count = self.history_manager.archive_project(project_name)
         

@@ -418,18 +418,13 @@ def get_builtin_tools_schema(agent_manager=None) -> List[Dict]:
         except Exception:
             pass
     # 动态生成 task_batch 工具描述
+    task_batch_desc = (
+        f"批量分发多个子智能体任务（并行执行）。无需等待子智能体结果，任务完成后系统会自动发送 `[后台任务状态]` 消息通知，发布完任务后可以继续自身任务。"
+        f"收到通知后使用 task_status 获取结果。"
+    )
     if subagent_names:
         subagent_list = ", ".join(subagent_names)
-        task_batch_desc = (
-            f"批量分发多个子智能体任务（并行执行）。任务完成后系统会自动发送 `[后台任务状态]` 消息通知。"
-            f"收到通知后使用 task_status 获取结果。\n\n"
-            f"可用子智能体: {subagent_list}"
-        )
-    else:
-        task_batch_desc = (
-            "批量分发多个子智能体任务（并行执行）。任务完成后系统会自动发送 `[后台任务状态]` 消息通知。"
-            "收到通知后使用 task_status 获取结果。"
-        )
+        task_batch_desc += f"\n\n可用子智能体: {subagent_list}"
 
     return [
         {

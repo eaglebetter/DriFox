@@ -926,8 +926,9 @@ class DiffHtmlGenerator:
                 logger.warning("[DiffHtml] 没有找到有效的文件路径")
                 return ""
 
-            # 备份目录: .drifox/backups/{session_id}/
-            backup_dir = Path(".drifox/backups") / session_id
+            # 备份目录: {app_data_dir}/backups/{session_id}/
+            from app.utils.utils import get_app_data_dir
+            backup_dir = get_app_data_dir() / "backups" / session_id
 
             if not backup_dir.exists():
                 logger.warning(f"[DiffHtml] 备份目录不存在: {backup_dir}")

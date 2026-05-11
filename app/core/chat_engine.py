@@ -186,7 +186,7 @@ class ChatEngine:
     def send_message(
         self,
         user_text: str,
-        context_params: Optional[Dict] = None,
+        **kwargs
     ) -> bool:
         if self._is_streaming:
             logger.warning("[ChatEngine] Already streaming, ignoring new message")
@@ -203,7 +203,7 @@ class ChatEngine:
             self._emit("error", "配置无效，请检查模型设置")
             return False
 
-        session.add_user_message(content=user_text, params=context_params or {})
+        session.add_user_message(content=user_text)
         self._is_streaming = True
 
         self._emit("user_message_added", user_text)
