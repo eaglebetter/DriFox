@@ -219,6 +219,7 @@ class OpenAIChatToolWindow(ToolWindow):
         self._suppress_scroll_sync_count = 0  # 加载历史时抑制滚动同步的计数器
         self._loading_session = False  # 加载会话标志，用于懒渲染期间保持滚动位置
         self._pending_lazy_cards: List[MessageCard] = []  # 待处理的懒渲染卡片队列
+        self._pending_lazy_cards_connected: List[MessageCard] = []  # 已连接 heightChanged 的卡片
         # resize 防抖定时器 - 性能优化：增加防抖时间减少卡顿
         self._resize_debounce_timer = QTimer(self)
         self._resize_debounce_timer.setSingleShot(True)
@@ -2423,21 +2424,28 @@ class OpenAIChatToolWindow(ToolWindow):
             self._batch_cards[global_batch_index] = cards if cards else None
 
         # 批量处理懒渲染：渲染完所有卡片后再统一触发，避免每次都触发滚动
-        # 收集需要懒渲染的卡片
+        # 从最后一个可见卡片开始渲染，确保滚动到底部后才能断开信号
         pending_lazy_cards = []
-        for batch_idx in range(batch_offset, batch_offset + len(batches)):
-            if batch_idx >= len(self._batch_cards):
-                break
+        batch_start = batch_offset
+        batch_end = min(batch_offset + len(batches), len(self._batch_cards))
+        
+        # 反向遍历，从最后一个卡片开始
+        for batch_idx in range(batch_end - 1, batch_start - 1, -1):
             cards = self._batch_cards[batch_idx]
             if cards:
-                for card in cards:
-                    if isinstance(card, MessageCard) and not getattr(card, '_lazy_rendered', False):
+                # 反向遍历每个 batch 的卡片
+                for card in reversed(cards):
+                    if isinstance(card, MessageCard) and card.role != "user" and not getattr(card, '_lazy_rendered', False):
                         pending_lazy_cards.append(card)
         
         # 批量触发懒渲染，使用延迟加载减少卡顿
         if pending_lazy_cards:
             self._pending_lazy_cards = pending_lazy_cards
+            # 不要清空 _pending_lazy_cards_connected，加载期间需要保持信号连接
             QTimer.singleShot(0, self._process_next_lazy_card)
+        else:
+            # 没有需要懒渲染的卡片，立即断开所有已连接的信号
+            self._disconnect_all_card_height_signals()
 
     def _get_rendered_message_cards(self) -> List[MessageCard]:
         def is_user_or_assistant(widget):
@@ -2452,6 +2460,9 @@ class OpenAIChatToolWindow(ToolWindow):
         if not self._pending_lazy_cards:
             # 所有懒渲染完成
             self._loading_session = False
+            # 延迟断开连接，等滚动真正完成后再断
+            # 用 200ms 确保 WebEngine 渲染和滚动都完成
+            QTimer.singleShot(200, self._disconnect_all_card_height_signals)
             return
         
         card = self._pending_lazy_cards.pop(0)
@@ -2466,8 +2477,7 @@ class OpenAIChatToolWindow(ToolWindow):
             scroll_bar.setValue(scroll_bar.maximum())
         
         # 继续处理下一个
-        if self._pending_lazy_cards:
-            self._process_next_lazy_card()
+        self._process_next_lazy_card()
 
     def _get_current_user_round_index(self) -> int:
         """获取当前 user message 应该是第几个 user（从 0 开始）
@@ -2478,6 +2488,20 @@ class OpenAIChatToolWindow(ToolWindow):
             return sum(1 for msg in session.messages if msg.get("role") == "user")
         # fallback: 从布局计数
         return count_user_cards_in_layout(self.chat_layout)
+
+    def _disconnect_all_card_height_signals(self):
+        """断开所有 MessageCard 的 heightChanged 信号连接"""
+        for i in range(self.chat_layout.count()):
+            item = self.chat_layout.itemAt(i)
+            if not item or not item.widget():
+                continue
+            widget = item.widget()
+            if isinstance(widget, MessageCard):
+                try:
+                    widget.heightChanged.disconnect(self._on_message_card_height_changed)
+                except Exception:
+                    pass
+        self._pending_lazy_cards_connected.clear()
 
     def _find_user_round_index_for_card(self, card: MessageCard) -> Optional[int]:
         """
@@ -2720,6 +2744,9 @@ class OpenAIChatToolWindow(ToolWindow):
             except Exception:
                 pass
             widget.heightChanged.connect(self._on_message_card_height_changed)
+            # 记录已连接的卡片，加载完成后断开
+            if widget not in self._pending_lazy_cards_connected:
+                self._pending_lazy_cards_connected.append(widget)
             if self._resize_preview_active:
                 widget.set_resize_preview_mode(True)
             widget.sync_width()
@@ -3986,7 +4013,8 @@ class OpenAIChatToolWindow(ToolWindow):
         self._bottom_anchor_timer.start()
 
     def _on_message_card_height_changed(self, _height: int):
-        # 卡片高度变化时，如果正在加载会话、懒渲染期间或正在流式输出，保持底部
+        # 注意：懒渲染完成后，heightChanged 信号会被断开
+        # 此回调仅在加载过程中生效，加载完成后不再触发滚动
         if self._bottom_anchor_deadline > time.monotonic() or self._is_streaming or self._loading_session:
             self._pending_scroll_to_bottom = True
             self._scroll_bottom_timer.start()
