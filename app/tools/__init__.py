@@ -810,8 +810,8 @@ def get_builtin_tools_schema(agent_manager=None) -> List[Dict]:
                                 "properties": {
                                     "agent": {
                                         "type": "string",
-                                        "description": f"子智能体名称。",
-                                        "enum": ', '.join(subagent_names),
+                                        "description": "子智能体名称。"
+                                        + (f" (可选：{', '.join(subagent_names)})" if subagent_names else ""),
                                     },
                                     "description": {"type": "string", "description": "任务描述"},
                                     "context": {"type": "string", "description": "详细上下文信息（可选）"},
@@ -821,7 +821,7 @@ def get_builtin_tools_schema(agent_manager=None) -> List[Dict]:
                         },
                         "share_context": {
                             "type": "boolean",
-                            "description": "是否共享主智能体上下文给子智能体（默认 False）。启用后子智能体将获得主智能体的完整上下文信息。",
+                            "description": "是否共享主智能体上下文给子智能体（默认 True）。启用后子智能体将获得主智能体的完整上下文信息。",
                             "default": True,
                         },
                     },
