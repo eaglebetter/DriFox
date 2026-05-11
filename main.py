@@ -44,11 +44,14 @@ def main():
     # 提前导入，确保在 app 创建之前触发
     from PyQt5.QtWebEngineWidgets import QWebEngineView  # noqa: F401
 
-    # 设置日志
-    log_dir = os.path.join(project_root, "logs")
-    os.makedirs(log_dir, exist_ok=True)
+    from app.utils.utils import get_app_data_dir
+    from PyQt5.QtWebEngineWidgets import QWebEngineView  # noqa: F401
+
+    # 设置日志 (使用统一路径获取方法，DMG 只读时也需要可写)
+    log_dir = get_app_data_dir() / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
     logger.add(
-        os.path.join(log_dir, "llm_chatter.log"),
+        log_dir / "llm_chatter.log",
         rotation="10 MB",
         level="DEBUG",
         format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {message}"
