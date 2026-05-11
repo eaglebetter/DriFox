@@ -600,7 +600,7 @@ class HistoryCompactor:
                     is_protected_tool = True
 
             # 自适应截断：越旧截断越多（受保护工具除外）
-            if not is_protected_tool:
+            if not is_protected_tool and role != "user":
                 content = self._adaptive_truncate(
                     content,
                     position=idx,
@@ -669,4 +669,4 @@ class HistoryCompactor:
         head = content[:head_length]
         tail = content[-tail_length:] if tail_length > 0 else ""
         
-        return f"{head}...[{keep_length}字]...{tail}"
+        return f"{head}...{tail}"
