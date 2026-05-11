@@ -57,9 +57,12 @@ class Settings(QConfig):
         """获取配置实例（单例模式）"""
         if cls._instance is None:
             cls._instance = cls()
-            CONFIG_FILE = "app.config"
+            # 配置文件路径：使用数据目录
+            from app.utils.utils import get_app_data_dir
+            app_data_dir = get_app_data_dir()
+            cls._instance.file = app_data_dir / "app.config"
             try:
-                cls._instance.load(CONFIG_FILE)
+                cls._instance.load()
             except:
                 logger.exception("无法加载配置文件")
         return cls._instance

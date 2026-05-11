@@ -102,7 +102,7 @@ class APIHistoryManager:
         try:
             from app.core.store import SessionStore
             
-            self._session_store = SessionStore.get_instance(db_dir=".drifox")
+            self._session_store = SessionStore.get_instance()
             if self._session_store.is_initialized:
                 logger.info("[APIHistoryManager] SQLite 存储已启用")
             else:

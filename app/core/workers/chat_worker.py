@@ -128,7 +128,7 @@ class OpenAIChatWorker(QThread):
 
         # 直接回调模式（API 层使用，已迁移到事件总线）
         # 保留以兼容旧的直接回调接口
-        self._legacy_legacy_direct_callbacks: Dict[str, Callable] = {}
+        self._legacy_direct_callbacks: Dict[str, Callable] = {}
 
     def _build_api_messages_cache(self) -> List[Dict[str, Any]]:
         """
@@ -240,7 +240,7 @@ class OpenAIChatWorker(QThread):
         Args:
             callbacks: 回调字典，键为信号名，值为回调函数
         """
-        self._legacy_legacy_direct_callbacks = callbacks
+        self._legacy_direct_callbacks = callbacks
         # 将回调注册到事件总线
         for signal_name, callback in callbacks.items():
             event = self._signal_name_to_event(signal_name)
@@ -1612,14 +1612,14 @@ class OpenAIChatWorker(QThread):
                     self.tool_result_received,
                     tool_call_id, tool_name, arguments, cancelled_result
                 )
-                if not self._legacy_legacy_direct_callbacks:
+                if not self._legacy_direct_callbacks:
                     QApplication.processEvents()
                 self._is_cancelled = True
                 return None
 
             self._emit_with_callback("tool_result_received", self.tool_result_received, tool_call_id, tool_name,
                                      arguments, result)
-            if not self._legacy_legacy_direct_callbacks:
+            if not self._legacy_direct_callbacks:
                 QApplication.processEvents()
             results.append(
                 {

@@ -313,11 +313,12 @@ class SkillListSettingCard(ExpandSettingCard):
         from pathlib import Path
         import yaml
 
+        from app.utils.utils import get_app_data_dir
         skills_dirs = [
             Path(__file__).parent.parent
             / "skills",
             Path.home() / ".agents" / "skills",
-            Path(".drifox") / "skills",
+            get_app_data_dir() / "skills",
         ]
 
         self.all_skills = []

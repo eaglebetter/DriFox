@@ -305,10 +305,11 @@ class SkillCompleterPopup(QWidget):
 def get_local_skills() -> list:
     """获取本地技能列表，与 list_skills 保持一致"""
     import yaml
+    from app.utils.utils import get_app_data_dir
 
     skills_dirs = [
         Path(__file__).parent.parent / "skills",
-        Path(".drifox") / "skills",
+        get_app_data_dir() / "skills",
         Path.home() / ".agents" / "skills",
     ]
 

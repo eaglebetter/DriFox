@@ -39,6 +39,39 @@ ANSI_COLOR_MAP = {
 }
 _ICON_CACHE = {}  # 缓存图标名 → QIcon 实例
 
+
+def get_app_data_dir() -> Path:
+    """获取应用数据目录（跨平台兼容）
+    
+    开发环境: 当前目录/.drifox
+    PyInstaller打包: 应用支持目录/.drifox（可写）
+    macOS .app: ~/Library/Application Support/Drifox/.drifox
+    """
+    # 开发环境
+    if not hasattr(sys, '_MEIPASS') and not getattr(sys, 'frozen', False):
+        return Path('.drifox')
+    
+    # macOS .app: 使用 Application Support（用户可写）
+    if sys.platform == 'darwin':
+        from AppKit import NSApplicationSupportDirectory, NSUserDomainMask, NSFileManager
+        paths = NSFileManager.defaultManager().URLsForDirectory_inDomains_(
+            NSApplicationSupportDirectory, NSUserDomainMask
+        )
+        if paths:
+            # paths[0].path 是 ObjC native-selector，用 fileSystemRepresentation() 转 bytes 再解码
+            app_support_path = paths[0].fileSystemRepresentation().decode('utf-8')
+            app_support = Path(app_support_path) / 'Drifox'
+            app_support.mkdir(parents=True, exist_ok=True)
+            return app_support / '.drifox'
+    
+    # Windows/Linux 或其他平台
+    if hasattr(sys, '_MEIPASS'):
+        # 使用 MEIPASS 的同级的可写目录
+        return Path(sys._MEIPASS).parent / '.drifox'
+    
+    # Fallback
+    return Path.home() / '.drifox'
+
 def get_pinyin_search_keys(text):
     """生成拼音全拼和首字母缩写"""
     if not pinyin or not text:
