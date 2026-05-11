@@ -558,6 +558,7 @@ class OpenAIChatWorker(QThread):
                 # ========== 工具迭代中压缩 ==========
                 # 在每次 API 调用前检查是否需要压缩
                 if self._compactor.should_compact(current_messages, budget):
+                    system_message = current_messages.pop(0)
                     compacted, state, cache = self._compactor.compact(
                         current_messages,
                         budget,
@@ -572,6 +573,7 @@ class OpenAIChatWorker(QThread):
                         # 重建 API 消息缓存（转换格式）
                         self._api_messages_cache = current_messages
                         self._emit_compaction_status(state)
+                    current_session_messages = [system_message] + current_session_messages
                 else:
                     # 更新 API 消息缓存
                     self._append_to_api_cache(response_sequence)
@@ -989,7 +991,11 @@ class OpenAIChatWorker(QThread):
             except BadRequestError as e:
                 error_str = str(e)
                 # 检测 tool call result 错误码 2013
-                is_tool_call_order_error = "2013" in error_str or "tool call result does not follow tool call" in error_str.lower()
+                is_tool_call_order_error = (
+                    "2013" in error_str or
+                    "tool call result does not follow tool call" in error_str.lower() or
+                    "tool_calls" in error_str.lower()
+                )
 
                 if is_tool_call_order_error and attempt < max_retries - 1:
                     # 自动修复 tool result 顺序问题
