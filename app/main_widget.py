@@ -191,6 +191,8 @@ class OpenAIChatToolWindow(ToolWindow):
         self._message_batch: List[List[Dict[str, Any]]] = []
         # 存储每个batch对应的UI卡片：None表示已回收（只存数据不存UI）
         self._batch_cards: List[Optional[List[MessageCard]]] = []
+        # 前缀和缓存：_user_prefix[i] = 前 i 个 batch 中有多少个 user（用于 O(1) 的 round_index 计算）
+        self._user_prefix_cache: List[int] = []
         self._visible_batch_start = 0
         self._visible_batch_end = 0
         self._is_loading_history_batches = False
@@ -215,6 +217,8 @@ class OpenAIChatToolWindow(ToolWindow):
         self._bottom_anchor_timer.setInterval(80)
         self._bottom_anchor_timer.timeout.connect(self._maintain_bottom_anchor)
         self._suppress_scroll_sync_count = 0  # 加载历史时抑制滚动同步的计数器
+        self._loading_session = False  # 加载会话标志，用于懒渲染期间保持滚动位置
+        self._pending_lazy_cards: List[MessageCard] = []  # 待处理的懒渲染卡片队列
         # resize 防抖定时器 - 性能优化：增加防抖时间减少卡顿
         self._resize_debounce_timer = QTimer(self)
         self._resize_debounce_timer.setSingleShot(True)
@@ -429,7 +433,6 @@ class OpenAIChatToolWindow(ToolWindow):
             # 验证 self 和 homepage 是否有效
             try:
                 if sip.isdeleted(self) or sip.isdeleted(self.homepage):
-                    
                     InfoBar.error("窗口错误", "主窗口已关闭，无法创建新窗口", parent=self, position=InfoBarPosition.TOP)
                     return
             except Exception:
@@ -509,13 +512,11 @@ class OpenAIChatToolWindow(ToolWindow):
 
             # 在 show() 之前再次检查 popup 是否仍然有效
             if sip.isdeleted(popup):
-                
                 InfoBar.error("复制失败", "窗口创建失败，请重试", parent=self, position=InfoBarPosition.TOP)
                 return
 
             popup.show()
         except Exception as e:
-            
 
             InfoBar.error("复制失败", str(e), parent=self, position=InfoBarPosition.TOP)
 
@@ -1451,7 +1452,7 @@ class OpenAIChatToolWindow(ToolWindow):
         """刷新历史面板数据"""
         if not self._history_card:
             return
-        
+
         current_tab = self._history_card._current_tab if hasattr(self._history_card, '_current_tab') else "history"
 
         if current_tab == "history" or is_archived:
@@ -1878,6 +1879,8 @@ class OpenAIChatToolWindow(ToolWindow):
         self._message_batch = group_messages_for_display(session.messages)
         # 初始化 batch_cards：每个batch对应一个卡片列表，None表示已回收
         self._batch_cards = [None for _ in self._message_batch]
+        # 重建 user 前缀和缓存（用于 O(1) 的 round_index 计算）
+        self._build_user_prefix_cache()
         self._visible_batch_end = len(self._message_batch)
         self._visible_batch_start = max(
             0, self._visible_batch_end - self._initial_visible_batch_count
@@ -1917,6 +1920,7 @@ class OpenAIChatToolWindow(ToolWindow):
                           self._visible_batch_start:self._visible_batch_end
                           ]
         self._suspend_auto_scroll = not initial
+        self._loading_session = True  # 标记加载状态，懒渲染期间保持滚动
         try:
             self._render_message_to_card(
                 visible_batches,
@@ -1925,14 +1929,10 @@ class OpenAIChatToolWindow(ToolWindow):
         finally:
             self._suspend_auto_scroll = False
 
-        # 延迟滚动，确保卡片渲染完成后再滚动到底部
-        # 使用多次滚动确保卡片高度变化后仍能保持在底部
-        self._scroll_to_bottom(sticky_ms=900)
+        # 节点预览和滚动同步在懒渲染完成后处理
         self._update_node_preview()
-        # 滚动完成后同步时间线节点到最后一个（延迟执行确保卡片渲染完成）
         QTimer.singleShot(100, self._sync_node_preview_to_last)
         self._refresh_context_usage_indicator()
-        # 会话切换加载完成后，延迟触发垃圾回收释放未使用内存
         QTimer.singleShot(500, lambda: gc.collect())
 
     def _has_more_history_batches(self) -> bool:
@@ -2241,6 +2241,8 @@ class OpenAIChatToolWindow(ToolWindow):
             else None
         )
         self._message_batch = group_messages_for_display(session.messages)
+        # 重建 user 前缀和缓存（用于 O(1) 的 round_index 计算）
+        self._build_user_prefix_cache()
         self._visible_batch_start = max(
             0, int(cache_entry.get("visible_batch_start", 0))
         )
@@ -2307,6 +2309,8 @@ class OpenAIChatToolWindow(ToolWindow):
         - 对于 user batch：round_index = 前面有多少个 user batch
         - 对于 assistant batch：round_index = 前面有多少个 user batch - 1
 
+        优化：使用前缀和缓存实现 O(1) 复杂度（每次 _message_batch 更新时重建缓存）
+
         Args:
             batch_index: batch 在 _message_batch 中的索引
             batch_offset: 当前加载批次的起始偏移量（用于分批加载历史消息）
@@ -2316,25 +2320,34 @@ class OpenAIChatToolWindow(ToolWindow):
         """
         global_batch_index = batch_index
 
-        # 统计 global_batch_index 之前有多少个 user batch
-        user_count = 0
-        for idx in range(global_batch_index):
-            if idx >= len(self._message_batch):
-                break
-            batch = self._message_batch[idx]
-            if batch and batch[0].get("role") == "user":
-                user_count += 1
+        # 边界检查
+        if global_batch_index >= len(self._message_batch):
+            return 0
 
-        # 对于 assistant batch，round_index 需要减 1
-        # 这是因为 assistant 属于它前面那个 user 的 round
-        current_batch = None
-        if global_batch_index < len(self._message_batch):
-            current_batch = self._message_batch[global_batch_index]
+        # 使用前缀和缓存 O(1) 获取 user 数量
+        user_count = self._user_prefix_cache[global_batch_index]
 
-        if current_batch and current_batch[0].get("role") != "user":
+        # 对于 assistant/tool batch，round_index 需要减 1
+        current_role = self._message_batch[global_batch_index][0].get("role")
+        if current_role != "user":
             user_count = max(0, user_count - 1)
 
         return user_count
+
+    def _build_user_prefix_cache(self) -> None:
+        """
+        构建 user 数量的前缀和缓存数组
+
+        _user_prefix_cache[i] = 前 i 个 batch 中有多少个 user
+        prefix[0] = 0（表示"前 0 个 batch 中的 user 数量"）
+        prefix 长度 = len(_message_batch) + 1
+        """
+        self._user_prefix_cache = [0]
+        for batch in self._message_batch:
+            is_user = batch and batch[0].get("role") == "user"
+            self._user_prefix_cache.append(
+                self._user_prefix_cache[-1] + (1 if is_user else 0)
+            )
 
     def _render_message_to_card(
             self,
@@ -2406,17 +2419,52 @@ class OpenAIChatToolWindow(ToolWindow):
             # 保存卡片引用到 batch_cards
             self._batch_cards[global_batch_index] = cards if cards else None
 
-            # 如果当前batch在可视范围内，确保已经渲染（懒渲染需要主动触发）
-            if cards and (self._visible_batch_start <= global_batch_index < self._visible_batch_end):
+        # 批量处理懒渲染：渲染完所有卡片后再统一触发，避免每次都触发滚动
+        # 收集需要懒渲染的卡片
+        pending_lazy_cards = []
+        for batch_idx in range(batch_offset, batch_offset + len(batches)):
+            if batch_idx >= len(self._batch_cards):
+                break
+            cards = self._batch_cards[batch_idx]
+            if cards:
                 for card in cards:
-                    if isinstance(card, MessageCard):
-                        card.ensure_rendered()
+                    if isinstance(card, MessageCard) and not getattr(card, '_lazy_rendered', False):
+                        pending_lazy_cards.append(card)
+
+        # 批量触发懒渲染，使用延迟加载减少卡顿
+        if pending_lazy_cards:
+            self._pending_lazy_cards = pending_lazy_cards
+            QTimer.singleShot(0, self._process_next_lazy_card)
 
     def _get_rendered_message_cards(self) -> List[MessageCard]:
         def is_user_or_assistant(widget):
             return widget.role in ("user", "assistant")
 
         return collect_message_cards_from_layout(self.chat_layout, is_user_or_assistant)
+
+    def _process_next_lazy_card(self):
+        """分批处理懒渲染卡片，每次处理一个卡片并触发滚动
+        关键：每次渲染完成后立即同步滚动，不依赖定时器延迟
+        """
+        if not self._pending_lazy_cards:
+            # 所有懒渲染完成
+            self._loading_session = False
+            return
+
+        card = self._pending_lazy_cards.pop(0)
+        # 检查卡片是否仍然有效
+        if self._is_widget_alive(card) and not getattr(card, '_lazy_rendered', False):
+            card.ensure_rendered()
+
+        # 每次渲染完一个卡片后立即同步滚动到底部，无论加载多慢都生效
+        # 直接设置滚动条值，不依赖定时器
+        if self._loading_session:
+            scroll_bar = self.chat_scroll_area.verticalScrollBar()
+            scroll_bar.setValue(scroll_bar.maximum())
+
+        # 继续处理下一个，使用 QTimer 异步调度释放事件循环
+        if self._pending_lazy_cards:
+            QTimer.singleShot(0, self._process_next_lazy_card)
 
     def _get_current_user_round_index(self) -> int:
         """获取当前 user message 应该是第几个 user（从 0 开始）
@@ -2709,10 +2757,12 @@ class OpenAIChatToolWindow(ToolWindow):
             )
 
         # 刷新历史会话卡片
-        current_tab = self._history_popup_card._current_tab if hasattr(self._history_popup_card, '_current_tab') else "history"
+        current_tab = self._history_popup_card._current_tab if hasattr(self._history_popup_card,
+                                                                       '_current_tab') else "history"
         if current_tab == "archived":
             # 如果当前在归档标签页，需要清理并刷新
-            refresh_history_card_if_visible(self._history_card, lambda: self._refresh_history_toggle_panel(is_archived=True))
+            refresh_history_card_if_visible(self._history_card,
+                                            lambda: self._refresh_history_toggle_panel(is_archived=True))
         else:
             refresh_history_card_if_visible(self._history_card, self._refresh_history_toggle_panel)
 
@@ -3001,6 +3051,7 @@ class OpenAIChatToolWindow(ToolWindow):
             on_card_diff=self._on_card_diff_requested,
             on_save_file=self._on_save_file_requested,
             on_subagent_log=self._on_subagent_log_requested,
+            immediate_render=scroll,  # 流式(scroll=True)立即渲染，加载(scroll=False)走懒渲染队列
         )
 
         self._add_chat_widget(card, insert_index=insert_index)
@@ -3063,7 +3114,7 @@ class OpenAIChatToolWindow(ToolWindow):
         # 收集所有已渲染用户卡片的位置信息
         user_card_info = []
         user_node_index = 0  # 节点预览中的索引
-        
+
         for batch_idx, batch in enumerate(self._message_batch):
             if not batch or batch[0].get("role") != "user":
                 continue
@@ -3099,8 +3150,8 @@ class OpenAIChatToolWindow(ToolWindow):
                     # 当前区间是从这个user卡片开始，到下一个user卡片之前
                     # 包含这个user问题和它对应的所有大模型回答卡片
                     segment_start_y = user_card_info[i]['y']
-                    segment_end_y = user_card_info[i+1]['y']
-                    
+                    segment_end_y = user_card_info[i + 1]['y']
+
                     if visible_top < segment_end_y:
                         current_segment_index = i
                         break
@@ -3108,12 +3159,12 @@ class OpenAIChatToolWindow(ToolWindow):
                     # 最后一个节点，一直到最后
                     current_segment_index = i
                     break
-            
+
             # 计算进度
             if current_segment_index >= 0:
                 start_node_index = user_card_info[current_segment_index]['index']
                 start_y = user_card_info[current_segment_index]['y']
-                
+
                 if current_segment_index < len(user_card_info) - 1:
                     end_y = user_card_info[current_segment_index + 1]['y']
                     end_node_index = user_card_info[current_segment_index + 1]['index']
@@ -3126,13 +3177,13 @@ class OpenAIChatToolWindow(ToolWindow):
                     else:
                         end_y = start_y
                         end_node_index = start_node_index
-                
+
                 # 计算在当前区间的比例
                 if end_y > start_y:
                     segment_progress = (visible_top - start_y) / (end_y - start_y)
                 else:
                     segment_progress = 0
-                    
+
                 # 转换到节点坐标
                 progress_position = start_node_index + segment_progress
                 visible_node_index = start_node_index
@@ -3141,7 +3192,7 @@ class OpenAIChatToolWindow(ToolWindow):
                 progress_position = 0
                 visible_node_index = 0
                 highlighted_index = 0
-            
+
             highlighted_index = visible_node_index
 
         # 确保在有效范围内
@@ -3421,6 +3472,8 @@ class OpenAIChatToolWindow(ToolWindow):
 
         # === 4. 同步 _message_batch ===
         self._message_batch = group_messages_for_display(session.messages)
+        # 重建 user 前缀和缓存
+        self._build_user_prefix_cache()
 
         # === 5. 保存 session ===
         self._persist_session_after_mutation()
@@ -3503,6 +3556,8 @@ class OpenAIChatToolWindow(ToolWindow):
 
         # === 3. 同步 _message_batch ===
         self._message_batch = group_messages_for_display(session.messages)
+        # 重建 user 前缀和缓存
+        self._build_user_prefix_cache()
 
         # === 4. 保存 session ===
         if self._current_session_id != session.session_id:
@@ -3608,7 +3663,8 @@ class OpenAIChatToolWindow(ToolWindow):
             return []
 
         canonical_messages = consolidate_messages(session.messages)
-        logger.debug(f"[card-diff] round_index={round_index}, start_idx={start_idx}, end_idx={end_idx}, total_msgs={len(canonical_messages)}")
+        logger.debug(
+            f"[card-diff] round_index={round_index}, start_idx={start_idx}, end_idx={end_idx}, total_msgs={len(canonical_messages)}")
 
         # 使用辅助函数收集 tool_call_id
         return collect_tool_call_ids(canonical_messages, start_idx, end_idx)
@@ -3770,7 +3826,8 @@ class OpenAIChatToolWindow(ToolWindow):
             return
 
         session_id = session.session_id
-        logger.debug(f"[card-diff] requested round_index={round_index}, session_id={session_id}, msg_count={len(session.messages)}")
+        logger.debug(
+            f"[card-diff] requested round_index={round_index}, session_id={session_id}, msg_count={len(session.messages)}")
 
         # 检查是否有 file_recorder
         if not self._tool_executor or not self.backend.file_recorder:
@@ -3907,16 +3964,26 @@ class OpenAIChatToolWindow(ToolWindow):
         if self._bottom_anchor_deadline > time.monotonic():
             self._bottom_anchor_timer.start()
         else:
-            # 即使anchor到期，也再延迟一次检查，防止懒渲染卡片高度变化导致没到底
-            QTimer.singleShot(150, self._ensure_at_bottom)
+            # 即使anchor到期，也再延迟多次检查，防止多批懒渲染卡片撑开高度导致没到底
+            QTimer.singleShot(150, lambda: self._ensure_at_bottom(retries=3))
         # 加载完成后抑制滚动同步，避免节点跑到渲染的卡片数量位置
         self._suppress_scroll_sync_count = 0
 
-    def _ensure_at_bottom(self):
-        """确保滚动条在底部，用于懒渲染卡片高度变化后的二次修正"""
+    def _ensure_at_bottom(self, retries: int = 3):
+        """确保滚动条在底部，用于懒渲染卡片高度变化后的二次修正
+        
+        Args:
+            retries: 剩余重试次数，即使 bottom anchor 过期，也重试几次处理懒加载
+        """
         scroll_bar = self.chat_scroll_area.verticalScrollBar()
         if scroll_bar.value() < scroll_bar.maximum() - 20:
             scroll_bar.setValue(scroll_bar.maximum())
+            # 懒渲染可能需要更长时间，延迟再次检查
+            # 如果还有重试次数，即使 bottom anchor 过期也继续重试
+            if retries > 0:
+                QTimer.singleShot(300, lambda: self._ensure_at_bottom(retries - 1))
+            elif self._bottom_anchor_deadline > time.monotonic():
+                QTimer.singleShot(300, self._ensure_at_bottom)
 
     def _maintain_bottom_anchor(self):
         if self._bottom_anchor_deadline <= time.monotonic():
@@ -3928,10 +3995,53 @@ class OpenAIChatToolWindow(ToolWindow):
         self._bottom_anchor_timer.start()
 
     def _on_message_card_height_changed(self, _height: int):
-        # 卡片高度变化时，如果正在加载会话或正在流式输出，保持底部
-        if self._bottom_anchor_deadline > time.monotonic() or self._is_streaming:
-            self._pending_scroll_to_bottom = True
-            self._scroll_bottom_timer.start()
+        """卡片高度变化时的滚动处理
+        仅当卡片 _content_just_loaded 标记为 True 时触发滚动并清除标记。
+        这样内容加载触发的高度变化会滚底，而用户折叠操作不会。
+        
+        修复规则：
+        1. 如果正在往顶部加载历史批次（用户主动向上滚动） → 不滚动
+        2. 如果这是整个会话最后一张卡片 → 强制滚动到底（初始加载完成保证到最底端）
+        3. 如果正在流式输出 → 滚动到底
+        4. 如果滚动条已经在底部附近 → 滚动到底
+        """
+        sender = self.sender()
+        if not isinstance(sender, MessageCard):
+            return
+        if not sender._content_just_loaded:
+            return
+        
+        # 如果正在往顶部加载历史批次（用户主动向上滚动触发），不滚动到底部
+        if self._is_loading_history_batches:
+            sender._content_just_loaded = False
+            return
+        
+        # 检查是否是整个会话的最后一张卡片
+        is_last_card = False
+        if hasattr(self, '_batch_cards') and self._batch_cards:
+            # 遍历最后一个非空批次
+            for batch in reversed(self._batch_cards):
+                if batch is not None and batch:
+                    # 检查当前 sender 是否在最后批次中
+                    if sender in batch:
+                        # 检查是否是最后批次的最后一张卡片
+                        if sender is batch[-1]:
+                            is_last_card = True
+                    break
+        
+        # 判断规则
+        if is_last_card or self._is_streaming:
+            # 如果是最后一张卡片，或者正在流式输出 → 强制滚底
+            self._scroll_to_bottom()
+        else:
+            scroll_bar = self.chat_scroll_area.verticalScrollBar()
+            max_val = scroll_bar.maximum()
+            current_val = scroll_bar.value()
+            # 如果滚动条已经在底部附近 → 滚底
+            if max_val - current_val < 50:
+                self._scroll_to_bottom()
+        
+        sender._content_just_loaded = False
 
     def handle_recommended_question(self, content: str, action: str):
         if action == "ask":
@@ -4157,7 +4267,7 @@ class OpenAIChatToolWindow(ToolWindow):
 
         # 绕过 streaming 检查直接发送
         self.backend.chat_engine._is_streaming = False
-        self._chat_engine.send_message(callback_text, {"source": "subagent_callback"})
+        self._chat_engine.send_message(callback_text)
 
     def _on_sub_agent_finished(self, task_id: str, result: str):
         """单个子智能体执行完成"""
@@ -4727,7 +4837,7 @@ class OpenAIChatToolWindow(ToolWindow):
 
         # 后端执行归档
         count = self.history_manager.archive_project(project_name)
-        
+
         if count > 0:
             # 如果归档的是当前项目，切换到默认项目
             if project_name == self._current_project:
@@ -4743,23 +4853,23 @@ class OpenAIChatToolWindow(ToolWindow):
                 # 更新当前项目过滤
                 self._current_history_project = self._current_project
                 self._refresh_history_toggle_panel()
-            
+
             # 刷新历史面板
             self._history_popup_card.refreshRequested.emit()
-            
+
             InfoBar.success(
-                "归档成功", 
-                f"已归档项目「{project_name}」的 {count} 个会话", 
-                parent=self, 
-                duration=3000, 
+                "归档成功",
+                f"已归档项目「{project_name}」的 {count} 个会话",
+                parent=self,
+                duration=3000,
                 position=InfoBarPosition.TOP
             )
         else:
             InfoBar.warning(
-                "归档失败", 
-                f"项目「{project_name}」没有可归档的会话", 
-                parent=self, 
-                duration=3000, 
+                "归档失败",
+                f"项目「{project_name}」没有可归档的会话",
+                parent=self,
+                duration=3000,
                 position=InfoBarPosition.TOP
             )
 
@@ -4783,7 +4893,7 @@ class OpenAIChatToolWindow(ToolWindow):
             return
         # 数据已经在 MemoryCardContent 中通过 memory_manager 保存
         # 这里只显示提示信息
-        
+
         InfoBar.success("已保存", "长期记忆已更新", parent=self, duration=1500, position=InfoBarPosition.TOP)
 
     def _on_memory_updated(self, memories: list):

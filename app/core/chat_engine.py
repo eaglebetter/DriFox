@@ -186,6 +186,7 @@ class ChatEngine:
     def send_message(
         self,
         user_text: str,
+        *args,
         **kwargs
     ) -> bool:
         if self._is_streaming:
@@ -449,6 +450,7 @@ class ChatEngine:
             # UI 模式：使用 Qt 信号-槽机制
             self._current_worker.content_received.connect(self._on_content_received)
             self._current_worker.reasoning_content_received.connect(self._on_reasoning_content_received)
+            self._current_worker.thinking_started.connect(self._on_thinking_started)
             self._current_worker.tool_call_started.connect(self._on_tool_call_started)
             self._current_worker.tool_result_received.connect(self._on_tool_result_received)
             self._current_worker.error_occurred.connect(self._on_error)
@@ -478,6 +480,10 @@ class ChatEngine:
     def _on_reasoning_content_received(self, reasoning_piece: str):
         """DeepSeek 思考内容接收"""
         self._emit("reasoning_content_received", reasoning_piece)
+
+    def _on_thinking_started(self):
+        """新一轮思考开始（多轮工具迭代时触发）"""
+        self._emit("thinking_started")
 
     def _on_reasoning_finished(self):
         """DeepSeek 思考内容结束"""

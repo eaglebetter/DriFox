@@ -1,109 +1,46 @@
 """
-截图脚本 - 修复4K屏幕截图问题
-强制使用横向分辨率
+截图脚本 - 跨平台屏幕截图工具
+支持 macOS 和 Windows
 """
-import subprocess
-import os
 import sys
-import tempfile
+import os
+from pathlib import Path
+
+# 添加 common 目录到路径
+SCRIPT_DIR = Path(__file__).parent
+sys.path.insert(0, str(SCRIPT_DIR))
+
+from common.utils import Screenshot
 
 
-def take_screenshot(output_path="screenshot.png"):
-    """
-    使用PowerShell截取全屏，强制横向4K分辨率
-    """
-    if not os.path.isabs(output_path):
-        output_path = os.path.join(os.getcwd(), output_path)
+def main():
+    """命令行截图工具"""
+    import argparse
     
-    # 强制横向4K分辨率截图
-    ps_script = '''
-Add-Type -AssemblyName System.Windows.Forms
-Add-Type @"
-using System;
-using System.Runtime.InteropServices;
-public class Win32 {
-    [DllImport("user32.dll")] public static extern IntPtr GetDC(IntPtr hWnd);
-    [DllImport("user32.dll")] public static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
-    [DllImport("gdi32.dll")] public static extern int GetDeviceCaps(IntPtr hDC, int index);
-}
-"@
-
-# 获取物理分辨率
-$hdc = [Win32]::GetDC([IntPtr]::Zero)
-$physicalWidth = [Win32]::GetDeviceCaps($hdc, 117)  # HORZRES
-$physicalHeight = [Win32]::GetDeviceCaps($hdc, 118)  # VERTRES
-[Win32]::ReleaseDC([IntPtr]::Zero, $hdc) | Out-Null
-
-# 如果高度>宽度，说明是竖屏模式，交换它们
-if ($physicalHeight -gt $physicalWidth) {
-    $temp = $physicalWidth
-    $physicalWidth = $physicalHeight
-    $physicalHeight = $temp
-}
-
-Write-Host "截图分辨率: $physicalWidth x $physicalHeight"
-
-# 创建位图
-$bmp = New-Object System.Drawing.Bitmap($physicalWidth, $physicalHeight)
-$graf = [System.Drawing.Graphics]::FromImage($bmp)
-
-# 高质量截图
-$graf.CopyFromScreen(0, 0, 0, 0, (New-Object System.Drawing.Size($physicalWidth, $physicalHeight)))
-
-# 保存
-$bmp.Save("%OUTPUT%", [System.Drawing.Imaging.ImageFormat]::Png)
-
-$graf.Dispose()
-$bmp.Dispose()
-
-Write-Host "截图成功!"
-exit 0
-'''.replace('%OUTPUT%', output_path.replace('\\', '\\\\').replace('/', '\\\\'))
+    parser = argparse.ArgumentParser(description="截取屏幕截图")
+    parser.add_argument(
+        'output',
+        nargs='?',
+        default='screenshot.png',
+        help='截图保存路径 (默认: screenshot.png)'
+    )
+    parser.add_argument(
+        '--delay', '-d',
+        type=float,
+        default=0,
+        help='延迟截图秒数 (macOS)'
+    )
     
-    temp_file = os.path.join(tempfile.gettempdir(), 'shot.ps1')
+    args = parser.parse_args()
     
-    with open(temp_file, 'w', encoding='utf-8') as f:
-        f.write(ps_script.replace('{{', '{').replace('}}', '}'))
+    success = Screenshot.take(args.output, args.delay)
     
-    print("正在截取屏幕...")
-    
-    try:
-        result = subprocess.run(
-            ['powershell', '-ExecutionPolicy', 'Bypass', '-File', temp_file],
-            capture_output=True,
-            text=True,
-            encoding='utf-8',
-            errors='replace',
-            timeout=30
-        )
-        
-        os.remove(temp_file)
-        
-        for line in result.stdout.split('\n'):
-            line = line.strip()
-            if line:
-                print(line)
-        
-        if result.returncode == 0 and os.path.exists(output_path):
-            size = os.path.getsize(output_path)
-            print(f"文件大小: {size/1024:.1f} KB ({size/1024/1024:.1f} MB)")
-            return True
-        else:
-            if result.stderr:
-                print(f"错误: {result.stderr.strip()}")
-            return False
-            
-    except Exception as e:
-        print(f"异常: {e}")
-        try:
-            os.remove(temp_file)
-        except:
-            pass
-        return False
+    if success:
+        print(f"截图已保存: {args.output}")
+        return 0
+    else:
+        return 1
 
 
 if __name__ == "__main__":
-    output = sys.argv[1] if len(sys.argv) > 1 else "screenshot.png"
-    success = take_screenshot(output)
-    if not success:
-        sys.exit(1)
+    sys.exit(main())

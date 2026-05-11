@@ -1,91 +1,60 @@
 """
-通用工具模块 - 提供 Python 探测和 API Key 获取功能
+通用工具模块 - 提供 Python 探测、API Key 获取、截图功能
+支持 macOS 和 Windows 双平台
 """
 import os
 import sys
 import subprocess
-import orjson as json
+import json
 import base64
+import platform
 from pathlib import Path
 
 
 class PythonFinder:
     """自动探测系统中可用的 Python 解释器"""
     
-    # 常见 Python 安装路径 (Windows)
-    COMMON_PATHS = [
-        # User installations
-        Path.home() / "AppData" / "Local" / "Programs" / "Python" / "Python312" / "python.exe",
-        Path.home() / "AppData" / "Local" / "Programs" / "Python" / "Python311" / "python.exe",
-        Path.home() / "AppData" / "Local" / "Programs" / "Python" / "Python310" / "python.exe",
-        Path.home() / "AppData" / "Local" / "Programs" / "Python" / "Python39" / "python.exe",
-        # System installations
-        Path("C:/") / "Python312" / "python.exe",
-        Path("C:/") / "Python311" / "python.exe",
-        Path("C:/") / "Python310" / "python.exe",
-        Path("C:/") / "Program Files" / "Python312" / "python.exe",
-        Path("C:/") / "Program Files" / "Python311" / "python.exe",
-        Path("C:/") / "Program Files (x86)" / "Python312" / "python.exe",
-        Path("C:/") / "Program Files (x86)" / "Python311" / "python.exe",
-        # Anaconda
-        Path.home() / "anaconda3" / "python.exe",
-        Path.home() / "miniconda3" / "python.exe",
-        Path("C:/") / "anaconda3" / "python.exe",
-        Path("C:/") / "miniconda3" / "python.exe",
-    ]
-    
     @classmethod
     def find_from_path(cls):
         """从 PATH 环境变量中查找 python"""
         import shutil
         
-        # 尝试 python3, python
-        for name in ['py', 'python3', 'python']:
+        for name in ['python3', 'python', 'py']:
             path = shutil.which(name)
             if path:
                 return Path(path)
         return None
     
     @classmethod
-    def find_from_registry(cls):
-        """从 Windows 注册表查找 Python (可选功能)"""
-        try:
-            import winreg
-            results = []
-            
-            # 尝试读取 Python 3.x 安装路径
-            for view in [winreg.KEY_READ]:
-                try:
-                    key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, 
-                                         r"SOFTWARE\Python\PythonCore", 0, view)
-                    i = 0
-                    while True:
-                        try:
-                            subkey_name = winreg.EnumKey(key, i)
-                            # 查找版本目录下的 InstallPath
-                            try:
-                                version_key = winreg.OpenKey(key, subkey_name)
-                                try:
-                                    install_path, _ = winreg.QueryValueEx(version_key, "InstallPath")
-                                    if install_path:
-                                        exe_path = Path(install_path) / "python.exe"
-                                        if exe_path.exists():
-                                            results.append(exe_path)
-                                except:
-                                    pass
-                                winreg.CloseKey(version_key)
-                            except:
-                                pass
-                            i += 1
-                        except OSError:
-                            break
-                    winreg.CloseKey(key)
-                except:
-                    pass
-                    
-            return results[0] if results else None
-        except:
-            return None
+    def find_mac_python(cls):
+        """macOS 特定路径"""
+        mac_paths = [
+            Path('/usr/bin/python3'),
+            Path('/usr/local/bin/python3'),
+            Path('/opt/homebrew/bin/python3'),
+            Path('/opt/local/bin/python3'),
+        ]
+        for p in mac_paths:
+            if p.exists():
+                return p
+        return None
+    
+    @classmethod
+    def find_win_python(cls):
+        """Windows 特定路径"""
+        win_paths = [
+            Path.home() / "AppData" / "Local" / "Programs" / "Python" / "Python312" / "python.exe",
+            Path.home() / "AppData" / "Local" / "Programs" / "Python" / "Python311" / "python.exe",
+            Path.home() / "AppData" / "Local" / "Programs" / "Python" / "Python310" / "python.exe",
+            Path("C:/") / "Python312" / "python.exe",
+            Path("C:/") / "Python311" / "python.exe",
+            Path.home() / "anaconda3" / "python.exe",
+            Path.home() / "miniconda3" / "python.exe",
+        ]
+        for p in win_paths:
+            if p.exists():
+                return p
+        return None
     
     @classmethod
     def verify_python(cls, path):
@@ -103,188 +72,262 @@ class PythonFinder:
     
     @classmethod
     def find(cls):
-        """
-        自动探测系统中可用的 Python 解释器
+        """综合查找 Python"""
+        # 1. 优先使用当前解释器
+        if cls.verify_python(Path(sys.executable)):
+            return Path(sys.executable)
         
-        探测顺序:
-        1. PATH 环境变量中的 python
-        2. 常见安装路径
-        3. Windows 注册表
+        # 2. 从 PATH 查找
+        found = cls.find_from_path()
+        if found and cls.verify_python(found):
+            return found
         
-        Returns:
-            Path or None: 找到的 Python 路径，未找到返回 None
-        """
-        # 1. 先从 PATH 查找 (最可靠，用户配置的)
-        path_from_path = cls.find_from_path()
-        if path_from_path and cls.verify_python(path_from_path):
-            return path_from_path
-        
-        # 2. 遍历常见安装路径
-        for candidate in cls.COMMON_PATHS:
-            if candidate.exists() and cls.verify_python(candidate):
-                return candidate
-        
-        # 3. 尝试注册表
-        registry_path = cls.find_from_registry()
-        if registry_path and cls.verify_python(registry_path):
-            return registry_path
+        # 3. 平台特定查找
+        system = platform.system()
+        if system == 'Darwin':
+            found = cls.find_mac_python()
+            if found and cls.verify_python(found):
+                return found
+        elif system == 'Windows':
+            found = cls.find_win_python()
+            if found and cls.verify_python(found):
+                return found
         
         return None
 
 
 class APIKeyFinder:
-    """自动获取 MiniMax API Key"""
-    
-    # 可用的环境变量名
-    ENV_VARS = [
-        'MINIMAX_API_KEY',
-        'MINIMAX_KEY', 
-        'OPENAI_API_KEY',  # 某些平台可能复用
-    ]
-    
-    # 可能的配置文件位置
-    CONFIG_FILES = [
-        Path.home() / ".minimax" / "api_key",
-        Path.home() / ".config" / "minimax" / "api_key",
-        Path.home() / ".env",
-    ]
+    """MiniMax API Key 查找器"""
     
     @classmethod
     def find_from_env(cls):
         """从环境变量获取"""
-        for var in cls.ENV_VARS:
-            key = os.environ.get(var)
+        # 尝试多个可能的环境变量名
+        for key_name in ['MINIMAX_API_KEY', 'MINIMAX_APIKEY', 'API_KEY']:
+            key = os.environ.get(key_name)
             if key:
                 return key
         return None
     
     @classmethod
-    def find_from_config(cls):
+    def find_from_file(cls):
         """从配置文件获取"""
-        for config_file in cls.CONFIG_FILES:
-            if config_file.exists():
-                try:
-                    content = config_file.read_text().strip()
-                    if content and not content.startswith('#'):
+        # 尝试多个可能的配置文件位置
+        config_paths = [
+            Path.home() / ".minimax" / "api_key",
+            Path.home() / ".minimax" / "api_key.txt",
+            Path.home() / ".config" / "minimax" / "api_key",
+        ]
+        
+        for config_path in config_paths:
+            try:
+                if config_path.exists():
+                    content = config_path.read_text().strip()
+                    if content:
                         return content
-                except:
-                    pass
+            except:
+                pass
         return None
     
     @classmethod
-    def find(cls, raise_if_missing=True):
-        """
-        自动获取 MiniMax API Key
-        
-        查找顺序:
-        1. 环境变量 (MINIMAX_API_KEY)
-        2. 配置文件 (~/.minimax/api_key)
-        
-        Args:
-            raise_if_missing: 未找到时是否抛出异常
-        
-        Returns:
-            str or None: API Key
-        """
+    def find(cls):
+        """综合查找 API Key"""
+        # 1. 环境变量优先
         key = cls.find_from_env()
         if key:
             return key
         
-        key = cls.find_from_config()
+        # 2. 配置文件
+        key = cls.find_from_file()
         if key:
             return key
         
-        if raise_if_missing:
-            # 输出结构化错误信息，供 agent 调用 question 工具
-            error_info = {
-                "error_type": "MISSING_API_KEY",
-                "exit_code": 10,
-                "message": "未找到 MiniMax API Key",
-                "solutions": [
-                    "set MINIMAX_API_KEY=your_key",
-                    "在 ~/.minimax/api_key 文件中写入密钥"
-                ],
-                "question_for_user": "请提供您的 MiniMax API Key"
-            }
-            print("\n" + "=" * 60, file=sys.stderr)
-            print("【配置缺失】需要 MiniMax API Key 才能使用图片分析功能", file=sys.stderr)
-            print("=" * 60, file=sys.stderr)
-            print(f"错误类型: {error_info['error_type']}", file=sys.stderr)
-            print(f"退出码: {error_info['exit_code']}", file=sys.stderr)
-            print("-" * 60, file=sys.stderr)
-            print("解决方法 (二选一):", file=sys.stderr)
-            for i, solution in enumerate(error_info['solutions'], 1):
-                print(f"  {i}. {solution}", file=sys.stderr)
-            print("=" * 60, file=sys.stderr)
-            raise ConfigError(error_info)
         return None
+
+
+class Screenshot:
+    """跨平台截图工具"""
+    
+    @staticmethod
+    def take(output_path="screenshot.png", delay=0):
+        """
+        截取全屏
+        
+        Args:
+            output_path: 保存路径
+            delay: 延迟截图秒数 (macOS)
+        
+        Returns:
+            bool: 是否成功
+        """
+        system = platform.system()
+        
+        if not os.path.isabs(output_path):
+            output_path = os.path.join(os.getcwd(), output_path)
+        
+        if system == 'Darwin':
+            return Screenshot._take_macos(output_path, delay)
+        elif system == 'Windows':
+            return Screenshot._take_windows(output_path)
+        else:
+            print(f"不支持的系统: {system}")
+            return False
+    
+    @staticmethod
+    def _take_macos(output_path, delay=0):
+        """macOS 截图"""
+        print("正在截取屏幕 (macOS)...")
+        
+        try:
+            # macOS 使用 screencapture
+            cmd = ['screencapture']
+            
+            if delay > 0:
+                cmd.extend(['-T', str(int(delay))])
+            
+            cmd.extend(['-x', output_path])
+            
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                timeout=30
+            )
+            
+            if result.returncode == 0 and os.path.exists(output_path):
+                size = os.path.getsize(output_path)
+                print(f"截图成功! 文件大小: {size/1024/1024:.1f} MB")
+                return True
+            else:
+                error_msg = result.stderr.decode('utf-8') if result.stderr else '未知错误'
+                print(f"截图失败: {error_msg}")
+                return False
+                
+        except subprocess.TimeoutExpired:
+            print("截图超时")
+            return False
+        except Exception as e:
+            print(f"截图异常: {e}")
+            return False
+    
+    @staticmethod
+    def _take_windows(output_path):
+        """Windows 截图"""
+        import tempfile
+        
+        ps_script = '''
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public class Win32 {
+    [DllImport("user32.dll")] public static extern IntPtr GetDC(IntPtr hWnd);
+    [DllImport("user32.dll")] public static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
+    [DllImport("gdi32.dll")] public static extern int GetDeviceCaps(IntPtr hDC, int index);
+}
+"@
+
+$hdc = [Win32]::GetDC([IntPtr]::Zero)
+$w = [Win32]::GetDeviceCaps($hdc, 117)
+$h = [Win32]::GetDeviceCaps($hdc, 118)
+[Win32]::ReleaseDC([IntPtr]::Zero, $hdc) | Out-Null
+
+if ($h -gt $w) {
+    $temp = $w; $w = $h; $h = $temp
+}
+
+$bmp = New-Object System.Drawing.Bitmap($w, $h)
+$graf = [System.Drawing.Graphics]::FromImage($bmp)
+$graf.CopyFromScreen(0, 0, 0, 0, (New-Object System.Drawing.Size($w, $h)))
+$bmp.Save('%OUTPUT%', [System.Drawing.Imaging.ImageFormat]::Png)
+$graf.Dispose()
+$bmp.Dispose()
+'''.replace('%OUTPUT%', output_path.replace('\\', '\\\\').replace('/', '\\\\'))
+        
+        temp_file = os.path.join(tempfile.gettempdir(), 'shot.ps1')
+        
+        try:
+            with open(temp_file, 'w', encoding='utf-8') as f:
+                content = ps_script.replace('{{', '{').replace('}}', '}')
+                f.write(content)
+            
+            result = subprocess.run(
+                ['powershell', '-ExecutionPolicy', 'Bypass', '-File', temp_file],
+                capture_output=True,
+                text=True,
+                encoding='utf-8',
+                errors='replace',
+                timeout=30
+            )
+            
+            os.remove(temp_file)
+            
+            if result.returncode == 0 and os.path.exists(output_path):
+                size = os.path.getsize(output_path)
+                print(f"截图成功! 文件大小: {size/1024/1024:.1f} MB")
+                return True
+            else:
+                print(f"截图失败: {result.stderr.strip() if result.stderr else '未知错误'}")
+                return False
+                
+        except Exception as e:
+            print(f"截图异常: {e}")
+            try:
+                os.remove(temp_file)
+            except:
+                pass
+            return False
 
 
 class ConfigError(Exception):
     """配置错误异常"""
     
-    def __init__(self, info_or_message):
-        if isinstance(info_or_message, dict):
-            self.error_info = info_or_message
-            super().__init__(info_or_message['message'])
-        else:
-            self.error_info = {"message": info_or_message}
-            super().__init__(info_or_message)
-    
-    def to_question(self):
-        """生成向用户提问的内容"""
-        if self.error_info.get('question_for_user'):
-            return self.error_info['question_for_user']
-        return self.error_info.get('message', '配置错误')
+    def __init__(self, message):
+        super().__init__(message)
+        self.message = message
 
 
 def get_python_executable():
-    """
-    获取当前脚本应该使用的 Python 解释器路径
-    
-    Returns:
-        str: Python 解释器路径
-    """
-    # 如果当前 Python 可用，直接返回
-    if PythonFinder.verify_python(Path(sys.executable)):
-        return sys.executable
-    
-    # 否则尝试自动探测
+    """获取可用的 Python 解释器"""
     found = PythonFinder.find()
     if found:
         return str(found)
-    
-    raise ConfigError(
-        "未找到可用的 Python 解释器\n"
-        "请确保已安装 Python 3.x"
-    )
+    raise ConfigError("未找到可用的 Python 解释器")
 
 
 def get_api_key():
-    """
-    获取 MiniMax API Key
-    
-    Returns:
-        str: API Key
-    
-    Raises:
-        ConfigError: 未找到 API Key 时抛出，包含向用户提问的信息
-    """
-    return APIKeyFinder.find()
+    """获取 MiniMax API Key"""
+    key = APIKeyFinder.find()
+    if key:
+        return key
+    raise ConfigError(
+        "未找到 MiniMax API Key\n"
+        "请设置环境变量 MINIMAX_API_KEY 或创建配置文件 ~/.minimax/api_key"
+    )
 
 
 if __name__ == "__main__":
-    print("Python 探测测试:")
+    print("=== 诊断信息 ===")
+    print(f"平台: {platform.system()}")
+    print(f"Python: {sys.executable}")
+    
+    print("\nPython 查找测试:")
     python_path = PythonFinder.find()
     if python_path:
-        print(f"  找到 Python: {python_path}")
+        print(f"  找到: {python_path}")
     else:
-        print("  未找到 Python")
+        print("  未找到")
     
-    print("\nAPI Key 探测测试:")
+    print("\nAPI Key 查找测试:")
     try:
-        key = APIKeyFinder.find()
+        key = get_api_key()
         if key:
-            print(f"  找到 API Key: {key[:10]}...")
+            print(f"  找到: {key[:10]}...")
     except ConfigError as e:
-        print(f"  {e}")
+        print(f"  未找到: {e}")
+    
+    print("\n截图测试:")
+    test_path = "/tmp/test_screenshot.png"
+    if Screenshot.take(test_path):
+        print(f"  成功: {test_path}")
+    else:
+        print("  失败")

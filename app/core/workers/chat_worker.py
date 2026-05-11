@@ -33,6 +33,7 @@ _VALID_IDENTIFIER_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 class OpenAIChatWorker(QThread):
     content_received = pyqtSignal(str)
     reasoning_content_received = pyqtSignal(str)  # DeepSeek thinking mode
+    thinking_started = pyqtSignal()  # 新一轮思考开始（多轮工具迭代时每轮触发）
     error_occurred = pyqtSignal(str)
     finished_with_content = pyqtSignal(str)
     finished_with_messages = pyqtSignal(list)
@@ -494,26 +495,6 @@ class OpenAIChatWorker(QThread):
                 if self._is_cancelled:
                     return
 
-                # ========== 工具迭代中压缩 ==========
-                # 在每次 API 调用前检查是否需要压缩
-                if self._compactor:
-
-                    if self._compactor.should_compact(current_messages, budget):
-                        compacted, state, cache = self._compactor.compact(
-                            current_messages,
-                            budget,
-                            existing_cache=self._compaction_cache,
-                            allow_llm_summary=False,  # 工具迭代中只用启发式，避免嵌套 LLM 调用
-                        )
-                        if compacted != current_messages:
-                            logger.info(compacted)
-                            current_messages = compacted
-                            self._last_compaction_state = state
-                            self._compaction_cache = cache
-                            # 重建 API 消息缓存（转换格式）
-                            self._api_messages_cache = current_messages
-                            self._emit_compaction_status(state)
-
                 # 每次 API 调用前：1. 清理中间状态  2. 检查压缩
                 self._clear_pending_response_state()
 
@@ -575,8 +556,28 @@ class OpenAIChatWorker(QThread):
                 current_messages.extend(response_sequence)
                 current_session_messages.extend(response_sequence)
                 self._current_session_messages = list(current_session_messages)
-                # 更新 API 消息缓存
-                self._append_to_api_cache(response_sequence)
+                # ========== 工具迭代中压缩 ==========
+                # 在每次 API 调用前检查是否需要压缩
+                if self._compactor.should_compact(current_messages, budget):
+                    system_message = current_messages.pop(0)
+                    compacted, state, cache = self._compactor.compact(
+                        current_messages,
+                        budget,
+                        existing_cache=self._compaction_cache,
+                        allow_llm_summary=False,  # 工具迭代中只用启发式，避免嵌套 LLM 调用
+                    )
+                    if compacted != current_messages:
+                        logger.info(compacted)
+                        current_messages = compacted
+                        self._last_compaction_state = state
+                        self._compaction_cache = cache
+                        # 重建 API 消息缓存（转换格式）
+                        self._api_messages_cache = current_messages
+                        self._emit_compaction_status(state)
+                    current_session_messages = [system_message] + current_session_messages
+                else:
+                    # 更新 API 消息缓存
+                    self._append_to_api_cache(response_sequence)
                 self._emit_with_callback("finished_with_messages", self.finished_with_messages,
                                          current_session_messages)
                 self._check_and_notify_stage_change()
@@ -991,7 +992,11 @@ class OpenAIChatWorker(QThread):
             except BadRequestError as e:
                 error_str = str(e)
                 # 检测 tool call result 错误码 2013
-                is_tool_call_order_error = "2013" in error_str or "tool call result does not follow tool call" in error_str.lower()
+                is_tool_call_order_error = (
+                    "2013" in error_str or
+                    "tool call result does not follow tool call" in error_str.lower() or
+                    "tool_calls" in error_str.lower()
+                )
 
                 if is_tool_call_order_error and attempt < max_retries - 1:
                     # 自动修复 tool result 顺序问题
@@ -1103,6 +1108,10 @@ class OpenAIChatWorker(QThread):
         self._tool_calls_buffer = {}
         tool_calls_found = False
         tool_args_pending = True
+        reasoning_started_this_call = False  # 本轮 API 调用是否已发射 thinking_started
+        _reasoning_batch = ""  # 批量积累 reasoning，减少信号频率
+        _reasoning_batch_time = time.time()  # 上次发射时间
+        chunk_count = 0  # chunk 计数器，用于定期 yield 主线程
         for chunk in response:
             if self._is_cancelled:
                 return False, False  # 返回元组而不是单个布尔值
@@ -1196,9 +1205,18 @@ class OpenAIChatWorker(QThread):
             # 提取 reasoning_content (DeepSeek V4 thinking mode)
             reasoning_delta = getattr(delta, "reasoning_content", None)
             if reasoning_delta:
+                if not reasoning_started_this_call:
+                    reasoning_started_this_call = True
+                    self._emit_with_callback("thinking_started", self.thinking_started)
                 # 性能优化：使用 list append 代替字符串拼接
                 self._reasoning_chunks.append(reasoning_delta)
-                self._emit_with_callback("reasoning_content_received", self.reasoning_content_received, reasoning_delta)
+                # 批量发送：积累到 10 字符或 50ms 才 emit，避免高频信号堵塞 Qt 事件队列
+                _reasoning_batch += reasoning_delta
+                now = time.time()
+                if len(_reasoning_batch) >= 10 or (now - _reasoning_batch_time) > 0.05:
+                    self._emit_with_callback("reasoning_content_received", self.reasoning_content_received, _reasoning_batch)
+                    _reasoning_batch = ""
+                    _reasoning_batch_time = now
 
             if content:
                 # 性能优化：使用 list append + join 代替字符串拼接
@@ -1207,6 +1225,16 @@ class OpenAIChatWorker(QThread):
                     self._response_content_blocks, content
                 )
                 self._emit_with_callback("content_received", self.content_received, content)
+
+            # 每处理 5 个 chunk 就让渡一次 CPU，确保主线程能及时处理排队的 Qt 信号
+            # 避免 content_received 等信号堆积到工具执行完毕后一次性处理
+            chunk_count += 1
+            if chunk_count % 5 == 0:
+                QCoreApplication.processEvents()
+
+        # 冲刷剩余的 reasoning batch
+        if _reasoning_batch:
+            self._emit_with_callback("reasoning_content_received", self.reasoning_content_received, _reasoning_batch)
 
         # 处理等待完整参数的 tool_calls（超长 arguments 场景）
         # 在所有 chunk 接收完成后，再次尝试解析仍处于等待状态的 tool_calls

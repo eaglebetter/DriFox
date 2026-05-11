@@ -1581,6 +1581,7 @@ def create_assistant_card_widget(
     on_card_diff=None,
     on_save_file=None,
     on_subagent_log=None,
+    immediate_render: bool = False,
 ) -> Any:
     """
     创建助手消息卡片（带标准配置）
@@ -1595,17 +1596,19 @@ def create_assistant_card_widget(
         on_card_diff: 卡片差异回调
         on_save_file: 保存文件回调
         on_subagent_log: 子智能体日志回调
+        immediate_render: 是否立即创建 QWebEngineView。流式输出需要 True；
+                         会话加载设为 False，由懒渲染队列统一控制。
 
     Returns:
         配置好的 MessageCard
     """
     card = MessageCard(parent=parent, role="assistant", timestamp=timestamp)
     card._round_index = round_index
-    # 新创建的assistant卡片肯定在可视区，确保立即渲染
-    card.ensure_rendered()
-    # 懒渲染：viewer现在已经创建，安装dialog filter
-    if card.viewer is not None:
-        card.viewer._install_dialog_filter()
+    if immediate_render:
+        # 流式输出需要立即渲染，否则内容无处写入
+        card.ensure_rendered()
+        if card.viewer is not None:
+            card.viewer._install_dialog_filter()
     
     if on_action:
         card.actionRequested.connect(on_action)

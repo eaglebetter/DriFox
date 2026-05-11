@@ -113,6 +113,9 @@ def ensure_content_blocks(content: Any) -> List[Dict[str, Any]]:
                     text = str(item.get("text", ""))
                     if text:
                         blocks.append({"type": "text", "text": text})
+                elif item_type == "reasoning":
+                    reasoning_content = str(item.get("content", "") or "")
+                    blocks.append({"type": "reasoning", "content": reasoning_content})
                 elif item_type == "tool_result":
                     blocks.append(
                         make_tool_result_block(
@@ -202,7 +205,12 @@ def content_to_markdown(content: Any) -> str:
     parts: List[str] = []
     for block in ensure_content_blocks(content):
         block_type = block.get("type")
-        if block_type == "text":
+        if block_type == "reasoning":
+            # 思考内容：输出为 <think> 标签，由渲染器 _inject_think_cards 处理
+            reasoning_content = str(block.get("content", "") or "")
+            if reasoning_content:
+                parts.append(f"<think>{reasoning_content}</think>")
+        elif block_type == "text":
             text = str(block.get("text", ""))
             if text:
                 parts.append(text)

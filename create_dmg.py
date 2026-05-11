@@ -6,8 +6,8 @@ import os
 import dmgbuild
 
 def build_dmg():
-    app_path = "/Users/dingma/work/DriFox/DriFox/dist/Drifox.app"
-    dmg_path = "/Users/dingma/work/DriFox/DriFox/dist/Drifox.dmg"
+    app_path = "dist/Drifox.app"
+    dmg_path = "dist/Drifox.dmg"
     
     # 删除旧的 dmg
     if os.path.exists(dmg_path):
