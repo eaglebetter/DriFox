@@ -2790,6 +2790,9 @@ class MessageCard(SimpleCardWidget):
             self._pending_content = self._content_data
             return
 
+        # 标记内容已加载，高度变化时触发 _on_message_card_height_changed 滚底
+        self._content_just_loaded = True
+
         if self._reasoning_total_len > LARGE_THINKING_THRESHOLD:
             # 超长思考：使用增量更新策略，避免完整重渲染
             self._update_thinking_incremental(text)
