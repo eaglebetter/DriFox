@@ -1717,7 +1717,12 @@ class CodeWebViewer(QWebEngineView):
         if not self._is_js_ready or not self.page():
             return
         try:
-            escaped = escape(text)
+            # 防御：过滤掉可能出现在正文 chunk 中的 <think> / </think> 标签
+            # （防止增量显示标签，全量渲染会正确处理）
+            text_clean = text.replace("<think>", "").replace("</think>", "")
+            if not text_clean:
+                return
+            escaped = escape(text_clean)
             js = f"""
             (function() {{
                 var c = document.getElementById('content-placeholder');
