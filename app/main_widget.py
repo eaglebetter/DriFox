@@ -2375,7 +2375,6 @@ class OpenAIChatToolWindow(ToolWindow):
                 user_card = self._append_user_message(
                     content,
                     timestamp=timestamp,
-                    tag_params=batch[0].get("params", {}),
                     scroll=False,
                     insert_index=insert_index,
                     user_round_index=round_index,
@@ -2932,7 +2931,6 @@ class OpenAIChatToolWindow(ToolWindow):
             self,
             content: str,
             timestamp: str = None,
-            tag_params: dict = None,
             scroll: bool = True,
             insert_index: Optional[int] = None,
             user_round_index: Optional[int] = None,
@@ -4066,8 +4064,6 @@ class OpenAIChatToolWindow(ToolWindow):
     def _on_tool_call_started(
             self, tool_call_id: str, tool_name: str, arguments: dict, round_id: str = None
     ):
-        import time
-
         self._current_tool_start_time = time.time()
         self._current_tool_call_id = tool_call_id
         self._current_tool_name = tool_name
@@ -4730,8 +4726,7 @@ class OpenAIChatToolWindow(ToolWindow):
         """归档项目处理"""
         if not self.history_manager:
             return
-            
-        
+
         # 后端执行归档
         count = self.history_manager.archive_project(project_name)
         
