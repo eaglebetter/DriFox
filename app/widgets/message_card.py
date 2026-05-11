@@ -1746,7 +1746,21 @@ class CodeWebViewer(QWebEngineView):
                 self._render_timer.stop()
             self._perform_update()
             return
-        interval = self._min_render_interval if self._streaming else 40
+
+        # 动态渲染间隔：内容越大渲染越稀疏，减轻 UI 压力
+        if self._streaming:
+            content_len = len(self._markdown_text)
+            if content_len > 50000:
+                interval = 200
+            elif content_len > 20000:
+                interval = 120
+            elif content_len > 5000:
+                interval = 80
+            else:
+                interval = self._min_render_interval
+        else:
+            interval = 40
+
         if self._render_timer.isActive():
             return
         self._render_timer.start(interval)
@@ -1762,6 +1776,7 @@ class CodeWebViewer(QWebEngineView):
                 _tcb0 = _t.time()
                 fresh_md = self._lazy_markdown_cb()
                 _tcb = (_t.time() - _tcb0) * 1000
+                self._lazy_markdown_cb = None  # 清除回调，避免后续 set_content 重复转换
                 if fresh_md == self._last_rendered_markdown:
                     if not self._height_report_pending:
                         self._height_report_pending = True
@@ -2634,13 +2649,11 @@ class MessageCard(SimpleCardWidget):
             if not self._lazy_rendered:
                 self._pending_content = self._content_data
                 return
-            t_md = time.time()
-            rendered = content_to_markdown(self._content_data)
-            md_ms = (time.time() - t_md) * 1000
-            self.viewer._markdown_text = rendered
+            # 性能优化：不立即执行 content_to_markdown，设懒回调让 _perform_update
+            # 在渲染定时器到期时执行（多个 chunk 在窗口期内只转换一次，避免白费）
+            self.viewer._lazy_markdown_cb = lambda: content_to_markdown(self._content_data)
             self.viewer._schedule_render(immediate=False)
             self._content_just_loaded = True
-            print(f"[DIAG] append_text: md_gen={md_ms:.1f}ms", flush=True)
             return
 
         self._content_data = str(self._content_data or "") + str(text or "")
@@ -2669,8 +2682,10 @@ class MessageCard(SimpleCardWidget):
         if not self._lazy_rendered:
             self._pending_content = self._content_data
             return
-        self.viewer._markdown_text = content_to_markdown(self._content_data)
-        self.viewer._schedule_render(immediate=True)
+        # 性能优化：通过 _lazy_markdown_cb 延迟到 _perform_update 执行
+        # 工具结果不必须立即渲染，用 immediate=False 合并到下一次渲染批次
+        self.viewer._lazy_markdown_cb = lambda: content_to_markdown(self._content_data)
+        self.viewer._schedule_render(immediate=False)
 
     def get_plain_text(self) -> str:
         if self.role == "assistant":
@@ -2734,14 +2749,11 @@ class MessageCard(SimpleCardWidget):
             # 超长思考：使用增量更新策略，避免完整重渲染
             self._update_thinking_incremental(text)
         else:
-            # 优化：只在渲染定时器未激活时才调用 content_to_markdown（避免高频重复计算）
-            # 渲染定时器激活时，下轮 _perform_update 会通过 _lazy_markdown_cb 获取最新数据
-            if not self.viewer._render_timer.isActive():
-                t_md = time.time()
-                self.viewer._markdown_text = content_to_markdown(self._content_data)
-                md_ms = (time.time() - t_md) * 1000
-                total_ms = (time.time() - t0) * 1000
-                print(f"[DIAG] append_reasoning: md_gen={md_ms:.1f}ms len={len(text)} total={total_ms:.1f}ms", flush=True)
+            # 性能优化：通过 _lazy_markdown_cb 将 content_to_markdown 延迟到
+            # _perform_update 执行（渲染定时器自带防抖，多 chunk 合并转换一次）
+            # 这同时修复了旧代码的 bug：渲染定时器激活时跳过 markdown 更新，
+            # 导致最后几个 chunk 内容丢失
+            self.viewer._lazy_markdown_cb = lambda: content_to_markdown(self._content_data)
             self.viewer._schedule_render(immediate=False)
 
     def _update_thinking_incremental(self, new_text: str):
