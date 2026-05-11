@@ -339,12 +339,16 @@ def _inject_think_cards(md_text: str, completed: bool = True) -> str:
 
         if end_idx != -1:
             content = md_text[think_start:end_idx]
-            parts.append(_render_think_block(content, completed=True))
+            if content.strip():
+                parts.append(_render_think_block(content, completed=True))
+            # 空思考块跳过渲染，避免页面末尾遗留空折叠框
             i = end_idx + len("</think>")
         else:
             # 未闭合：内容截取到边界处，避免吞掉后续 <think>
             content = md_text[think_start:search_end]
-            parts.append(_render_think_block(content, completed=False))
+            if content.strip():
+                parts.append(_render_think_block(content, completed=False))
+            # 空且未闭合也跳过
             i = search_end
     return "".join(parts)
 
@@ -1704,6 +1708,39 @@ class CodeWebViewer(QWebEngineView):
         else:
             self._schedule_render()
 
+    def _append_text_incremental(self, text: str):
+        """增量追加纯文本到 DOM（流式模式），让用户立即看到文字，不等全量渲染。
+
+        在全量渲染（updateContent）到达前先推送纯文本内容，
+        避免渲染延迟导致的"卡高先涨、文字后显"问题。
+        """
+        if not self._is_js_ready or not self.page():
+            return
+        try:
+            escaped = escape(text)
+            js = f"""
+            (function() {{
+                var c = document.getElementById('content-placeholder');
+                if (!c) return;
+                var last = c.lastElementChild;
+                if (last && last.tagName === 'P') {{
+                    last.textContent += {json.dumps(escaped)};
+                }} else if (last && last.classList.contains('think-block')) {{
+                    // 最后是思考块：追加到思考块之后的新段落
+                    var p = document.createElement('p');
+                    p.textContent = {json.dumps(escaped)};
+                    c.appendChild(p);
+                }} else {{
+                    var p = document.createElement('p');
+                    p.textContent = {json.dumps(escaped)};
+                    c.appendChild(p);
+                }}
+            }})();
+            """
+            self.page().runJavaScript(js)
+        except RuntimeError:
+            pass
+
     def _render_markdown_to_html(self, raw_md: str) -> str:
         """渲染 markdown 到 HTML。
         
@@ -1753,11 +1790,11 @@ class CodeWebViewer(QWebEngineView):
             if content_len > 50000:
                 interval = 200
             elif content_len > 20000:
-                interval = 120
+                interval = 100
             elif content_len > 5000:
-                interval = 80
+                interval = 60
             else:
-                interval = self._min_render_interval
+                interval = 30
         else:
             interval = 40
 
@@ -2652,6 +2689,9 @@ class MessageCard(SimpleCardWidget):
             # 性能优化：不立即执行 content_to_markdown，设懒回调让 _perform_update
             # 在渲染定时器到期时执行（多个 chunk 在窗口期内只转换一次，避免白费）
             self.viewer._lazy_markdown_cb = lambda: content_to_markdown(self._content_data)
+            # 流式模式下增量追加纯文本到 DOM，让用户立即看到文字
+            if self._streaming:
+                self.viewer._append_text_incremental(text)
             self.viewer._schedule_render(immediate=False)
             self._content_just_loaded = True
             return
@@ -2748,6 +2788,8 @@ class MessageCard(SimpleCardWidget):
         if self._reasoning_total_len > LARGE_THINKING_THRESHOLD:
             # 超长思考：使用增量更新策略，避免完整重渲染
             self._update_thinking_incremental(text)
+            # 设置懒回调，确保 finish_streaming 时能产生完整标记以关闭思考块
+            self.viewer._lazy_markdown_cb = lambda: content_to_markdown(self._content_data)
         else:
             # 性能优化：通过 _lazy_markdown_cb 将 content_to_markdown 延迟到
             # _perform_update 执行（渲染定时器自带防抖，多 chunk 合并转换一次）
