@@ -2462,9 +2462,9 @@ class OpenAIChatToolWindow(ToolWindow):
             scroll_bar = self.chat_scroll_area.verticalScrollBar()
             scroll_bar.setValue(scroll_bar.maximum())
 
-        # 继续处理下一个
+        # 继续处理下一个，使用 QTimer 异步调度释放事件循环
         if self._pending_lazy_cards:
-            self._process_next_lazy_card()
+            QTimer.singleShot(0, self._process_next_lazy_card)
 
     def _get_current_user_round_index(self) -> int:
         """获取当前 user message 应该是第几个 user（从 0 开始）
@@ -3051,6 +3051,7 @@ class OpenAIChatToolWindow(ToolWindow):
             on_card_diff=self._on_card_diff_requested,
             on_save_file=self._on_save_file_requested,
             on_subagent_log=self._on_subagent_log_requested,
+            immediate_render=scroll,  # 流式(scroll=True)立即渲染，加载(scroll=False)走懒渲染队列
         )
 
         self._add_chat_widget(card, insert_index=insert_index)
