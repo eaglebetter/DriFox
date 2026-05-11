@@ -326,13 +326,13 @@ class OpenAIChatToolWindow(ToolWindow):
     def _init_sub_agent_log_store(self):
         """初始化子智能体日志存储"""
         from app.core import SubAgentLogStore
-        import os
+        from app.utils.utils import get_app_data_dir
 
         try:
-            db_path = os.path.join(".drifox", "sessions.db")
+            db_path = get_app_data_dir() / "sessions.db"
 
             log_store = SubAgentLogStore()
-            log_store.init(db_path)
+            log_store.init(str(db_path))
             self._sub_agent_manager.set_log_store(log_store)
             logger.info(f"[LLMChatter] 子智能体日志存储初始化完成")
         except Exception as e:

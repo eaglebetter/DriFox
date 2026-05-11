@@ -22,7 +22,7 @@ from PyQt5.QtCore import QTimer
 
 from app.core.message_content import consolidate_messages, content_to_text
 from app.core.store import SessionStore
-from app.utils.utils import serialize_for_json, deserialize_from_json
+from app.utils.utils import get_app_data_dir, resource_path, serialize_for_json, deserialize_from_json
 
 
 # 预编译文件名清理正则
@@ -46,12 +46,15 @@ class HistoryManager:
     """
 
     def __init__(self):
-        self.archive_dir = Path(".drifox") / "archived"
+        self.archive_dir = get_app_data_dir() / "archived"
         self.archive_dir.mkdir(parents=True, exist_ok=True)
 
         self._history_limit = 100
         self._save_timer: Optional[QTimer] = None
         self._save_delay_ms = 1000
+
+        # 延迟保存的待处理会话 ID
+        self._pending_save_session_id: Optional[str] = None
 
         # SQLite 存储层
         self._session_store: Optional[SessionStore] = None
@@ -628,33 +631,48 @@ class HistoryManager:
             self._schedule_save(existing.get("session_id"))
 
     def _schedule_save(self, session_id: str = None):
-        """延迟保存会话，指定 session_id 时只保存该会话"""
+        """
+        延迟保存会话，指定 session_id 时只保存该会话。
+        关键修复：合并对同一 session 的重复保存请求，防止丢失。
+        """
+        if not session_id:
+            return
+
+        # 如果当前已有待保存的请求，且是同一个 session，直接忽略（已被覆盖，无需重复）
+        if self._pending_save_session_id == session_id and self._save_timer is not None:
+            logger.debug(f"[HistoryManager] 合并保存请求: session_id={session_id[:8]}...")
+            return
+
+        # 如果有待保存的不同 session_id，先立即执行（防止丢失）
+        if self._pending_save_session_id and self._pending_save_session_id != session_id:
+            logger.debug(f"[HistoryManager] 立即保存被覆盖的会话: {self._pending_save_session_id[:8]}...")
+            self._do_save()
+
         self._pending_save_session_id = session_id
         if self._save_timer is None:
             self._save_timer = QTimer.singleShot(self._save_delay_ms, self._do_save)
 
     def _do_save(self):
         """延迟保存会话到 SQLite"""
+        self._save_timer = None
+
         if not (self._use_sqlite and self._session_store):
             logger.debug("[HistoryManager] SQLite 未就绪，跳过保存")
-            self._save_timer = None
             self._pending_save_session_id = None
             return
 
         pending_id = getattr(self, '_pending_save_session_id', None)
         if not pending_id:
             logger.debug("[HistoryManager] 无待保存会话，跳过")
-            self._save_timer = None
             self._pending_save_session_id = None
             return
 
-        logger.debug(f"[HistoryManager] 保存会话: pending_id={pending_id}")
+        logger.debug(f"[HistoryManager] 保存会话: pending_id={pending_id[:8]}...")
         for session in self._history_sessions:
             if session.get("session_id") == pending_id:
                 self._session_store.save_session(session)
                 break
 
-        self._save_timer = None
         self._pending_save_session_id = None
 
     def _extract_last_message_time(self, messages: List[Dict]) -> str:
@@ -697,9 +715,10 @@ class HistoryManager:
         """获取总存储大小"""
         if self._use_sqlite and self._session_store:
             # 估算 SQLite 数据库大小
-            db_path = os.path.join(".drifox", "sessions.db")
-            if os.path.exists(db_path):
-                return os.path.getsize(db_path)
+            from app.utils.utils import get_app_data_dir
+            db_path = get_app_data_dir() / "sessions.db"
+            if db_path.exists():
+                return db_path.stat().st_size
 
     def get_memory_stats(self) -> Dict:
         total_messages = sum(s.get("message_count", 0) for s in self._history_sessions)
