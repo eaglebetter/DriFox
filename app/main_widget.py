@@ -4014,10 +4014,8 @@ class OpenAIChatToolWindow(ToolWindow):
 
         self._hide_welcome_cards()
 
-        context_params = {}
-
         self.input_area.clear()
-        self._append_user_message(user_text, tag_params=context_params)
+        self._append_user_message(user_text)
 
         assistant_card = self._append_assistant_message()
 
@@ -4030,7 +4028,7 @@ class OpenAIChatToolWindow(ToolWindow):
             self._tool_executor.set_session_context(session.session_id)
 
         # 如果 send_message 返回 False（通常是 LLM 配置无效），回滚 UI 状态
-        if not self.backend.send_message_to_engine(user_text, context_params):
+        if not self.backend.send_message_to_engine(user_text):
             self._is_streaming = False
             self._toggle_send_stop(False)
             assistant_card.deleteLater()

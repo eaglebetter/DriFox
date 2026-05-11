@@ -81,13 +81,12 @@ class ChatSession:
         self.messages = consolidate_messages(self.messages)
         self._update_timestamp()
 
-    def add_user_message(self, content: str, params: dict = None):
+    def add_user_message(self, content: str, **kwargs):
         self.messages.append(
             {
                 "role": "user",
                 "content": content,
-                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "params": params or {},
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             }
         )
         self.messages = consolidate_messages(self.messages)
