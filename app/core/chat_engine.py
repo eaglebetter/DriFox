@@ -2,6 +2,7 @@
 """
 聊天引擎模块 - 处理 LLM 对话的核心逻辑
 """
+import os
 import anyio
 from datetime import datetime
 from typing import Dict, List, Optional, Any, Callable
@@ -206,7 +207,6 @@ class ChatEngine:
 
         # Trigger PreUserMessage hook
         if hasattr(self._agent_manager, '_hook_manager') and self._agent_manager._hook_manager:
-            from app.core.hook_manager import HookManager
             hook_manager = self._agent_manager._hook_manager
             if hook_manager:
                 import os
@@ -227,7 +227,6 @@ class ChatEngine:
 
         # Trigger PostUserMessage hook
         if hasattr(self._agent_manager, '_hook_manager') and self._agent_manager._hook_manager:
-            from app.core.hook_manager import HookManager
             hook_manager = self._agent_manager._hook_manager
             if hook_manager:
                 import os
@@ -241,7 +240,7 @@ class ChatEngine:
                     current_message=user_text
                 )
 
-        messages = self._build_messages(session, llm_config)
+        messages = self._build_messages(self._session_manager.get_current_session(), llm_config)
         if self._current_agent:
             available_tools = self._get_agent_manager().get_agent_tools_schema(
                 self._current_agent
@@ -458,6 +457,27 @@ class ChatEngine:
             compaction_config = self._agent_manager.get_agent_config("compaction")
         session = self._session_manager.get_current_session()
 
+        # Trigger PreAssistantMessage hook - BEFORE building messages, so output is included
+        if self._agent_manager and hasattr(self._agent_manager, '_hook_manager'):
+            hook_manager = self._agent_manager._hook_manager
+            if hook_manager:
+                current_message_text = ""
+                if session and hasattr(session, 'messages'):
+                    # Find last user message
+                    for msg in reversed(session.messages):
+                        if msg.get('role') == 'user':
+                            current_message_text = msg.get('content', '')
+                            break
+                import os
+                context = {
+                    "project_root": os.getcwd(),
+                }
+                hook_manager.trigger_event(
+                    "PreAssistantMessage",
+                    context=context,
+                    current_message=current_message_text
+                )
+
         self._current_worker = OpenAIChatWorker(
             messages=messages,
             session_messages=session.get_context_messages() if session else [],
@@ -494,28 +514,6 @@ class ChatEngine:
             self._current_worker.permission_approval_requested.connect(
                 self._on_permission_approval_requested
             )
-
-        # Trigger PreAssistantMessage hook
-        if self._agent_manager and hasattr(self._agent_manager, '_hook_manager'):
-            hook_manager = self._agent_manager._hook_manager
-            if hook_manager:
-                session = self._session_manager.get_current_session()
-                current_message_text = ""
-                if session and hasattr(session, 'messages'):
-                    # Find last user message
-                    for msg in reversed(session.messages):
-                        if msg.get('role') == 'user':
-                            current_message_text = msg.get('content', '')
-                            break
-                import os
-                context = {
-                    "project_root": os.getcwd(),
-                }
-                hook_manager.trigger_event(
-                    "PreAssistantMessage",
-                    context=context,
-                    current_message=current_message_text
-                )
 
         self._current_worker.start()
         

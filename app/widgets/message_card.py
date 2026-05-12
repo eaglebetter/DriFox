@@ -2385,6 +2385,7 @@ class MessageCard(SimpleCardWidget):
             return
         self._apply_card_style()
         self.update()
+        self.repaint()
 
     def _on_webengine_context_lost(self):
         """WebEngine 上下文丢失时显示恢复提示"""

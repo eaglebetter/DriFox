@@ -154,9 +154,13 @@ class ChatBackend(QObject):
         self._hook_manager = HookManager(self._thread_pool)
         # Hook 完成后，把输出添加到上下文
         def on_hook_finished(output: str, success: bool):
-            if output.strip():
-                # 发送消息给前端显示，添加到上下文
+            if output.strip() and success:
+                # 添加到当前会话
+                session = self.get_current_session()
                 hook_output = f"\n\n# Hook Output\n```\n{output}\n```\n"
+                if session:
+                    session.add_system_message(hook_output)
+                # 发送消息给前端显示
                 self.message_received.emit({
                     "role": "system",
                     "content": hook_output

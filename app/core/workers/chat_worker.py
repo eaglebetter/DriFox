@@ -960,7 +960,7 @@ class OpenAIChatWorker(QThread):
             "messages": sanitized,
             "stream": cached_config["stream"],
         }
-
+        print(messages)
         # 添加 extra_body
         if cached_config.get("extra_body"):
             req_kwargs["extra_body"] = cached_config["extra_body"]

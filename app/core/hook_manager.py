@@ -171,7 +171,10 @@ class HookManager:
             
             # 执行这个规则下的所有 Hooks
             for hook in rule.hooks:
-                self._execute_hook(hook, context, project_root)
+                # Add event_name to context for sync/async decision
+                context_with_event = context.copy()
+                context_with_event["_event_name"] = event_name
+                self._execute_hook(hook, context_with_event, project_root)
     
     def _execute_hook(self, hook: Hook, context: Dict[str, Any], project_root: str):
         """替换变量并执行 Hook"""
@@ -194,16 +197,40 @@ class HookManager:
                 if isinstance(value, str):
                     cwd = cwd.replace(f"{{{key}}}", value)
         
-        # 创建信号和 worker
-        signals = HookWorkerSignals()
-        worker = HookWorker(command, cwd, signals)
+        # 判断是否需要同步执行
+        # Pre 事件和 SessionStart 需要在下一步之前完成，这样输出才能加入上下文
+        event_name = context.get("_event_name", "")
+        need_sync = event_name.startswith("Pre") or event_name == "SessionStart"
         
-        # 连接信号，如果需要添加输出到上下文
-        if hook.add_output_to_context and self._on_finished_callback:
-            signals.finished.connect(self._on_finished_callback)
-        
-        self._thread_pool.start(worker)
-        logger.debug(f"[HookManager] Started hook: {command[:60]}...")
+        if need_sync:
+            # 同步执行，保证输出在下一步之前加入上下文
+            try:
+                result = subprocess.run(
+                    command,
+                    cwd=cwd,
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=300
+                )
+                output = result.stdout
+                if result.stderr:
+                    logger.debug(f"[HookManager] stderr: {result.stderr}")
+                if hook.add_output_to_context and self._on_finished_callback:
+                    self._on_finished_callback(output, result.returncode == 0)
+                logger.debug(f"[HookManager] Completed sync hook: {command[:60]}")
+            except Exception as e:
+                logger.error(f"[HookManager] Sync execution failed: {e}")
+                if hook.add_output_to_context and self._on_finished_callback:
+                    self._on_finished_callback(f"Error: {str(e)}", False)
+        else:
+            # 异步执行，不阻塞主线程
+            signals = HookWorkerSignals()
+            worker = HookWorker(command, cwd, signals)
+            if hook.add_output_to_context and self._on_finished_callback:
+                signals.finished.connect(self._on_finished_callback)
+            self._thread_pool.start(worker)
+            logger.debug(f"[HookManager] Started async hook: {command[:60]}...")
     
     def get_registered_events(self) -> List[str]:
         """获取所有已注册事件"""

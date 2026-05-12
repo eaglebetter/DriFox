@@ -258,6 +258,7 @@ class AgentManager:
 
         # 检查所有子目录，查找 hooks/hooks.json 配置（不修改agent加载逻辑，只加载hooks）
         if self._hook_manager is not None:
+            # Check current agents_dir for hooks (app/agents)
             for agent_dir in self.agents_dir.iterdir():
                 if agent_dir.is_dir():
                     hooks_file = agent_dir / "hooks" / "hooks.json"
@@ -273,6 +274,24 @@ class AgentManager:
                                 logger.info(f"[AgentManager] Loaded {count} hooks from {skill_name}")
                         except Exception as e:
                             logger.error(f"[AgentManager] Failed to load hooks from {hooks_file}: {e}")
+            # Also check skills directory (app/skills) for hooks from skills
+            skills_dir = self.agents_dir.parent / "skills"
+            if skills_dir.exists():
+                for skill_dir in skills_dir.iterdir():
+                    if skill_dir.is_dir():
+                        hooks_file = skill_dir / "hooks" / "hooks.json"
+                        if hooks_file.exists():
+                            try:
+                                import json
+                                with open(hooks_file, 'r', encoding='utf-8') as f:
+                                    config = json.load(f)
+                                skill_name = skill_dir.name
+                                skill_root = str(skill_dir.absolute())
+                                count = self._hook_manager.register_hooks_from_json(skill_name, skill_root, config)
+                                if count > 0:
+                                    logger.info(f"[AgentManager] Loaded {count} hooks from skill {skill_name}")
+                            except Exception as e:
+                                logger.error(f"[AgentManager] Failed to load hooks from skill {hooks_file}: {e}")
 
     def _parse_markdown_agent(self, file_path: Path) -> Optional[Agent]:
         content = file_path.read_text(encoding="utf-8")
