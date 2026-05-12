@@ -584,8 +584,6 @@ class OpenAIChatToolWindow(ToolWindow):
         # 如果有分支数据，延迟调用分支会话处理，避免与 _restore_latest_or_create_session 冲突
         if getattr(self, "_branch_session_data", None):
             QTimer.singleShot(50, self._apply_branch_or_create_session)
-        else:
-            QTimer.singleShot(0, self._create_new_session)
 
         QTimer.singleShot(100, self._load_model_configs)
         self._connect_opacity_signal()
@@ -4948,6 +4946,21 @@ class OpenAIChatToolWindow(ToolWindow):
         session = self.session_manager.get_current_session()
         if not session or not session.messages:
             return
+        
+        # 跳过只有 hook 输出 assistant 消息的会话（没有用户消息）
+        # 这种会话是 SessionStart hook 产生的，但用户没有真正开始对话
+        has_user_message = any(
+            msg.get("role") == "user" 
+            for msg in session.messages
+        )
+        if not has_user_message:
+            # 检查是否是 hook 输出消息
+            hook_only = all(
+                msg.get("role") == "assistant" and "# Hook Output" in (msg.get("content") or "")
+                for msg in session.messages
+            )
+            if hook_only:
+                return
 
         system_prompt = getattr(session, "system_prompt", "") or ""
 
