@@ -636,6 +636,8 @@ WELCOME_TIPS = [
     "💡 代码块右上角有复制和保存按钮，点击即可",
     "💡 工具执行结果可点击「查看差异」对比文件修改",
     "💡 工具悬浮框会显示正在执行的工具，点击可查看详情",
+    "💡 用户卡片的撤销按钮可以单独撤销单个编辑操作",
+    "💡 用户卡片的撤销按钮会将会话重置到对应卡片之前",
 
     # ===== 窗口与布局 =====
     "💡 右上角「新建窗口」按钮可创建并发会话，多任务同时进行",
@@ -1598,7 +1600,8 @@ class CodeWebViewer(QWebEngineView):
                         }});
 
                         if (window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise();
-                        reportHeight();
+                        // 使用延迟报告，确保折叠框高度设为 auto 后浏览器布局完成
+                        setTimeout(() => reportHeight(), 50);
                     }}
                 }}
                 function reportHeight() {{
@@ -2011,7 +2014,7 @@ class PlainTextViewer(QWidget):
         vp_width = self.text_edit.viewport().width()
         if vp_width > 0:
             self.text_edit.document().setTextWidth(vp_width)
-        QTimer.singleShot(500, self._update_height)
+        QTimer.singleShot(100, self._update_height)
 
     def _update_height(self):
         """强制 QTextEdit 重新布局后再计算高度"""
@@ -2357,13 +2360,13 @@ class MessageCard(SimpleCardWidget):
         self._streaming = True
         self._pulse_phase = 0.0
         try:
-            self._anim_timer.start(80)
+            self._anim_timer.start(50)  # 80→50ms，帧率从12.5fps提升到20fps
         except RuntimeError:
             return
         self.update()
 
     def _update_anim(self):
-        self._pulse_phase = (self._pulse_phase + 0.25) % (math.pi * 2)
+        self._pulse_phase = (self._pulse_phase + 0.035) % (math.pi * 2)
         self.update()
 
     def _apply_card_style(self, border: str = None, bg: str = None):
@@ -2385,6 +2388,7 @@ class MessageCard(SimpleCardWidget):
             return
         self._apply_card_style()
         self.update()
+        self.repaint()
 
     def _on_webengine_context_lost(self):
         """WebEngine 上下文丢失时显示恢复提示"""
@@ -2420,43 +2424,159 @@ class MessageCard(SimpleCardWidget):
         if not self._streaming:
             return
 
-        path = QPainterPath()
-        path.addRoundedRect(1, 1, w - 2, h - 2, radius, radius)
-        painter.setClipPath(path)
-
-        gradient = QLinearGradient(0, 0, w, h)
+        # ══════════════════════════════════════════════════════
+        #  辅助：准备彩虹色板（10色精细渐变 + 流光相位）
+        # ══════════════════════════════════════════════════════
         if self.role == "assistant":
+            # 10 色精细彩虹（蓝→青→紫→粉→橙→绿→蓝 形成闭环）
             rainbow = [
-                QColor("#63D8FF"),
-                QColor("#7FA8FF"),
-                QColor("#A98BFF"),
-                QColor("#FF92C2"),
-                QColor("#FFB86B"),
-                QColor("#7BE3A1"),
+                QColor("#60D4FF"),  # 天蓝
+                QColor("#40C8FF"),  # 青蓝
+                QColor("#4DA6FF"),  # 柔蓝
+                QColor("#8B7BFF"),  # 薰衣草
+                QColor("#C084FC"),  # 紫罗兰
+                QColor("#F472B6"),  # 玫瑰粉
+                QColor("#FB7185"),  # 珊瑚红
+                QColor("#F59E0B"),  # 琥珀金
+                QColor("#34D399"),  # 翠绿
+                QColor("#22D3EE"),  # 青色
             ]
-            shift = int((self._pulse_phase / (math.pi * 2)) * len(rainbow))
-            rainbow = rainbow[shift:] + rainbow[:shift]
-            positions = [0.0, 0.2, 0.4, 0.62, 0.82, 1.0]
-            for pos, color in zip(positions, rainbow):
-                c = QColor(color)
-                c.setAlpha(175)
-                gradient.setColorAt(pos, c)
+            N = len(rainbow)
+            # 主边框连续相位（小数，可精确到颜色之间的过渡）
+            shift_main = (self._pulse_phase / (math.pi * 2)) * N  # 0~N 的连续值
+            # 发光层更慢（产生柔和光晕延伸感）
+            shift_glow = shift_main * 0.5
+            # 流光带相位（比主边框略快）
+            shift_shimmer = shift_main * 1.15
+            # 呼吸：极缓慢脉动
+            breathe = 0.55 + 0.45 * (math.sin(self._pulse_phase * 0.3) + 1) / 2
+            # 流光闪烁：柔和放缓
+            shimmer = 0.6 + 0.4 * (math.sin(self._pulse_phase * 1.8) + 1) / 2
+
+            def lerp_color(a: QColor, b: QColor, t: float) -> QColor:
+                """线性插值两颜色"""
+                r = int(a.red() + (b.red() - a.red()) * t)
+                g = int(a.green() + (b.green() - a.green()) * t)
+                bl = int(a.blue() + (b.blue() - a.blue()) * t)
+                return QColor(r, g, bl)
+
+            def build_gradient(shift: float, stops: list, alpha_base: float) -> QLinearGradient:
+                """用连续相位生成平滑渐变：每个 stop 点用前后两色插值"""
+                grad = QLinearGradient(0, 0, w, h)
+                for pos in stops:
+                    raw = (shift + pos * N) % N
+                    idx = int(raw) % N
+                    frac = raw - int(raw)
+                    c = lerp_color(rainbow[idx], rainbow[(idx + 1) % N], frac)
+                    c.setAlpha(int(alpha_base * breathe))
+                    grad.setColorAt(pos, c)
+                return grad
+
+            main_stops = [0.0, 0.12, 0.24, 0.36, 0.50, 0.64, 0.76, 0.88, 1.0]
+            inner_stops = [0.0, 0.12, 0.24, 0.36, 0.48, 0.60, 0.72, 0.84, 0.92, 1.0]
+            glow_stops = [0.0, 0.2, 0.4, 0.6, 0.8, 1.0]
+            shimmer_stops = [0.0, 0.5, 1.0]
         else:
+            rainbow = None
             pulse = QColor(self._theme["accent"])
-            glow_alpha = 90 + int(45 * (math.sin(self._pulse_phase) + 1) / 2)
-            pulse.setAlpha(glow_alpha)
-            gradient.setColorAt(0.0, pulse.lighter(120))
-            gradient.setColorAt(0.5, pulse)
-            gradient.setColorAt(1.0, pulse.darker(130))
+            breathe = 0.55 + 0.45 * (math.sin(self._pulse_phase * 0.3) + 1) / 2
+            shimmer = 0.6 + 0.4 * (math.sin(self._pulse_phase * 1.8) + 1) / 2
 
-        pen = QPen(gradient, 3)
-        painter.setPen(pen)
+
+        # ══════════════════════════════════════════════════════
+        #  层1：内壁漫射（极柔和的边缘渗光）
+        # ══════════════════════════════════════════════════════
+        inner_clip = QPainterPath()
+        inner_clip.addRoundedRect(3, 3, w - 6, h - 6, radius - 2, radius - 2)
+        painter.setClipPath(inner_clip)
+        if self.role == "assistant":
+            inner_gradient = build_gradient(shift_glow, inner_stops, 12)
+        else:
+            inner_gradient = QLinearGradient(0, 0, w, h)
+            c = QColor(pulse.lighter(150))
+            c.setAlpha(int(18 * breathe))
+            inner_gradient.setColorAt(0.0, c)
+            inner_gradient.setColorAt(1.0, QColor(pulse.darker(110).name()))
+        painter.fillRect(0, 0, w, h, inner_gradient)
+
+        # ══════════════════════════════════════════════════════
+        #  层2：外发光（霓虹光晕，7px宽，比主边框更宽更柔和）
+        # ══════════════════════════════════════════════════════
+        outer_clip = QPainterPath()
+        outer_clip.addRoundedRect(-2, -2, w + 4, h + 4, radius + 3, radius + 3)
+        inner_edge_clip = QPainterPath()
+        inner_edge_clip.addRoundedRect(0, 0, w, h, radius + 1, radius + 1)
+        glow_region = outer_clip - inner_edge_clip
+        painter.setClipPath(glow_region)
+        if self.role == "assistant":
+            glow_gradient = build_gradient(shift_glow, glow_stops, 48)
+        else:
+            glow_gradient = QLinearGradient(0, 0, w, h)
+            glow_gradient.setColorAt(0.0, QColor(pulse.lighter(130).name()))
+            glow_gradient.setColorAt(0.5, QColor(pulse.name()))
+            glow_gradient.setColorAt(1.0, QColor(pulse.darker(140).name()))
+        glow_pen = QPen(glow_gradient, 7)
+        painter.setPen(glow_pen)
         painter.setBrush(QBrush(Qt.NoBrush))
-        painter.drawRoundedRect(1, 1, w - 2, h - 2, radius, radius)
+        painter.drawRoundedRect(-2, -2, w + 4, h + 4, radius + 3, radius + 3)
 
-        highlight = QColor(self._theme["accent"])
-        highlight.setAlpha(24)
-        painter.fillRect(0, 0, w, 4, highlight)
+        # ══════════════════════════════════════════════════════
+        #  层3：主彩色边框（4px，饱和鲜艳）
+        # ══════════════════════════════════════════════════════
+        border_clip = QPainterPath()
+        border_clip.addRoundedRect(0, 0, w, h, radius + 1, radius + 1)
+        inner_border_clip = QPainterPath()
+        inner_border_clip.addRoundedRect(2, 2, w - 4, h - 4, radius - 1, radius - 1)
+        border_region = border_clip - inner_border_clip
+        painter.setClipPath(border_region)
+        if self.role == "assistant":
+            main_gradient = build_gradient(shift_main, main_stops, 215)
+        else:
+            main_gradient = QLinearGradient(0, 0, w, h)
+            glow_a = int((90 + 45 * (math.sin(self._pulse_phase * 1.5) + 1) / 2) * breathe)
+            pulse2 = QColor(pulse.name())
+            pulse2.setAlpha(glow_a)
+            main_gradient.setColorAt(0.0, QColor(pulse.lighter(120).name()))
+            main_gradient.setColorAt(0.5, pulse2)
+            main_gradient.setColorAt(1.0, QColor(pulse.darker(130).name()))
+        main_pen = QPen(main_gradient, 4)
+        painter.setPen(main_pen)
+        painter.setBrush(QBrush(Qt.NoBrush))
+        painter.drawRoundedRect(0, 0, w, h, radius + 1, radius + 1)
+
+        # ══════════════════════════════════════════════════════
+        #  层4：流光高光带（白色细光条快速划过）
+        # ══════════════════════════════════════════════════════
+        if self.role == "assistant":
+            shimmer_clip = QPainterPath()
+            shimmer_clip.addRoundedRect(1, 1, w - 2, h - 2, radius, radius)
+            painter.setClipPath(shimmer_clip)
+            # 流光位置：连续小数，避免跳变
+            shimmer_pos = (shift_shimmer % N) / N
+            shimmer_band_gradient = QLinearGradient(0, 0, w, h)
+            shimmer_band_gradient.setColorAt(max(0.0, shimmer_pos - 0.07), QColor(0, 0, 0, 0))
+            shimmer_band_gradient.setColorAt(shimmer_pos - 0.03, QColor(255, 255, 255, int(80 * shimmer)))
+            shimmer_band_gradient.setColorAt(shimmer_pos, QColor(255, 255, 255, int(150 * shimmer)))
+            shimmer_band_gradient.setColorAt(shimmer_pos + 0.03, QColor(255, 255, 255, int(80 * shimmer)))
+            shimmer_band_gradient.setColorAt(min(1.0, shimmer_pos + 0.07), QColor(0, 0, 0, 0))
+            shimmer_pen = QPen(shimmer_band_gradient, 3)
+            painter.setPen(shimmer_pen)
+            painter.setBrush(QBrush(Qt.NoBrush))
+            painter.drawRoundedRect(1, 1, w - 2, h - 2, radius, radius)
+
+        # ══════════════════════════════════════════════════════
+        #  层5：顶部高光条（柔和的光泽）
+        # ══════════════════════════════════════════════════════
+        top_clip = QPainterPath()
+        top_clip.addRoundedRect(0, 0, w, h, radius, radius)
+        painter.setClipPath(top_clip)
+        if self.role == "assistant":
+            top_color = QColor("#60D4FF")
+            top_color.setAlpha(int(22 * breathe))
+        else:
+            top_color = QColor(self._theme["accent"])
+            top_color.setAlpha(int(30 * breathe))
+        painter.fillRect(0, 0, w, 5, top_color)
 
     def set_error_state(self, is_error: bool):
         self.error = is_error

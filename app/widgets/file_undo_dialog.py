@@ -18,11 +18,9 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 from qfluentwidgets import (
-    PrimaryPushButton,
     PushButton,
     TransparentToolButton,
-    FluentIcon,
-    isDarkTheme,
+    isDarkTheme, PrimaryPushButton, ToolButton,
 )
 
 from app.utils.utils import get_icon, get_font_family_css
@@ -36,9 +34,10 @@ class FileUndoPreviewDialog(QDialog):
     KEEP_CARD = 1   # 不还原文件（卡片也撤销）
     RESTORE = 2     # 还原所选文件
 
-    def __init__(self, operations: List[Dict], parent=None):
+    def __init__(self, operations: List[Dict], file_recorder=None, parent=None):
         super().__init__(parent)
         self.operations = operations
+        self.file_recorder = file_recorder
         self._selected_set = set(range(len(operations)))  # 默认全选
         self._result = self.CANCEL
         self._init_ui()
@@ -139,6 +138,13 @@ class FileUndoPreviewDialog(QDialog):
             diff_btn.op_index = i
             diff_btn.clicked.connect(lambda _, idx=i: self._show_diff(idx))
             item_layout.addWidget(diff_btn, 0)
+
+            # 添加单独撤销按钮
+            undo_btn = ToolButton(get_icon("撤销"), self)
+            undo_btn.setFixedSize(24, 24)
+            undo_btn.op_index = i
+            undo_btn.clicked.connect(lambda _, idx=i: self._undo_single_operation(idx))
+            item_layout.addWidget(undo_btn, 0)
 
             item.setSizeHint(item_widget.sizeHint())
             list_widget.addItem(item)
@@ -258,3 +264,130 @@ class FileUndoPreviewDialog(QDialog):
     def get_selected_operations(self) -> List[Dict]:
         """获取选中的操作列表"""
         return getattr(self, 'selected_ops', [])
+
+    def _undo_single_operation(self, index: int):
+        """单独撤销指定索引的操作"""
+        if index < 0 or index >= len(self.operations):
+            return
+
+        from loguru import logger
+        from qfluentwidgets import InfoBar
+
+        op = self.operations[index]
+        if not self.file_recorder:
+            InfoBar.warning(
+                "无法撤销",
+                "文件记录器未初始化",
+                parent=self
+            )
+            return
+
+        # 执行回滚
+        result = self.file_recorder.rollback_operations([op])
+
+        # 显示结果
+        if result.success_count > 0:
+            InfoBar.success(
+                "撤销成功",
+                f"已成功撤销操作: {Path(op.get('file_path', '未知')).name}",
+                parent=self
+            )
+            logger.info(f"[FileUndo] 单个操作撤销成功: {op.get('file_path')}")
+
+            # 从列表移除该操作
+            self.operations.pop(index)
+            self._selected_set.discard(index)
+
+            # 更新选中集合中大于 index 的索引（因为列表变短了）
+            new_selected = set()
+            for s in self._selected_set:
+                if s > index:
+                    new_selected.add(s - 1)
+                else:
+                    new_selected.add(s)
+            self._selected_set = new_selected
+
+            # 刷新列表
+            # 重新构建整个列表比较简单
+            list_widget = self.findChild(QListWidget)
+            if list_widget:
+                list_widget.clear()
+                self.file_cbs = []
+                dark = isDarkTheme()
+                border_color = "#3a3a3a" if dark else "#d0d0d0"
+                text_color = "#e0e0e0" if dark else "#333333"
+
+                for i, op_cur in enumerate(self.operations):
+                    file_path = op_cur.get("file_path", "")
+                    file_name = Path(file_path).name if file_path else "未知"
+                    tool_name = op_cur.get("tool_name", "")
+
+                    item = QListWidgetItem(list_widget)
+                    item_widget = QWidget()
+                    item_layout = QHBoxLayout(item_widget)
+                    item_layout.setContentsMargins(10, 8, 10, 8)
+
+                    cb = QCheckBox()
+                    cb.setChecked(i in self._selected_set)
+                    cb.index = i
+                    cb.stateChanged.connect(self._on_item_check_changed)
+                    self.file_cbs.append(cb)
+
+                    name_label = QLabel(file_name)
+                    name_label.setStyleSheet(f"color: {text_color}; font-weight: bold;")
+
+                    path_label = QLabel(file_path)
+                    path_label.setStyleSheet(f"color: #8c99ad; {get_font_family_css()} font-size: 12px;")
+                    path_label.setWordWrap(True)
+
+                    item_layout.addWidget(cb, 0)
+                    item_layout.addWidget(name_label, 0)
+                    item_layout.addWidget(path_label, 1)
+
+                    # 添加差异查看按钮
+                    diff_btn = TransparentToolButton(get_icon("差异对比"), self)
+                    diff_btn.setFixedSize(24, 24)
+                    diff_btn.setToolTip("查看差异")
+                    diff_btn.op_index = i
+                    diff_btn.clicked.connect(lambda _, idx=i: self._show_diff(idx))
+                    item_layout.addWidget(diff_btn, 0)
+
+                    # 添加单独撤销按钮
+                    from qfluentwidgets import PrimaryPushButton
+                    undo_btn = PrimaryPushButton("撤销此操作", self)
+                    undo_btn.setFixedHeight(24)
+                    undo_btn.setFixedWidth(80)
+                    undo_btn.setStyleSheet("font-size: 12px; padding: 2px 4px;")
+                    undo_btn.op_index = i
+                    undo_btn.clicked.connect(lambda _, idx=i: self._undo_single_operation(idx))
+                    item_layout.addWidget(undo_btn, 0)
+
+                    item.setSizeHint(item_widget.sizeHint())
+                    list_widget.addItem(item)
+                    list_widget.setItemWidget(item, item_widget)
+
+                # 更新计数标签
+                parent_layout = self.layout()
+                for i in range(parent_layout.count()):
+                    item = parent_layout.itemAt(i)
+                    if item and item.widget() and isinstance(item.widget(), QLabel):
+                        label = item.widget()
+                        if "共" in label.text() and "个文件将被回滚" in label.text():
+                            label.setText(f"共 {len(self.operations)} 个文件将被回滚：")
+                            break
+
+                # 更新全选状态
+                if len(self.operations) == 0:
+                    self.select_all_cb.setCheckState(Qt.Unchecked)
+                else:
+                    all_checked = len(self._selected_set) == len(self.operations)
+                    none_checked = len(self._selected_set) == 0
+                    self.select_all_cb.setCheckState(Qt.Checked if all_checked else (Qt.Unchecked if none_checked else Qt.PartiallyChecked))
+
+        else:
+            InfoBar.error(
+                "撤销失败",
+                f"撤销操作失败: {result.failed_files}",
+                parent=self
+            )
+            logger.error(f"[FileUndo] 单个操作撤销失败: {result.failed_files}")

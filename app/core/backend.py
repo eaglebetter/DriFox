@@ -3,7 +3,9 @@
 ChatBackend - 统一后端接口
 后端自己创建和管理所有组件，前端只负责 UI 调用
 """
-
+import os
+import orjson as json
+from pathlib import Path
 from typing import Dict, List, Any, Optional, Callable
 
 from PyQt5.QtCore import QObject, pyqtSignal, QThreadPool
@@ -14,6 +16,7 @@ from app.core.agent import AgentManager
 from app.core.chat_engine import ChatEngine
 from app.core.chat_session import SessionManager, ChatSession
 from app.core.memory_manager import MemoryManagerCore
+from app.core.hook_manager import HookManager
 from app.core.tool_executor import ToolExecutor
 from app.utils.history_manager import HistoryManager
 
@@ -63,6 +66,7 @@ class ChatBackend(QObject):
         self._tool_executor: Optional[ToolExecutor] = None
         self._agent_manager: Optional[AgentManager] = None
         self._memory_manager: Optional[MemoryManagerCore] = None
+        self._hook_manager: Optional[HookManager] = None
         self._sub_agent_manager = None
         self._session_store = None
         self._history_manager = None
@@ -103,6 +107,10 @@ class ChatBackend(QObject):
         return self._sub_agent_manager
     
     @property
+    def hook_manager(self) -> Optional[HookManager]:
+        return self._hook_manager
+    
+    @property
     def is_initialized(self) -> bool:
         return self._initialized
 
@@ -136,19 +144,65 @@ class ChatBackend(QObject):
         # 1. 创建 SessionManager
         self._session_store = SessionStore.get_instance()
         self._session_manager = SessionManager()
-        self._session_manager.create_new_session()
         logger.info("[ChatBackend] SessionManager 创建完成")
         
         # 2. 创建 MemoryManager
         self._memory_manager = MemoryManagerCore()
         logger.info("[ChatBackend] MemoryManager 创建完成")
         
+        # 3. 创建 HookManager（必须在 create_session 之前）
+        self._hook_manager = HookManager(self._thread_pool)
+        # Hook 完成后，把输出添加到上下文
+        def on_hook_finished(output: str, success: bool):
+            if output.strip() and success:
+                hook_output = f"# Hook Output\n```\n{output}\n```"
+                
+                # 1. 添加到 worker 消息列表（如果正在执行）
+                if self._chat_engine and self._chat_engine._current_worker:
+                    worker = self._chat_engine._current_worker
+                    # 直接追加到 worker 的 API 消息缓存
+                    if hasattr(worker, '_append_to_api_cache'):
+                        worker._append_to_api_cache([{
+                            "role": "assistant",
+                            "content": hook_output,
+                        }])
+                        logger.debug(f"[HookManager] Added hook output to worker messages")
+                
+                # 2. 添加到当前会话（用于 UI 显示）
+                session = self.get_current_session()
+                if session:
+                    session.add_assistant_message(hook_output)
+                
+                # 3. 发送消息给前端显示
+                self.message_received.emit({
+                    "role": "assistant",
+                    "content": hook_output
+                })
+        self._hook_manager.set_on_finished_callback(on_hook_finished)
+        
+        # 4. 使用 create_session() 触发 SessionStart hook（必须在 hook_manager 之后）
+        self.create_session()
+        
         # 3. 使用传入的 AgentManager 或创建新的
-        self._agent_manager = AgentManager()
+        self._agent_manager = AgentManager(str(Path(__file__).parent.parent / "agents"), self._hook_manager)
         logger.info(f"[ChatBackend] AgentManager 就绪，{len(self._agent_manager.list_agents())} 个 Agent")
         
+        # 加载 .drifox 全局 hooks
+        from app.utils.utils import get_app_data_dir
+        global_hooks_file = get_app_data_dir() / "hooks" / "hooks.json"
+        if global_hooks_file.exists():
+            try:
+                with open(global_hooks_file, 'r', encoding='utf-8') as f:
+                    config = json.loads(f.read())
+                skill_root = str(global_hooks_file.parent)
+                count = self._hook_manager.register_hooks_from_json("__global__", skill_root, config)
+                if count > 0:
+                    logger.info(f"[ChatBackend] Loaded {count} global hooks from {global_hooks_file}")
+            except Exception as e:
+                logger.error(f"[ChatBackend] Failed to load global hooks from {global_hooks_file}: {e}")
+        
         # 4. 创建 ToolExecutor（不传递 homepage，解耦 Qt）
-        self._tool_executor = ToolExecutor(workdir=workdir)
+        self._tool_executor = ToolExecutor(workdir=workdir, backend=self)
         self._tool_executor.set_memory_manager(self._memory_manager)
         self._tool_executor.set_llm_config_getter(get_model_config)
         self._tool_executor.set_agent_manager(self._agent_manager)
@@ -267,6 +321,49 @@ class ChatBackend(QObject):
             return self._tool_executor.execute_skill(method, params)
         return None
     
+    # ========== MemoryManager 代理方法 ==========
+    
+    def get_memory_context_string(self, query: str = "", limit: int = 8) -> str:
+        """获取记忆上下文字符串"""
+        if self._memory_manager:
+            return self._memory_manager.get_context_string(query=query, limit=limit)
+        return ""
+    
+    def get_user_memories(self, memory_data: Dict = None) -> List[Dict]:
+        """获取用户记忆列表"""
+        if self._memory_manager:
+            return self._memory_manager.get_user_memories(memory_data=memory_data)
+        return []
+    
+    def load_memory_data(self) -> Dict:
+        """加载记忆数据"""
+        if self._memory_manager:
+            return self._memory_manager.load_memory()
+        return {}
+    
+    def add_user_memory(self, content: str, **kwargs):
+        """添加用户记忆"""
+        if self._memory_manager:
+            self._memory_manager.add_user_memory(content, **kwargs)
+    
+    def touch_memories(self, contents: List[str], memory_data: Dict = None) -> bool:
+        """标记记忆被访问"""
+        if self._memory_manager:
+            return self._memory_manager.touch_memories(contents, memory_data=memory_data)
+        return False
+    
+    def save_memory_data(self, memory_data: Dict) -> bool:
+        """保存记忆数据"""
+        if self._memory_manager:
+            return self._memory_manager.save_memory(memory_data)
+        return False
+    
+    def update_user_memories(self, memories: List[Dict]) -> bool:
+        """更新用户记忆"""
+        if self._memory_manager:
+            return self._memory_manager.update_user_memories(memories)
+        return False
+    
     # ========== AgentManager 代理方法 ==========
     
     def get_primary_agents(self) -> List:
@@ -287,6 +384,18 @@ class ChatBackend(QObject):
         """创建新会话"""
         session = self._session_manager.create_new_session()
         self.session_created.emit(session.session_id)
+        
+        # Trigger SessionStart hook
+        if self._hook_manager:
+            context = {
+                "project_root": os.getcwd(),
+            }
+            self._hook_manager.trigger_event(
+                "SessionStart",
+                context=context,
+                current_message=""
+            )
+        
         return session
     
     def get_current_session(self) -> Optional[ChatSession]:
@@ -333,21 +442,6 @@ class ChatBackend(QObject):
             agent_name=agent_name,
         )
     
-    def stop_streaming(self):
-        """停止流式输出"""
-        if self._chat_engine and self._chat_engine._current_worker:
-            self._chat_engine._current_worker.stop()
-    
-    def approve_permission(self, tool_call_id: str, auto_allow: bool = False, session_allow: bool = False):
-        """批准权限"""
-        if self._chat_engine:
-            self._chat_engine.approve_tool_permission(tool_call_id, auto_allow, session_allow)
-    
-    def deny_permission(self, tool_call_id: str):
-        """拒绝权限"""
-        if self._chat_engine:
-            self._chat_engine.deny_tool_permission(tool_call_id)
-    
     # ========== 状态查询 ==========
     
     def get_current_agent(self) -> str:
@@ -358,6 +452,11 @@ class ChatBackend(QObject):
         """设置当前 Agent"""
         if self._chat_engine:
             self._chat_engine._current_agent = agent_name
+    
+    def set_streaming_state(self, is_streaming: bool):
+        """设置流式状态"""
+        if self._chat_engine:
+            self._chat_engine._is_streaming = is_streaming
     
     def get_context_usage(self) -> tuple:
         """获取上下文使用情况"""

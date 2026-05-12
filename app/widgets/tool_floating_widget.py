@@ -1,15 +1,56 @@
 # -*- coding: utf-8 -*-
 import orjson as json
-from PyQt5.QtCore import Qt, pyqtSignal, QTimer
+from PyQt5.QtCore import Qt, pyqtSignal, QTimer, QRectF
+from PyQt5.QtGui import QPixmap, QPainter
+from PyQt5.QtSvg import QSvgRenderer
 from PyQt5.QtWidgets import (
     QVBoxLayout,
     QLabel,
     QPushButton,
     QHBoxLayout,
+    QWidget,
 )
 from qfluentwidgets import SimpleCardWidget
 
 from app.utils.utils import get_unified_font
+
+
+class _RotatingIcon(QWidget):
+    """用 QPainter 原地旋转 SVG，消除 QPixmap.transform 的 bounding-box 抖动"""
+
+    def __init__(self, svg_path: str, size: int = 18, parent=None):
+        super().__init__(parent)
+        self._renderer = QSvgRenderer(svg_path)
+        self._size = size
+        self._angle = 0
+        self.setFixedSize(size, size)
+        # 预渲染一帧到 QPixmap，用于 QLabel 显示
+        self._last_pixmap = QPixmap(size, size)
+        self._last_pixmap.fill(Qt.transparent)
+
+    def set_angle(self, degrees: float):
+        self._angle = degrees
+        self.update()
+        self._redraw()
+
+    def _redraw(self):
+        self._last_pixmap.fill(Qt.transparent)
+        p = QPainter(self._last_pixmap)
+        p.setRenderHint(QPainter.SmoothPixmapTransform)
+        cx, cy = self._size / 2, self._size / 2
+        p.translate(cx, cy)
+        p.rotate(self._angle)
+        p.translate(-cx, -cy)
+        self._renderer.render(p, QRectF(0, 0, self._size, self._size))
+        p.end()
+
+    def current_pixmap(self) -> QPixmap:
+        return self._last_pixmap
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.drawPixmap(0, 0, self._last_pixmap)
+        p.end()
 
 
 class ToolFloatingWidget(SimpleCardWidget):
@@ -24,6 +65,11 @@ class ToolFloatingWidget(SimpleCardWidget):
         self._is_running = False
         self._current_tool = None
         self._current_process = None
+        self._rotation_angle = 0
+        self._rotation_timer = QTimer(self)
+        self._rotation_timer.timeout.connect(self._update_rotation)
+        self._rotating = False
+        self._svg_renderer = _RotatingIcon(":/icons/执行中.svg", size=18)
         self._setup_ui()
 
     def _setup_ui(self):
@@ -44,8 +90,11 @@ class ToolFloatingWidget(SimpleCardWidget):
         header = QHBoxLayout()
         header.setSpacing(10)
 
-        self.icon_label = QLabel("🔧", self)
-        self.icon_label.setFont(get_unified_font(14))
+        self.icon_label = QLabel(self)
+        self.icon_label.setFixedSize(22, 22)
+        self.icon_label.setStyleSheet("background: transparent; border: none;")
+        # 初始显示静态 SVG
+        self.icon_label.setPixmap(self._svg_renderer.current_pixmap())
 
         self.tool_name_label = QLabel("", self)
         self.tool_name_label.setFont(get_unified_font(10))
@@ -92,12 +141,29 @@ class ToolFloatingWidget(SimpleCardWidget):
         self.task_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         main_layout.addWidget(self.task_label)
 
+    # ── 旋转图标 ──────────────────────────────────────────
+
+    def _start_rotation(self):
+        if not self._rotating:
+            self._rotating = True
+            self._rotation_timer.start(30)  # 30ms ≈ 33fps，流畅旋转
+
+    def _stop_rotation(self):
+        self._rotating = False
+        self._rotation_timer.stop()
+
+    def _update_rotation(self):
+        self._rotation_angle = (self._rotation_angle + 12) % 360
+        self._svg_renderer.set_angle(self._rotation_angle)
+        self.icon_label.setPixmap(self._svg_renderer.current_pixmap())
+
     def _on_close(self):
         self.setVisible(False)
         self.closed.emit()
 
     def _on_cancel(self):
         self._is_running = False
+        self._stop_rotation()
         self.cancel_btn.setEnabled(False)
         self.cancel_btn.setText("已中止")
         self.title_label.setText("执行已中止")
@@ -121,7 +187,7 @@ class ToolFloatingWidget(SimpleCardWidget):
         self.title_label.setText("正在执行工具")
         self.title_label.setStyleSheet("color: #f59e0b;")
 
-        self.icon_label.setText("⚙️")
+        self._start_rotation()
 
         self.tool_name_label.setText(f" {tool_name} ")
 
@@ -181,7 +247,13 @@ class ToolFloatingWidget(SimpleCardWidget):
         """完成工具执行"""
         self._is_running = False
         self._current_process = None
+        self._stop_rotation()
 
+        # 清除旋转 pixmap，显示结果表情
+        self.icon_label.setPixmap(QPixmap())
+        self.icon_label.setFixedSize(24, 24)
+        self.icon_label.setFont(get_unified_font(14))
+        self.icon_label.setStyleSheet("background: transparent; border: none;")
         self.icon_label.setText("✅" if success else "❌")
 
         if success:
@@ -211,11 +283,16 @@ class ToolFloatingWidget(SimpleCardWidget):
         self._is_running = False
         self._current_tool = None
         self._current_process = None
+        self._stop_rotation()
+        self._rotation_angle = 0
         self.setVisible(False)
         self.cancel_btn.setEnabled(True)
         self.cancel_btn.setVisible(True)
         self.cancel_btn.setText("中止")
-        self.icon_label.setText("⚙️")
+        self.icon_label.setPixmap(self._svg_renderer.current_pixmap())
+        self.icon_label.setText("")
+        self.icon_label.setFixedSize(22, 22)
+        self.icon_label.setStyleSheet("background: transparent; border: none;")
         self.title_label.setText("正在执行工具")
         self.title_label.setStyleSheet("color: #f59e0b;")
 

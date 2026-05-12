@@ -13,9 +13,10 @@ from PyQt5.QtWidgets import (
     QScrollArea,
     QFontComboBox,
 )
+from loguru import logger
 
+from app.utils.design_tokens import CardStyles
 from app.widgets.provider_setting_card import ProviderListSettingCard
-from app.utils.design_tokens import CardStyles, Colors
 
 
 class NoWheelFontComboBox(QFontComboBox):
@@ -29,11 +30,62 @@ from qfluentwidgets import (
     StrongBodyLabel,
     SwitchSettingCard,
     OptionsSettingCard,
-    FluentIcon, SimpleCardWidget,
+    FluentIcon, SimpleCardWidget, SettingCard, PrimaryPushButton,
 )
 
 from app.utils.config import Settings
 from app.utils.utils import get_icon, get_unified_font
+
+
+class ManualUpdateCard(SettingCard):
+    def __init__(self, title, content, parent_widget, parent=None):
+        super().__init__(FluentIcon.SYNC, title, content, parent)
+        self.parent_widget = parent_widget
+
+        self.updateBtn = PrimaryPushButton("检查更新", self)
+        self.updateBtn.setFixedWidth(100)
+        self.updateBtn.clicked.connect(self._on_check_update)
+        self.hBoxLayout.addWidget(self.updateBtn, 0, Qt.AlignRight)
+
+    def _on_check_update(self):
+        from app.update_checker import UpdateChecker
+
+        self.updateBtn.setText("检查中...")
+        self.updateBtn.setEnabled(False)
+
+        checker = UpdateChecker(self.parent_widget)
+        checker.finished.connect(self._on_check_finished)
+        checker.finished.connect(self._on_check_finished_final)
+        checker.error.connect(self._on_error)
+        checker.check_update()
+
+    def _on_check_finished(self, latest_release):
+        pass  # UpdateChecker 内部已处理
+
+    def _on_check_finished_final(self, latest_release):
+        self.updateBtn.setText("检查更新")
+        self.updateBtn.setEnabled(True)
+
+    def _on_error(self, msg):
+        self.updateBtn.setText("检查更新")
+        self.updateBtn.setEnabled(True)
+        logger.error(msg)
+
+    def _on_error(self, msg):
+        try:
+            self.updateBtn.setText("检查更新")
+            self.updateBtn.setEnabled(True)
+            from qfluentwidgets import InfoBar, InfoBarPosition, InfoBarIcon
+            InfoBar.error(
+                icon=InfoBarIcon.WARNING,
+                title="检查更新失败",
+                content=msg,
+                position=InfoBarPosition.BOTTOM_RIGHT,
+                duration=3000,
+                parent=self.parent_widget,
+            ).show()
+        except Exception as e:
+            print(f"_on_error error: {e}")
 
 
 class LLMSettingsCard(SimpleCardWidget):
@@ -170,6 +222,30 @@ class LLMSettingsCard(SimpleCardWidget):
             parent=self,
         )
         content_layout.addWidget(self.llmSoundCard)
+
+        # 分隔标签
+        sep_label = StrongBodyLabel("版本更新", self)
+        sep_label.setFont(get_unified_font(10, True))
+        sep_label.setStyleSheet("color: #888; padding: 4px 0;")
+        content_layout.addWidget(sep_label)
+
+        # 自动检查更新
+        self.autoUpdateCard = SwitchSettingCard(
+            get_icon("提示"),
+            "自动检查更新",
+            "启动时自动检测新版本",
+            configItem=self.cfg.auto_check_update,
+            parent=self,
+        )
+        content_layout.addWidget(self.autoUpdateCard)
+
+        self.manualUpdateCard = ManualUpdateCard(
+            "手动检查更新",
+            "点击按钮检查是否有新版本",
+            self.parent(),
+            self.parent(),
+        )
+        content_layout.addWidget(self.manualUpdateCard)
 
         content_layout.addStretch(1)
         scroll.setWidget(content_widget)

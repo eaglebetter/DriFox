@@ -559,7 +559,7 @@ class HistoryCompactor:
         
         越旧的消息，保留越少
         """
-        if messages[0]["content"].startswith("## Earlier Conversation Summary"):
+        if "content" in messages[0] and messages[0]["content"].startswith("## Earlier Conversation Summary"):
             summary_lines = [messages[0]["content"]]
         else:
             summary_lines = [
