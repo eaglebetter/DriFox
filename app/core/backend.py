@@ -321,6 +321,49 @@ class ChatBackend(QObject):
             return self._tool_executor.execute_skill(method, params)
         return None
     
+    # ========== MemoryManager 代理方法 ==========
+    
+    def get_memory_context_string(self, query: str = "", limit: int = 8) -> str:
+        """获取记忆上下文字符串"""
+        if self._memory_manager:
+            return self._memory_manager.get_context_string(query=query, limit=limit)
+        return ""
+    
+    def get_user_memories(self, memory_data: Dict = None) -> List[Dict]:
+        """获取用户记忆列表"""
+        if self._memory_manager:
+            return self._memory_manager.get_user_memories(memory_data=memory_data)
+        return []
+    
+    def load_memory_data(self) -> Dict:
+        """加载记忆数据"""
+        if self._memory_manager:
+            return self._memory_manager.load_memory()
+        return {}
+    
+    def add_user_memory(self, content: str, tags: List[str] = None):
+        """添加用户记忆"""
+        if self._memory_manager:
+            self._memory_manager.add_user_memory(content, tags=tags)
+    
+    def touch_memories(self, contents: List[str], memory_data: Dict = None) -> bool:
+        """标记记忆被访问"""
+        if self._memory_manager:
+            return self._memory_manager.touch_memories(contents, memory_data=memory_data)
+        return False
+    
+    def save_memory_data(self, memory_data: Dict) -> bool:
+        """保存记忆数据"""
+        if self._memory_manager:
+            return self._memory_manager.save_memory(memory_data)
+        return False
+    
+    def update_user_memories(self, memories: List[Dict]) -> bool:
+        """更新用户记忆"""
+        if self._memory_manager:
+            return self._memory_manager.update_user_memories(memories)
+        return False
+    
     # ========== AgentManager 代理方法 ==========
     
     def get_primary_agents(self) -> List:
@@ -399,21 +442,6 @@ class ChatBackend(QObject):
             agent_name=agent_name,
         )
     
-    def stop_streaming(self):
-        """停止流式输出"""
-        if self._chat_engine and self._chat_engine._current_worker:
-            self._chat_engine._current_worker.stop()
-    
-    def approve_permission(self, tool_call_id: str, auto_allow: bool = False, session_allow: bool = False):
-        """批准权限"""
-        if self._chat_engine:
-            self._chat_engine.approve_tool_permission(tool_call_id, auto_allow, session_allow)
-    
-    def deny_permission(self, tool_call_id: str):
-        """拒绝权限"""
-        if self._chat_engine:
-            self._chat_engine.deny_tool_permission(tool_call_id)
-    
     # ========== 状态查询 ==========
     
     def get_current_agent(self) -> str:
@@ -424,6 +452,11 @@ class ChatBackend(QObject):
         """设置当前 Agent"""
         if self._chat_engine:
             self._chat_engine._current_agent = agent_name
+    
+    def set_streaming_state(self, is_streaming: bool):
+        """设置流式状态"""
+        if self._chat_engine:
+            self._chat_engine._is_streaming = is_streaming
     
     def get_context_usage(self) -> tuple:
         """获取上下文使用情况"""
