@@ -801,6 +801,10 @@ class DiffHtmlGenerator:
             })
 
         result = json.dumps(files_data).decode('utf-8')
+        # fix: 转义 </ 为 \u003C/，防止嵌入 <script> 标签时被浏览器提前关闭
+        # 当 diff 内容包含 HTML/JS 代码（如 </script>、</div> 等）时，
+        # 浏览器 HTML 解析器会误将 JSON 字符串中的 </ 识别为脚本结束标记
+        result = result.replace('</', '\\u003C/')
         return result
 
     @classmethod

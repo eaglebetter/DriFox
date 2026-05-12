@@ -1253,27 +1253,28 @@ class OpenAIChatWorker(QThread):
             if buffer and buffer["function"]["name"] and buffer["function"]["arguments"]:
                 args_str = buffer["function"]["arguments"]
 
-                # 跳过已存在的 tc_id（已通过 tool name 添加到字典）
+                # 无论 tc_id 是否已存在，都尝试解析 JSON
+                # fix: 已存在的 tc_id 也必须尝试解析，否则 tool_args_pending 无法设为 False
                 if tc_id in self._current_tool_calls:
-                    # 更新 arguments
+                    # 先更新 arguments
                     self._current_tool_calls[tc_id]["function"]["arguments"] = args_str
-                    self._waiting_tool_params.pop(tc_id, None)
-                    self._tool_calls_buffer.pop(tc_id, None)
-                    continue
 
                 try:
-                    # 尝试 JSON 解析
+                    # 尝试 JSON 解析（参数完整时应当成功）
                     parsed_args = json.loads(args_str)
                     tool_args_pending = False
-                    self._current_tool_calls[tc_id] = {
-                        "id": buffer["id"],
-                        "type": buffer.get("type", "function"),
-                        "function": {
-                            "name": buffer["function"]["name"],
-                            "arguments": args_str,
-                        },
-                        "_args_parsed": True,
-                    }
+                    if tc_id not in self._current_tool_calls:
+                        self._current_tool_calls[tc_id] = {
+                            "id": buffer["id"],
+                            "type": buffer.get("type", "function"),
+                            "function": {
+                                "name": buffer["function"]["name"],
+                                "arguments": args_str,
+                            },
+                            "_args_parsed": True,
+                        }
+                    else:
+                        self._current_tool_calls[tc_id]["_args_parsed"] = True
                     # 从等待队列中移除
                     self._waiting_tool_params.pop(tc_id, None)
                     self._tool_calls_buffer.pop(tc_id, None)
@@ -1288,6 +1289,7 @@ class OpenAIChatWorker(QThread):
                     wait_duration = time.time() - first_time if first_time else 0
 
                     # 超过 60 秒或超过 10 次尝试，放弃解析
+                    # fix: 放弃解析时也设置 tool_args_pending = False，避免无限循环
                     if wait_duration > 60 or attempt_count >= self._max_param_retry_count:
                         logger.warning(
                             f"[ToolCall] ⚠️ JSON 解析超时/超限，保留原始 arguments: "
@@ -1308,6 +1310,8 @@ class OpenAIChatWorker(QThread):
                                     "arguments": args_str,  # 保留原始字符串
                                 },
                             }
+                        # fix: 放弃解析时标记参数不再 pending，允许继续执行
+                        tool_args_pending = False
                         self._waiting_tool_params.pop(tc_id, None)
                     else:
                         # 还在等待中，保持在等待队列
@@ -1317,6 +1321,14 @@ class OpenAIChatWorker(QThread):
                                 "attempt_count": attempt_count + 1,
                                 "first_failure_time": first_time,
                             }
+
+        # fix: 所有待处理项都处理完毕后，如果没有任何剩余等待项，标记 args_pending = False
+        if tool_calls_found and not self._tool_calls_buffer and not self._waiting_tool_params:
+            tool_args_pending = False
+            # 确保所有已识别的 tool call 都有原始 arguments（防止参数被跳过导致为空字符串）
+            for tc in self._current_tool_calls.values():
+                if not tc["function"]["arguments"] and tc.get("id") in all_pending_ids:
+                    tc["function"]["arguments"] = "{}"
 
         return tool_calls_found, tool_args_pending
 
