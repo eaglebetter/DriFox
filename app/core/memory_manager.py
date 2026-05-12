@@ -317,8 +317,11 @@ class MemoryManagerCore:
         confidence: float = 0.8,
         conflict_group: str = "",
         category: str = "key_knowledge",
+        memory_data: Optional[Dict] = None,
     ) -> bool:
-        """添加用户偏好记忆"""
+        """添加用户偏好记忆
+        如果传入memory_data，则直接修改该对象，不调用save_memory
+        """
         if not content:
             return False
 
@@ -326,8 +329,12 @@ class MemoryManagerCore:
             category = "key_knowledge"
 
         try:
-            memory_data = self.load_memory()
-            user_memories = self.get_user_memories()
+            should_save = False
+            if memory_data is None:
+                memory_data = self.load_memory()
+                should_save = True
+                
+            user_memories = self.get_user_memories(memory_data)
             normalized_key = self._normalize_content_key(content)
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -351,7 +358,9 @@ class MemoryManagerCore:
                 user_memories[index] = updated
                 user_memories = self._enforce_category_limits(user_memories)
                 memory_data["user_memories"] = user_memories
-                return self.save_memory(memory_data)
+                if should_save:
+                    return self.save_memory(memory_data)
+                return True
 
             new_entry = {
                 "content": content.strip(),
@@ -368,7 +377,9 @@ class MemoryManagerCore:
             user_memories.sort(key=self._memory_sort_key, reverse=True)
             user_memories = self._enforce_category_limits(user_memories)
             memory_data["user_memories"] = user_memories
-            return self.save_memory(memory_data)
+            if should_save:
+                return self.save_memory(memory_data)
+            return True
         except Exception as e:
             logger.error(f"[MemoryManager] Failed to add user memory: {e}")
             return False
@@ -508,8 +519,10 @@ class MemoryManagerCore:
             return False
 
         try:
+            should_save = False
             if memory_data is None:
                 memory_data = self.load_memory()
+                should_save = True
             changed = False
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             updated_memories = []
@@ -528,7 +541,9 @@ class MemoryManagerCore:
             if not changed:
                 return False
             memory_data["user_memories"] = updated_memories
-            return self.save_memory(memory_data)
+            if should_save:
+                return self.save_memory(memory_data)
+            return True
         except Exception as e:
             logger.error(f"[MemoryManager] Failed to touch memories: {e}")
             return False

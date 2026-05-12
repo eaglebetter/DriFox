@@ -4762,25 +4762,40 @@ class OpenAIChatToolWindow(ToolWindow):
 
         self._update_title_display(clean_summary)
 
-        if should_update_memory and memory_content and self._memory_manager:
-            self._memory_manager.add_user_memory(
-                memory_content,
-                source="topic_summary",
-                confidence=0.8,
-                category=memory_category,
-            )
-            logger.info(
-                f"[Topic Summary] Added to long-term memory [{memory_category}]: {memory_content[:50]}..."
-            )
+        if self._memory_manager and ((should_update_memory and memory_content) or hit_memories):
+            # 合并修改：添加新记忆 + touch 现有记忆，只做一次全量保存
+            memory_data = self._memory_manager.load_memory()
+            changed = False
+            
+            if should_update_memory and memory_content:
+                # 添加/更新用户记忆
+                self._memory_manager.add_user_memory(
+                    memory_content,
+                    source="topic_summary",
+                    confidence=0.8,
+                    category=memory_category,
+                    memory_data=memory_data
+                )
+                logger.info(
+                    f"[Topic Summary] Added to long-term memory [{memory_category}]: {memory_content[:50]}..."
+                )
+                changed = True
+            
+            if hit_memories:
+                # touch 现有记忆
+                if self._memory_manager.touch_memories(hit_memories, memory_data=memory_data):
+                    changed = True
+            
+            if changed:
+                # 只保存一次
+                self._memory_manager.save_memory(memory_data)
+                if hit_memories:
+                    logger.info(
+                        f"[Topic Summary] Touched {len(hit_memories)} existing memories"
+                    )
         else:
             logger.info(
-                f"[Topic Summary] Memory update skipped (should_update={should_update_memory}, content={bool(memory_content)})"
-            )
-
-        if hit_memories and self._memory_manager:
-            self._memory_manager.touch_memories(hit_memories)
-            logger.info(
-                f"[Topic Summary] Touched {len(hit_memories)} existing memories"
+                f"[Topic Summary] Memory update skipped (should_update={should_update_memory}, content={bool(memory_content)}, has_hit={bool(hit_memories)})"
             )
 
     def _update_title_display(self, title: str):
