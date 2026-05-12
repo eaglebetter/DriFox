@@ -2011,7 +2011,7 @@ class PlainTextViewer(QWidget):
         vp_width = self.text_edit.viewport().width()
         if vp_width > 0:
             self.text_edit.document().setTextWidth(vp_width)
-        QTimer.singleShot(500, self._update_height)
+        QTimer.singleShot(100, self._update_height)
 
     def _update_height(self):
         """强制 QTextEdit 重新布局后再计算高度"""

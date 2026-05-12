@@ -287,6 +287,20 @@ class OpenAIChatToolWindow(ToolWindow):
         if self.backend.tool_executor:
             self.backend.set_session_context(self._current_session_id)
 
+    def _init_auto_update_check(self):
+        """启动时静默检查更新"""
+        from app.utils.config import Settings
+
+        cfg = Settings.get_instance()
+        # 检查是否启用自动更新
+        if not cfg.auto_check_update.value:
+            return
+
+        from app.update_checker import UpdateChecker
+
+        checker = UpdateChecker(self)
+        checker.check_update()
+
     def _setup_engine_callbacks(self):
         """设置 ChatEngine 的回调"""
         callbacks = {
@@ -584,6 +598,8 @@ class OpenAIChatToolWindow(ToolWindow):
         # 如果有分支数据，延迟调用分支会话处理，避免与 _restore_latest_or_create_session 冲突
         if getattr(self, "_branch_session_data", None):
             QTimer.singleShot(50, self._apply_branch_or_create_session)
+        else:
+            QTimer.singleShot(0, self._create_new_session)
 
         QTimer.singleShot(100, self._load_model_configs)
         self._connect_opacity_signal()
@@ -999,6 +1015,9 @@ class OpenAIChatToolWindow(ToolWindow):
         hlayout.addWidget(self._toolbar_capsule)
 
         layout.addLayout(hlayout)
+
+        # 自动检查更新（启动时静默检查）
+        self._init_auto_update_check()
 
         # 输入框 - 在工具栏下方
         self.input_area = SendableTextEdit(self)
