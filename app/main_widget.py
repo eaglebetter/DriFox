@@ -3607,7 +3607,7 @@ class OpenAIChatToolWindow(ToolWindow):
             )
 
             if operations:
-                dialog = FileUndoPreviewDialog(operations, self)
+                dialog = FileUndoPreviewDialog(operations, self.backend.file_recorder, self)
                 result = dialog.exec_()
 
                 if result == FileUndoPreviewDialog.CANCEL:
