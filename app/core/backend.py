@@ -3,7 +3,8 @@
 ChatBackend - 统一后端接口
 后端自己创建和管理所有组件，前端只负责 UI 调用
 """
-
+import os
+from pathlib import Path
 from typing import Dict, List, Any, Optional, Callable
 
 from PyQt5.QtCore import QObject, pyqtSignal, QThreadPool
@@ -14,6 +15,7 @@ from app.core.agent import AgentManager
 from app.core.chat_engine import ChatEngine
 from app.core.chat_session import SessionManager, ChatSession
 from app.core.memory_manager import MemoryManagerCore
+from app.core.hook_manager import HookManager
 from app.core.tool_executor import ToolExecutor
 from app.utils.history_manager import HistoryManager
 
@@ -63,6 +65,7 @@ class ChatBackend(QObject):
         self._tool_executor: Optional[ToolExecutor] = None
         self._agent_manager: Optional[AgentManager] = None
         self._memory_manager: Optional[MemoryManagerCore] = None
+        self._hook_manager: Optional[HookManager] = None
         self._sub_agent_manager = None
         self._session_store = None
         self._history_manager = None
@@ -101,6 +104,10 @@ class ChatBackend(QObject):
     @property
     def sub_agent_manager(self):
         return self._sub_agent_manager
+    
+    @property
+    def hook_manager(self) -> Optional[HookManager]:
+        return self._hook_manager
     
     @property
     def is_initialized(self) -> bool:
@@ -143,12 +150,40 @@ class ChatBackend(QObject):
         self._memory_manager = MemoryManagerCore()
         logger.info("[ChatBackend] MemoryManager 创建完成")
         
+        # 创建 HookManager
+        self._hook_manager = HookManager(self._thread_pool)
+        # Hook 完成后，把输出添加到上下文
+        def on_hook_finished(output: str, success: bool):
+            if output.strip():
+                # 发送消息给前端显示，添加到上下文
+                hook_output = f"\n\n# Hook Output\n```\n{output}\n```\n"
+                self.message_received.emit({
+                    "role": "system",
+                    "content": hook_output
+                })
+        self._hook_manager.set_on_finished_callback(on_hook_finished)
+        
         # 3. 使用传入的 AgentManager 或创建新的
-        self._agent_manager = AgentManager()
+        self._agent_manager = AgentManager(str(Path(__file__).parent.parent / "agents"), self._hook_manager)
         logger.info(f"[ChatBackend] AgentManager 就绪，{len(self._agent_manager.list_agents())} 个 Agent")
         
+        # 加载 .drifox 全局 hooks
+        from app.utils.utils import get_app_data_dir
+        global_hooks_file = get_app_data_dir() / "hooks" / "hooks.json"
+        if global_hooks_file.exists():
+            try:
+                import json
+                with open(global_hooks_file, 'r', encoding='utf-8') as f:
+                    config = json.load(f)
+                skill_root = str(global_hooks_file.parent)
+                count = self._hook_manager.register_hooks_from_json("__global__", skill_root, config)
+                if count > 0:
+                    logger.info(f"[ChatBackend] Loaded {count} global hooks from {global_hooks_file}")
+            except Exception as e:
+                logger.error(f"[ChatBackend] Failed to load global hooks from {global_hooks_file}: {e}")
+        
         # 4. 创建 ToolExecutor（不传递 homepage，解耦 Qt）
-        self._tool_executor = ToolExecutor(workdir=workdir)
+        self._tool_executor = ToolExecutor(workdir=workdir, backend=self)
         self._tool_executor.set_memory_manager(self._memory_manager)
         self._tool_executor.set_llm_config_getter(get_model_config)
         self._tool_executor.set_agent_manager(self._agent_manager)
@@ -287,6 +322,18 @@ class ChatBackend(QObject):
         """创建新会话"""
         session = self._session_manager.create_new_session()
         self.session_created.emit(session.session_id)
+        
+        # Trigger SessionStart hook
+        if self._hook_manager:
+            context = {
+                "project_root": os.getcwd(),
+            }
+            self._hook_manager.trigger_event(
+                "SessionStart",
+                context=context,
+                current_message=""
+            )
+        
         return session
     
     def get_current_session(self) -> Optional[ChatSession]:

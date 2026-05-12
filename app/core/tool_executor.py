@@ -25,8 +25,9 @@ class ToolExecutor:
         "write", "edit", "multiedit", "patch"
     }
 
-    def __init__(self, homepage=None, workdir: str = None):
+    def __init__(self, homepage=None, workdir: str = None, backend=None):
         self._homepage = homepage
+        self._backend = backend  # ChatBackend 引用，用于访问 HookManager
         self._builtin_tools: Optional[BuiltinTools] = None
         self._workdir = workdir
         self._custom_tools: Dict[str, Callable] = {}
@@ -445,6 +446,36 @@ class ToolExecutor:
                 # 文件操作成功后备份编辑后的文件（用于差异对比）
                 if tool_name in self._FILE_OPS_TO_TRACK and result and result.success:
                     self._record_file_operation_after(tool_name, args, file_path_before)
+                
+                # Trigger PostToolUse hook
+                if self._backend and self._backend.hook_manager:
+                    import os
+                    context = {
+                        "project_root": self._workdir or os.getcwd(),
+                        "tool_name": tool_name,
+                    }
+                    # Extract file path if available
+                    file_path = args.get("path") or args.get("file")
+                    if file_path:
+                        context["file"] = file_path
+                    
+                    # Get last user message for matching
+                    current_message_text = ""
+                    if self._backend.session_manager:
+                        session = self._backend.get_current_session()
+                        if session and hasattr(session, 'messages'):
+                            # Find last user message
+                            for msg in reversed(session.messages):
+                                if msg.get('role') == 'user':
+                                    current_message_text = msg.get('content', '')
+                                    break
+                    
+                    self._backend.hook_manager.trigger_event(
+                        "PostToolUse",
+                        context=context,
+                        current_message=current_message_text
+                    )
+                
                 return result
             except Exception as e:
                 return ToolResult(False, error=f"Execution error: {str(e)}")

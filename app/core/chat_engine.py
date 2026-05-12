@@ -204,10 +204,42 @@ class ChatEngine:
             self._emit("error", "配置无效，请检查模型设置")
             return False
 
+        # Trigger PreUserMessage hook
+        if hasattr(self._agent_manager, '_hook_manager') and self._agent_manager._hook_manager:
+            from app.core.hook_manager import HookManager
+            hook_manager = self._agent_manager._hook_manager
+            if hook_manager:
+                import os
+                context = {
+                    "project_root": os.getcwd(),
+                    "message": user_text,
+                }
+                hook_manager.trigger_event(
+                    "PreUserMessage",
+                    context=context,
+                    current_message=user_text
+                )
+
         session.add_user_message(content=user_text)
         self._is_streaming = True
 
         self._emit("user_message_added", user_text)
+
+        # Trigger PostUserMessage hook
+        if hasattr(self._agent_manager, '_hook_manager') and self._agent_manager._hook_manager:
+            from app.core.hook_manager import HookManager
+            hook_manager = self._agent_manager._hook_manager
+            if hook_manager:
+                import os
+                context = {
+                    "project_root": os.getcwd(),
+                    "message": user_text,
+                }
+                hook_manager.trigger_event(
+                    "PostUserMessage",
+                    context=context,
+                    current_message=user_text
+                )
 
         messages = self._build_messages(session, llm_config)
         if self._current_agent:
@@ -463,6 +495,28 @@ class ChatEngine:
                 self._on_permission_approval_requested
             )
 
+        # Trigger PreAssistantMessage hook
+        if self._agent_manager and hasattr(self._agent_manager, '_hook_manager'):
+            hook_manager = self._agent_manager._hook_manager
+            if hook_manager:
+                session = self._session_manager.get_current_session()
+                current_message_text = ""
+                if session and hasattr(session, 'messages'):
+                    # Find last user message
+                    for msg in reversed(session.messages):
+                        if msg.get('role') == 'user':
+                            current_message_text = msg.get('content', '')
+                            break
+                import os
+                context = {
+                    "project_root": os.getcwd(),
+                }
+                hook_manager.trigger_event(
+                    "PreAssistantMessage",
+                    context=context,
+                    current_message=current_message_text
+                )
+
         self._current_worker.start()
         
         # API 模式：engine 也需要在主线程发射事件（用于 stream_started）
@@ -507,6 +561,30 @@ class ChatEngine:
     def _on_worker_finished(self, response: str):
         self._is_streaming = False
         self._emit("stream_finished", response)
+        
+        # Trigger PostAssistantMessage hook
+        if self._agent_manager and hasattr(self._agent_manager, '_hook_manager'):
+            hook_manager = self._agent_manager._hook_manager
+            if hook_manager:
+                session = self._session_manager.get_current_session()
+                current_message_text = ""
+                if session and hasattr(session, 'messages'):
+                    # Find last user message
+                    for msg in reversed(session.messages):
+                        if msg.get('role') == 'user':
+                            current_message_text = msg.get('content', '')
+                            break
+                import os
+                context = {
+                    "project_root": os.getcwd(),
+                    "response": response,
+                }
+                hook_manager.trigger_event(
+                    "PostAssistantMessage",
+                    context=context,
+                    current_message=current_message_text
+                )
+        
         # 对话结束后清理 worker，释放内存
         self.cleanup_worker()
 

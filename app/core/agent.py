@@ -14,6 +14,7 @@ import yaml
 from loguru import logger
 
 from app.tools import get_builtin_tools_schema
+from app.core.hook_manager import HookManager
 
 
 @dataclass
@@ -212,12 +213,13 @@ class PermissionResolver:
 class AgentManager:
     DEFAULT_TOOLS = ["Read", "Grep", "Glob", "Bash", "write", "edit"]
 
-    def __init__(self, agents_dir: Optional[str] = None):
+    def __init__(self, agents_dir: Optional[str] = None, hook_manager: Optional[HookManager] = None):
         self.agents_dir = (
             Path(agents_dir) if agents_dir else Path(__file__).parent.parent / "agents"
         )
         self._agents: Dict[str, Agent] = {}
         self._hidden_agents: Dict[str, Agent] = {}
+        self._hook_manager = hook_manager
         self._global_permission: Dict[str, Any] = {}
         self._load_agents()
 
@@ -253,6 +255,24 @@ class AgentManager:
                     logger.info(f"[AgentManager] Loaded agent (yaml): {agent.name}")
             except Exception as e:
                 logger.error(f"[AgentManager] Failed to load {yaml_file}: {e}")
+
+        # 检查所有子目录，查找 hooks/hooks.json 配置（不修改agent加载逻辑，只加载hooks）
+        if self._hook_manager is not None:
+            for agent_dir in self.agents_dir.iterdir():
+                if agent_dir.is_dir():
+                    hooks_file = agent_dir / "hooks" / "hooks.json"
+                    if hooks_file.exists():
+                        try:
+                            import json
+                            with open(hooks_file, 'r', encoding='utf-8') as f:
+                                config = json.load(f)
+                            skill_name = agent_dir.name
+                            skill_root = str(agent_dir.absolute())
+                            count = self._hook_manager.register_hooks_from_json(skill_name, skill_root, config)
+                            if count > 0:
+                                logger.info(f"[AgentManager] Loaded {count} hooks from {skill_name}")
+                        except Exception as e:
+                            logger.error(f"[AgentManager] Failed to load hooks from {hooks_file}: {e}")
 
     def _parse_markdown_agent(self, file_path: Path) -> Optional[Agent]:
         content = file_path.read_text(encoding="utf-8")
@@ -327,6 +347,16 @@ class AgentManager:
             lines.append(f"- **{a.name}**: {a.description}")
 
         return "\n".join(lines)
+
+    def unload_skill(self, skill_name: str):
+        """卸载一个技能，包括其 Hooks"""
+        if skill_name in self._agents:
+            del self._agents[skill_name]
+        if skill_name in self._hidden_agents:
+            del self._hidden_agents[skill_name]
+        if self._hook_manager:
+            self._hook_manager.unregister_skill_hooks(skill_name)
+        logger.info(f"[AgentManager] Unloaded skill: {skill_name}")
 
     def get_agent_tools_schema(
             self, agent_name: str, global_permission: Optional[Dict[str, Any]] = None, is_subagent_call: bool = False
