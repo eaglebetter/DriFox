@@ -341,10 +341,10 @@ class ChatBackend(QObject):
             return self._memory_manager.load_memory()
         return {}
     
-    def add_user_memory(self, content: str, tags: List[str] = None):
+    def add_user_memory(self, content: str, **kwargs):
         """添加用户记忆"""
         if self._memory_manager:
-            self._memory_manager.add_user_memory(content, tags=tags)
+            self._memory_manager.add_user_memory(content, **kwargs)
     
     def touch_memories(self, contents: List[str], memory_data: Dict = None) -> bool:
         """标记记忆被访问"""

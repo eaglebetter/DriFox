@@ -201,6 +201,42 @@ class HookManager:
                 logger.info(f"[HookManager] Executing hook for {event_name}, tool={tool_name}, command: {hook.command[:60]}")
                 self._execute_hook(hook, context_with_event, project_root)
     
+    def _parse_command(self, command: str) -> Optional[List[str]]:
+        """解析命令字符串，返回 [cmd, arg1, arg2, ...] 或 None（解析失败）"""
+        parts = []
+        current = ""
+        in_quote = False
+        quote_char = None
+        
+        for char in command:
+            if char in ('"', "'") and not in_quote:
+                in_quote = True
+                quote_char = char
+            elif char == quote_char and in_quote:
+                in_quote = False
+                quote_char = None
+            elif char == ' ' and not in_quote:
+                if current:
+                    parts.append(current)
+                    current = ""
+            else:
+                current += char
+        
+        if current:
+            parts.append(current)
+        
+        if not parts:
+            return None
+        
+        # 去掉首尾引号
+        cmd = parts[0]
+        if cmd.startswith('"') and cmd.endswith('"'):
+            cmd = cmd[1:-1]
+        elif cmd.startswith("'") and cmd.endswith("'"):
+            cmd = cmd[1:-1]
+        
+        return [cmd] + parts[1:]
+
     def _execute_hook(self, hook: Hook, context: Dict[str, Any], project_root: str):
         """替换变量并执行 Hook"""
         # 变量替换
@@ -240,17 +276,51 @@ class HookManager:
                     elif output.startswith("'") and output.endswith("'"):
                         output = output[1:-1]
                 else:
-                    # 其他命令用 shell 执行（因为可能是复杂命令）
-                    result = subprocess.run(
-                        command,
-                        cwd=cwd,
-                        shell=True,
-                        capture_output=True,
-                        text=True,
-                        encoding='utf-8',
-                        errors='replace',
-                        timeout=300
-                    )
+                    # 解析命令和参数（处理引号包裹的命令路径）
+                    parts = self._parse_command(command)
+                    if not parts:
+                        logger.warning(f"[HookManager] Failed to parse command: {command}")
+                        return
+                    
+                    cmd = parts[0]
+                    args = parts[1:]
+                    
+                    logger.debug(f"[HookManager] Parsed: cmd={cmd}, args={args}, cwd={cwd}")
+                    
+                    # 如果是相对路径，转换为绝对路径
+                    if not os.path.isabs(cmd):
+                        cmd_abs = os.path.normpath(os.path.join(cwd, cmd))
+                        logger.debug(f"[HookManager] Relative path converted to: {cmd_abs}")
+                        cmd = cmd_abs
+                    
+                    # 检测 .cmd 文件，使用 cmd.exe 直接执行
+                    if cmd.lower().endswith('.cmd'):
+                        logger.debug(f"[HookManager] Using cmd.exe to run: {cmd}")
+                        # cmd.exe /c 需要用 shell=True
+                        result = subprocess.run(
+                            ['cmd.exe', '/c', cmd] + args,
+                            cwd=cwd,
+                            shell=False,
+                            capture_output=True,
+                            text=True,
+                            encoding='utf-8',
+                            errors='replace',
+                            timeout=300
+                        )
+                    else:
+                        # Unix 脚本：转换为 MSYS 兼容路径格式
+                        cmd_msys = cmd.replace('\\', '/').replace(':', '')
+                        logger.debug(f"[HookManager] Running script: {cmd_msys} with args {args}")
+                        result = subprocess.run(
+                            ['bash', cmd_msys] + args,
+                            cwd=cwd,
+                            shell=False,
+                            capture_output=True,
+                            text=True,
+                            encoding='utf-8',
+                            errors='replace',
+                            timeout=300
+                        )
                     output = result.stdout or ""
                     if result.stderr:
                         logger.debug(f"[HookManager] stderr: {result.stderr}")
