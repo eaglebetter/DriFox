@@ -26,7 +26,7 @@ class Hook:
 @dataclass
 class HookMatchRule:
     """匹配规则，一个事件可以有多个匹配规则"""
-    matcher: Optional[str] = None  # 正则表达式
+    matcher: Optional[str] = None  # 支持 "tool:xxx" 前缀匹配工具名，或普通正则匹配用户消息
     hooks: List[Hook] = None
     
     def __post_init__(self):
@@ -50,18 +50,33 @@ class HookWorker(QRunnable):
     def run(self):
         """执行命令，收集输出"""
         try:
-            result = subprocess.run(
-                self.command,
-                cwd=self.cwd,
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=300  # 5 分钟超时
-            )
-            output = result.stdout
-            if result.stderr:
-                logger.debug(f"[HookWorker] stderr: {result.stderr}")
-            self.signals.finished.emit(output, result.returncode == 0)
+            output = ""
+            # 直接在 Python 中执行，避免 Windows cmd 的编码问题
+            if self.command.startswith("echo "):
+                # echo 命令直接输出，不需要 shell
+                output = self.command[5:].strip()
+                # 去掉首尾的引号（如果有）
+                if output.startswith('"') and output.endswith('"'):
+                    output = output[1:-1]
+                elif output.startswith("'") and output.endswith("'"):
+                    output = output[1:-1]
+            else:
+                # 其他命令用 shell 执行
+                result = subprocess.run(
+                    self.command,
+                    cwd=self.cwd,
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                    encoding='utf-8',
+                    errors='replace',
+                    timeout=300
+                )
+                output = result.stdout or ""
+                if result.stderr:
+                    logger.debug(f"[HookWorker] stderr: {result.stderr}")
+            
+            self.signals.finished.emit(output, True)
         except Exception as e:
             logger.error(f"[HookWorker] Execution failed: {e}")
             self.signals.finished.emit(f"Error: {str(e)}", False)
@@ -160,20 +175,30 @@ class HookManager:
         
         context = context or {}
         project_root = context.get("project_root", os.getcwd())
+        tool_name = context.get("tool_name", "")
         
         for rule in self._hooks[event_name]:
-            # 检查 matcher
-            if rule.matcher:
-                if not current_message:
-                    continue  # 没有消息可匹配，跳过
-                if not re.search(rule.matcher, current_message, re.IGNORECASE):
-                    continue  # 不匹配，跳过
+            if not rule.matcher:
+                # 没有 matcher，总是触发
+                pass
+            elif rule.matcher.startswith("tool:"):
+                # tool: 前缀表示匹配工具名
+                tool_pattern = rule.matcher[5:]  # 去掉 "tool:" 前缀
+                if not tool_name or not re.search(tool_pattern, tool_name, re.IGNORECASE):
+                    logger.info(f"[HookManager] Skipping: tool matcher '{rule.matcher}' doesn't match tool '{tool_name}'")
+                    continue
+            elif current_message and re.search(rule.matcher, current_message, re.IGNORECASE):
+                # 普通 matcher 匹配用户消息
+                pass
+            else:
+                # 用户消息不匹配
+                continue
             
             # 执行这个规则下的所有 Hooks
             for hook in rule.hooks:
-                # Add event_name to context for sync/async decision
                 context_with_event = context.copy()
                 context_with_event["_event_name"] = event_name
+                logger.info(f"[HookManager] Executing hook for {event_name}, tool={tool_name}, command: {hook.command[:60]}")
                 self._execute_hook(hook, context_with_event, project_root)
     
     def _execute_hook(self, hook: Hook, context: Dict[str, Any], project_root: str):
@@ -198,33 +223,47 @@ class HookManager:
                     cwd = cwd.replace(f"{{{key}}}", value)
         
         # 判断是否需要同步执行
-        # Pre 事件和 SessionStart 需要在下一步之前完成，这样输出才能加入上下文
         event_name = context.get("_event_name", "")
         need_sync = event_name.startswith("Pre") or event_name == "SessionStart"
         
         if need_sync:
-            # 同步执行，保证输出在下一步之前加入上下文
+            # 同步执行
             try:
-                result = subprocess.run(
-                    command,
-                    cwd=cwd,
-                    shell=True,
-                    capture_output=True,
-                    text=True,
-                    timeout=300
-                )
-                output = result.stdout
-                if result.stderr:
-                    logger.debug(f"[HookManager] stderr: {result.stderr}")
+                output = ""
+                # 直接在 Python 中执行，避免 Windows cmd 的编码问题
+                if command.startswith("echo "):
+                    # echo 命令直接输出，不需要 shell
+                    output = command[5:].strip()
+                    # 去掉首尾的引号（如果有）
+                    if output.startswith('"') and output.endswith('"'):
+                        output = output[1:-1]
+                    elif output.startswith("'") and output.endswith("'"):
+                        output = output[1:-1]
+                else:
+                    # 其他命令用 shell 执行（因为可能是复杂命令）
+                    result = subprocess.run(
+                        command,
+                        cwd=cwd,
+                        shell=True,
+                        capture_output=True,
+                        text=True,
+                        encoding='utf-8',
+                        errors='replace',
+                        timeout=300
+                    )
+                    output = result.stdout or ""
+                    if result.stderr:
+                        logger.debug(f"[HookManager] stderr: {result.stderr}")
+                
                 if hook.add_output_to_context and self._on_finished_callback:
-                    self._on_finished_callback(output, result.returncode == 0)
+                    self._on_finished_callback(output, True)
                 logger.debug(f"[HookManager] Completed sync hook: {command[:60]}")
             except Exception as e:
                 logger.error(f"[HookManager] Sync execution failed: {e}")
                 if hook.add_output_to_context and self._on_finished_callback:
                     self._on_finished_callback(f"Error: {str(e)}", False)
         else:
-            # 异步执行，不阻塞主线程
+            # 异步执行
             signals = HookWorkerSignals()
             worker = HookWorker(command, cwd, signals)
             if hook.add_output_to_context and self._on_finished_callback:

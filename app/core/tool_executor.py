@@ -309,6 +309,30 @@ class ToolExecutor:
 
         logger.info(f"[ToolExecutor] Executing tool: {tool_name}, args: {args}")
 
+        # Trigger PreToolUse hook (同步执行，输出会加入上下文)
+        if self._backend and self._backend.hook_manager:
+            import os
+            context = {
+                "project_root": self._workdir or os.getcwd(),
+                "tool_name": tool_name,
+            }
+            file_path = args.get("path") or args.get("file")
+            if file_path:
+                context["file"] = file_path
+            current_message_text = ""
+            if self._backend.session_manager:
+                session = self._backend.get_current_session()
+                if session and hasattr(session, 'messages'):
+                    for msg in reversed(session.messages):
+                        if msg.get('role') == 'user':
+                            current_message_text = msg.get('content', '')
+                            break
+            self._backend.hook_manager.trigger_event(
+                "PreToolUse",
+                context=context,
+                current_message=current_message_text
+            )
+
         # 校验必需参数
         if tool_name in self.REQUIRED_ARGS:
             required = self.REQUIRED_ARGS[tool_name]

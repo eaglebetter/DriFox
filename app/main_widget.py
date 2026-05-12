@@ -1836,7 +1836,7 @@ class OpenAIChatToolWindow(ToolWindow):
             )
 
         self._cache_current_session_cards()
-        session = self.session_manager.create_new_session()
+        session = self.backend.create_session()
         self._current_session_id = session.session_id
         self._history_preview_messages = None
         self._clear_chat_area()

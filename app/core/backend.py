@@ -4,6 +4,7 @@ ChatBackend - 统一后端接口
 后端自己创建和管理所有组件，前端只负责 UI 调用
 """
 import os
+import orjson as json
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Callable
 
@@ -143,29 +144,44 @@ class ChatBackend(QObject):
         # 1. 创建 SessionManager
         self._session_store = SessionStore.get_instance()
         self._session_manager = SessionManager()
-        self._session_manager.create_new_session()
         logger.info("[ChatBackend] SessionManager 创建完成")
         
         # 2. 创建 MemoryManager
         self._memory_manager = MemoryManagerCore()
         logger.info("[ChatBackend] MemoryManager 创建完成")
         
-        # 创建 HookManager
+        # 3. 创建 HookManager（必须在 create_session 之前）
         self._hook_manager = HookManager(self._thread_pool)
         # Hook 完成后，把输出添加到上下文
         def on_hook_finished(output: str, success: bool):
             if output.strip() and success:
-                # 添加到当前会话
+                hook_output = f"# Hook Output\n```\n{output}\n```"
+                
+                # 1. 添加到 worker 消息列表（如果正在执行）
+                if self._chat_engine and self._chat_engine._current_worker:
+                    worker = self._chat_engine._current_worker
+                    # 直接追加到 worker 的 API 消息缓存
+                    if hasattr(worker, '_append_to_api_cache'):
+                        worker._append_to_api_cache([{
+                            "role": "assistant",
+                            "content": hook_output,
+                        }])
+                        logger.debug(f"[HookManager] Added hook output to worker messages")
+                
+                # 2. 添加到当前会话（用于 UI 显示）
                 session = self.get_current_session()
-                hook_output = f"\n\n# Hook Output\n```\n{output}\n```\n"
                 if session:
-                    session.add_system_message(hook_output)
-                # 发送消息给前端显示
+                    session.add_assistant_message(hook_output)
+                
+                # 3. 发送消息给前端显示
                 self.message_received.emit({
-                    "role": "system",
+                    "role": "assistant",
                     "content": hook_output
                 })
         self._hook_manager.set_on_finished_callback(on_hook_finished)
+        
+        # 4. 使用 create_session() 触发 SessionStart hook（必须在 hook_manager 之后）
+        self.create_session()
         
         # 3. 使用传入的 AgentManager 或创建新的
         self._agent_manager = AgentManager(str(Path(__file__).parent.parent / "agents"), self._hook_manager)
@@ -176,9 +192,8 @@ class ChatBackend(QObject):
         global_hooks_file = get_app_data_dir() / "hooks" / "hooks.json"
         if global_hooks_file.exists():
             try:
-                import json
                 with open(global_hooks_file, 'r', encoding='utf-8') as f:
-                    config = json.load(f)
+                    config = json.loads(f.read())
                 skill_root = str(global_hooks_file.parent)
                 count = self._hook_manager.register_hooks_from_json("__global__", skill_root, config)
                 if count > 0:
