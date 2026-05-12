@@ -42,6 +42,7 @@ class SubAgentExecutor(QThread):
             tool_executor: Any = None,
             parent_context: str = "",
             is_subagent_call: bool = True,  # 标记是否为被主智能体调用（通过 task_batch）
+            max_iterations: int = 30,  # 最大迭代次数，默认 30
     ):
         super().__init__()
         self.task_id = task_id
@@ -52,6 +53,7 @@ class SubAgentExecutor(QThread):
         self.tool_executor = tool_executor
         self.parent_context = parent_context
         self.is_subagent_call = is_subagent_call  # 传递给提示词构建
+        self.max_iterations = max_iterations  # 最大迭代次数限制
         self._is_cancelled = False
         self._pending_answer = None
         self._last_result = None
@@ -158,8 +160,8 @@ class SubAgentExecutor(QThread):
                                 content = "".join(
                                     c.get("text", "") for c in content if isinstance(c, dict)
                                 )
-                            if content:
-                                # 截断过长内容
+                            if content and role != "user" and role != "assistant":
+                                # 截断过长工具内容
                                 truncated = content[:max_chars] + ("..." if len(content) > max_chars else "")
                                 history_lines.append(f"**{role}**: {truncated}")
 
@@ -168,14 +170,15 @@ class SubAgentExecutor(QThread):
                 except Exception as e:
                     logger.warning(f"[SubAgentExecutor] 获取历史消息失败: {e}")
 
-            if self.parent_context:
-                content = f"## 父任务上下文\n{self.parent_context}\n\n## 子任务\n{self.task_description}"
-            else:
-                content = f"## 子任务\n{self.task_description}"
-
+            content = ""
             # 追加历史上下文
             if history_section:
-                content += history_section
+                content += history_section + "\n\n"
+
+            if self.parent_context:
+                content += f"## 父智能体说明\n{self.parent_context}\n\n## 子任务\n{self.task_description}"
+            else:
+                content += f"## 子任务\n{self.task_description}"
 
             messages.append({"role": "user", "content": content})
 
@@ -191,13 +194,8 @@ class SubAgentExecutor(QThread):
             if self._is_cancelled:
                 return
 
-            try:
-                summary = self._summarize_result(result)
-                self._last_result = summary
-            except Exception as e:
-                logger.error(f"[SubAgentExecutor] _summarize_result error: {e}")
-                summary = result if result else "执行出错"
-                self._last_result = summary
+            # 直接使用执行结果（迭代结束时已自动总结）
+            self._last_result = result if result else "无执行结果"
 
             # 任务完成，保存最终状态
             if self._log_store_callback:
@@ -207,7 +205,7 @@ class SubAgentExecutor(QThread):
                 except Exception as e:
                     logger.warning(f"[SubAgentExecutor] 保存完成状态失败: {e}")
 
-            self.finished_with_result.emit(self.task_id, summary)
+            self.finished_with_result.emit(self.task_id, self._last_result)
 
         except Exception as e:
             logger.error(f"[SubAgentExecutor] run() error: {e}")
@@ -226,10 +224,20 @@ class SubAgentExecutor(QThread):
         current_messages = messages.copy()
         response_content = ""
         current_reasoning = ""  # DeepSeek V4 thinking mode
+        iteration_count = 0
 
         while not self._is_cancelled:
             if self._is_cancelled:
                 return ""
+
+            # 检查是否达到最大迭代次数（触发强制结束并总结）
+            iteration_count += 1
+            if iteration_count > self.max_iterations:
+                self._add_log("progress", f"已达到最大迭代次数 ({self.max_iterations})，强制结束并总结")
+                final_summary_prompt = self._build_final_summary_prompt()
+                current_messages.append({"role": "user", "content": final_summary_prompt})
+                response_content, _, _ = self._make_api_call(current_messages, None)
+                return self._filter_thinking_content(response_content)
 
             response_content, tool_calls, reasoning_content = self._make_api_call(
                 current_messages, tools
@@ -239,6 +247,7 @@ class SubAgentExecutor(QThread):
             if self._is_cancelled:
                 return ""
 
+            # 没有工具调用，直接返回结果（提前有结果了）
             if not tool_calls:
                 return self._filter_thinking_content(response_content)
 
@@ -277,6 +286,20 @@ class SubAgentExecutor(QThread):
 
         return self._filter_thinking_content(response_content)
 
+    def _build_final_summary_prompt(self) -> str:
+        """构建最终总结提示"""
+        return """
+
+## 已达到最大迭代次数限制，请总结当前执行结果。
+
+请整理并返回以下内容：
+1. 已完成的工作
+2. 关键发现和结论
+3. 重要文件路径和数据
+4. 待解决的问题（如有）
+
+直接输出总结内容："""
+
     def _filter_thinking_content(self, content: str) -> str:
         """过滤掉思考内容，只保留纯回复"""
         if not content:
@@ -302,7 +325,7 @@ class SubAgentExecutor(QThread):
         return parsed, ""
 
     def _make_api_call(self, messages: List[Dict], tools: List[Dict] = None) -> tuple:
-        """调用 LLM API"""
+        """调用 LLM API（非流式，子智能体后台执行无需流式输出）"""
         api_key = self.llm_config.get("API_KEY", "").strip()
         base_url = self.llm_config.get("API_URL") or None
         model = str(self.llm_config.get("模型名称", "gpt-4o"))
@@ -310,7 +333,7 @@ class SubAgentExecutor(QThread):
         req_kwargs = {
             "model": model,
             "messages": messages,
-            "stream": True,
+            "stream": False,
         }
 
         extra_body = {}
@@ -355,92 +378,25 @@ class SubAgentExecutor(QThread):
 
         response = create_api_call_with_retry(client, create_completion)
 
-        full_response = ""
-        reasoning_content = ""  # DeepSeek V4 thinking mode
+        # 非流式：直接读取响应
+        message = response.choices[0].message
+        response_content = self._filter_thinking_content(message.content or "")
+        reasoning_content = getattr(message, "reasoning_content", "") or ""
+
+        # 提取工具调用
         tool_calls_found = []
-        tool_calls_buffer = {}
-
-        for chunk in response:
-            if self._is_cancelled:
-                return "", []
-
-            delta = chunk.choices[0].delta
-            content = getattr(delta, "content", None)
-            if content:
-                content = self._filter_thinking_content(content)
-                full_response += content
-
-            # DeepSeek V4 thinking mode: 收集 reasoning_content
-            reasoning_delta = getattr(delta, "reasoning_content", None)
-            if reasoning_delta:
-                reasoning_content += reasoning_delta
-
-            tool_calls = getattr(delta, "tool_calls", None)
-            if tool_calls:
-                for tc in tool_calls:
-                    tc_id = tc.id
-                    if tc_id is None:
-                        if tool_calls_buffer:
-                            tc_id = list(tool_calls_buffer.keys())[-1]
-                        else:
-                            continue
-
-                    if tc_id not in tool_calls_buffer:
-                        tool_calls_buffer[tc_id] = {
-                            "id": tc_id,
-                            "type": getattr(tc, "type", "function"),
-                            "function": {"name": "", "arguments": ""},
-                        }
-
-                    buffer = tool_calls_buffer[tc_id]
-                    if tc.function and tc.function.name:
-                        buffer["function"]["name"] = tc.function.name
-                    if tc.function and tc.function.arguments:
-                        buffer["function"]["arguments"] += tc.function.arguments
-
-                    if buffer["function"]["name"] and buffer["function"]["arguments"]:
-                        parsed_args, _ = self._parse_tool_arguments_json(
-                            buffer["function"]["arguments"]
-                        )
-                        if parsed_args is not None:
-                            tool_calls_found.append(
-                                {
-                                    "id": buffer["id"],
-                                    "type": buffer["type"],
-                                    "function": {
-                                        "name": buffer["function"]["name"],
-                                        "arguments": json.dumps(
-                                            parsed_args
-                                        ).decode('utf-8'),
-                                    },
-                                }
-                            )
-                            del tool_calls_buffer[tc_id]
-
-        for tc_id, buffer in list(tool_calls_buffer.items()):
-            if not (buffer["function"]["name"] and buffer["function"]["arguments"]):
-                continue
-            parsed_args, error = self._parse_tool_arguments_json(
-                buffer["function"]["arguments"]
-            )
-            if parsed_args is None:
-                logger.warning(
-                    f"[SubAgentExecutor] Dropping invalid tool arguments for "
-                    f"tool_call {tc_id} ({buffer['function']['name']}): {error}"
-                )
-                continue
-            tool_calls_found.append(
-                {
-                    "id": buffer["id"],
-                    "type": buffer["type"],
+        if message.tool_calls:
+            for tc in message.tool_calls:
+                tool_calls_found.append({
+                    "id": tc.id,
+                    "type": tc.type,
                     "function": {
-                        "name": buffer["function"]["name"],
-                        "arguments": json.dumps(parsed_args).decode('utf-8'),
+                        "name": tc.function.name,
+                        "arguments": tc.function.arguments,  # 已是 JSON 字符串
                     },
-                }
-            )
+                })
 
-        return full_response, tool_calls_found, reasoning_content
+        return response_content, tool_calls_found, reasoning_content
 
     def _cap_max_output_tokens(self, model: str, requested: int) -> int:
         try:
@@ -507,76 +463,6 @@ class SubAgentExecutor(QThread):
             )
 
         return results
-
-    def _summarize_result(self, result: str) -> str:
-        """总结子智能体执行结果"""
-        if not result:
-            return "无执行结果"
-
-        if len(result) < 2000:
-            return result
-
-        try:
-            api_key = self.llm_config.get("API_KEY", "").strip()
-            base_url = self.llm_config.get("API_URL") or None
-            model = str(self.llm_config.get("模型名称", "gpt-4o"))
-
-            prompt = f"""你是一个结果整理助手。请将以下子智能体的执行结果整理成结构化但详细的内容，返回给主智能体继续任务。
-
-## 要求
-1. 完整保留关键信息、结论、发现的内容
-2. 保留重要的文件路径、代码片段、数据详情
-3. 保持信息的完整性和实用性，不要过度压缩
-4. 使用清晰的格式组织内容，便于主智能体理解和使用
-
-## 执行结果
-{result[:15000]}
-
-请直接输出整理后的内容，格式示例：
-
-## 任务完成情况
-[总结任务完成情况]
-
-## 关键发现
-- 发现1: 具体内容
-- 发现2: 具体内容
-- ...
-
-## 重要细节
-- 文件: xxx
-- 关键代码: xxx
-- 数据: xxx
-
-## 建议
-[如果有必要，可以给出后续建议]
-
-直接输出内容，不要输出JSON格式："""
-
-            client = OpenAI(
-                api_key=api_key if api_key else "dummy",
-                base_url=base_url,
-                timeout=60.0,
-            )
-
-            from app.core.retry_helper import create_api_call_with_retry
-
-            def create_summary():
-                return client.chat.completions.create(
-                    model=model,
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=0.3,
-                    max_tokens=4000,
-                )
-
-            resp = create_api_call_with_retry(client, create_summary)
-
-            # 过滤思考内容，避免 LLM 总结时带入思考标签
-            summarized = resp.choices[0].message.content.strip()
-            return self._filter_thinking_content(summarized)
-
-        except Exception as e:
-            logger.warning(f"Summary failed: {e}")
-            return self._filter_thinking_content(result[:3000])
 
 
 class SubAgentManager(QObject):
@@ -701,6 +587,9 @@ class SubAgentManager(QObject):
                 except Exception as e:
                     logger.warning(f"[SubAgentManager] 获取上下文失败: {e}")
 
+            # 获取最大迭代次数（从 agent 配置的 steps 获取）
+            max_iterations = agent.steps if agent.steps else 30
+
             executor = SubAgentExecutor(
                 task_id=task_id,
                 agent_name=agent_name,
@@ -710,6 +599,7 @@ class SubAgentManager(QObject):
                 tool_executor=self._tool_executor,
                 parent_context=full_context,
                 is_subagent_call=True,  # 标记为被主智能体调用
+                max_iterations=max_iterations,  # 传递最大迭代次数限制
             )
 
             # 设置日志存储回调
