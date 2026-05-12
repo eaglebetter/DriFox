@@ -4150,6 +4150,8 @@ class OpenAIChatToolWindow(ToolWindow):
     def _on_stream_started(self):
         self._is_streaming = True
         self._accumulated_content = ""
+        if self._current_assistant_card:
+            self._current_assistant_card.start_streaming_anim()
 
     def _on_content_received(self, content_piece: str):
         if self._current_assistant_card:
@@ -4162,11 +4164,13 @@ class OpenAIChatToolWindow(ToolWindow):
     def _on_reasoning_content_received(self, reasoning_piece: str):
         """处理 DeepSeek 思考内容（流式接收）"""
         if self._current_assistant_card:
+            self._current_assistant_card.start_streaming_anim()
             self._current_assistant_card.append_reasoning(reasoning_piece)
 
     def _on_thinking_started(self):
         """新轮次思考开始，为当前助手卡片创建新的独立思考块"""
         if self._current_assistant_card:
+            self._current_assistant_card.start_streaming_anim()
             self._current_assistant_card.start_new_thinking_block()
 
     def _on_tool_call_started(
@@ -4176,6 +4180,10 @@ class OpenAIChatToolWindow(ToolWindow):
         self._current_tool_call_id = tool_call_id
         self._current_tool_name = tool_name
         self._current_tool_args = arguments
+
+        # 模型开始调用工具时激活彩虹边框（即使返回内容不含文本）
+        if self._current_assistant_card:
+            self._current_assistant_card.start_streaming_anim()
 
         if tool_name == "question":
             question_text = arguments.get("question", "")

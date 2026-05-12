@@ -2357,13 +2357,13 @@ class MessageCard(SimpleCardWidget):
         self._streaming = True
         self._pulse_phase = 0.0
         try:
-            self._anim_timer.start(80)
+            self._anim_timer.start(50)  # 80→50ms，帧率从12.5fps提升到20fps
         except RuntimeError:
             return
         self.update()
 
     def _update_anim(self):
-        self._pulse_phase = (self._pulse_phase + 0.25) % (math.pi * 2)
+        self._pulse_phase = (self._pulse_phase + 0.15) % (math.pi * 2)
         self.update()
 
     def _apply_card_style(self, border: str = None, bg: str = None):
@@ -2420,13 +2420,53 @@ class MessageCard(SimpleCardWidget):
         if not self._streaming:
             return
 
+        # ── 呼吸效果：透明度随时间周期性变化 ──
+        breathe = 0.75 + 0.25 * (math.sin(self._pulse_phase * 1.5) + 1) / 2  # 0.75~1.0
+
         path = QPainterPath()
         path.addRoundedRect(1, 1, w - 2, h - 2, radius, radius)
-        painter.setClipPath(path)
 
-        gradient = QLinearGradient(0, 0, w, h)
+        # ── 外发光层（霓虹光晕） ──
+        glow_path = QPainterPath()
+        glow_path.addRoundedRect(0, 0, w, h, radius + 2, radius + 2)
+        painter.setClipPath(glow_path)
+
+        glow_gradient = QLinearGradient(0, 0, w, h)
         if self.role == "assistant":
-            rainbow = [
+            glow_colors = [
+                QColor("#40E0FF"),
+                QColor("#6B8AFF"),
+                QColor("#C084FC"),
+                QColor("#FF87B2"),
+                QColor("#FFB347"),
+                QColor("#50E3A0"),
+            ]
+            shift = int((self._pulse_phase / (math.pi * 2)) * len(glow_colors))
+            glow_colors = glow_colors[shift:] + glow_colors[:shift]
+            glow_positions = [0.0, 0.18, 0.36, 0.55, 0.76, 1.0]
+            for pos, color in zip(glow_positions, glow_colors):
+                c = QColor(color)
+                glow_alpha = int(55 * breathe)  # 外发光半透明
+                c.setAlpha(glow_alpha)
+                glow_gradient.setColorAt(pos, c)
+        else:
+            pulse = QColor(self._theme["accent"])
+            glow_alpha = int(80 * breathe)
+            pulse.setAlpha(glow_alpha)
+            glow_gradient.setColorAt(0.0, pulse.lighter(130))
+            glow_gradient.setColorAt(0.5, pulse)
+            glow_gradient.setColorAt(1.0, pulse.darker(140))
+
+        glow_pen = QPen(glow_gradient, 6)
+        painter.setPen(glow_pen)
+        painter.setBrush(QBrush(Qt.NoBrush))
+        painter.drawRoundedRect(0, 0, w, h, radius + 2, radius + 2)
+
+        # ── 主边框层（鲜艳流动） ──
+        painter.setClipPath(path)
+        main_gradient = QLinearGradient(0, 0, w, h)
+        if self.role == "assistant":
+            main_colors = [
                 QColor("#63D8FF"),
                 QColor("#7FA8FF"),
                 QColor("#A98BFF"),
@@ -2434,28 +2474,30 @@ class MessageCard(SimpleCardWidget):
                 QColor("#FFB86B"),
                 QColor("#7BE3A1"),
             ]
-            shift = int((self._pulse_phase / (math.pi * 2)) * len(rainbow))
-            rainbow = rainbow[shift:] + rainbow[:shift]
-            positions = [0.0, 0.2, 0.4, 0.62, 0.82, 1.0]
-            for pos, color in zip(positions, rainbow):
+            shift = int((self._pulse_phase / (math.pi * 2)) * len(main_colors))
+            main_colors = main_colors[shift:] + main_colors[:shift]
+            main_positions = [0.0, 0.2, 0.4, 0.62, 0.82, 1.0]
+            for pos, color in zip(main_positions, main_colors):
                 c = QColor(color)
-                c.setAlpha(175)
-                gradient.setColorAt(pos, c)
+                main_alpha = int(200 * breathe)
+                c.setAlpha(main_alpha)
+                main_gradient.setColorAt(pos, c)
         else:
             pulse = QColor(self._theme["accent"])
-            glow_alpha = 90 + int(45 * (math.sin(self._pulse_phase) + 1) / 2)
-            pulse.setAlpha(glow_alpha)
-            gradient.setColorAt(0.0, pulse.lighter(120))
-            gradient.setColorAt(0.5, pulse)
-            gradient.setColorAt(1.0, pulse.darker(130))
+            glow_alpha = 90 + int(45 * (math.sin(self._pulse_phase * 1.5) + 1) / 2)
+            pulse.setAlpha(int(glow_alpha * breathe))
+            main_gradient.setColorAt(0.0, pulse.lighter(120))
+            main_gradient.setColorAt(0.5, pulse)
+            main_gradient.setColorAt(1.0, pulse.darker(130))
 
-        pen = QPen(gradient, 3)
-        painter.setPen(pen)
+        main_pen = QPen(main_gradient, 4)  # 3→4px 加粗
+        painter.setPen(main_pen)
         painter.setBrush(QBrush(Qt.NoBrush))
         painter.drawRoundedRect(1, 1, w - 2, h - 2, radius, radius)
 
-        highlight = QColor(self._theme["accent"])
-        highlight.setAlpha(24)
+        # ── 顶部光晕条 ──
+        highlight = QColor(self._theme["accent"] if self.role != "assistant" else "#63D8FF")
+        highlight.setAlpha(int(28 * breathe))
         painter.fillRect(0, 0, w, 4, highlight)
 
     def set_error_state(self, is_error: bool):
