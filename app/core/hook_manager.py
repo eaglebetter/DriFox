@@ -256,9 +256,41 @@ class HookWorker(QRunnable):
             # 根据操作系统选择合适的编码
             encoding = 'utf-8'
             if os.name == 'nt':
-                # Windows 尝试使用系统编码
+                # Windows: 优先尝试 UTF-8（Bash 输出通常是 UTF-8）
+                # 如果 locale 编码是 GBK/CP936 等中文编码，优先用 UTF-8
                 import locale
-                encoding = locale.getpreferredencoding(False) or 'gbk'
+                preferred = locale.getpreferredencoding(False) or ''
+                # 如果系统编码不是 UTF-8，优先用 UTF-8 读取 bash 输出
+                if preferred.upper() not in ('UTF-8', 'UTF8'):
+                    # 尝试用 UTF-8，如果失败再用系统编码
+                    try:
+                        result = subprocess.run(
+                            command,
+                            cwd=self.cwd,
+                            shell=True,
+                            capture_output=True,
+                            text=True,
+                            encoding='utf-8',
+                            errors='strict'
+                        )
+                    except UnicodeDecodeError:
+                        # UTF-8 失败，用系统编码
+                        result = subprocess.run(
+                            command,
+                            cwd=self.cwd,
+                            shell=True,
+                            capture_output=True,
+                            text=True,
+                            encoding=preferred or 'gbk',
+                            errors='replace'
+                        )
+                    # 检查是否成功
+                    if result.returncode != 0:
+                        return result.stderr or f"Command failed with exit code {result.returncode}", False
+                    return result.stdout or "", True
+            else:
+                # Unix 系统直接用 utf-8
+                preferred = 'utf-8'
             
             result = subprocess.run(
                 command,
@@ -739,21 +771,58 @@ class HookManager:
                         # 根据操作系统选择合适的编码
                         encoding = 'utf-8'
                         if os.name == 'nt':
+                            # Windows: 优先尝试 UTF-8（Bash 输出通常是 UTF-8）
                             import locale
-                            encoding = locale.getpreferredencoding(False) or 'gbk'
-                        
-                        result = subprocess.run(
-                            command,
-                            cwd=cwd,
-                            shell=True,
-                            capture_output=True,
-                            text=True,
-                            encoding=encoding,
-                            errors='replace',
-                            timeout=hook.timeout
-                        )
-                        success = result.returncode == 0
-                        output = result.stdout if success else (result.stderr or f"Exit code {result.returncode}")
+                            preferred = locale.getpreferredencoding(False) or ''
+                            if preferred.upper() not in ('UTF-8', 'UTF8'):
+                                try:
+                                    result = subprocess.run(
+                                        command,
+                                        cwd=cwd,
+                                        shell=True,
+                                        capture_output=True,
+                                        text=True,
+                                        encoding='utf-8',
+                                        errors='strict'
+                                    )
+                                except UnicodeDecodeError:
+                                    result = subprocess.run(
+                                        command,
+                                        cwd=cwd,
+                                        shell=True,
+                                        capture_output=True,
+                                        text=True,
+                                        encoding=preferred or 'gbk',
+                                        errors='replace'
+                                    )
+                                success = result.returncode == 0
+                                output = result.stdout if success else (result.stderr or f"Exit code {result.returncode}")
+                            else:
+                                result = subprocess.run(
+                                    command,
+                                    cwd=cwd,
+                                    shell=True,
+                                    capture_output=True,
+                                    text=True,
+                                    encoding='utf-8',
+                                    errors='replace',
+                                    timeout=hook.timeout
+                                )
+                                success = result.returncode == 0
+                                output = result.stdout if success else (result.stderr or f"Exit code {result.returncode}")
+                        else:
+                            result = subprocess.run(
+                                command,
+                                cwd=cwd,
+                                shell=True,
+                                capture_output=True,
+                                text=True,
+                                encoding='utf-8',
+                                errors='replace',
+                                timeout=hook.timeout
+                            )
+                            success = result.returncode == 0
+                            output = result.stdout if success else (result.stderr or f"Exit code {result.returncode}")
                 
                 elif hook.type == HookType.HTTP.value:
                     import urllib.request
