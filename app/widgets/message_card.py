@@ -850,10 +850,12 @@ class CodeWebViewer(QWebEngineView):
     # WebEngine 上下文丢失信号
     contextLost = pyqtSignal()
     contextRestored = pyqtSignal()
+    needRecreate = pyqtSignal()  # 需要完全重建控件（恢复失败时）
 
     # WebEngine 最大尺寸限制，防止 GPU 内存溢出
-    MAX_WIDTH = 1600
-    MAX_HEIGHT = 2000
+    # macOS GPU 对过大离屏缓冲分配失败，所以需要保守限制
+    MAX_WIDTH = 1800
+    MAX_HEIGHT = 4000
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -916,6 +918,12 @@ class CodeWebViewer(QWebEngineView):
             self._context_lost = True
             self._context_lost_count += 1
             self.contextLost.emit()
+            
+            # 如果已经丢失超过1次，直接请求重建
+            if self._context_lost_count > 1:
+                self.needRecreate.emit()
+                return
+            
             # 尝试恢复上下文
             self._schedule_context_restore()
 
@@ -936,6 +944,8 @@ class CodeWebViewer(QWebEngineView):
                 self._schedule_render(immediate=True)
         except Exception as e:
             print(f"Context restore failed: {e}")
+            # 恢复失败，请求重建
+            self.needRecreate.emit()
 
     def event(self, event):
         """拦截 WebEngine 事件"""
@@ -994,6 +1004,16 @@ class CodeWebViewer(QWebEngineView):
         safe_h = min(h, self.MAX_HEIGHT) if isinstance(h, int) else h
 
         super().resize(safe_w, safe_h)
+    
+    def setFixedHeight(self, height):
+        """限制最大高度，防止 GPU 内存溢出"""
+        safe_h = min(height, self.MAX_HEIGHT)
+        super().setFixedHeight(safe_h)
+    
+    def setFixedWidth(self, width):
+        """限制最大宽度，防止 GPU 内存溢出"""
+        safe_w = min(width, self.MAX_WIDTH)
+        super().setFixedWidth(safe_w)
 
     def _install_dialog_filter(self):
         """安装事件过滤器，监听对话框显示"""
@@ -1143,7 +1163,9 @@ class CodeWebViewer(QWebEngineView):
                     font-family: "{font_family}", "Segoe UI", sans-serif; font-size: 14px; line-height: 1.5;
                     margin: 0; 
                     padding: 6px 14px; 
-                    overflow: hidden;
+                    max-height: {self.MAX_HEIGHT}px;
+                    overflow-x: hidden;
+                    overflow-y: auto;
                 }}
                 {scrollbar_css}
 
@@ -1682,6 +1704,10 @@ class CodeWebViewer(QWebEngineView):
                         }});
 
                         if (window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise();
+                        
+                        // 自动滚动到 body 底部（流式时新内容在底部）
+                        document.body.scrollTop = document.body.scrollHeight;
+                        
                         // 使用延迟报告，确保折叠框高度设为 auto 后浏览器布局完成
                         setTimeout(() => reportHeight(), 50);
                     }}
@@ -1825,6 +1851,8 @@ class CodeWebViewer(QWebEngineView):
                     p.textContent = {json.dumps(escaped)};
                     c.appendChild(p);
                 }}
+                // 流式增量追加时，让 body 内部滚动到最底部
+                document.body.scrollTop = document.body.scrollHeight;
             }})();
             """
             self.page().runJavaScript(js)
@@ -2414,6 +2442,7 @@ class MessageCard(SimpleCardWidget):
             # WebEngine 上下文丢失处理
             self.viewer.contextLost.connect(self._on_webengine_context_lost)
             self.viewer.contextRestored.connect(self._on_webengine_context_restored)
+            self.viewer.needRecreate.connect(self._on_webengine_need_recreate)
             self.viewer._install_dialog_filter()
             self._viewer_layout.addWidget(self.viewer)
             main.addWidget(self._viewer_container)
@@ -2507,6 +2536,52 @@ class MessageCard(SimpleCardWidget):
         self._apply_card_style()
         self._webengine_needs_restore = False
         # 重新同步宽度
+        self.sync_width(force=True)
+
+    def _on_webengine_need_recreate(self):
+        """需要完全重建 WebEngine 视图（GPU上下文丢失无法恢复时）"""
+        if not self._lazy_rendered or self.viewer is None:
+            return
+        
+        # 保存当前内容
+        markdown_text = None
+        if hasattr(self.viewer, '_markdown_text'):
+            markdown_text = self.viewer._markdown_text
+        
+        # 销毁旧viewer
+        self.viewer.deleteLater()
+        
+        # 重新创建viewer
+        for i in reversed(range(self._viewer_layout.count())):
+            item = self._viewer_layout.itemAt(i)
+            if item and item.widget():
+                item.widget().deleteLater()
+        
+        self.viewer = CodeWebViewer(self)
+        self.viewer._lazy_markdown_cb = lambda: content_to_markdown(self._content_data)
+        self.viewer.codeActionRequested.connect(self.actionRequested.emit)
+        self.viewer.contextActionRequested.connect(self.contextActionRequested.emit)
+        self.viewer.contentHeightChanged.connect(self._update_height)
+        self.viewer.toolDiffRequested.connect(self.toolDiffRequested.emit)
+        self.viewer.subAgentLogRequested.connect(self.subAgentLogRequested.emit)
+        self.viewer.saveFileRequested.connect(self.saveFileRequested.emit)
+        self.viewer.contextLost.connect(self._on_webengine_context_lost)
+        self.viewer.contextRestored.connect(self._on_webengine_context_restored)
+        self.viewer.needRecreate.connect(self._on_webengine_need_recreate)
+        self.viewer._install_dialog_filter()
+        
+        self._viewer_layout.addWidget(self.viewer)
+        
+        # 恢复内容
+        if markdown_text:
+            self.viewer._markdown_text = markdown_text
+            self.viewer._schedule_render(immediate=True)
+        
+        # 恢复正常样式
+        self._apply_card_style()
+        self._webengine_needs_restore = False
+        
+        # 同步宽度
         self.sync_width(force=True)
 
     def paintEvent(self, event):
@@ -2869,6 +2944,7 @@ class MessageCard(SimpleCardWidget):
             # WebEngine 上下文丢失处理
             self.viewer.contextLost.connect(self._on_webengine_context_lost)
             self.viewer.contextRestored.connect(self._on_webengine_context_restored)
+            self.viewer.needRecreate.connect(self._on_webengine_need_recreate)
             # 安装对话框过滤
             self.viewer._install_dialog_filter()
 

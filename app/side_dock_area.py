@@ -409,7 +409,14 @@ class ToolPopupDialog(QDialog):
             self._opacity_slider.move(pos)
 
     def _set_window_passthrough(self, enabled: bool):
-        """使用 Windows API 实现真正的鼠标穿透到下层软件"""
+        """使用 Windows API 实现真正的鼠标穿透到下层软件（仅 Windows）"""
+        import platform
+
+        # macOS 不支持这种方式，透明穿透在 macOS 上会导致窗口系统问题
+        if platform.system() != "Windows":
+            logger.debug(f"[ToolPopupDialog] 穿透模式仅支持 Windows，macOS 跳过")
+            return
+
         import ctypes
 
         GWL_EXSTYLE = -20

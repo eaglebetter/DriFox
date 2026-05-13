@@ -780,6 +780,21 @@ class OpenAIChatToolWindow(ToolWindow):
         self._settings_popup.llmProviderCard.showAddProviderCard.connect(self._show_provider_add_card)
         self._settings_popup.llmProviderCard.showEditProviderCard.connect(self._show_provider_edit_card)
 
+        # 连接 Hook 添加/编辑信号
+        self._settings_popup.hookListCard.showAddHookCard.connect(self._show_hook_add_card)
+
+        # Hook 编辑卡片
+        from app.widgets.hook_setting_card import HookEditCard
+        self._hook_edit_card = BaseSettingsCard("Hook 配置", "⚙️", parent=self)
+        self._hook_edit_card.setFixedHeight(380)
+        self._hook_edit_popup = HookEditCard(parent=self)
+        self._hook_edit_popup.saved.connect(self._on_hook_edit_saved)
+        self._hook_edit_popup.closed.connect(self._on_hook_edit_closed)
+        self._hook_edit_card.content_layout.addWidget(self._hook_edit_popup)
+        self._hook_edit_card.set_save_button_handler(self._hook_edit_popup._on_save)
+        self._hook_edit_card.setVisible(False)
+        layout.addWidget(self._hook_edit_card)
+
         # 服务商编辑卡片
         self._provider_edit_card = BaseSettingsCard("服务商配置", "⚙️", parent=self)
         self._provider_edit_card.setFixedHeight(380)
@@ -1239,6 +1254,46 @@ class OpenAIChatToolWindow(ToolWindow):
         )
         self._provider_edit_card.show()
 
+    # ========== Hook 编辑卡片 ==========
+
+    def _show_hook_add_card(self):
+        """显示添加 Hook 卡片"""
+        from app.widgets.hook_setting_card import HookEditCard
+        self._settings_popup.hide()
+        self._hook_edit_card.set_title("➕ 添加 Hook")
+        # 重新创建 HookEditCard
+        self._hook_edit_popup = HookEditCard(parent=self)
+        self._hook_edit_popup.saved.connect(self._on_hook_edit_saved)
+        self._hook_edit_popup.closed.connect(self._on_hook_edit_closed)
+        while self._hook_edit_card.content_layout.count():
+            item = self._hook_edit_card.content_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        self._hook_edit_card.content_layout.addWidget(self._hook_edit_popup)
+        self._hook_edit_card.set_save_button_handler(
+            lambda: self._hook_edit_popup._on_save()
+        )
+        self._hook_edit_card.show()
+
+    def _on_hook_edit_saved(self, values: dict):
+        """Hook 保存回调"""
+        self._hook_edit_card.hide()
+        self._settings_popup.show()
+        # 通过 HookListSettingCard 添加 hook
+        if hasattr(self._settings_popup, 'hookListCard'):
+            self._settings_popup.hookListCard._add_hook(
+                event=values["event"],
+                command=values["command"],
+                matcher=values["matcher"],
+                hook_type=values["type"],
+                enabled=values["enabled"]
+            )
+
+    def _on_hook_edit_closed(self):
+        """Hook 编辑关闭回调"""
+        self._hook_edit_card.hide()
+        self._settings_popup.show()
+
     def _show_provider_edit_card(self, provider_name: str, provider_info: dict):
         """显示编辑服务商卡片"""
         # 隐藏设置卡片，显示服务商编辑卡片
@@ -1262,6 +1317,46 @@ class OpenAIChatToolWindow(ToolWindow):
             lambda: self._provider_edit_popup._on_save()
         )
         self._provider_edit_card.show()
+
+    # ========== Hook 编辑卡片 ==========
+
+    def _show_hook_add_card(self):
+        """显示添加 Hook 卡片"""
+        from app.widgets.hook_setting_card import HookEditCard
+        self._settings_popup.hide()
+        self._hook_edit_card.set_title("➕ 添加 Hook")
+        # 重新创建 HookEditCard
+        self._hook_edit_popup = HookEditCard(parent=self)
+        self._hook_edit_popup.saved.connect(self._on_hook_edit_saved)
+        self._hook_edit_popup.closed.connect(self._on_hook_edit_closed)
+        while self._hook_edit_card.content_layout.count():
+            item = self._hook_edit_card.content_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        self._hook_edit_card.content_layout.addWidget(self._hook_edit_popup)
+        self._hook_edit_card.set_save_button_handler(
+            lambda: self._hook_edit_popup._on_save()
+        )
+        self._hook_edit_card.show()
+
+    def _on_hook_edit_saved(self, values: dict):
+        """Hook 保存回调"""
+        self._hook_edit_card.hide()
+        self._settings_popup.show()
+        # 通过 HookListSettingCard 添加 hook
+        if hasattr(self._settings_popup, 'hookListCard'):
+            self._settings_popup.hookListCard._add_hook(
+                event=values["event"],
+                command=values["command"],
+                matcher=values["matcher"],
+                hook_type=values["type"],
+                enabled=values["enabled"]
+            )
+
+    def _on_hook_edit_closed(self):
+        """Hook 编辑关闭回调"""
+        self._hook_edit_card.hide()
+        self._settings_popup.show()
 
     def _hide_main_popups(self):
         """隐藏主要的悬浮面板（互斥显示）

@@ -431,7 +431,9 @@ class SkillListSettingCard(ExpandSettingCard):
         elif not enabled and name in self.enabled_skills:
             self.enabled_skills.remove(name)
 
-        qconfig.set(self.configItem, self.enabled_skills, save=True)
+        # 使用 Settings.set() 而非 qconfig.set()，确保持久化到正确的配置文件
+        from app.utils.config import Settings
+        Settings.get_instance().set(self.configItem, self.enabled_skills, save=True)
         self.skillsChanged.emit(self.enabled_skills)
 
 

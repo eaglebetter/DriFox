@@ -198,6 +198,23 @@ class LLMSettingsCard(SimpleCardWidget):
         )
         content_layout.addWidget(self.llmSkillsCard)
 
+        # Hooks 管理
+        from app.widgets.hook_setting_card import HookListSettingCard
+        
+        hook_manager = getattr(self.parent(), 'backend', None)
+        if hook_manager:
+            hook_manager = hook_manager.hook_manager
+
+        self.hookListCard = HookListSettingCard(
+            icon=get_icon("智能体"),
+            title="Hooks 管理",
+            content="管理全局 Hooks",
+            parent=self,
+            home=self,
+            hook_manager=hook_manager,
+        )
+        content_layout.addWidget(self.hookListCard)
+
         # 全局字体设置
         self._setup_font_card()
         content_layout.addWidget(self.llmFontCard)

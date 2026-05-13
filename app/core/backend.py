@@ -154,7 +154,7 @@ class ChatBackend(QObject):
         self._hook_manager = HookManager(self._thread_pool)
         # Hook 完成后，把输出添加到上下文
         def on_hook_finished(event_name: str, output: str, success: bool):
-            logger.info(f"[HookManager] Hook callback: event={event_name}, success={success}")
+            logger.info(f"[HookManager] Hook callback: event={event_name}, success={success}，output={output[:100]}...")
             
             # 只有成功执行的 hook 才添加到消息列表
             if not success:

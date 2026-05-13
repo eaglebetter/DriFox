@@ -211,6 +211,14 @@ class PermissionResolver:
 
 
 class AgentManager:
+    """
+    Agent/Skill 管理器
+    
+    支持从以下位置加载 hooks:
+    - agents/{name}/hooks/hooks.json
+    - skills/{name}/hooks/hooks.json  
+    - skills/{name}/SKILL.md (frontmatter hooks 配置)
+    """
     DEFAULT_TOOLS = ["Read", "Grep", "Glob", "Bash", "write", "edit"]
 
     def __init__(self, agents_dir: Optional[str] = None, hook_manager: Optional[HookManager] = None):
@@ -292,6 +300,132 @@ class AgentManager:
                                     logger.info(f"[AgentManager] Loaded {count} hooks from skill {skill_name}")
                             except Exception as e:
                                 logger.error(f"[AgentManager] Failed to load hooks from skill {hooks_file}: {e}")
+                        
+                        # 支持从 SKILL.md frontmatter 加载 hooks
+                        skill_md = skill_dir / "SKILL.md"
+                        if skill_md.exists():
+                            try:
+                                self._load_skill_hooks_from_markdown(skill_dir, skill_md)
+                            except Exception as e:
+                                logger.error(f"[AgentManager] Failed to load hooks from SKILL.md {skill_md}: {e}")
+
+    def _load_skill_hooks_from_markdown(self, skill_dir: Path, md_file: Path):
+        """
+        从 SKILL.md frontmatter 加载 hooks 配置
+        
+        支持格式:
+        ---
+        name: my-skill
+        ---
+        <hooks>
+        SessionStart:
+          - command: echo "Hello"
+        PreToolUse:
+          - matcher: "tool:bash"
+            command: echo "Running bash"
+        </hooks>
+        """
+        import re
+        
+        content = md_file.read_text(encoding='utf-8')
+        
+        # 解析 frontmatter
+        if not content.startswith("---"):
+            return None
+            
+        parts = content.split("---", 2)
+        if len(parts) < 3:
+            return
+        
+        frontmatter = parts[1]
+        body = parts[2]
+        
+        # 查找 <hooks> 块
+        hooks_pattern = r'<hooks>(.*?)</hooks>'
+        hooks_match = re.search(hooks_pattern, body, re.DOTALL)
+        
+        if not hooks_match:
+            return
+        
+        hooks_text = hooks_match.group(1).strip()
+        skill_name = skill_dir.name
+        skill_root = str(skill_dir.absolute())
+        
+        # 解析简化的 hooks 格式
+        config = self._parse_inline_hooks(hooks_text)
+        
+        if config.get("hooks"):
+            count = self._hook_manager.register_hooks_from_json(skill_name, skill_root, config)
+            if count > 0:
+                logger.info(f"[AgentManager] Loaded {count} hooks from SKILL.md of {skill_name}")
+    
+    def _parse_inline_hooks(self, hooks_text: str) -> dict:
+        """
+        解析内联 hooks 文本格式
+        
+        格式:
+        EventName:
+          - command: "echo hello"
+          - matcher: "tool:bash"
+            command: "echo bash"
+        """
+        import re
+        
+        config = {"hooks": {}}
+        current_event = None
+        current_hook = None
+        
+        for line in hooks_text.split('\n'):
+            line = line.rstrip()
+            
+            # 跳过空行和注释
+            if not line.strip() or line.strip().startswith('#'):
+                continue
+            
+            # 检测事件名 (行首无缩进的键名)
+            if line and not line.startswith(' ') and not line.startswith('\t') and ':' in line:
+                event_name = line.split(':')[0].strip()
+                if event_name:
+                    current_event = event_name
+                    if event_name not in config["hooks"]:
+                        config["hooks"][event_name] = []
+                    continue
+            
+            if current_event is None:
+                continue
+            
+            # 检测 hook 条目 (以 - 开头)
+            if line.strip().startswith('-'):
+                hook_data = {}
+                indent = len(line) - len(line.lstrip())
+                hook_indent = indent
+                
+                # 解析 - 后面的内容
+                after_dash = line.lstrip()[1:].strip()
+                
+                if ':' in after_dash:
+                    key, value = after_dash.split(':', 1)
+                    hook_data[key.strip()] = value.strip().strip('"\'')
+                
+                current_hook = hook_data
+                config["hooks"][current_event].append({"hooks": [hook_data]})
+                continue
+            
+            # 检测 continuation (同缩进的键值对)
+            if current_hook is not None and ':' in line:
+                indent = len(line) - len(line.lstrip())
+                key, value = line.split(':', 1)
+                key = key.strip()
+                value = value.strip().strip('"\'')
+                
+                # 检查是否是 tool: 前缀
+                if value.startswith('tool:') or value.startswith('regex:'):
+                    # 这实际上是 matcher
+                    current_hook['matcher'] = value
+                else:
+                    current_hook[key] = value
+        
+        return config
 
     def _parse_markdown_agent(self, file_path: Path) -> Optional[Agent]:
         content = file_path.read_text(encoding="utf-8")
