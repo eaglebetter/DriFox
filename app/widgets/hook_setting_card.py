@@ -325,23 +325,17 @@ class HookListSettingCard(ExpandSettingCard):
     def _setup_ui(self):
         self.viewLayout.setSpacing(0)
         self.viewLayout.setAlignment(Qt.AlignTop)
+        self.viewLayout.setContentsMargins(8, 0, 8, 0)
         
-        # 按钮行
-        btn_widget = QWidget(self.view)
-        btn_layout = QHBoxLayout(btn_widget)
-        btn_layout.setContentsMargins(16, 8, 16, 8)
-        
-        self.addButton = PushButton("+ 添加", self)
-        self.refreshButton = PushButton("⟳ 刷新", self)
+        # 按钮移到卡片头部（类似 SkillListSettingCard）
+        self.addButton = PushButton("添加", self, FluentIcon.ADD)
+        self.refreshButton = PushButton("刷新", self, FluentIcon.SYNC)
         
         self.addButton.clicked.connect(self.showAddHookCard.emit)
         self.refreshButton.clicked.connect(self._refresh)
         
-        btn_layout.addWidget(self.addButton)
-        btn_layout.addWidget(self.refreshButton)
-        btn_layout.addStretch(1)
-        
-        self.viewLayout.addWidget(btn_widget)
+        self.addWidget(self.addButton)
+        self.addWidget(self.refreshButton)
         
         # 事件分组
         self._render_hooks()
@@ -433,10 +427,14 @@ class HookListSettingCard(ExpandSettingCard):
     def _refresh(self):
         """刷新 hook 列表"""
         self._load_hooks()
-        # 移除现有条目（保留按钮行）
-        while self.viewLayout.count() > 1:
-            item = self.viewLayout.takeAt(1)
-            if item.widget():
-                item.widget().deleteLater()
+        # 移除 viewLayout 中的所有 widgets
+        for i in reversed(range(self.viewLayout.count())):
+            item = self.viewLayout.itemAt(i)
+            widget = item.widget()
+            if widget:
+                self.viewLayout.removeItem(item)
+                widget.deleteLater()
         # 重新渲染
         self._render_hooks()
+        # 调整展开区域高度
+        self._adjustViewSize()
