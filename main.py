@@ -128,9 +128,6 @@ def main():
     # 跳过历史会话恢复
     chat_window._skip_restore_history = True
 
-    # 延迟初始化会话
-    QTimer.singleShot(100, chat_window._create_new_session)
-
     popup.show()
 
     logger.info("LLM Chatter 启动成功")

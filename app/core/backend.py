@@ -186,8 +186,8 @@ class ChatBackend(QObject):
                 logger.info(f"[HookManager] Hook added to messages: {event_name}")
         self._hook_manager.set_on_finished_callback(on_hook_finished)
         
-        # 4. 使用 create_session() 触发 SessionStart hook（必须在 hook_manager 之后）
-        self.create_session()
+        # 4. 创建初始会话（不触发 SessionStart hook，避免重复初始化）
+        self.create_session(trigger_hook=False)
         
         # 3. 使用传入的 AgentManager 或创建新的
         self._agent_manager = AgentManager(str(Path(__file__).parent.parent / "agents"), self._hook_manager)
@@ -386,13 +386,17 @@ class ChatBackend(QObject):
     
     # ========== 会话管理 ==========
     
-    def create_session(self) -> ChatSession:
-        """创建新会话"""
+    def create_session(self, trigger_hook: bool = True) -> ChatSession:
+        """创建新会话
+        
+        Args:
+            trigger_hook: 是否触发 SessionStart hook。初始化时设为 False 避免重复触发。
+        """
         session = self._session_manager.create_new_session()
         self.session_created.emit(session.session_id)
         
         # Trigger SessionStart hook
-        if self._hook_manager:
+        if trigger_hook and self._hook_manager:
             context = {
                 "project_root": os.getcwd(),
             }
