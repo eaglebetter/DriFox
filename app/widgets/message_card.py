@@ -2025,11 +2025,24 @@ class CodeWebViewer(QWebEngineView):
         # 清理页面：先加载空白页释放资源
         try:
             self.setHtml("")
-            if hasattr(self, '_page'):
-                self._page.deleteLater()
-                delattr(self, '_page')
         except RuntimeError:
             pass
+        
+        # 清理页面对象
+        try:
+            if hasattr(self, '_page'):
+                self._page.deleteLater()
+                del self._page
+        except (RuntimeError, AttributeError):
+            pass
+        
+        # 清理代码块缓存
+        if hasattr(self, '_code_block_cache'):
+            self._code_block_cache.clear()
+            self._code_block_cache = None
+        
+        # 清理滚动位置
+        self._last_scroll_position = 0
 
     def deleteLater(self):
         self.cleanup()
@@ -2138,18 +2151,27 @@ class PlainTextViewer(QWidget):
         """
         try:
             self._resize_debounce_timer.stop()
+            self._resize_debounce_timer.deleteLater()
         except RuntimeError:
             pass
 
         # 清理文本缓存
         self._text = ""
 
-        # 清理 QTextEdit
+        # 清理 QTextEdit（关键修复：先清空内容，再释放文档）
         if hasattr(self, 'text_edit') and self.text_edit:
             try:
                 self.text_edit.clear()
+                # 释放文档以释放内存
+                doc = self.text_edit.document()
+                doc.setPlainText("")
+                # 清空undo/redo历史
+                doc.setUndoRedoEnabled(False)
             except RuntimeError:
                 pass
+        
+        # 清理引用
+        self.text_edit = None
 
 
 class MessageCard(SimpleCardWidget):
@@ -3123,16 +3145,26 @@ class MessageCard(SimpleCardWidget):
             except RuntimeError:
                 pass
 
-        # 调用 viewer 的清理方法
+        # 调用 viewer 的清理方法（先清理后释放引用）
         if hasattr(self.viewer, 'cleanup'):
             try:
                 self.viewer.cleanup()
             except RuntimeError:
                 pass
+        self.viewer = None  # 释放 viewer 引用，允许 GC
 
         # 清理大数据缓存
         self._content_data = None
         self._interactive_options = []
+        self._markdown_text = None  # 大 markdown 文本
+        self._last_rendered_html = None  # 大 HTML 字符串
+        self._last_rendered_markdown = None  # 可能很大的 markdown
+        self._rendered_code_blocks = []  # 代码块缓存
+
+        # 清理 markdown_cache 如果存在
+        if hasattr(self, '_markdown_cache') and self._markdown_cache:
+            self._markdown_cache.clear()
+            self._markdown_cache = None
 
     def closeEvent(self, e):
         self.cleanup()

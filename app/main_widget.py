@@ -4471,16 +4471,16 @@ class OpenAIChatToolWindow(ToolWindow):
 
     def _refresh_balance(self):
         """刷新余额显示（对话完成后调用）"""
-        print(f"[Balance] _refresh_balance called, provider={getattr(self, '_current_provider_name', 'None')}")
+        logger.debug(f"[Balance] _refresh_balance called, provider={getattr(self, '_current_provider_name', 'None')}")
         balance_display = getattr(self, "balance_display", None)
         if balance_display:
             # 如果当前服务商支持余额查询，则刷新
             provider_name = getattr(self, "_current_provider_name", "")
-            print(f"[Balance] provider_name={provider_name}")
+            logger.debug(f"[Balance] provider_name={provider_name}")
             if provider_name in ("DeepSeek", "SiliconFlow (硅基流动)"):
                 config = self._valid_configs.get(provider_name, {})
                 api_key = config.get("API_KEY", "")
-                print(f"[Balance] api_key exists: {bool(api_key)}")
+                logger.debug(f"[Balance] api_key exists: {bool(api_key)}")
                 if api_key:
                     balance_display.set_provider(provider_name, api_key)
                     return
@@ -4564,6 +4564,7 @@ class OpenAIChatToolWindow(ToolWindow):
         self._notify_if_inactive(f"{current_title} - 错误", error[:100])
 
     def _on_user_message_added(self, user_text: str):
+        """TODO: 实现用户消息添加时的回调处理"""
         pass
 
     def _on_skill_requested(self, method: str, params: dict):
@@ -4637,7 +4638,7 @@ class OpenAIChatToolWindow(ToolWindow):
             self.input_area.setFocus()
 
     def _on_agent_switched(self, agent_name: str):
-        """智能体切换回调 - 丝滑切换，不清空对话"""
+        """TODO: 实现智能体切换时的状态同步"""
         pass
 
     def _on_permission_approval_requested(

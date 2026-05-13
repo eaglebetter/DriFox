@@ -542,7 +542,7 @@ Use the tools available to you based on your permissions.
                                 name = meta.get("name", skill_dir.name)
                                 description = meta.get("description", "")
                         except Exception:
-                            pass
+                            logger.debug(f"Failed to parse skill frontmatter: {skill_dir}")
                     result_parts.append(f"\n### {name}\n{description}\n")
                 except Exception:
                     continue
@@ -617,7 +617,7 @@ def get_available_skills() -> List[Dict]:
                         name = meta.get("name", name)
                         description = meta.get("description", "")
                 except Exception:
-                    pass
+                    logger.debug(f"Failed to parse skill meta: {name}")
 
             results.append({"name": name, "description": description})
 

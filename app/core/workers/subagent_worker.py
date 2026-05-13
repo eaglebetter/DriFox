@@ -451,7 +451,11 @@ class SubAgentExecutor(QThread):
                 {
                     "role": "tool",
                     "tool_call_id": tool_call_id,
+                    "name": tool_name,  # 添加 name 字段与 ChatWorker 一致
+                    "arguments": arguments,  # 添加 arguments 字段与 ChatWorker 一致
                     "content": result_content,
+                    "success": success,  # 添加 success 字段与 ChatWorker 一致
+                    "round_id": f"round_{id(tc)}",  # 添加 round_id 字段与 ChatWorker 一致
                 }
             )
 

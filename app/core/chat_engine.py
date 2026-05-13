@@ -2,9 +2,6 @@
 """
 聊天引擎模块 - 处理 LLM 对话的核心逻辑
 """
-import os
-import anyio
-from datetime import datetime
 from typing import Dict, List, Optional, Any, Callable
 
 from loguru import logger
@@ -14,18 +11,15 @@ from app.core.chat_session import (
     ChatSession,
     SessionManager,
 )
+from app.core.context_builder import ContextBuilder
 from app.core.history_compactor import HistoryCompactor
 from app.core.message_content import (
     consolidate_messages,
 )
 from app.core.permission_cache import PermissionCache
-from app.core.provider_profile import (
-    get_provider_profile,
-)
-from app.core.token_estimator import count_messages_tokens, estimate_tokens
+from app.core.token_estimator import count_messages_tokens
 from app.core.workers import OpenAIChatWorker
 from app.tools import get_builtin_tools_schema
-from app.utils.config import Settings
 
 
 class ChatEngine:
@@ -60,15 +54,49 @@ class ChatEngine:
         self._worker_callbacks = worker_callbacks or {}
         self._api_mode = api_mode
         
+        # Token 计算缓存（已移除版本追踪机制）
+        # 如需缓存优化，可在此处实现基于内容hash的失效判断
+        
         self._compactor = HistoryCompactor(
             get_model_config=get_model_config,
             agent_manager=agent_manager,
+        )
+        
+        # 初始化 ContextBuilder
+        self._context_builder = ContextBuilder(
+            agent_manager=agent_manager,
+            memory_context_getter=get_memory_context,
+            compactor=self._compactor,
         )
 
     @property
     def compactor(self) -> 'HistoryCompactor':
         """暴露压缩器供外部使用（如工具迭代中压缩）"""
         return self._compactor
+    
+    # ========== 属性访问（正式接口，避免直接访问私有属性）==========
+    
+    @property
+    def current_agent(self) -> str:
+        """获取当前 Agent"""
+        return self._current_agent or "plan"
+    
+    def set_current_agent(self, value: str):
+        """设置当前 Agent"""
+        self._current_agent = value
+    
+    @property
+    def is_streaming(self) -> bool:
+        """获取流式状态"""
+        return self._is_streaming
+    
+    def set_streaming(self, value: bool):
+        """设置流式状态"""
+        self._is_streaming = value
+    
+    def get_context_usage(self) -> tuple:
+        """获取上下文使用情况（用于兼容性）"""
+        return (0, 0)  # 占位，后续可实现
 
     def _get_agent_manager(self):
         return self._agent_manager
@@ -156,16 +184,8 @@ class ChatEngine:
             callback(*args, **kwargs)
 
     @property
-    def is_streaming(self) -> bool:
-        return self._is_streaming
-
-    @property
     def session_manager(self) -> SessionManager:
         return self._session_manager
-
-    @property
-    def current_agent(self) -> Optional[str]:
-        return self._current_agent
 
     def switch_agent(self, agent_name: Optional[str]):
         agent_manager = self._get_agent_manager()
@@ -277,138 +297,15 @@ class ChatEngine:
         llm_config: Dict,
         allow_llm_summary: bool = False,
     ) -> List[Dict]:
-        messages: List[Dict[str, Any]] = []
-
-        if self._current_agent:
-            full_system_prompt = self._get_agent_manager().get_agent_system_prompt(
-                self._current_agent, is_subagent_call=False
-            )
-        else:
-            full_system_prompt = self._get_agent_manager().get_unified_system_prompt()
-
-        prompt_parts = [full_system_prompt]
-        
-        # 性能优化：时间放最后，避免每次都重复构建
-        time_part = f"# 当前系统时间\n{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-
-        enabled_skills = Settings.get_instance().llm_enabled_skills.value
-        if enabled_skills and self._agent_manager:
-            skills_content = self._agent_manager.get_enabled_skills_content(
-                enabled_skills
-            )
-            if skills_content:
-                prompt_parts.append(skills_content)
-        custom_prompt = llm_config.get("系统提示", "").strip()
-        if custom_prompt:
-            prompt_parts.append(custom_prompt)
-        
-        # 最后添加时间
-        prompt_parts.append(time_part)
-        
-        # 性能优化：使用单一 join 操作
-        full_system_content = "\n\n".join(prompt_parts)
-
-        if messages and messages[0].get("role") == "system":
-            messages[0]["content"] = full_system_content
-        else:
-            messages.append(
-                {
-                    "role": "system",
-                    "content": full_system_content,
-                }
-            )
-
-        session.system_prompt = full_system_content
-        normalized_session_messages = consolidate_messages(
-            session.get_context_messages()
+        """委托给 ContextBuilder 构建消息"""
+        messages = self._context_builder.build_messages(
+            session=session,
+            llm_config=llm_config,
+            allow_llm_summary=allow_llm_summary,
+            current_agent=self._current_agent,
         )
-        latest_user_message = ""
-        latest_user_timestamp = ""
-        params = {}
-        history_messages = normalized_session_messages
-        if history_messages and history_messages[-1].get("role") == "user":
-            latest_user_message = history_messages[-1].get("content", "")
-            latest_user_timestamp = history_messages[-1].get("timestamp", "")
-            params = history_messages[-1].get("params", {})
-            history_messages = history_messages[:-1]
-
-        if self._get_memory_context:
-            try:
-                memory_context = self._get_memory_context(latest_user_message)
-            except TypeError:
-                memory_context = self._get_memory_context()
-            if memory_context:
-                messages[0]["content"] = (
-                    messages[0]["content"] + "\n\n" + memory_context
-                )
-        budget = self._compactor.get_budget(llm_config)
-        history_for_api, compaction_state, compaction_cache = anyio.run(
-            anyio.to_thread.run_sync,
-            lambda: self._compactor.compact(
-                history_messages,
-                budget,
-                existing_cache=getattr(session, "compaction_cache", None),
-                allow_llm_summary=allow_llm_summary,
-            )
-        )
-        session.set_compaction_state(compaction_state)
-        session.set_compaction_cache(compaction_cache)
-
-        filtered_history = [m for m in history_for_api if m.get("role") != "system"]
-        messages.extend(filtered_history)
-
-        user_msg = {"role": "user", "content": latest_user_message, "params": params}
-        if latest_user_timestamp:
-            user_msg["timestamp"] = latest_user_timestamp
-        messages.append(user_msg)
+        
         return messages
-
-    def _get_context_budget(self, llm_config: Dict) -> int:
-        profile = get_provider_profile(llm_config)
-        context_limit = int(profile.get("context_limit", 128000))
-
-        # 支持多种上下文长度配置字段名
-        for key in (
-            "context_limit",
-            "context_window",
-            "max_context_tokens",
-            "max_input_tokens",
-            "最大Token",  # 用户在服务商设置中配置的上下文长度
-        ):
-            value = llm_config.get(key)
-            if value in (None, ""):
-                continue
-            try:
-                context_limit = int(value)
-                break
-            except Exception:
-                continue
-
-        max_output_tokens = llm_config.get(
-            "最大新Token",
-            llm_config.get(
-                "max_tokens",
-                llm_config.get(
-                    "max_output_tokens", profile.get("max_output_tokens", 4096)
-                ),
-            ),
-        )
-        try:
-            max_output_tokens = int(max_output_tokens)
-        except Exception:
-            max_output_tokens = int(profile.get("max_output_tokens", 4096))
-
-        model_name = str(llm_config.get("model", "")).lower()
-        profile_max_output = int(profile.get("max_output_tokens", 4096))
-
-        if max_output_tokens > profile_max_output * 2:
-            context_limit = min(context_limit, max_output_tokens)
-
-        reserved = min(800, max_output_tokens)
-        if "o1" in model_name or "o3" in model_name:
-            reserved = min(max_output_tokens, 32000)
-
-        return max(500, context_limit - reserved)
 
     def get_context_usage_snapshot(
         self, session: Optional[ChatSession] = None, llm_config: Optional[Dict] = None
@@ -425,8 +322,10 @@ class ChatEngine:
                 "compacted_tokens": 0,
             }
 
+        # 直接构建消息
         messages = self._build_messages(session, llm_config)
-        budget_tokens = max(1, self._get_context_budget(llm_config))
+        
+        budget_tokens = max(1, self._context_builder.get_context_budget(llm_config))
         used_tokens = count_messages_tokens(messages)
         percent = max(0, min(100, int((used_tokens / budget_tokens) * 100)))
         

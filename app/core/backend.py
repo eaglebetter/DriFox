@@ -452,22 +452,24 @@ class ChatBackend(QObject):
     
     def get_current_agent(self) -> str:
         """获取当前 Agent"""
-        return self._chat_engine._current_agent if self._chat_engine else "plan"
+        if self._chat_engine:
+            return self._chat_engine.current_agent
+        return "plan"
     
     def set_current_agent(self, agent_name: str):
         """设置当前 Agent"""
         if self._chat_engine:
-            self._chat_engine._current_agent = agent_name
+            self._chat_engine.set_current_agent(agent_name)
     
     def set_streaming_state(self, is_streaming: bool):
         """设置流式状态"""
         if self._chat_engine:
-            self._chat_engine._is_streaming = is_streaming
+            self._chat_engine.set_streaming(is_streaming)
     
     def get_context_usage(self) -> tuple:
         """获取上下文使用情况"""
         if self._chat_engine:
-            return self._chat_engine._get_context_usage()
+            return self._chat_engine.get_context_usage()
         return (0, 0)
     
     # ========== 上下文构建方法 ==========

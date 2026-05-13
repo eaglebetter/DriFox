@@ -192,7 +192,7 @@ class HistoryCompactor:
                     context_limit = int(value)
                     break
                 except (ValueError, TypeError):
-                    pass
+                    logger.debug(f"Failed to parse context_limit from: {value}")
 
         max_output_tokens = llm_config.get("最大新Token", 
             llm_config.get("max_tokens",
@@ -204,6 +204,7 @@ class HistoryCompactor:
         try:
             max_output_tokens = int(max_output_tokens)
         except (ValueError, TypeError):
+            logger.debug(f"Failed to parse max_output_tokens: {max_output_tokens}, using default")
             max_output_tokens = int(profile.get("max_output_tokens", 4096))
 
         # O1 模型需要更大的输出预留
