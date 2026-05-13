@@ -154,35 +154,36 @@ class ChatBackend(QObject):
         self._hook_manager = HookManager(self._thread_pool)
         # Hook 完成后，把输出添加到上下文
         def on_hook_finished(event_name: str, output: str, success: bool):
-            if output.strip() and success:
-                hook_output = f"<hook event=\"{event_name}\">\n{output}\n</hook>"
-                
-                # 只有 SessionStart 和 PreUserMessage 添加到消息列表（用于 UI 显示和 LLM）
-                # PreToolUse/PostToolUse 只执行脚本，不加入消息列表，避免打断工具迭代
-                add_to_messages = event_name in ("SessionStart", "PreUserMessage", "PostUserMessage")
-                
-                if add_to_messages:
-                    session = self.get_current_session()
-                    if session:
-                        # 对于 PreUserMessage，先删除之前的同类 hook 消息，只保留最新一个
-                        if event_name == "PreUserMessage":
-                            session.messages = [
-                                msg for msg in session.messages
-                                if not (msg.get("role") == "assistant" and "<hook " in (msg.get("content") or "") and 'event="PreUserMessage"' in (msg.get("content") or ""))
-                            ]
-                        
-                        # 添加新消息
-                        session.add_assistant_message(hook_output)
+            logger.info(f"[HookManager] Hook callback: event={event_name}, success={success}")
+            
+            # 只有成功执行的 hook 才添加到消息列表
+            if not success:
+                return
+            
+            hook_output = f"<hook event=\"{event_name}\">\n{output}\n</hook>"
+            
+            # SessionStart 和 PreUserMessage 添加到消息列表
+            add_to_messages = event_name in ("SessionStart", "PreUserMessage", "PostUserMessage")
+            
+            if add_to_messages:
+                session = self.get_current_session()
+                if session:
+                    # 对于 PreUserMessage，先删除之前的同类 hook 消息，只保留最新一个
+                    if event_name == "PreUserMessage":
+                        session.messages = [
+                            msg for msg in session.messages
+                            if not (msg.get("role") == "assistant" and "<hook " in (msg.get("content") or "") and 'event="PreUserMessage"' in (msg.get("content") or ""))
+                        ]
                     
-                    # 发送消息给前端显示
-                    self.message_received.emit({
-                        "role": "assistant",
-                        "content": hook_output
-                    })
+                    # 添加新消息
+                    session.add_assistant_message(hook_output)
                 
-                # PreToolUse/PostToolUse 只打印日志
-                else:
-                    pass
+                # 发送消息给前端显示
+                self.message_received.emit({
+                    "role": "assistant",
+                    "content": hook_output
+                })
+                logger.info(f"[HookManager] Hook added to messages: {event_name}")
         self._hook_manager.set_on_finished_callback(on_hook_finished)
         
         # 4. 使用 create_session() 触发 SessionStart hook（必须在 hook_manager 之后）

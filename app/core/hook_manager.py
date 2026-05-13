@@ -73,14 +73,19 @@ class HookWorker(QRunnable):
                     errors='replace',
                     timeout=300
                 )
-                output = result.stdout or ""
-                if result.stderr:
-                    logger.debug(f"[HookWorker] stderr: {result.stderr}")
+                
+                # 检查命令是否成功执行
+                if result.returncode != 0:
+                    output = result.stderr or f"Command failed with exit code {result.returncode}"
+                    success = False
+                else:
+                    output = result.stdout or ""
+                    success = True
             
-            self.signals.finished.emit(self.event_name, output, True)
+            self.signals.finished.emit(self.event_name, output, success)
         except Exception as e:
             logger.error(f"[HookWorker] Execution failed: {e}")
-            self.signals.finished.emit(f"Error: {str(e)}", False)
+            self.signals.finished.emit(self.event_name, f"Error: {str(e)}", False)
 
 
 class HookManager:
@@ -263,53 +268,69 @@ class HookManager:
         if need_sync:
             # 同步执行
             try:
-                output = ""
-                if command.startswith("echo "):
-                    output = command[5:].strip()
+                # 对于 echo 命令，直接用 shell=True 执行（Windows 下 echo 是内置命令）
+                if command.strip().startswith("echo "):
+                    output = command.strip()[5:].strip()
+                    # 去掉首尾的引号
                     if output.startswith('"') and output.endswith('"'):
                         output = output[1:-1]
                     elif output.startswith("'") and output.endswith("'"):
                         output = output[1:-1]
+                    if hook.add_output_to_context and self._on_finished_callback:
+                        self._on_finished_callback(event_name, output, True)
+                    logger.info(f"[HookManager] Hook executed: {event_name}")
+                    return
+                
+                parts = self._parse_command(command)
+                if not parts:
+                    return
+
+                cmd = parts[0]
+                args = parts[1:]
+
+                if not os.path.isabs(cmd):
+                    cmd_abs = os.path.normpath(os.path.join(cwd, cmd))
+                    cmd = cmd_abs
+
+                if cmd.lower().endswith('.cmd'):
+                    result = subprocess.run(
+                        ['cmd.exe', '/c', cmd] + args,
+                        cwd=cwd,
+                        shell=False,
+                        capture_output=True,
+                        text=True,
+                        encoding='utf-8',
+                        errors='replace',
+                        timeout=300
+                    )
                 else:
-                    parts = self._parse_command(command)
-                    if not parts:
-                        return
-                    
-                    cmd = parts[0]
-                    args = parts[1:]
-                    
-                    if not os.path.isabs(cmd):
-                        cmd_abs = os.path.normpath(os.path.join(cwd, cmd))
-                        cmd = cmd_abs
-                    
-                    if cmd.lower().endswith('.cmd'):
-                        result = subprocess.run(
-                            ['cmd.exe', '/c', cmd] + args,
-                            cwd=cwd,
-                            shell=False,
-                            capture_output=True,
-                            text=True,
-                            encoding='utf-8',
-                            errors='replace',
-                            timeout=300
-                        )
-                    else:
-                        cmd_msys = cmd.replace('\\', '/').replace(':', '')
-                        result = subprocess.run(
-                            ['bash', cmd_msys] + args,
-                            cwd=cwd,
-                            shell=False,
-                            capture_output=True,
-                            text=True,
-                            encoding='utf-8',
-                            errors='replace',
-                            timeout=300
-                        )
+                    # 使用 shell=True 执行其他命令（确保 Windows 内置命令可用）
+                    result = subprocess.run(
+                        command,
+                        cwd=cwd,
+                        shell=True,
+                        capture_output=True,
+                        text=True,
+                        encoding='utf-8',
+                        errors='replace',
+                        timeout=300
+                    )
+
+                # 检查命令是否成功执行
+                if result.returncode != 0:
+                    output = result.stderr or f"Command failed with exit code {result.returncode}"
+                    success = False
+                else:
                     output = result.stdout or ""
+                    success = True
                 
                 if hook.add_output_to_context and self._on_finished_callback:
-                    self._on_finished_callback(event_name, output, True)
+                    self._on_finished_callback(event_name, output, success)
+                logger.info(f"[HookManager] Hook executed: {event_name}")
+                if not success:
+                    logger.error(f"[HookManager] Hook failed: {event_name} - {output}")
             except Exception as e:
+                logger.error(f"[HookManager] Hook failed: {event_name} - {e}")
                 if hook.add_output_to_context and self._on_finished_callback:
                     self._on_finished_callback(event_name, f"Error: {str(e)}", False)
         else:
@@ -318,6 +339,7 @@ class HookManager:
             if hook.add_output_to_context and self._on_finished_callback:
                 signals.finished.connect(self._on_finished_callback)
             self._thread_pool.start(worker)
+            logger.info(f"[HookManager] Hook triggered (async): {event_name}")
     
     def get_registered_events(self) -> List[str]:
         """获取所有已注册事件"""
