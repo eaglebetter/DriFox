@@ -206,7 +206,7 @@ class LLMSettingsCard(SimpleCardWidget):
             hook_manager = hook_manager.hook_manager
 
         self.hookListCard = HookListSettingCard(
-            icon=get_icon("智能体"),
+            icon=get_icon("hooks"),
             title="Hooks 管理",
             content="管理全局 Hooks",
             parent=self,

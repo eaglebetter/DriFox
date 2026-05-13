@@ -7,6 +7,7 @@ ICON_NAME_TO_FILE = {
     "fox_bg": "fox_bg.png",
     "gemini-ai": "gemini-ai.svg",
     "groq": "groq.svg",
+    "hooks": "hooks.svg",
     "MCP": "MCP.svg",
     "MiniMax": "MiniMax.svg",
     "Ollama": "Ollama.svg",

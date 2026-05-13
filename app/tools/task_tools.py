@@ -260,7 +260,7 @@ class TaskTools:
 
             skills_dirs = [
                 Path(__file__).parent.parent / "skills",
-                get_app_data_dir() / "skills",
+                get_app_data_dir() / ".drifox"/ "skills",
                 Path.home() / ".agents" / "skills",
             ]
             results = []

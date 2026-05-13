@@ -13,8 +13,44 @@ from openai import OpenAI
 from app.core.memory_manager import MEMORY_CATEGORIES
 from app.core.retry_helper import create_api_call_with_retry
 
-# 预编译正则表达式
+# 预编译正则表达式 - 简单的 JSON 对象提取（用于快速定位）
 _JSON_OBJECT_PATTERN = re.compile(r"\{[^{}]*\}", re.DOTALL)
+
+
+def _extract_json(text: str) -> dict | None:
+    """
+    从文本中提取并解析 JSON。
+    
+    使用两种策略：
+    1. 先尝试匹配 ```json ... ``` 代码块
+    2. 再尝试 raw_decode 方式（更健壮，能处理嵌套）
+    3. 最后才用简单的正则匹配
+    """
+    # 策略1: 尝试匹配 ```json ... ``` 块
+    code_block_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+    if code_block_match:
+        try:
+            return json.loads(code_block_match.group(1))
+        except Exception:
+            pass
+    
+    # 策略2: 使用 json.JSONDecoder.raw_decode 解析最外层 JSON
+    try:
+        decoder = json.JSONDecoder()
+        obj, end = decoder.raw_decode(text.strip())
+        return obj
+    except Exception:
+        pass
+    
+    # 策略3: 简单的正则匹配（兜底）
+    match = _JSON_OBJECT_PATTERN.search(text)
+    if match:
+        try:
+            return json.loads(match.group())
+        except Exception:
+            pass
+    
+    return None
 
 
 class TopicSummaryTask(QRunnable):
@@ -169,9 +205,8 @@ class TopicSummaryTask(QRunnable):
 
             resp = create_api_call_with_retry(client, create_task)
             raw_response = resp.choices[0].message.content.strip()
-            json_match = _JSON_OBJECT_PATTERN.search(raw_response)
-            if json_match:
-                result = json.loads(json_match.group())
+            result = _extract_json(raw_response)
+            if result:
                 callback_data = {
                     "topic_summary": result.get("topic_summary", ""),
                     "should_update_memory": result.get("should_update_memory", False),

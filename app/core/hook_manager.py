@@ -237,13 +237,24 @@ class HookWorker(QRunnable):
                 output = output[1:-1]
             return output, True
         else:
+            # 修复路径分隔符问题：Unix / 转 Windows \（如果在 Windows 上）
+            if os.name == 'nt':
+                command = command.replace('/', '\\')
+            
+            # 根据操作系统选择合适的编码
+            encoding = 'utf-8'
+            if os.name == 'nt':
+                # Windows 尝试使用系统编码
+                import locale
+                encoding = locale.getpreferredencoding(False) or 'gbk'
+            
             result = subprocess.run(
                 command,
                 cwd=self.cwd,
                 shell=True,
                 capture_output=True,
                 text=True,
-                encoding='utf-8',
+                encoding=encoding,
                 errors='replace',
                 timeout=self.hook.timeout
             )
@@ -712,13 +723,23 @@ class HookManager:
                         output = command[5:].strip().strip('"\'')
                         success = True
                     else:
+                        # 修复路径分隔符问题：Unix / 转 Windows \（如果在 Windows 上）
+                        if os.name == 'nt':
+                            command = command.replace('/', '\\')
+                        
+                        # 根据操作系统选择合适的编码
+                        encoding = 'utf-8'
+                        if os.name == 'nt':
+                            import locale
+                            encoding = locale.getpreferredencoding(False) or 'gbk'
+                        
                         result = subprocess.run(
                             command,
                             cwd=cwd,
                             shell=True,
                             capture_output=True,
                             text=True,
-                            encoding='utf-8',
+                            encoding=encoding,
                             errors='replace',
                             timeout=hook.timeout
                         )
