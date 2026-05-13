@@ -6,7 +6,7 @@
 # Each session gets its own directory to avoid conflicts.
 #
 # Options:
-#   --project-dir <path>  Store session files under <path>/.superpowers/brainstorm/
+#   --project-dir <path>  Store session files under <path>/.using-superpowers/brainstorm/
 #                         instead of /tmp. Files persist after server stops.
 #   --host <host>         Host/interface to bind (default: 127.0.0.1).
 #                         Use 0.0.0.0 in remote/containerized environments.
