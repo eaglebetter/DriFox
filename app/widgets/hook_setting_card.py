@@ -485,9 +485,12 @@ class HookListSettingCard(ExpandSettingCard):
                 if hook_index < len(hooks):
                     hooks[hook_index]["enabled"] = enabled
                     
-                    # 同步到 HookManager
-                    if self._hook_manager:
-                        self._hook_manager.reload_global_hooks(str(self.hooks_config_file))
+                    # 计算全局 hook_index
+                    hook_global_index = self._get_hook_index(event, rule_index, hook_index)
+                    
+                    # 同步到 HookManager（会自动保存到正确的配置文件）
+                    if self._hook_manager and hook_global_index >= 0:
+                        self._hook_manager.set_hook_enabled(event, hook_global_index, enabled)
                     
                     self.hooksChanged.emit()
     

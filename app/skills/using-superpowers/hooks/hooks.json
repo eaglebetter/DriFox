@@ -5,9 +5,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "./run-hook.cmd  session-start",
-            "cwd":"D:\\work\\DriFoxx\\app\\skills\\superpowers\\hooks",
-            "enabled": true
+            "command": "./run-hook.cmd session-start",
+            "enabled": false
           }
         ]
       }

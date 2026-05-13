@@ -277,7 +277,7 @@ class AgentManager:
                                 config = json.load(f)
                             skill_name = agent_dir.name
                             skill_root = str(agent_dir.absolute())
-                            count = self._hook_manager.register_hooks_from_json(skill_name, skill_root, config)
+                            count = self._hook_manager.register_hooks_from_json(skill_name, skill_root, config, str(hooks_file))
                             if count > 0:
                                 logger.info(f"[AgentManager] Loaded {count} hooks from {skill_name}")
                         except Exception as e:
@@ -295,7 +295,7 @@ class AgentManager:
                                     config = json.load(f)
                                 skill_name = skill_dir.name
                                 skill_root = str(skill_dir.absolute())
-                                count = self._hook_manager.register_hooks_from_json(skill_name, skill_root, config)
+                                count = self._hook_manager.register_hooks_from_json(skill_name, skill_root, config, str(hooks_file))
                                 if count > 0:
                                     logger.info(f"[AgentManager] Loaded {count} hooks from skill {skill_name}")
                             except Exception as e:
@@ -355,7 +355,7 @@ class AgentManager:
         config = self._parse_inline_hooks(hooks_text)
         
         if config.get("hooks"):
-            count = self._hook_manager.register_hooks_from_json(skill_name, skill_root, config)
+            count = self._hook_manager.register_hooks_from_json(skill_name, skill_root, config, str(md_file))
             if count > 0:
                 logger.info(f"[AgentManager] Loaded {count} hooks from SKILL.md of {skill_name}")
     

@@ -95,6 +95,9 @@ class Hook:
     function: Optional[str] = None
     function_args: Optional[Dict[str, Any]] = None
     
+    # config_file: 所属的 hooks.json 配置文件路径（用于 UI 保存）
+    config_file: Optional[str] = None
+    
     @classmethod
     def from_dict(cls, d: dict) -> 'Hook':
         conditions = [HookCondition.from_dict(c) for c in d.get("conditions", [])]
@@ -113,6 +116,7 @@ class Hook:
             allowed_env_vars=d.get("allowedEnvVars"),
             function=d.get("function"),
             function_args=d.get("function_args"),
+            config_file=d.get("config_file"),  # 添加 config_file 字段
         )
     
     def to_dict(self) -> dict:
@@ -132,6 +136,7 @@ class Hook:
             "allowedEnvVars": self.allowed_env_vars,
             "function": self.function,
             "function_args": self.function_args,
+            "config_file": self.config_file,  # 添加 config_file 字段
         }
 
 
@@ -169,10 +174,11 @@ class HookMatchRule:
             return False
     
     @classmethod
-    def from_dict(cls, d: dict, skill_root: str = "") -> 'HookMatchRule':
+    def from_dict(cls, d: dict, skill_root: str = "", config_file: str = "") -> 'HookMatchRule':
         hooks = [Hook.from_dict(h) for h in d.get("hooks", [])]
         for h in hooks:
             h.skill_root = skill_root
+            h.config_file = config_file  # 传递 config_file
         return cls(
             matcher=d.get("matcher"),
             hooks=hooks,
@@ -227,6 +233,12 @@ class HookWorker(QRunnable):
     def _execute_command(self) -> tuple:
         """执行命令"""
         command = self.hook.command
+        
+        # 在异步执行中也做变量替换（从 context 获取 project_root 等）
+        if hasattr(self, 'context') and self.context:
+            project_root = self.context.get('project_root', '')
+            if project_root and os.name == 'nt':
+                command = command.replace('/', '\\')
         
         # 直接在 Python 中执行，避免 Windows cmd 的编码问题
         if command.startswith("echo "):
@@ -430,7 +442,7 @@ class HookManager:
                         # 旧格式兼容
                         rule_data = {"hooks": [rule_data]}
                     
-                    match_rule = HookMatchRule.from_dict(rule_data, skill_root)
+                    match_rule = HookMatchRule.from_dict(rule_data, skill_root, config_file)
                     if match_rule.hooks:
                         rule_index = len(self._hooks[event_name])
                         self._hooks[event_name].append(match_rule)
@@ -691,11 +703,8 @@ class HookManager:
     def _execute_hook(self, hook: Hook, context: Dict[str, Any], 
                      trigger_async: bool = True) -> HookExecutionResult:
         """执行单个 Hook"""
-        # cwd: 如果显式设置了 hook.cwd 则用它，否则为 None（使用 subprocess 默认 CWD=项目根目录）
-        # 注意：不能把 skill_root 当 cwd 用！
-        # skill_root 是技能/配置文件的目录（如 .drifox/hooks/），但命令中的相对路径
-        # （如 ".drifox/hooks/run-hook.cmd"）是相对于项目根目录的。
-        cwd = hook.cwd  # 只有显式设置才使用，否则 None = subprocess 默认 CWD
+        # cwd: 智能解析（显式设置 > 从命令脚本路径推导 > 默认项目根目录）
+        cwd = self._resolve_command_cwd(hook, context)
         
         # 变量替换
         command = self._interpolate_variables(hook.command, context)
@@ -801,6 +810,63 @@ class HookManager:
                     self._on_finished_callback(context.get("event_name", ""), f"Error: {str(e)}", False)
                 return HookExecutionResult(success=False, output=str(e))
     
+    def _resolve_command_cwd(self, hook: Hook, context: Dict[str, Any]) -> Optional[str]:
+        """
+        解析命令的工作目录。
+        优先级：
+        1. 显式设置的 cwd（配置文件中指定）
+        2. 从命令中解析脚本文件路径，使用该文件所在目录
+        3. None（使用 subprocess 默认 CWD=项目根目录）
+        """
+        # 1. 显式设置优先
+        if hook.cwd:
+            logger.debug(f"[HookManager] Using explicit cwd: {hook.cwd}")
+            return hook.cwd
+        
+        # 2. 从命令中解析脚本文件路径
+        command = hook.command
+        if not command:
+            logger.debug("[HookManager] No command, returning None for cwd")
+            return None
+        
+        # 匹配常见的脚本调用模式：
+        # ./script, script.ext, bash script, cmd script, python script 等
+        patterns = [
+            r'^\s*\.?/?([^\s]+\.(cmd|bat|ps1|sh|bash))\s',  # 相对路径脚本
+            r'\s+([^\s/]+\.(cmd|bat|ps1|sh|bash))\s',       # 空格后的脚本
+            r'\s+([^\s/]+/[^\s]+\.(cmd|bat|ps1|sh|bash))\s',  # 带目录的脚本
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, command, re.IGNORECASE)
+            if match:
+                script_path = match.group(1)
+                logger.debug(f"[HookManager] Script detected: {script_path}")
+                
+                # 搜索目录列表（支持 hooks 子目录）
+                search_dirs = []
+                if hook.skill_root:
+                    search_dirs.append(hook.skill_root)
+                    # 如果 skill_root 下有 hooks 子目录，也加入搜索
+                    hooks_dir = os.path.join(hook.skill_root, 'hooks')
+                    if os.path.isdir(hooks_dir):
+                        search_dirs.append(hooks_dir)
+                search_dirs.append(os.getcwd())
+                
+                for base_dir in search_dirs:
+                    full_path = os.path.join(base_dir, script_path)
+                    full_path = os.path.normpath(full_path)
+                    logger.debug(f"[HookManager] Checking: {full_path}")
+                    if os.path.isfile(full_path):
+                        resolved_cwd = os.path.dirname(full_path)
+                        logger.debug(f"[HookManager] Found script, resolved cwd: {resolved_cwd}")
+                        return resolved_cwd
+                
+                logger.debug(f"[HookManager] Script file not found in any search dir")
+        
+        logger.debug(f"[HookManager] No script in command, returning None for cwd")
+        return None
+    
     def _interpolate_variables(self, text: str, context: Dict[str, Any]) -> str:
         """变量替换"""
         if not text:
@@ -881,8 +947,42 @@ class HookManager:
             for h in rule.hooks:
                 if hook_count == hook_index:
                     h.enabled = enabled
+                    # 如果 hook 有对应的配置文件，也更新配置文件
+                    if h.config_file and os.path.exists(h.config_file):
+                        self._save_hook_to_file(h, event_name)
                     return
                 hook_count += 1
+    
+    def _save_hook_to_file(self, hook: Hook, event_name: str):
+        """保存单个 hook 的状态到配置文件"""
+        try:
+            with open(hook.config_file, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+            
+            # 递归查找并更新 hook
+            self._update_hook_in_config(config, event_name, hook)
+            
+            with open(hook.config_file, 'w', encoding='utf-8') as f:
+                json.dump(config, f, indent=2, ensure_ascii=False)
+            
+            logger.debug(f"[HookManager] Saved hook enabled={hook.enabled} to {hook.config_file}")
+        except Exception as e:
+            logger.error(f"[HookManager] Failed to save hook to {hook.config_file}: {e}")
+    
+    def _update_hook_in_config(self, config: dict, event_name: str, target_hook: Hook):
+        """递归更新配置中的 hook enabled 状态"""
+        raw_hooks = config.get("hooks", config)
+        if event_name not in raw_hooks:
+            return
+        
+        rules = raw_hooks[event_name]
+        for rule in rules:
+            hooks = rule.get("hooks", [])
+            for h in hooks:
+                # 通过 command 匹配（假设 command 是唯一的）
+                if h.get("command") == target_hook.command:
+                    h["enabled"] = target_hook.enabled
+                    return
 
     def reload_global_hooks(self, config_file: str = None):
         """仅重新加载全局 hooks 配置，不影响 skill/agent hooks"""
