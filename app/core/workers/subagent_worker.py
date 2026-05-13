@@ -155,6 +155,8 @@ class SubAgentExecutor(QThread):
                         max_chars = getattr(agent, 'inherit_history_max_chars', 500) or 500
                         for msg in history_messages:
                             role = msg.get("role", "user")
+                            if role == "tool":
+                                continue
                             content = msg.get("content", "")
                             if isinstance(content, list):
                                 content = "".join(

@@ -636,6 +636,8 @@ WELCOME_TIPS = [
     "💡 代码块右上角有复制和保存按钮，点击即可",
     "💡 工具执行结果可点击「查看差异」对比文件修改",
     "💡 工具悬浮框会显示正在执行的工具，点击可查看详情",
+    "💡 用户卡片的撤销按钮可以单独撤销单个编辑操作",
+    "💡 用户卡片的撤销按钮会将会话重置到对应卡片之前",
 
     # ===== 窗口与布局 =====
     "💡 右上角「新建窗口」按钮可创建并发会话，多任务同时进行",
@@ -1598,7 +1600,8 @@ class CodeWebViewer(QWebEngineView):
                         }});
 
                         if (window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise();
-                        reportHeight();
+                        // 使用延迟报告，确保折叠框高度设为 auto 后浏览器布局完成
+                        setTimeout(() => reportHeight(), 50);
                     }}
                 }}
                 function reportHeight() {{

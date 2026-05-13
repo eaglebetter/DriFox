@@ -23,6 +23,7 @@ to_remove = [
     "tensorflow",
     "torchaudio",
     "sqlalchemy",
+    "PIL"
 ]
 # 2. 图标选择 (跨平台)
 icon_arg = None

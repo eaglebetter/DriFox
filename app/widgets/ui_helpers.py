@@ -1331,7 +1331,7 @@ def clear_and_show_welcome(
 def init_new_session_after_archive(
     self_widget,
     new_state,
-    tool_executor=None,
+    backend=None,
     clear_chat_func=None,
     show_welcome_func=None
 ) -> None:
@@ -1341,15 +1341,15 @@ def init_new_session_after_archive(
     Args:
         self_widget: 自身 widget（用于访问 session_manager 等）
         new_state: create_new_session_state 返回的状态
-        tool_executor: 工具执行器
+        backend: ChatBackend 实例
         clear_chat_func: 清空聊天函数
         show_welcome_func: 显示欢迎函数
     """
     self_widget.session_manager = new_state["session_manager"]
     self_widget._current_session_id = new_state["new_session_id"]
 
-    if tool_executor:
-        tool_executor.set_session_context(self_widget._current_session_id)
+    if backend:
+        backend.set_session_context(self_widget._current_session_id)
 
     if clear_chat_func:
         clear_chat_func()
@@ -1363,7 +1363,7 @@ def init_after_loading_session(
     session,
     session_id,
     title=None,
-    tool_executor=None
+    backend=None
 ) -> None:
     """
     加载会话后初始化
@@ -1373,15 +1373,15 @@ def init_after_loading_session(
         session: 加载的会话
         session_id: 会话 ID
         title: 会话标题
-        tool_executor: 工具执行器
+        backend: ChatBackend 实例
     """
     self_widget.session_manager.set_current_session(session)
     self_widget._history_preview_messages = None
     self_widget._current_session_id = session_id
     self_widget.title_edit.setText(title or "历史对话")
 
-    if tool_executor:
-        tool_executor.set_session_context(session_id)
+    if backend:
+        backend.set_session_context(session_id)
 
 
 def post_append_user_message(

@@ -2,7 +2,7 @@ import os
 import subprocess
 import tempfile
 
-from PyQt5.QtCore import Qt, pyqtSignal, QThread
+from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import QWidget, QApplication, QProgressDialog, QHBoxLayout
 from qfluentwidgets import (
     InfoBar,
