@@ -395,11 +395,13 @@ class OpenAIChatWorker(QThread):
         }
 
         skip_params = {"temperature", "top_p", "presence_penalty", "frequency_penalty", "reasoning_effort"}
+        # 排除界面配置参数，这些不应该发送给 API
+        skip_config_params = {"API_KEY", "API_URL", "模型名称", "系统提示", "启用技能", "自动选择工具", "tool_choice", "provider", "base_url"}
         if model and (model.startswith("o1") or model.startswith("o3")):
             skip_params.update({"temperature", "top_p"})
 
         for cn_key, value in self.llm_config.items():
-            if cn_key in ["API_KEY", "API_URL", "模型名称", "系统提示", "启用技能"]:
+            if cn_key in skip_config_params:
                 continue
             en_key = mapping.get(cn_key)
             if not en_key and _VALID_IDENTIFIER_PATTERN.match(cn_key):
@@ -408,12 +410,17 @@ class OpenAIChatWorker(QThread):
                 continue
             if en_key in ["max_tokens"]:
                 continue  # 单独处理
+            # 防御性检查：再次确保跳过中文配置参数
+            if en_key in ["自动选择工具", "自动选择"]:
+                continue
             extra_body[en_key] = value
 
-        # 处理 max_tokens
+        # 顶级参数（OpenAI 规范要求这些在顶层，不在 extra_body）
+        top_level_params = {}
+        # 处理 max_tokens - max_tokens 是顶级参数，符合 OpenAI 官方规范
         max_tokens = self.llm_config.get("最大Token")
         if max_tokens is not None:
-            extra_body["max_tokens"] = self._cap_max_output_tokens(model, max_tokens)
+            top_level_params["max_tokens"] = self._cap_max_output_tokens(model, max_tokens)
 
         # 处理认证
         auth_headers = None
@@ -430,6 +437,7 @@ class OpenAIChatWorker(QThread):
             "_config_key": config_key,
             "model": model,
             "extra_body": extra_body,
+            "top_level_params": top_level_params,
             "_auth_headers": auth_headers,
             "_is_o1_model": is_o1,
         }
@@ -438,6 +446,7 @@ class OpenAIChatWorker(QThread):
             "model": model,
             "stream": self.stream,
             "extra_body": extra_body,
+            "top_level_params": top_level_params,
             "_auth_headers": auth_headers,
             "_is_o1_model": is_o1,
         }
@@ -953,6 +962,10 @@ class OpenAIChatWorker(QThread):
         if cached_config.get("extra_body"):
             req_kwargs["extra_body"] = cached_config["extra_body"]
 
+        # 添加顶级参数（max_tokens 等，符合 OpenAI 官方规范）
+        if cached_config.get("top_level_params"):
+            req_kwargs.update(cached_config["top_level_params"])
+
         # 添加认证头
         if cached_config.get("_auth_headers"):
             req_kwargs["extra_headers"] = cached_config["_auth_headers"]
@@ -960,11 +973,26 @@ class OpenAIChatWorker(QThread):
         # 添加 tools
         if self.tools:
             req_kwargs["tools"] = self.tools
+            # 处理 tool_choice（自动选择工具）参数，作为顶级参数添加
+            # 支持中文配置名"自动选择工具"和英文配置名"tool_choice"
+            tool_choice = self.llm_config.get("tool_choice", self.llm_config.get("自动选择工具"))
+            if tool_choice is not None:
+                # 处理中文选项映射到标准值
+                if isinstance(tool_choice, str):
+                    mapping = {
+                        "自动": "auto",
+                        "none": "none",
+                        "禁用": "none",
+                        "不选择": "none",
+                    }
+                    tool_choice = mapping.get(tool_choice.lower(), tool_choice)
+                req_kwargs["tool_choice"] = tool_choice
 
         # 处理 o1 模型
         if cached_config.get("_is_o1_model"):
             req_kwargs.pop("stream", None)
-            self.stream = False
+            # o1 不支持流式输出，但不应该永久修改 self.stream
+            # self.stream = False （已移除，永久修改实例状态会影响后续工具迭代轮次）
 
         # 性能优化：使用复用的 HTTP 客户端
         client = self._get_http_client()
@@ -1310,8 +1338,10 @@ class OpenAIChatWorker(QThread):
                                 "first_failure_time": first_time,
                             }
 
-        # fix: 所有待处理项都处理完毕后，如果没有任何剩余等待项，标记 args_pending = False
-        if tool_calls_found and not self._tool_calls_buffer and not self._waiting_tool_params:
+        # fix: 所有 chunks 都已接收完毕（流式响应已结束），不可能再有新的数据
+        # 无论还有多少 pending 参数，都必须标记 args_pending = False，允许继续执行
+        # 否则会导致重新发起 API 请求（无意义的重试，浪费 token）
+        if tool_calls_found:
             tool_args_pending = False
             # 确保所有已识别的 tool call 都有原始 arguments（防止参数被跳过导致为空字符串）
             for tc in self._current_tool_calls.values():

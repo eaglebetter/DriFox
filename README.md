@@ -30,10 +30,13 @@
 |------|------|
 | 🎯 **极简界面** | 仅一个悬浮置顶对话框，无项目概念，随开随用 |
 | 🔀 **分支会话** | 问题分叉，多个窗口并行探索不同答案，互不干扰 |
+| 🧩 **多窗口粘合** | 多个窗口粘合后可一起拖动一起管理，双击边框快速拆分 |
 | 🧠 **长记忆** | 越用越懂你的偏好、习惯、禁忌 |
+| 🔌 **Hook 系统** | 可扩展的事件钩子系统，支持在特定事件触发自定义脚本 |
 | 🛠️ **代码工具** | 30+ 工具：读、写、搜索、执行、diff |
-| 🔌 **多模型** | OpenAI / Claude / DeepSeek / 通义 等随时切换 |
+| 🔌 **多模型** | OpenAI / Claude / DeepSeek / MiniMax / 通义 等随时切换 |
 | 🛡️ **穿透模式** | 悬浮窗口可穿透点击，不阻断其他应用 |
+| 🚀 **自动更新** | 自动检查新版本，随时保持更新 |
 
 ---
 
@@ -100,6 +103,7 @@ python main.py
 │  ├── MessageCard – 消息卡片渲染                         │
 │  ├── DiffViewer – 代码差异对比视图                      │
 │  ├── SegmentWidget – 分段任务窗口                       │
+│  ├── HookSettingCard – Hook 设置卡片                    │
 │  └── BottomInputArea – 底部输入区                      │
 ├─────────────────────────────────────────────────────────┤
 │  引擎层                                                  │
@@ -107,7 +111,8 @@ python main.py
 │  ├── ToolExecutor – 工具执行（文件/终端/网络）          │
 │  ├── AgentManager – Agent 定义加载与切换                │
 │  ├── ContextManager – Token 预算控制与压缩              │
-│  └── SubAgentExecutor – 子智能体并行执行                │
+│  ├── SubAgentExecutor – 子智能体并行执行                │
+│  └── HookManager – Hook 生命周期管理与事件触发          │
 ├─────────────────────────────────────────────────────────┤
 │  存储层                                                  │
 │  ├── SessionManager – 会话管理                          │
@@ -164,6 +169,31 @@ permission:
 | **记忆** | memory_save, memory_search, memory_list |
 | **任务** | todowrite, todoread, task, task_batch, task_wait, skill |
 | **其他** | scan_repo, stage_files, ask_question |
+
+---
+
+## Hook 系统
+
+Hook 系统允许你在特定事件触发时执行自定义脚本，扩展 DriFox 的能力：
+
+### 支持的事件类型
+| 事件 | 触发时机 |
+|------|----------|
+| **SessionStart** | 新会话启动时 |
+| **BeforeReply** | AI 回复之前 |
+| **AfterReply** | AI 回复之后 |
+| **ToolComplete** | 工具执行完成后 |
+
+### Hook 配置
+- 通过设置界面可视化配置 Hook
+- 支持启用/禁用单个 Hook
+- 支持自定义工作目录和环境变量
+- 支持输出结构化显示
+
+### Hook 脚本支持
+- 支持任何可执行脚本（.py, .sh, .cmd, .bat 等）
+- 事件信息通过环境变量传递给脚本
+- 脚本输出会被捕获并显示在聊天窗口
 
 ---
 
@@ -300,16 +330,19 @@ DriFox/
 │   │   ├── chat_engine.py
 │   │   ├── agent_manager.py
 │   │   ├── memory_manager.py
-│   │   └── context_manager.py
+│   │   ├── context_manager.py
+│   │   └── hook_manager.py     # Hook 管理
 │   ├── utils/                 # 工具模块
 │   │   ├── chat_session.py
 │   │   ├── session_store.py
 │   │   ├── memory_store.py
-│   │   └── config.py
+│   │   ├── config.py           # 配置与版本
+│   │   └── update_checker.py   # 自动更新检查
 │   └── widgets/               # UI 组件
 │       ├── message_card.py
 │       ├── diff_viewer.py
 │       ├── segment_widget.py
+│       ├── hook_setting_card.py # Hook 设置卡片
 │       ├── context_usage_ring.py
 │       └── ...
 ├── .drifox/                   # 应用数据
@@ -425,16 +458,26 @@ def my_tool(arg1: str) -> ToolResult:
 
 ---
 
-## 未来扩展
+## 更新日志
 
-### TaskWatcher 系统
+### v0.1.4 (2024)
+- ✨ **Hook 管理系统**：新增 Hook 管理功能和可视化 UI 配置界面
+- ✨ **自动更新**：添加自动检查更新功能
+- 🐛 **Windows 兼容**：修复 Windows 平台下路径分隔符和编码问题
+- 🔧 **架构重构**：移除任务观察系统，重构聊天引擎架构和后端内存管理
+- 🔧 **技能管理**：重构技能管理功能以统一实现
+- 🎨 **UI 优化**：重构 Hook 设置卡片布局
 
-计划中的自动任务触发系统，支持：
-- **定时任务**：基于 cron 表达式的自动执行
-- **文件监听**：监控文件夹，检测到新文件自动处理
-- **优先级队列**：任务排队与重试机制
+### v0.1.2
+- 新增多窗口粘合功能：支持窗口一起拖动一起管理，双击粘合边框可自动拆分
+- 优化多窗口布局和管理体验
+- 支持不同大小窗口粘合
 
-详见 `docs/superpowers/specs/2024-06-09-task-watcher-system.md`
+### v0.1.1
+- 基础对话功能
+- 分支会话
+- 工具系统
+- 记忆系统
 
 ---
 

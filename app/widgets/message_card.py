@@ -379,7 +379,7 @@ def _render_tool_block_content(content: str) -> str:
     if name_match:
         tool_name = name_match.group(1).strip()
 
-    # ========== 解析 args（需要正确处理嵌套 JSON）==========
+    # ========== 解析 args（需要正确处理嵌套 JSON 和数组）==========
     args_start = content.find("args:")
     result_search_start = 0  # 默认值
     tool_args_str = ""
@@ -387,31 +387,53 @@ def _render_tool_block_content(content: str) -> str:
     if args_start != -1:
         brace_start = content.find("{", args_start)
         if brace_start != -1:
+            # 找到最外层的 } 或 ]（结束 JSON/数组）
             depth = 0
             i = brace_start
+            in_string = False
+            
             while i < len(content):
                 c = content[i]
-                if c == "{":
+                
+                # 字符串内不计入深度
+                if in_string:
+                    if c == '\\':
+                        i += 2
+                        continue
+                    elif c == '"':
+                        in_string = False
+                    i += 1
+                    continue
+                
+                if c == '"':
+                    in_string = True
+                    i += 1
+                    continue
+                
+                if c == '{' or c == '[':
                     depth += 1
-                elif c == "}":
+                elif c == '}' or c == ']':
                     depth -= 1
                     if depth == 0:
                         tool_args_str = content[brace_start:i + 1]
                         result_search_start = i + 1
                         break
                 i += 1
-            if depth != 0:  # 循环结束但没找到匹配的 }
-                # JSON 未正确闭合，回退到单行解析
-                tool_args_str = ""
-                # 尝试找到 args: 后的内容作为替代
-                line_match = _TOOL_ARGS_LINE_PATTERN.search(content)
-                if line_match:
-                    tool_args_str = line_match.group(1)
-                    result_search_start = args_start + len(line_match.group(0))
+            
+            # 如果没有找到闭合（JSON 不完整），取已接收的部分
+            if not tool_args_str and brace_start >= 0:
+                tool_args_str = content[brace_start:]
+                result_search_start = i
         else:
             line = content[args_start:].split("\n")[0]
             tool_args_str = line[args_start + 5:].strip()
             result_search_start = args_start + len(line)
+    else:
+        # 没有找到 args:，尝试直接解析整个 JSON 对象
+        brace_start = content.find("{")
+        if brace_start >= 0:
+            tool_args_str = content[brace_start:]
+    
     # ========== 解析 success ==========
     success_match = _TOOL_SUCCESS_PATTERN.search(content)
     if success_match:
@@ -423,15 +445,18 @@ def _render_tool_block_content(content: str) -> str:
         tool_call_id = id_match.group(1).strip()
 
     # ========== 解析 result ==========
-    result_line_match = _TOOL_RESULT_PATTERN.search(content[result_search_start:])
-    if result_line_match:
-        result_content = result_line_match.group(1)
-        remaining = content[result_search_start + result_line_match.end():]
-        next_field_match = _NEXT_FIELD_PATTERN.search(remaining)
-        if next_field_match:
-            tool_result = (result_content + remaining[:next_field_match.start()]).strip()
+    # 关键：从 result: 之后开始搜索，而不是从 result_search_start
+    result_start = content.find("result:")
+    if result_start >= 0:
+        result_after = content[result_start + 7:]  # 跳过 "result:"
+        # 找到 result 内容的结束位置（下一个字段之前）
+        next_field = _NEXT_FIELD_PATTERN.search(result_after)
+        if next_field:
+            tool_result = result_after[:next_field.start()].strip()
         else:
-            tool_result = result_content.strip()
+            tool_result = result_after.strip()
+    else:
+        tool_result = ""
 
     # 转义 result 中的换行符（参数预览和表格不支持多行显示）
     tool_result = tool_result.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\\n")
@@ -439,13 +464,27 @@ def _render_tool_block_content(content: str) -> str:
     # ========== 解析 args JSON 为字典 ==========
     args_dict = {}
     if tool_args_str:
+        # 1. 尝试完整 JSON 解析
         try:
             args_dict = json.loads(tool_args_str)
             if not isinstance(args_dict, dict):
                 args_dict = {}
         except json.JSONDecodeError:
-            # JSON 解析失败，尝试使用正则提取参数
-            args_dict = _extract_args_by_regex(tool_args_str)
+            # JSON 解析失败，可能是因为不完整，尝试智能修复
+            fixed_args_str = tool_args_str.strip()
+            # 如果是未闭合，尝试补全括号
+            if fixed_args_str.startswith('{') and not fixed_args_str.endswith('}'):
+                fixed_args_str += '}'
+                try:
+                    args_dict = json.loads(fixed_args_str)
+                    if not isinstance(args_dict, dict):
+                        args_dict = {}
+                except json.JSONDecodeError:
+                    # 补全后还是失败，再尝试正则提取
+                    args_dict = _extract_args_by_regex(tool_args_str)
+            else:
+                # JSON 解析失败，尝试使用正则提取参数
+                args_dict = _extract_args_by_regex(tool_args_str)
     else:
         # 没有 args，尝试从整个 content 中提取参数
         args_dict = _extract_args_by_regex(content)
@@ -460,68 +499,231 @@ def _render_tool_block_content(content: str) -> str:
     )
 
 
+def _find_string_end(s, start):
+    """从 start 位置开始，找到字符串真正结束的位置
+    
+    规则：只有当引号后面紧跟 , 或 } 或 ] 或 : 时，才认为是字符串结束
+    这避免了把字符串内容中的引号误认为是结束
+    """
+    i = start
+    n = len(s)
+    while i < n:
+        c = s[i]
+        if c == '\\':
+            # 转义序列，跳过下一个字符
+            i += 2
+        elif c == '"':
+            # 检查后面是否是真正的分隔符
+            next_i = i + 1
+            # 跳过空白
+            while next_i < n and s[next_i] in ' \t\n\r':
+                next_i += 1
+            if next_i < n:
+                next_c = s[next_i]
+                # 只有后面是这些字符才是真正结束：, } ] 或 : (key后面的值结束时)
+                if next_c in ',}:]':
+                    return i
+            i += 1
+        else:
+            i += 1
+    return i
+
+
+def _parse_json_partial(json_str: str) -> dict:
+    """部分 JSON 解析 - 在 JSON 不完整时尽可能提取参数"""
+    args = {}
+    i = 0
+    n = len(json_str)
+
+    while i < n:
+        c = json_str[i]
+
+        # 跳过空白
+        if c in ' \t\n\r':
+            i += 1
+            continue
+
+        # 期待 "key"
+        if c != '"':
+            i += 1
+            continue
+
+        # 解析 key
+        key_end = _find_string_end(json_str, i + 1)
+        key = json_str[i+1:key_end]
+        i = key_end + 1
+
+        # 跳过空白和冒号
+        while i < n and json_str[i] in ' \t\n\r:':
+            i += 1
+        if i >= n:
+            break
+
+        c = json_str[i]
+
+        # 解析 value
+        if c == '"':
+            value_end = _find_string_end(json_str, i + 1)
+            value = json_str[i+1:value_end]
+            i = value_end + 1
+            # 处理转义（简化处理）
+            value = value.replace('\\"', '"').replace('\\\\', '\\')
+            args[key] = value
+        elif c == '{':
+            obj_start = i
+            depth = 1
+            i += 1
+            while i < n and depth > 0:
+                ch = json_str[i]
+                if ch == '"':
+                    str_end = _find_string_end(json_str, i + 1)
+                    i = str_end + 1
+                elif ch in '{[':
+                    depth += 1
+                elif ch in '}]':
+                    depth -= 1
+                i += 1
+            obj_str = json_str[obj_start:i]
+            try:
+                args[key] = json.loads(obj_str)
+            except:
+                args[key] = obj_str
+        elif c == '[':
+            arr_start = i
+            depth = 1
+            i += 1
+            while i < n and depth > 0:
+                ch = json_str[i]
+                if ch == '"':
+                    str_end = _find_string_end(json_str, i + 1)
+                    i = str_end + 1
+                elif ch in '{[':
+                    depth += 1
+                elif ch in '}]':
+                    depth -= 1
+                i += 1
+            arr_str = json_str[arr_start:i]
+            try:
+                args[key] = json.loads(arr_str)
+            except:
+                args[key] = arr_str
+        elif c.isdigit() or c == '-':
+            num_str = c
+            i += 1
+            while i < n and json_str[i].isdigit() or json_str[i] in '.eE+-':
+                num_str += json_str[i]
+                i += 1
+            try:
+                args[key] = float(num_str) if '.' in num_str else int(num_str)
+            except:
+                args[key] = num_str
+        elif i + 4 <= n and json_str[i:i+4] == 'true':
+            args[key] = True
+            i += 4
+        elif i + 5 <= n and json_str[i:i+5] == 'false':
+            args[key] = False
+            i += 5
+        elif i + 4 <= n and json_str[i:i+4] == 'null':
+            args[key] = None
+            i += 4
+        else:
+            i += 1
+
+        # 跳过空白和逗号
+        while i < n and json_str[i] in ' \t\n\r,':
+            i += 1
+
+    return args
+
+
+def _find_json_bounds(content: str) -> tuple:
+    """找到 JSON 对象的起始和结束位置"""
+    start = content.find('{')
+    if start == -1:
+        return -1, -1
+    
+    depth = 0
+    i = start
+    in_string = False
+    escape_next = False
+    
+    while i < len(content):
+        c = content[i]
+        
+        if escape_next:
+            escape_next = False
+            i += 1
+            continue
+        if c == '\\':
+            escape_next = True
+            i += 1
+            continue
+        if c == '"':
+            in_string = not in_string
+            i += 1
+            continue
+        if not in_string:
+            if c == '{':
+                depth += 1
+            elif c == '}':
+                depth -= 1
+                if depth == 0:
+                    return start, i + 1
+        i += 1
+    
+    return start, -1
+
+
 def _extract_args_by_regex(content: str) -> dict:
     """
-    当 JSON 解析失败时，使用正则表达式提取参数。
-    处理包含未转义引号、换行符等复杂情况。
+    当 JSON 解析失败时，使用状态机解析任意参数。
+    处理包含复杂代码内容的场景（代码中有引号、括号等）。
     """
+    if not content:
+        return {}
+    
+    # 方法1: 尝试直接解析整个内容
+    content = content.strip()
+    try:
+        result = json.loads(content)
+        if isinstance(result, dict):
+            return result
+    except:
+        pass
+    
+    # 方法2: 找到 JSON 边界，尝试解析
+    start, end = _find_json_bounds(content)
+    if start >= 0:
+        end_pos = end if end > 0 else len(content)
+        json_str = content[start:end_pos]
+        try:
+            result = json.loads(json_str)
+            if isinstance(result, dict):
+                return result
+        except:
+            if end < 0:  # JSON 未闭合，尝试部分解析
+                args = _parse_json_partial(json_str)
+                if args:
+                    return args
+    
+    # 方法3: 直接部分解析
+    args = _parse_json_partial(content)
+    return args if args else {}
+
+
+def _extract_by_regex_fallback(content: str) -> dict:
+    """正则提取后备方案 - 很少使用"""
     import re
     args = {}
-
-    # 1. 先尝试匹配数字类型参数（冒号后无引号）: "limit": 30
-    number_params = ["limit", "offset"]
-    for param in number_params:
-        pattern = rf'"{param}"\s*:\s*(-?\d+(?:\.\d+)?)\s*[,}}]'
-        match = re.search(pattern, content)
-        if match:
-            num_str = match.group(1)
-            args[param] = int(float(num_str)) if '.' not in num_str else float(num_str)
-
-    # 2. 匹配字符串参数（冒号后有引号）: "path": "xxx"
-    string_params = ["path", "oldString", "newString", "command", "url", "pattern", "query", "name", "_raw_args",
-                     "file_path", "old_string", "new_string"]
-
-    for param in string_params:
-        # 查找 "param": " 后面开始的位置
-        pattern = rf'"{param}"\s*:\s*"'
-        match = re.search(pattern, content)
-        if match:
-            start = match.end()
-            # 从 start 开始，找到字符串真正的结束位置
-            # 策略：找到最后一个 " 后面紧跟 , 或 } 的位置
-            i = start
-            last_valid_end = -1  # 最后一个有效的字符串结束位置
-
-            while i < len(content):
-                c = content[i]
-                if c == '\\':
-                    # 转义字符，跳过下一个字符
-                    i += 2
-                    continue
-                elif c == '"':
-                    # 检查这是否是真正的字符串结束
-                    next_i = i + 1
-                    while next_i < len(content) and content[next_i] in ' \t\n\r':
-                        next_i += 1
-                    if next_i < len(content) and content[next_i] in ',}':
-                        # 这是有效的结束位置，记录下来
-                        last_valid_end = i
-                    i += 1
-                else:
-                    i += 1
-
-            # 提取到最后一个有效结束位置的内容
-            if last_valid_end > 0:
-                value = content[start:last_valid_end]
-            else:
-                # 没找到有效结束，取到文件末尾（去掉最后的 }）
-                value = content[start:].rstrip().rstrip('}')
-
-            # 清理截断标记
-            value = value.replace('... [内容已截断]', '')
-            # 替换真实换行为转义的 \n（用于显示）
-            value = value.replace('\r\n', '\\n').replace('\r', '\\n').replace('\n', '\\n')
-            args[param] = value
+    pattern = re.compile(r'"([^"\\]+)"\s*:\s*"([^"]*)"', re.DOTALL)
+    for match in pattern.finditer(content):
+        key = match.group(1)
+        value = match.group(2)
+        quote_count = value.count('"')
+        if quote_count % 2 != 0:
+            continue
+        args[key] = value
+    return args
 
     return args
 
