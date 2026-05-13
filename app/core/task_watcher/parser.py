@@ -8,9 +8,13 @@ import os
 from typing import Optional, Tuple, Dict, Any
 from loguru import logger
 from .models import TaskConfig, TriggerMode, TriggerConfig, ContextConfig, OutputConfig
+
+
 class TaskParseError(Exception):
     """任务解析错误"""
     pass
+
+
 class TaskParser:
     """任务文件解析器
     
@@ -44,10 +48,10 @@ class TaskParser:
         r"^---\s*\n(.*?)\n---\s*\n",
         re.DOTALL
     )
-    
+
     # 文件缓存：path -> (mtime, config)
     _file_cache: Dict[str, Tuple[float, TaskConfig]] = {}
-    
+
     def parse_file(self, file_path: str) -> Optional[TaskConfig]:
         """
         解析任务文件（带缓存）
@@ -59,7 +63,7 @@ class TaskParser:
             TaskConfig 或 None（解析失败）
         """
         abs_path = os.path.abspath(file_path)
-        
+
         # 检查缓存
         if abs_path in self._file_cache:
             cached_mtime, cached_config = self._file_cache[abs_path]
@@ -71,7 +75,7 @@ class TaskParser:
             except OSError:
                 # 文件可能已删除，清除缓存
                 del self._file_cache[abs_path]
-        
+
         # 需要解析
         try:
             config = self._parse_file_uncached(abs_path)
@@ -86,7 +90,7 @@ class TaskParser:
         except Exception as e:
             logger.error(f"[TaskParser] 解析文件失败: {abs_path}, {e}")
             return None
-    
+
     def _parse_file_uncached(self, file_path: str) -> Optional[TaskConfig]:
         """
         不使用缓存的解析方法
@@ -107,6 +111,7 @@ class TaskParser:
         except Exception as e:
             logger.error(f"[TaskParser] 解析文件失败 {file_path}: {e}")
             raise TaskParseError(f"解析文件失败: {e}")
+
     def parse_content(self, content: str, source_file: Optional[str] = None) -> Optional[TaskConfig]:
         """
         解析任务内容
@@ -121,17 +126,17 @@ class TaskParser:
         try:
             # 解析 frontmatter
             frontmatter_data, body = self._parse_frontmatter(content)
-            
+
             if not frontmatter_data:
                 logger.warning("[TaskParser] 未找到有效的 frontmatter")
                 return None
-            
+
             # 设置 id
             task_id = frontmatter_data.get("id")
             if not task_id:
                 import uuid
                 task_id = str(uuid.uuid4())
-            
+
             # 创建任务配置
             task_config = TaskConfig(
                 id=task_id,
@@ -144,15 +149,15 @@ class TaskParser:
                 retry=frontmatter_data.get("retry", 0),
                 timeout=frontmatter_data.get("timeout", 3600),
             )
-            
+
             # 设置 body 内容
             if body and body.strip():
                 task_config.content = body.strip()
-            
+
             # 设置源文件路径
             if source_file:
                 task_config.source_file = os.path.abspath(source_file)
-            
+
             logger.debug(f"[TaskParser] 解析成功: {task_config.id}, name={task_config.name}")
             return task_config
         except TaskParseError:
@@ -160,6 +165,7 @@ class TaskParser:
         except Exception as e:
             logger.error(f"[TaskParser] 解析内容失败: {e}")
             raise TaskParseError(f"解析内容失败: {e}")
+
     def _parse_frontmatter(self, content: str) -> Tuple[Optional[dict], str]:
         """
         解析 YAML frontmatter
@@ -173,10 +179,10 @@ class TaskParser:
         match = self.FRONTMATTER_PATTERN.match(content)
         if not match:
             return None, content
-        
+
         yaml_str = match.group(1).strip()
         body = content[match.end():]
-        
+
         # 解析 YAML
         try:
             import yaml
@@ -189,6 +195,7 @@ class TaskParser:
         except yaml.YAMLError as e:
             logger.error(f"[TaskParser] YAML 解析错误: {e}")
             raise TaskParseError(f"YAML 格式错误: {e}")
+
     def _simple_yaml_parse(self, yaml_str: str) -> dict:
         """
         简单的 YAML 解析器（处理基本格式）
@@ -203,23 +210,23 @@ class TaskParser:
         current_key = None
         current_dict = result
         stack = [result]
-        
+
         for line in yaml_str.split("\n"):
             line = line.rstrip()
-            
+
             # 空行
             if not line.strip():
                 continue
-            
+
             # 计算缩进
             indent = len(line) - len(line.lstrip())
-            
+
             # 检查是否是新键值对
             if ":" in line:
                 key_end = line.index(":")
                 key = line[:key_end].strip()
                 value = line[key_end + 1:].strip()
-                
+
                 # 判断是否是嵌套对象
                 if not value and indent > 0:
                     # 创建嵌套字典
@@ -240,17 +247,17 @@ class TaskParser:
                         value = False
                     elif value.isdigit():
                         value = int(value)
-                    
+
                     # 回到正确的层级
                     while stack and indent <= list(reversed(stack)).index(current_dict) if current_dict in stack else 0:
                         if len(stack) > 1:
                             stack.pop()
                             current_dict = stack[-1]
-                    
+
                     current_dict[key] = value
-        
+
         return result
-    
+
     @classmethod
     def clear_cache(cls):
         """清除缓存"""

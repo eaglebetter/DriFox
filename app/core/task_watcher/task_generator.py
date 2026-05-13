@@ -9,11 +9,25 @@ from pathlib import Path
 from typing import Optional, List
 from loguru import logger
 from .models import TaskConfig, TriggerMode, TaskType, OutputMode, SessionMode
+
+# 统一路径获取（与主程序保持一致）
+try:
+    from app.utils.utils import get_app_data_dir
+except ImportError:
+    get_app_data_dir = None
+
+
 class TaskGenerator:
     """测试任务生成器"""
     
     # 默认输出目录
-    DEFAULT_OUTPUT_DIR = os.path.join(Path.home(), ".drifox", "tasks")
+    # 默认输出目录 - 使用统一路径
+    if get_app_data_dir:
+        _default_dir = os.path.join(str(get_app_data_dir()), "tasks")
+    else:
+        _default_dir = os.path.join(str(Path.home()), ".drifox", "tasks")
+    
+    DEFAULT_OUTPUT_DIR = _default_dir
     
     def __init__(self, output_dir: Optional[str] = None):
         self._output_dir = output_dir or self.DEFAULT_OUTPUT_DIR
@@ -311,10 +325,6 @@ priority: high
                 ("快速排序", "python", "def quicksort(arr):\n    if len(arr) <= 1:\n        return arr\n    pivot = arr[len(arr) // 2]\n    left = [x for x in arr if x < pivot]\n    middle = [x for x in arr if x == pivot]\n    right = [x for x in arr if x > pivot]\n    return quicksort(left) + middle + quicksort(right)"),
                 ("数据库连接", "python", "import sqlite3\n\ndef create_table():\n    conn = sqlite3.connect('example.db')\n    cursor = conn.cursor()\n    cursor.execute('''CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT)''')\n    conn.commit()\n    conn.close()"),
             ]
-                codes = [
-                ("快速排序", "python", "def quicksort(arr):\n    if len(arr) <= 1:\n        return arr\n    pivot = arr[len(arr) // 2]\n    left = [x for x in arr if x < pivot]\n    middle = [x for x in arr if x == pivot]\n    right = [x for x in arr if x > pivot]\n    return quicksort(left) + middle + quicksort(right)"),
-                ("数据库连接", "python", "import sqlite3\n\ndef create_table():\n    conn = sqlite3.connect('example.db')\n    cursor = conn.cursor()\n    cursor.execute('''CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT)''')\n    conn.commit()\n    conn.close()"),
-                ]
         
         for i in range(count):
             if task_type == "code_review":

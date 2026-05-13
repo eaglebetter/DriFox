@@ -30,6 +30,7 @@ from .output_handler import OutputHandler
 from .engine_scheduler import EngineScheduler, get_engine_scheduler, EngineInfo
 from .task_execution_engine import TaskExecutionEngine, get_task_execution_engine
 from .system import TaskWatcherSystem
+
 __all__ = [
     # 模型
     "TriggerMode",
@@ -68,4 +69,4 @@ __all__ = [
     # 系统
     "TaskWatcherSystem",
 ]
-__version__ = "1.1.0"
+__version__ = "1.2.0"

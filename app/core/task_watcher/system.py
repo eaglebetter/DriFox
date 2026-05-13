@@ -4,20 +4,22 @@ TaskWatcher 系统门面
 整合所有组件，提供统一的入口
 """
 import os
-from datetime import datetime
-from pathlib import Path
 from typing import Optional, Callable, Dict, Any, List
+
 from loguru import logger
-from .database import Database, DRIFOX_DIR
+
 from .config_store import TaskConfigStore
-from .parser import TaskParser, TaskParseError
-from .queue import TaskQueue
-from .watcher import TaskWatcher
-from .scheduler import TaskScheduler
-from .output_handler import OutputHandler
+from .database import Database, DRIFOX_DIR
 from .engine_scheduler import get_engine_scheduler, EngineScheduler
 from .models import TaskConfig, TaskResult, TriggerMode, QueueStatus
+from .output_handler import OutputHandler
+from .parser import TaskParser, TaskParseError
+from .queue import TaskQueue
+from .scheduler import TaskScheduler
 from .task_execution_engine import TaskExecutionEngine, get_task_execution_engine
+from .watcher import TaskWatcher
+
+
 class TaskWatcherSystem:
     """TaskWatcher 系统门面
     
@@ -158,7 +160,7 @@ class TaskWatcherSystem:
         # 更新队列状态
         queue_id = self._pending_tasks.get(config.id)
         if queue_id:
-            self._queue.increment_retry(queue_id
+            self._queue.increment_retry(queue_id)
             if config.retry_count < config.retry:
                 self._queue.update_status(queue_id, QueueStatus.FAILED)
                 # 重新入队

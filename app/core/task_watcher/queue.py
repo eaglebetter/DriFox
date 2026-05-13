@@ -8,11 +8,14 @@ from typing import List, Optional, Callable
 from loguru import logger
 from .database import Database
 from .models import QueueItem, QueueStatus, TaskConfig
+
+
 class TaskQueue:
     """任务队列管理
     
     支持优先级排序、状态管理、重试机制
     """
+
     def __init__(self, db: Optional[Database] = None):
         """初始化任务队列
         
@@ -20,6 +23,7 @@ class TaskQueue:
             db: 数据库实例，默认使用单例
         """
         self._db = db or Database.get_instance()
+
     def enqueue(self, config: TaskConfig, trigger_type: str = "manual") -> int:
         """将任务加入队列
         
@@ -32,15 +36,15 @@ class TaskQueue:
         """
         try:
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            
+
             # 计算优先级
             priority = self._calc_priority(config)
-            
+
             # 执行时间
             execute_at = None
             if config.trigger.execute_at and config.trigger.execute_at != "now":
                 execute_at = config.trigger.execute_at
-            
+
             # 获取最大优先级和最小创建时间的ID，用于插入顺序
             self._db.execute(
                 """
@@ -59,17 +63,18 @@ class TaskQueue:
                 )
             )
             self._db.commit()
-            
+
             # 获取插入的 ID
             cursor = self._db.execute("SELECT last_insert_rowid()")
             queue_id = cursor.fetchone()[0]
-            
+
             logger.debug(f"[TaskQueue] 入队: task_id={config.id}, queue_id={queue_id}, priority={priority}")
             return queue_id
         except Exception as e:
             logger.error(f"[TaskQueue] 入队失败: {e}")
             self._db.rollback()
             return -1
+
     def _calc_priority(self, config: TaskConfig) -> int:
         """计算任务优先级
         
@@ -80,20 +85,21 @@ class TaskQueue:
             优先级值（越大优先级越高）
         """
         base = 0
-        
+
         # 基于 priority 字段
         priority_map = {"high": 100, "normal": 50, "low": 0}
         base += priority_map.get(config.priority, 50)
-        
+
         # 基于触发类型
         trigger_priority = {
             "file_change": 80,  # 文件变化立即处理
-            "manual": 60,       # 手动触发次之
-            "scheduled": 40     # 定时任务最后
+            "manual": 60,  # 手动触发次之
+            "scheduled": 40  # 定时任务最后
         }
         base += trigger_priority.get(config.trigger.mode.value, 50)
-        
+
         return base
+
     def dequeue(self) -> Optional[QueueItem]:
         """取出最高优先级的待处理任务
         
@@ -102,7 +108,7 @@ class TaskQueue:
         """
         try:
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            
+
             # 查询条件：pending 状态，且执行时间 <= 当前时间
             row = self._db.fetch_one(
                 """
@@ -113,15 +119,16 @@ class TaskQueue:
                 """,
                 (QueueStatus.PENDING.value, now)
             )
-            
+
             if not row:
                 return None
-            
+
             item = QueueItem.from_dict(dict(row))
             return item
         except Exception as e:
             logger.error(f"[TaskQueue] 出队失败: {e}")
             return None
+
     def update_status(self, queue_id: int, status: QueueStatus) -> bool:
         """更新队列项状态
         
@@ -134,7 +141,7 @@ class TaskQueue:
         """
         try:
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            
+
             if status == QueueStatus.RUNNING:
                 self._db.execute(
                     """
@@ -162,13 +169,14 @@ class TaskQueue:
                     """,
                     (status.value, queue_id)
                 )
-            
+
             self._db.commit()
             return True
         except Exception as e:
             logger.error(f"[TaskQueue] 更新状态失败: {e}")
             self._db.rollback()
             return False
+
     def increment_retry(self, queue_id: int) -> bool:
         """增加重试计数
         
@@ -193,6 +201,7 @@ class TaskQueue:
             logger.error(f"[TaskQueue] 增加重试计数失败: {e}")
             self._db.rollback()
             return False
+
     def get_pending_count(self) -> int:
         """获取待处理任务数量
         
@@ -210,6 +219,7 @@ class TaskQueue:
         except Exception as e:
             logger.error(f"[TaskQueue] 获取待处理数量失败: {e}")
             return 0
+
     def get_all(self, limit: int = 100) -> List[QueueItem]:
         """获取所有队列项
         
@@ -230,6 +240,7 @@ class TaskQueue:
         except Exception as e:
             logger.error(f"[TaskQueue] 获取队列失败: {e}")
             return []
+
     def clean_old_completed(self, days: int = 7) -> int:
         """清理 N 天前已完成的任务
         
@@ -242,7 +253,7 @@ class TaskQueue:
         try:
             from datetime import timedelta
             cutoff_time = datetime.now() - timedelta(days=days)
-            
+
             cursor = self._db.execute(
                 """
                 DELETE FROM task_queue 
@@ -257,6 +268,7 @@ class TaskQueue:
         except Exception as e:
             logger.error(f"[TaskQueue] 清理队列失败: {e}")
             return 0
+
     def cancel(self, queue_id: int) -> bool:
         """取消队列项
         
@@ -278,6 +290,7 @@ class TaskQueue:
             logger.error(f"[TaskQueue] 取消队列项失败: {e}")
             self._db.rollback()
             return False
+
     def requeue_failed(self, max_retries: int = 3) -> int:
         """重新入队失败任务（未超过最大重试次数的）
         
@@ -289,7 +302,7 @@ class TaskQueue:
         """
         try:
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            
+
             # 找出失败且未超过重试次数的任务
             rows = self._db.fetch_all(
                 """
@@ -298,7 +311,7 @@ class TaskQueue:
                 """,
                 (QueueStatus.FAILED.value, max_retries)
             )
-            
+
             count = 0
             for row in rows:
                 self._db.execute(
@@ -310,7 +323,7 @@ class TaskQueue:
                     (QueueStatus.PENDING.value, row["id"])
                 )
                 count += 1
-            
+
             self._db.commit()
             logger.info(f"[TaskQueue] 重新入队: {count} 个任务")
             return count

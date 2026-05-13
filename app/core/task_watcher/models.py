@@ -8,34 +8,46 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional, List, Dict, Any
 import json
+
+
 class TriggerMode(str, Enum):
     """触发模式"""
     SCHEDULED = "scheduled"
     MANUAL = "manual"
     FILE_CHANGE = "file_change"
+
+
 class TaskType(str, Enum):
     """任务类型"""
     ANALYZE = "analyze"
     RESEARCH = "research"
     CODE = "code"
     CUSTOM = "custom"
+
+
 class OutputMode(str, Enum):
     """输出模式"""
     FILE = "file"
     CLIPBOARD = "clipboard"
     NOTIFICATION = "notification"
     WEBHOOK = "webhook"
+
+
 class SessionMode(str, Enum):
     """会话模式"""
     NEW = "new"
     CONTINUE = "continue"
     FROM_SESSION_ID = "from_session_id"
+
+
 class QueueStatus(str, Enum):
     """队列状态"""
     PENDING = "pending"
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+
+
 class TaskStatus(str, Enum):
     """任务状态"""
     IDLE = "idle"
@@ -44,11 +56,15 @@ class TaskStatus(str, Enum):
     EXECUTING = "executing"
     COMPLETED = "completed"
     FAILED = "failed"
+
+
 class OutputFormat(str, Enum):
     """输出格式"""
     MARKDOWN = "markdown"
     JSON = "json"
     TEXT = "text"
+
+
 @dataclass
 class TriggerConfig:
     """触发配置"""
@@ -60,6 +76,7 @@ class TriggerConfig:
     # file_change 模式
     watch_folder: Optional[str] = None
     file_pattern: Optional[str] = "*.task.md"
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "TriggerConfig":
         """从字典创建触发配置"""
@@ -68,7 +85,7 @@ class TriggerConfig:
             mode = TriggerMode(mode_str)
         except ValueError:
             mode = TriggerMode.MANUAL
-        
+
         return cls(
             mode=mode,
             cron=data.get("cron"),
@@ -76,6 +93,7 @@ class TriggerConfig:
             watch_folder=data.get("watch_folder"),
             file_pattern=data.get("file_pattern", "*.task.md"),
         )
+
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
         return {
@@ -85,6 +103,8 @@ class TriggerConfig:
             "watch_folder": self.watch_folder,
             "file_pattern": self.file_pattern,
         }
+
+
 @dataclass
 class ContextConfig:
     """执行上下文配置"""
@@ -93,6 +113,7 @@ class ContextConfig:
     agent: str = "plan"
     reference_files: List[str] = field(default_factory=list)
     project: Optional[str] = None  # 任务会话保存到的 project
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ContextConfig":
         """从字典创建上下文配置"""
@@ -101,7 +122,7 @@ class ContextConfig:
             session_mode = SessionMode(session_mode_str)
         except ValueError:
             session_mode = SessionMode.NEW
-        
+
         return cls(
             session_mode=session_mode,
             session_id=data.get("session_id"),
@@ -109,6 +130,7 @@ class ContextConfig:
             reference_files=data.get("reference_files", []),
             project=data.get("project"),
         )
+
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
         return {
@@ -118,12 +140,15 @@ class ContextConfig:
             "reference_files": self.reference_files,
             "project": self.project,
         }
+
+
 @dataclass
 class OutputConfig:
     """输出配置"""
     mode: OutputMode = OutputMode.FILE
     destination: Optional[str] = None
     format: OutputFormat = OutputFormat.MARKDOWN
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "OutputConfig":
         """从字典创建输出配置"""
@@ -137,12 +162,13 @@ class OutputConfig:
             fmt = OutputFormat(fmt_str)
         except ValueError:
             fmt = OutputFormat.MARKDOWN
-        
+
         return cls(
             mode=mode,
             destination=data.get("destination"),
             format=fmt,
         )
+
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
         return {
@@ -150,6 +176,8 @@ class OutputConfig:
             "destination": self.destination,
             "format": self.format.value if isinstance(self.format, Enum) else self.format,
         }
+
+
 @dataclass
 class TaskConfig:
     """任务配置"""
@@ -167,6 +195,7 @@ class TaskConfig:
     source_file: Optional[str] = None
     created_at: str = None
     updated_at: str = None
+
     def __post_init__(self):
         """初始化后处理"""
         if self.trigger is None:
@@ -178,6 +207,7 @@ class TaskConfig:
         if not self.created_at:
             from datetime import datetime
             self.created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "TaskConfig":
         """从字典创建任务配置"""
@@ -200,6 +230,7 @@ class TaskConfig:
             created_at=data.get("created_at"),
             updated_at=data.get("updated_at"),
         )
+
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
         return {
@@ -218,6 +249,8 @@ class TaskConfig:
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
+
+
 @dataclass
 class QueueItem:
     """队列项"""
@@ -233,6 +266,7 @@ class QueueItem:
     error: Optional[str] = None
     retry_count: int = 0
     task_config: Optional[TaskConfig] = None
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "QueueItem":
         """从字典创建队列项"""
@@ -242,10 +276,10 @@ class QueueItem:
             status = QueueStatus(status_str)
         except ValueError:
             status = QueueStatus.PENDING
-        
+
         task_config_data = data.get("task_config")
         task_config = TaskConfig.from_dict(task_config_data) if task_config_data else None
-        
+
         return cls(
             id=data.get("id"),
             task_id=data.get("task_id"),
@@ -260,6 +294,7 @@ class QueueItem:
             retry_count=data.get("retry_count", 0),
             task_config=task_config,
         )
+
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
         result = {
@@ -278,6 +313,8 @@ class QueueItem:
         if self.task_config:
             result["task_config"] = self.task_config.to_dict()
         return result
+
+
 @dataclass
 class ExecutionLog:
     """执行日志"""
@@ -289,6 +326,7 @@ class ExecutionLog:
     status: str = "pending"
     result_summary: Optional[str] = None
     output_file: Optional[str] = None
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ExecutionLog":
         """从字典创建执行日志"""
@@ -302,6 +340,7 @@ class ExecutionLog:
             result_summary=data.get("result_summary"),
             output_file=data.get("output_file"),
         )
+
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
         return {
@@ -314,6 +353,8 @@ class ExecutionLog:
             "result_summary": self.result_summary,
             "output_file": self.output_file,
         }
+
+
 @dataclass
 class TaskResult:
     """任务执行结果"""
@@ -324,6 +365,7 @@ class TaskResult:
     output_file: Optional[str] = None
     error: Optional[str] = None
     execution_time: Optional[float] = None
+
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
         return {
