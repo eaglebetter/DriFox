@@ -6,6 +6,8 @@ from typing import Dict, List, Optional
 from loguru import logger
 
 from app.tools.result import ToolResult
+from app.utils.utils import list_skills_with_intro
+from app.utils.utils import load_skill as utils_load_skill
 
 
 class TaskTools:
@@ -128,16 +130,6 @@ class TaskTools:
             logger.error(f"[Task] task_execute_batch exception: {e}")
             return ToolResult(False, error=f"批量任务启动失败: {str(e)}")
 
-        # def task_wait(
-        #     self,
-        #     task_ids: List[str],
-        #     timeout: int = 1800,
-        #     poll_interval: float = 0.1,
-        # ) -> ToolResult:
-        #     """
-        #     【已禁用】请使用自动回调机制。
-        #     任务完成后系统会自动发送 `[后台任务状态]` 消息。
-        #     """
         if not hasattr(self, "_sub_agent_manager") or not self._sub_agent_manager:
             return ToolResult(False, error="子智能体管理器未初始化")
 
@@ -223,92 +215,24 @@ class TaskTools:
             return self._sub_agent_manager.get_all_active_tasks_with_details(with_log, with_result)
 
     def load_skill(self, name: str) -> ToolResult:
-        try:
-            from app.utils.utils import get_app_data_dir
-            search_paths = [
-                Path(__file__).parent.parent / "skills" / name / f"SKILL.md",
-                get_app_data_dir() / "skills" / name / f"SKILL.md",
-                Path.home() / ".agents" / "skills" / name / f"SKILL.md",
-            ]
-            found_path = None
-            for path in search_paths:
-                if path.exists():
-                    found_path = path
-                    break
-
-            if not found_path:
-                return ToolResult(False, error=f"Skill not found: {name}")
-
-            with open(found_path, "r", encoding="utf-8") as f:
-                content = f.read()
-                content = content.split("---", 2)[-1].strip()
-
+        """加载指定技能"""
+        success, content, workspace = utils_load_skill(name)
+        
+        if success:
             self._loaded_skills[name] = content
-            self._skill_workspaces[name] = str(found_path.parent.resolve())
-
+            self._skill_workspaces[name] = workspace
             return ToolResult(
                 True,
-                content=f"Skill loaded: {name}\n\nSkill workspace: {str(found_path.parent.resolve())}\n\n{content}",
+                content=f"Skill loaded: {name}\n\nSkill workspace: {workspace}\n\n{content}",
             )
-        except Exception as e:
-            return ToolResult(False, error=f"Load skill error: {str(e)}")
+        else:
+            return ToolResult(False, error=content)
 
     def list_skills(self) -> ToolResult:
+        """获取所有技能列表"""
         try:
-            import yaml
-            from app.utils.utils import get_app_data_dir
-
-            skills_dirs = [
-                Path(__file__).parent.parent / "skills",
-                get_app_data_dir() / ".drifox"/ "skills",
-                Path.home() / ".agents" / "skills",
-            ]
-            results = []
-
-            skills_intro = ""
-            main_skills_dir = Path(__file__).parent.parent / "skills"
-            skills_readme = main_skills_dir / "SKILLS.md"
-            if skills_readme.exists():
-                content = skills_readme.read_text(encoding="utf-8")
-                skills_intro = content + "\n\n"
-
-            for skills_dir in skills_dirs:
-                if not skills_dir.exists():
-                    continue
-                for skill_dir in skills_dir.iterdir():
-                    if not skill_dir.is_dir():
-                        continue
-                    if skill_dir.name.startswith("_") or skill_dir.name.startswith("."):
-                        continue
-
-                    skill_file = skill_dir / "SKILL.md"
-                    if not skill_file.exists():
-                        skill_file = skill_dir / "skill.md"
-
-                    if not skill_file.exists():
-                        continue
-
-                    content = skill_file.read_text(encoding="utf-8")
-                    name = skill_dir.name
-                    description = ""
-
-                    if content.startswith("---"):
-                        try:
-                            frontmatter = content.split("---", 2)[1]
-                            meta = yaml.safe_load(frontmatter)
-                            if meta:
-                                name = meta.get("name", skill_dir.name)
-                                description = meta.get("description", "")
-                        except Exception:
-                            pass
-
-                    results.append({"name": name, "description": description})
-
-            skills_xml = "<available_skills>\n"
-            for skill in results:
-                skills_xml += f"  <skill>\n    <name>{skill['name']}</name>\n    <description>{skill['description']}</description>\n  </skill>\n"
-            skills_xml += "</available_skills>"
-            return ToolResult(True, content=skills_intro + skills_xml)
+            content = list_skills_with_intro()
+            return ToolResult(True, content=content)
         except Exception as e:
             return ToolResult(False, error=f"List skills error: {str(e)}")
 

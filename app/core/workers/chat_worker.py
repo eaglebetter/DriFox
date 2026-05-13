@@ -651,7 +651,6 @@ class OpenAIChatWorker(QThread):
                         }
 
         tool_result_map = {}
-        MAX_CONTENT_LENGTH = 6000
         if tool_results:
             for item in tool_results:
                 if not isinstance(item, dict):
@@ -660,22 +659,12 @@ class OpenAIChatWorker(QThread):
                 if not tool_call_id:
                     continue
 
-                content = item.get("content", "")
-                if len(content) > MAX_CONTENT_LENGTH:
-                    head_len = int(MAX_CONTENT_LENGTH * 0.6)
-                    tail_len = MAX_CONTENT_LENGTH - head_len
-                    content = (
-                            content[:head_len]
-                            + f"\n\n... [已截断，原始长度 {len(content)}] ...\n\n"
-                            + content[-tail_len:]
-                    )
-
                 tool_result_map[tool_call_id] = {
                     "role": "tool",
                     "tool_call_id": tool_call_id,
                     "name": item.get("name", "tool"),
                     "arguments": item.get("arguments", {}),
-                    "content": content,
+                    "content": item.get("content", ""),
                     "success": item.get("success", True),
                     "round_id": item.get("round_id"),
                     "timestamp": item.get("timestamp", now_ts),

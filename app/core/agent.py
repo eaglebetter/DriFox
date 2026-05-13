@@ -633,54 +633,21 @@ Use the tools available to you based on your permissions.
 不要在回复中重复消息内容，直接给出检查结果和建议。""".strip()
 
     def get_enabled_skills_content(self, enabled_skills: List[str]) -> str:
+        """获取已启用的技能内容"""
+        from app.utils.utils import get_local_skills
+        
         if not enabled_skills:
             return ""
-        from app.utils.utils import get_app_data_dir
-        skills_dirs = [
-            Path(__file__).parent.parent / "skills",
-            Path.home() / ".agents" / "skills",
-            get_app_data_dir() / "skills",
-        ]
+        
+        all_skills = get_local_skills()
         result_parts = [
             "\n\n## 偏好技能\n以下是部分用户偏好的智能体技能，如果以下技能不能满足用户需求，可以使用 `list_skills` 技能加载完整技能列表：\n"
         ]
-
-        for skills_base in skills_dirs:
-            if not skills_base.exists():
-                continue
-
-            for skill_dir in skills_base.iterdir():
-                if not skill_dir.is_dir():
-                    continue
-                if skill_dir.name not in enabled_skills:
-                    continue
-                if skill_dir.name.startswith("_") or skill_dir.name.startswith("."):
-                    continue
-
-                skill_file = skill_dir / "SKILL.md"
-                if not skill_file.exists():
-                    skill_file = skill_dir / "skill.md"
-                if not skill_file.exists():
-                    continue
-
-                try:
-                    content = skill_file.read_text(encoding="utf-8")
-                    name = skill_dir.name
-                    description = ""
-
-                    if content.startswith("---"):
-                        try:
-                            frontmatter = content.split("---", 2)[1]
-                            meta = yaml.safe_load(frontmatter)
-                            if meta:
-                                name = meta.get("name", skill_dir.name)
-                                description = meta.get("description", "")
-                        except Exception:
-                            logger.debug(f"Failed to parse skill frontmatter: {skill_dir}")
-                    result_parts.append(f"\n### {name}\n{description}\n")
-                except Exception:
-                    continue
-
+        
+        for skill in all_skills:
+            if skill["name"] in enabled_skills:
+                result_parts.append(f"\n### {skill['name']}\n{skill.get('description', '')}\n")
+        
         return "\n".join(result_parts) if len(result_parts) > 1 else ""
 
     def get_agent_config(self, agent_name: str) -> Dict[str, Any]:
@@ -714,48 +681,9 @@ Use the tools available to you based on your permissions.
 
 
 def get_available_skills() -> List[Dict]:
-    """获取内置 skills 列表。"""
-    skills_dir = Path(__file__).parent.parent / "skills"
-    opencode_skills_dir = Path(__file__).parent.parent / ".opencode" / "skills"
-
-    results = []
-
-    for skills_base in [skills_dir, opencode_skills_dir]:
-        if not skills_base.exists():
-            continue
-
-        for skill_dir in skills_base.iterdir():
-            if not skill_dir.is_dir():
-                continue
-            if skill_dir.name.startswith("_") or skill_dir.name.startswith("."):
-                continue
-
-            skill_file = skill_dir / "SKILL.md"
-            if not skill_file.exists():
-                skill_file = skill_dir / "skill.md"
-            if not skill_file.exists():
-                continue
-
-            try:
-                content = skill_file.read_text(encoding="utf-8")
-            except Exception:
-                continue
-
-            name = skill_dir.name
-            description = ""
-            if content.startswith("---"):
-                try:
-                    frontmatter = content.split("---", 2)[1]
-                    meta = yaml.safe_load(frontmatter)
-                    if meta:
-                        name = meta.get("name", name)
-                        description = meta.get("description", "")
-                except Exception:
-                    logger.debug(f"Failed to parse skill meta: {name}")
-
-            results.append({"name": name, "description": description})
-
-    return results
+    """获取内置 skills 列表"""
+    from app.utils.utils import get_local_skills
+    return get_local_skills()
 
 
 def create_agent_manager(agents_dir: Optional[str] = None) -> AgentManager:
