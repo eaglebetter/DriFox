@@ -138,8 +138,6 @@ class SubAgentExecutor(QThread):
             )
             tools = self.agent_manager.get_agent_tools_schema(self.agent_name, is_subagent_call=self.is_subagent_call)
 
-            messages = [{"role": "system", "content": system_prompt}]
-
             # 【新增】如果 agent 配置了 inherit_history，获取主智能体历史消息
             history_section = ""
             if agent.inherit_history and self._get_history_messages:
@@ -172,17 +170,10 @@ class SubAgentExecutor(QThread):
                 except Exception as e:
                     logger.warning(f"[SubAgentExecutor] 获取历史消息失败: {e}")
 
-            content = ""
-            # 追加历史上下文
-            if history_section:
-                content += history_section + "\n\n"
-
-            if self.parent_context:
-                content += f"## 父智能体说明\n{self.parent_context}\n\n## 子任务\n{self.task_description}"
-            else:
-                content += f"## 子任务\n{self.task_description}"
-
-            messages.append({"role": "user", "content": content})
+            messages = [
+                {"role": "system", "content": system_prompt + history_section + F"## 父智能体说明\n{self.parent_context}\n\n"},
+                {"role": "user", "content": f"## 子任务\n{self.task_description}"}
+            ]
 
             self._add_log("progress", f"开始执行子任务: {self.agent_name}")
             self.progress_updated.emit(self.task_id, f"开始执行子任务: {self.agent_name}")
