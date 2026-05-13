@@ -7,6 +7,7 @@ HookManager - Hooks 机制核心管理类
 import re
 import subprocess
 import os
+import sys
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Any, Callable
 from PyQt5.QtCore import QThreadPool, QRunnable, pyqtSignal, QObject
@@ -292,9 +293,23 @@ class HookManager:
                     cmd_abs = os.path.normpath(os.path.join(cwd, cmd))
                     cmd = cmd_abs
 
-                if cmd.lower().endswith('.cmd'):
+                if cmd.lower().endswith('.cmd') and sys.platform.startswith('win'):
                     result = subprocess.run(
                         ['cmd.exe', '/c', cmd] + args,
+                        cwd=cwd,
+                        shell=False,
+                        capture_output=True,
+                        text=True,
+                        encoding='utf-8',
+                        errors='replace',
+                        timeout=300
+                    )
+                elif cmd.lower().endswith('.cmd'):
+                    # On non-Windows systems, add execute permission first
+                    os.chmod(cmd, 0o755)
+                    # Use sh to execute .cmd file
+                    result = subprocess.run(
+                        ['sh', '-c', f'"{cmd}" {" ".join(args)}'],
                         cwd=cwd,
                         shell=False,
                         capture_output=True,
