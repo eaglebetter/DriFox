@@ -36,16 +36,17 @@ class HookMatchRule:
 
 class HookWorkerSignals(QObject):
     """Worker 信号，用于执行完后回调"""
-    finished = pyqtSignal(str, bool)  # output, success
+    finished = pyqtSignal(str, str, bool)  # event_name, output, success
 
 
 class HookWorker(QRunnable):
     """异步执行 Hook 的 Worker"""
-    def __init__(self, command: str, cwd: Optional[str], signals: HookWorkerSignals):
+    def __init__(self, command: str, cwd: Optional[str], signals: HookWorkerSignals, event_name: str = ""):
         super().__init__()
         self.command = command
         self.cwd = cwd
         self.signals = signals
+        self.event_name = event_name
     
     def run(self):
         """执行命令，收集输出"""
@@ -76,7 +77,7 @@ class HookWorker(QRunnable):
                 if result.stderr:
                     logger.debug(f"[HookWorker] stderr: {result.stderr}")
             
-            self.signals.finished.emit(output, True)
+            self.signals.finished.emit(self.event_name, output, True)
         except Exception as e:
             logger.error(f"[HookWorker] Execution failed: {e}")
             self.signals.finished.emit(f"Error: {str(e)}", False)
@@ -179,13 +180,10 @@ class HookManager:
         
         for rule in self._hooks[event_name]:
             if not rule.matcher:
-                # 没有 matcher，总是触发
                 pass
             elif rule.matcher.startswith("tool:"):
-                # tool: 前缀表示匹配工具名
-                tool_pattern = rule.matcher[5:]  # 去掉 "tool:" 前缀
+                tool_pattern = rule.matcher[5:]
                 if not tool_name or not re.search(tool_pattern, tool_name, re.IGNORECASE):
-                    logger.info(f"[HookManager] Skipping: tool matcher '{rule.matcher}' doesn't match tool '{tool_name}'")
                     continue
             elif current_message and re.search(rule.matcher, current_message, re.IGNORECASE):
                 # 普通 matcher 匹配用户消息
@@ -194,11 +192,9 @@ class HookManager:
                 # 用户消息不匹配
                 continue
             
-            # 执行这个规则下的所有 Hooks
             for hook in rule.hooks:
                 context_with_event = context.copy()
                 context_with_event["_event_name"] = event_name
-                logger.info(f"[HookManager] Executing hook for {event_name}, tool={tool_name}, command: {hook.command[:60]}")
                 self._execute_hook(hook, context_with_event, project_root)
     
     def _parse_command(self, command: str) -> Optional[List[str]]:
@@ -239,6 +235,8 @@ class HookManager:
 
     def _execute_hook(self, hook: Hook, context: Dict[str, Any], project_root: str):
         """替换变量并执行 Hook"""
+        event_name = context.get("_event_name", "")
+        
         # 变量替换
         command = hook.command
         command = command.replace("{skill_root}", hook.skill_root)
@@ -266,37 +264,25 @@ class HookManager:
             # 同步执行
             try:
                 output = ""
-                # 直接在 Python 中执行，避免 Windows cmd 的编码问题
                 if command.startswith("echo "):
-                    # echo 命令直接输出，不需要 shell
                     output = command[5:].strip()
-                    # 去掉首尾的引号（如果有）
                     if output.startswith('"') and output.endswith('"'):
                         output = output[1:-1]
                     elif output.startswith("'") and output.endswith("'"):
                         output = output[1:-1]
                 else:
-                    # 解析命令和参数（处理引号包裹的命令路径）
                     parts = self._parse_command(command)
                     if not parts:
-                        logger.warning(f"[HookManager] Failed to parse command: {command}")
                         return
                     
                     cmd = parts[0]
                     args = parts[1:]
                     
-                    logger.debug(f"[HookManager] Parsed: cmd={cmd}, args={args}, cwd={cwd}")
-                    
-                    # 如果是相对路径，转换为绝对路径
                     if not os.path.isabs(cmd):
                         cmd_abs = os.path.normpath(os.path.join(cwd, cmd))
-                        logger.debug(f"[HookManager] Relative path converted to: {cmd_abs}")
                         cmd = cmd_abs
                     
-                    # 检测 .cmd 文件，使用 cmd.exe 直接执行
                     if cmd.lower().endswith('.cmd'):
-                        logger.debug(f"[HookManager] Using cmd.exe to run: {cmd}")
-                        # cmd.exe /c 需要用 shell=True
                         result = subprocess.run(
                             ['cmd.exe', '/c', cmd] + args,
                             cwd=cwd,
@@ -308,9 +294,7 @@ class HookManager:
                             timeout=300
                         )
                     else:
-                        # Unix 脚本：转换为 MSYS 兼容路径格式
                         cmd_msys = cmd.replace('\\', '/').replace(':', '')
-                        logger.debug(f"[HookManager] Running script: {cmd_msys} with args {args}")
                         result = subprocess.run(
                             ['bash', cmd_msys] + args,
                             cwd=cwd,
@@ -322,24 +306,18 @@ class HookManager:
                             timeout=300
                         )
                     output = result.stdout or ""
-                    if result.stderr:
-                        logger.debug(f"[HookManager] stderr: {result.stderr}")
                 
                 if hook.add_output_to_context and self._on_finished_callback:
-                    self._on_finished_callback(output, True)
-                logger.debug(f"[HookManager] Completed sync hook: {command[:60]}")
+                    self._on_finished_callback(event_name, output, True)
             except Exception as e:
-                logger.error(f"[HookManager] Sync execution failed: {e}")
                 if hook.add_output_to_context and self._on_finished_callback:
-                    self._on_finished_callback(f"Error: {str(e)}", False)
+                    self._on_finished_callback(event_name, f"Error: {str(e)}", False)
         else:
-            # 异步执行
             signals = HookWorkerSignals()
-            worker = HookWorker(command, cwd, signals)
+            worker = HookWorker(command, cwd, signals, event_name)
             if hook.add_output_to_context and self._on_finished_callback:
                 signals.finished.connect(self._on_finished_callback)
             self._thread_pool.start(worker)
-            logger.debug(f"[HookManager] Started async hook: {command[:60]}...")
     
     def get_registered_events(self) -> List[str]:
         """获取所有已注册事件"""

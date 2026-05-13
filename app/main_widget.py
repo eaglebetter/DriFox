@@ -4942,9 +4942,9 @@ class OpenAIChatToolWindow(ToolWindow):
             for msg in session.messages
         )
         if not has_user_message:
-            # 检查是否是 hook 输出消息
+            # 检查是否是 hook 输出消息（兼容新旧格式）
             hook_only = all(
-                msg.get("role") == "assistant" and "# Hook Output" in (msg.get("content") or "")
+                msg.get("role") == "assistant" and ("# Hook Output" in (msg.get("content") or "") or "<hook " in (msg.get("content") or ""))
                 for msg in session.messages
             )
             if hook_only:

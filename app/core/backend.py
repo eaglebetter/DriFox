@@ -153,31 +153,36 @@ class ChatBackend(QObject):
         # 3. 创建 HookManager（必须在 create_session 之前）
         self._hook_manager = HookManager(self._thread_pool)
         # Hook 完成后，把输出添加到上下文
-        def on_hook_finished(output: str, success: bool):
+        def on_hook_finished(event_name: str, output: str, success: bool):
             if output.strip() and success:
-                hook_output = f"# Hook Output\n```\n{output}\n```"
+                hook_output = f"<hook event=\"{event_name}\">\n{output}\n</hook>"
                 
-                # 1. 添加到 worker 消息列表（如果正在执行）
-                if self._chat_engine and self._chat_engine._current_worker:
-                    worker = self._chat_engine._current_worker
-                    # 直接追加到 worker 的 API 消息缓存
-                    if hasattr(worker, '_append_to_api_cache'):
-                        worker._append_to_api_cache([{
-                            "role": "assistant",
-                            "content": hook_output,
-                        }])
-                        logger.debug(f"[HookManager] Added hook output to worker messages")
+                # 只有 SessionStart 和 PreUserMessage 添加到消息列表（用于 UI 显示和 LLM）
+                # PreToolUse/PostToolUse 只执行脚本，不加入消息列表，避免打断工具迭代
+                add_to_messages = event_name in ("SessionStart", "PreUserMessage", "PostUserMessage")
                 
-                # 2. 添加到当前会话（用于 UI 显示）
-                session = self.get_current_session()
-                if session:
-                    session.add_assistant_message(hook_output)
+                if add_to_messages:
+                    session = self.get_current_session()
+                    if session:
+                        # 对于 PreUserMessage，先删除之前的同类 hook 消息，只保留最新一个
+                        if event_name == "PreUserMessage":
+                            session.messages = [
+                                msg for msg in session.messages
+                                if not (msg.get("role") == "assistant" and "<hook " in (msg.get("content") or "") and 'event="PreUserMessage"' in (msg.get("content") or ""))
+                            ]
+                        
+                        # 添加新消息
+                        session.add_assistant_message(hook_output)
+                    
+                    # 发送消息给前端显示
+                    self.message_received.emit({
+                        "role": "assistant",
+                        "content": hook_output
+                    })
                 
-                # 3. 发送消息给前端显示
-                self.message_received.emit({
-                    "role": "assistant",
-                    "content": hook_output
-                })
+                # PreToolUse/PostToolUse 只打印日志
+                else:
+                    pass
         self._hook_manager.set_on_finished_callback(on_hook_finished)
         
         # 4. 使用 create_session() 触发 SessionStart hook（必须在 hook_manager 之后）

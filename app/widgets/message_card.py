@@ -550,6 +550,56 @@ def _inject_tool_blocks(md_text: str, completed: bool = True) -> str:
     return "".join(parts)
 
 
+def _inject_hook_blocks(md_text: str, completed: bool = True) -> str:
+    """注入 Hook 块 HTML，类似 think 块"""
+    if not md_text:
+        return md_text
+
+    parts = []
+    i = 0
+    while i < len(md_text):
+        start_idx = md_text.find("<hook ", i)
+        if start_idx == -1:
+            parts.append(md_text[i:])
+            break
+        parts.append(md_text[i:start_idx])
+        
+        # 找到 event 属性
+        event_start = md_text.find('event="', start_idx)
+        if event_start == -1 or event_start > start_idx + 10:
+            # 没有 event 属性，跳过这个位置，继续往后找
+            i = start_idx + 6
+            continue
+        
+        event_end = md_text.find('"', event_start + len('event="'))
+        if event_end == -1:
+            parts.append(md_text[start_idx:])
+            break
+        
+        event_name = md_text[event_start + len('event="'):event_end]
+        
+        # 找到闭合标签
+        end_idx = md_text.find("</hook>", start_idx + len("<hook "))
+        if end_idx != -1:
+            content = md_text[start_idx + len('<hook '): end_idx]
+            # 解析内容（event_name 后面的内容）
+            content_start = content.find('>')
+            if content_start != -1:
+                hook_content = content[content_start + 1:].strip()
+            else:
+                hook_content = content.strip()
+            
+            # 使用 render_hook_block 渲染
+            from app.widgets.render_helpers import render_hook_block
+            parts.append(render_hook_block(event_name, hook_content, collapsed=not completed))
+            i = end_idx + len("</hook>")
+        else:
+            # 未闭合的 hook，跳过
+            parts.append(md_text[start_idx:])
+            break
+    return "".join(parts)
+
+
 # 缓存大小阈值（KB）：超过此大小的文本不缓存，防止内存膨胀
 _LRU_CACHE_SIZE_THRESHOLD = 50 * 1024  # 50KB
 
@@ -564,6 +614,7 @@ def _render_markdown_to_html_cached_impl(raw_md: str, reasoning: str) -> str:
     safe_md = _inject_context_links(safe_md)
     processed_md = _inject_think_cards(safe_md, True)
     processed_md = _inject_tool_blocks(processed_md, True)
+    processed_md = _inject_hook_blocks(processed_md, True)
 
     try:
         md = get_markdown_instance()
@@ -1452,6 +1503,37 @@ class CodeWebViewer(QWebEngineView):
                     word-break: break-word;
                 }}
 
+                .hook-block {{
+                    margin: 8px 0;
+                    background: rgba(0, 188, 212, 0.08);
+                    border: 1px solid rgba(0, 188, 212, 0.2);
+                    border-left: 3px solid #00BCD4;
+                    border-radius: 10px;
+                    box-shadow: none;
+                    transition: border-color 220ms ease;
+                }}
+                .hook-block[data-expanded="true"] {{
+                    border-color: rgba(0, 188, 212, 0.5);
+                }}
+                .hook-block__summary {{
+                    padding: 8px 12px;
+                    color: #00BCD4;
+                    font-weight: 600;
+                    font-size: 13px;
+                    white-space: normal;
+                }}
+                .hook-content {{
+                    padding: 10px 12px;
+                    border-top: 1px solid rgba(0, 188, 212, 0.2);
+                    background: rgba(0, 188, 212, 0.05);
+                    font-family: Consolas, monospace;
+                    font-size: 12px;
+                    color: #e0e0e0;
+                    white-space: pre-wrap;
+                    word-break: break-word;
+                    line-height: 1.5;
+                }}
+
                 blockquote {{
                     border-left: 3px solid var(--accent-warm);
                     background: rgba(255,182,92,0.08);
@@ -1774,6 +1856,7 @@ class CodeWebViewer(QWebEngineView):
         safe_md = _inject_context_links(safe_md)
         processed_md = _inject_think_cards(safe_md, self._streaming is False)
         processed_md = _inject_tool_blocks(processed_md, self._streaming is False)
+        processed_md = _inject_hook_blocks(processed_md, self._streaming is False)
 
         try:
             md = get_markdown_instance()
