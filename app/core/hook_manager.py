@@ -18,6 +18,7 @@ import sys
 import json
 import time
 import threading
+from pathlib import Path
 from dataclasses import dataclass, field, asdict
 from typing import Dict, List, Optional, Any, Callable, Union
 from enum import Enum
@@ -269,20 +270,24 @@ class HookWorker(QRunnable):
                             cwd=self.cwd,
                             shell=True,
                             capture_output=True,
+                            stdin=subprocess.DEVNULL,
                             text=True,
                             encoding='utf-8',
-                            errors='strict'
+                            errors='replace',
+                            timeout=self.hook.timeout
                         )
-                    except UnicodeDecodeError:
-                        # UTF-8 失败，用系统编码
+                    except Exception:
+                        # 任何异常（如超时）回退到系统编码
                         result = subprocess.run(
                             command,
                             cwd=self.cwd,
                             shell=True,
                             capture_output=True,
+                            stdin=subprocess.DEVNULL,
                             text=True,
                             encoding=preferred or 'gbk',
-                            errors='replace'
+                            errors='replace',
+                            timeout=self.hook.timeout
                         )
                     # 检查是否成功
                     if result.returncode != 0:
@@ -297,6 +302,7 @@ class HookWorker(QRunnable):
                 cwd=self.cwd,
                 shell=True,
                 capture_output=True,
+                stdin=subprocess.DEVNULL,
                 text=True,
                 encoding=encoding,
                 errors='replace',
@@ -758,6 +764,7 @@ class HookManager:
             try:
                 output = ""
                 success = False
+                _exit2_skip = False  # exit code 2 跳过标记（Claude Code 兼容）
                 
                 if hook.type == HookType.COMMAND.value:
                     if command.startswith("echo "):
@@ -770,6 +777,7 @@ class HookManager:
                         
                         # 根据操作系统选择合适的编码
                         encoding = 'utf-8'
+                        _exit2_skip = False  # exit code 2 跳过标记
                         if os.name == 'nt':
                             # Windows: 优先尝试 UTF-8（Bash 输出通常是 UTF-8）
                             import locale
@@ -781,28 +789,34 @@ class HookManager:
                                         cwd=cwd,
                                         shell=True,
                                         capture_output=True,
+                                        stdin=subprocess.DEVNULL,
                                         text=True,
                                         encoding='utf-8',
-                                        errors='strict'
+                                        errors='replace',
+                                        timeout=hook.timeout
                                     )
-                                except UnicodeDecodeError:
+                                except Exception:
                                     result = subprocess.run(
                                         command,
                                         cwd=cwd,
                                         shell=True,
                                         capture_output=True,
+                                        stdin=subprocess.DEVNULL,
                                         text=True,
                                         encoding=preferred or 'gbk',
-                                        errors='replace'
+                                        errors='replace',
+                                        timeout=hook.timeout
                                     )
                                 success = result.returncode == 0
                                 output = result.stdout if success else (result.stderr or f"Exit code {result.returncode}")
+                                _exit2_skip = (result.returncode == 2)
                             else:
                                 result = subprocess.run(
                                     command,
                                     cwd=cwd,
                                     shell=True,
                                     capture_output=True,
+                                    stdin=subprocess.DEVNULL,
                                     text=True,
                                     encoding='utf-8',
                                     errors='replace',
@@ -810,12 +824,14 @@ class HookManager:
                                 )
                                 success = result.returncode == 0
                                 output = result.stdout if success else (result.stderr or f"Exit code {result.returncode}")
+                                _exit2_skip = (result.returncode == 2)
                         else:
                             result = subprocess.run(
                                 command,
                                 cwd=cwd,
                                 shell=True,
                                 capture_output=True,
+                                stdin=subprocess.DEVNULL,
                                 text=True,
                                 encoding='utf-8',
                                 errors='replace',
@@ -823,6 +839,7 @@ class HookManager:
                             )
                             success = result.returncode == 0
                             output = result.stdout if success else (result.stderr or f"Exit code {result.returncode}")
+                            _exit2_skip = (result.returncode == 2)
                 
                 elif hook.type == HookType.HTTP.value:
                     import urllib.request
@@ -850,16 +867,30 @@ class HookManager:
                         output = f"Function not registered: {hook.function}"
                         success = False
                         
-                # 检查决策
+                # 检查决策（支持 JSON decision 和 exit code 2 两种方式）
                 decision = HookDecision.CONTINUE
+                
+                # 方式1: 检测 exit code 2（Claude Code 兼容：跳过工具执行）
+                if _exit2_skip:
+                    decision = HookDecision.BLOCK
+                    logger.info(f"[HookManager] Hook exit code 2 → BLOCK: {context.get('event_name')}")
+                
+                # 方式2: 解析 JSON 中的 decision 字段
                 try:
                     output_data = json.loads(output)
                     if isinstance(output_data, dict):
                         decision_str = output_data.get("decision", "continue")
                         if decision_str in ["block", "continue", "defer"]:
                             decision = HookDecision(decision_str)
+                            if decision_str == "block":
+                                # 如果 JSON 中明确指定 block，使用原始 output（可能不是 stdout）
+                                pass
                 except json.JSONDecodeError:
                     pass
+                
+                # 当 exit 2 时，使用 stdout 作为 output（用于回填到工具）
+                if _exit2_skip:
+                    output = result.stdout or output
                 
                 # 触发决策回调
                 if decision != HookDecision.CONTINUE and self._on_decision_callback:
@@ -1064,8 +1095,9 @@ class HookManager:
                 config = json.load(f)
             
             # 先注销旧的全局 hooks，再重新注册（不碰 skill/agent hooks）
+            skill_root = str(Path(config_file).parent)
             self.unregister_skill_hooks("__global__")
-            self.register_hooks_from_json("__global__", "", config, config_file)
+            self.register_hooks_from_json("__global__", skill_root, config, config_file)
             logger.info(f"[HookManager] Reloaded global hooks from {config_file}")
         except Exception as e:
             logger.error(f"Failed to reload global hooks: {e}")

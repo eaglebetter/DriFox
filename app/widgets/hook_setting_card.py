@@ -58,6 +58,8 @@ class HookItem(QWidget):
         
         # 启用开关
         self.switch = SwitchButton(self)
+        self.switch.setOnText("")
+        self.switch.setOffText("")
         self.switch.setChecked(self.hook_data.get("enabled", True))
         
         self.setFixedHeight(40)
@@ -301,22 +303,77 @@ class HookListSettingCard(ExpandSettingCard):
         self._refresh()
     
     def _load_hooks(self):
-        """从 HookManager 获取所有已注册的 hooks（包括 skills 注册的）"""
-        self.all_hooks = {}
-        if self._hook_manager:
-            self.all_hooks = self._hook_manager.get_all_hooks()
+        """从 HookManager 加载所有 hooks（文件 hooks + 技能 hooks），转为规则格式"""
+        self.all_hooks = {"SessionStart": [], "PreUserMessage": [], "PostUserMessage": [],
+                          "PreAssistantMessage": [], "PostAssistantMessage": [],
+                          "PreToolUse": [], "PostToolUse": []}
+        
+        if not self._hook_manager:
+            return
+        
+        # 获取所有 hooks（扁平格式）
+        hm_hooks = self._hook_manager.get_all_hooks()
+        global_config = str(self.hooks_config_file)
+        
+        for event_name, flat_hooks in hm_hooks.items():
+            if event_name not in self.all_hooks:
+                self.all_hooks[event_name] = []
+            
+            # 按 matcher 分组，同 matcher 的合入同一规则
+            rule_map = {}  # matcher -> list of hook dicts
+            for hook in flat_hooks:
+                matcher = hook.get("matcher", "")
+                if matcher not in rule_map:
+                    rule_map[matcher] = []
+                rule_map[matcher].append(hook)
+            
+            for matcher, hooks in rule_map.items():
+                # 判断是否全部来自技能目录（非全局配置文件）
+                # 使用 resolve 处理相对/绝对路径差异
+                try:
+                    global_resolved = Path(global_config).resolve()
+                except Exception:
+                    global_resolved = Path(global_config)
+                
+                all_skill = all(
+                    self._is_skill_hook(h, global_resolved)
+                    for h in hooks
+                )
+                rule_entry = {
+                    "matcher": matcher,
+                    "hooks": hooks,
+                }
+                if all_skill:
+                    rule_entry["_readonly"] = True
+                self.all_hooks[event_name].append(rule_entry)
+    
+    def _is_skill_hook(self, hook: dict, global_resolved: Path) -> bool:
+        """判断 hook 是否来自技能目录（而非全局配置文件）"""
+        cf = hook.get("config_file")
+        if not cf:
+            return False  # 没有 config_file 的当作全局 hook
+        try:
+            cf_resolved = Path(cf).resolve()
+            return cf_resolved != global_resolved
+        except Exception:
+            return str(self.hooks_config_file) not in cf  # fallback: 字符串包含判断
     
     def _save_hooks(self):
-        """保存 hooks 到配置文件，并同步到 HookManager"""
+        """保存全局 hooks 到配置文件，并同步到 HookManager"""
+        # 过滤掉 _readonly 的 skill hooks
+        save_data = {}
+        for event_name, rules in self.all_hooks.items():
+            filtered_rules = [r for r in rules if not r.get("_readonly", False)]
+            if filtered_rules:
+                save_data[event_name] = filtered_rules
+        
         self.hooks_config_file.parent.mkdir(parents=True, exist_ok=True)
         with open(self.hooks_config_file, 'w', encoding='utf-8') as f:
-            json.dump({"hooks": self.all_hooks}, f, indent=2, ensure_ascii=False)
+            json.dump({"hooks": save_data}, f, indent=2, ensure_ascii=False)
         
         # 同步到 HookManager（热重载）
         if self._hook_manager:
             self._hook_manager.reload_global_hooks(str(self.hooks_config_file))
-            logger = __import__('logging').getLogger('hook_setting_card')
-            logger.info(f"[HookSettingCard] Synced hooks to HookManager")
     
     def _setup_ui(self):
         self.viewLayout.setSpacing(0)
@@ -326,6 +383,8 @@ class HookListSettingCard(ExpandSettingCard):
         # 按钮移到卡片头部（类似 SkillListSettingCard）
         self.addButton = PushButton("添加", self, FluentIcon.ADD)
         self.refreshButton = PushButton("刷新", self, FluentIcon.SYNC)
+        self.addButton.setObjectName("_hook_add_btn")
+        self.refreshButton.setObjectName("_hook_refresh_btn")
         
         self.addButton.clicked.connect(self.showAddHookCard.emit)
         self.refreshButton.clicked.connect(self._refresh)
@@ -337,8 +396,9 @@ class HookListSettingCard(ExpandSettingCard):
         self._render_hooks()
     
     def _render_hooks(self):
-        """渲染所有 hooks"""
-        if not self.all_hooks:
+        """渲染所有 hooks（数据已统一为规则格式）"""
+        has_visible = any(rules for event_name, rules in self.all_hooks.items() if rules)
+        if not has_visible:
             empty_label = QLabel("暂无 Hooks，点击「+ 添加」创建", self.view)
             empty_label.setStyleSheet("color: #888; padding: 16px; font-size: 12px;")
             empty_label.setAlignment(Qt.AlignCenter)
@@ -349,12 +409,7 @@ class HookListSettingCard(ExpandSettingCard):
             if not rules:
                 continue
             
-            # 兼容两种格式：
-            # 1. HookManager 格式: [hook_dict, ...] (直接 hook 列表)
-            # 2. 配置文件格式: [{"matcher": "...", "hooks": [...]}, ...]
-            # 标准化为配置文件格式
-            normalized_rules = self._normalize_hooks_format(rules)
-            
+            # 数据已统一为规则格式: [{"matcher": "...", "hooks": [...]}, ...]
             # 事件标题
             header = QLabel(f"Event: {event_name}", self.view)
             header.setStyleSheet(
@@ -364,10 +419,12 @@ class HookListSettingCard(ExpandSettingCard):
             self.viewLayout.addWidget(header)
             
             # Hook 条目
-            for rule_index, rule in enumerate(normalized_rules):
+            for rule_index, rule in enumerate(rules):
                 hooks = rule.get("hooks", [])
                 for hook_index, hook in enumerate(hooks):
                     item = HookItem(event_name, hook, hook_index, self.view)
+                    # 只读 hooks：允许开关操作，但持久化到技能自己的配置文件
+                    is_readonly = rule.get("_readonly", False)
                     # 使用闭包捕获正确的变量值
                     item.removed.connect(
                         lambda idx, en=event_name, ri=rule_index: self._remove_hook(en, ri, idx)
@@ -377,49 +434,11 @@ class HookListSettingCard(ExpandSettingCard):
                     )
                     self.viewLayout.addWidget(item)
     
-    def _normalize_hooks_format(self, rules):
-        """
-        标准化 hooks 格式。
-        
-        HookManager.get_all_hooks() 返回的格式:
-        {
-            "event": [
-                {"type": "command", "command": "xxx", "matcher": "yyy", ...},
-                ...
-            ]
-        }
-        
-        配置文件格式:
-        {
-            "event": [
-                {"matcher": "yyy", "hooks": [{"type": "command", "command": "xxx", ...}]},
-                ...
-            ]
-        }
-        """
-        if not rules:
-            return []
-        
-        # 如果第一个规则直接包含 "type" 字段，说明是 HookManager 格式
-        if rules and isinstance(rules[0], dict) and "type" in rules[0]:
-            # HookManager 格式 -> 转换为配置文件格式
-            normalized = []
-            for hook in rules:
-                normalized.append({
-                    "matcher": hook.get("matcher", ""),
-                    "hooks": [hook]
-                })
-            return normalized
-        
-        # 否则就是配置文件格式
-        return rules
-    
     def _get_hook_index(self, event_name, rule_index, hook_index):
         """计算 hook 的全局索引（用于 toggle 操作）"""
         total = 0
         for en, rules in self.all_hooks.items():
-            normalized_rules = self._normalize_hooks_format(rules)
-            for ri, rule in enumerate(normalized_rules):
+            for ri, rule in enumerate(rules):
                 for hi, hook in enumerate(rule.get("hooks", [])):
                     if en == event_name and ri == rule_index and hi == hook_index:
                         return total
@@ -427,7 +446,7 @@ class HookListSettingCard(ExpandSettingCard):
         return -1
     
     def _add_hook(self, event: str, command: str, matcher: str = "", hook_type: str = "command", enabled: bool = True):
-        """添加新 hook"""
+        """添加新 hook（直接修改 self.all_hooks 并持久化）"""
         if event not in self.all_hooks:
             self.all_hooks[event] = []
         
@@ -443,68 +462,75 @@ class HookListSettingCard(ExpandSettingCard):
         
         self.all_hooks[event].append(new_rule)
         
-        # 同步到 HookManager（add 操作直接调用 reload）
-        if self._hook_manager:
-            self._hook_manager.reload_global_hooks(str(self.hooks_config_file))
+        # 先保存到文件，再同步到 HookManager
+        self._save_hooks()
         
         self._refresh()
         self.hooksChanged.emit()
     
     def _remove_hook(self, event: str, rule_index: int, hook_index: int):
-        """删除 hook"""
+        """删除 hook（直接修改 self.all_hooks 并持久化）"""
         if event in self.all_hooks:
             rules = self.all_hooks[event]
-            # 标准化格式
-            normalized_rules = self._normalize_hooks_format(rules)
-            if rule_index < len(normalized_rules):
-                hooks = normalized_rules[rule_index].get("hooks", [])
+            if rule_index < len(rules):
+                rule = rules[rule_index]
+                # 不允许删除只读 skill hooks
+                if rule.get("_readonly", False):
+                    return
+                hooks = rule.get("hooks", [])
                 if hook_index < len(hooks):
                     hooks.pop(hook_index)
                     # 如果规则没有 hooks 了，移除规则
                     if not hooks:
-                        normalized_rules.pop(rule_index)
+                        rules.pop(rule_index)
                     # 如果事件没有规则了，移除事件
-                    if not normalized_rules:
+                    if not rules:
                         del self.all_hooks[event]
                     
-                    # 同步到 HookManager
-                    if self._hook_manager:
-                        self._hook_manager.reload_global_hooks(str(self.hooks_config_file))
+                    # 先保存到文件，再同步到 HookManager
+                    self._save_hooks()
                     
                     self._refresh()
                     self.hooksChanged.emit()
     
     def _toggle_hook(self, event: str, rule_index: int, hook_index: int, enabled: bool):
-        """切换 hook 启用状态"""
+        """切换 hook 启用状态（直接修改 self.all_hooks 并持久化）"""
         if event in self.all_hooks:
             rules = self.all_hooks[event]
-            # 标准化格式
-            normalized_rules = self._normalize_hooks_format(rules)
-            if rule_index < len(normalized_rules):
-                hooks = normalized_rules[rule_index].get("hooks", [])
+            if rule_index < len(rules):
+                rule = rules[rule_index]
+                hooks = rule.get("hooks", [])
                 if hook_index < len(hooks):
                     hooks[hook_index]["enabled"] = enabled
                     
-                    # 计算全局 hook_index
-                    hook_global_index = self._get_hook_index(event, rule_index, hook_index)
-                    
-                    # 同步到 HookManager（会自动保存到正确的配置文件）
-                    if self._hook_manager and hook_global_index >= 0:
-                        self._hook_manager.set_hook_enabled(event, hook_global_index, enabled)
+                    if rule.get("_readonly", False):
+                        # 技能 hook：通过 HookManager 保存到技能的 config_file
+                        hook_global_index = self._get_hook_index(event, rule_index, hook_index)
+                        if self._hook_manager and hook_global_index >= 0:
+                            self._hook_manager.set_hook_enabled(event, hook_global_index, enabled)
+                    else:
+                        # 全局 hook：保存到全局配置文件
+                        self._save_hooks()
                     
                     self.hooksChanged.emit()
     
     def _refresh(self):
-        """刷新 hook 列表"""
+        """刷新 hook 列表（保留添加/刷新按钮和展开状态）"""
+        # 保存展开状态
+        was_expanded = getattr(self, 'isExpand', False)
+        
         self._load_hooks()
-        # 移除 viewLayout 中的所有 widgets
+        # 移除 viewLayout 中除了按钮外的所有 widgets
         for i in reversed(range(self.viewLayout.count())):
             item = self.viewLayout.itemAt(i)
             widget = item.widget()
-            if widget:
+            if widget and widget.objectName() not in ("_hook_add_btn", "_hook_refresh_btn"):
                 self.viewLayout.removeItem(item)
                 widget.deleteLater()
         # 重新渲染
         self._render_hooks()
         # 调整展开区域高度
         self._adjustViewSize()
+        # 恢复展开状态
+        if was_expanded:
+            self.setExpand(True)

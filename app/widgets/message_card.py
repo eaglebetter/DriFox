@@ -1327,10 +1327,40 @@ class CodeWebViewer(QWebEngineView):
         """
 
         scrollbar_css = """
-            ::-webkit-scrollbar { width: 10px; height: 10px; }
-            ::-webkit-scrollbar-track { background: #252526; border-radius: 5px; }
-            ::-webkit-scrollbar-thumb { background: #454545; border-radius: 5px; border: 1px solid #3c3c3c; }
-            ::-webkit-scrollbar-thumb:hover { background: #5a5a5a; }
+            /* 统一滚动条样式 - 深色模式适配 */
+            ::-webkit-scrollbar {
+                width: 12px;
+                height: 12px;
+            }
+            ::-webkit-scrollbar-track {
+                background: transparent;
+                border-radius: 6px;
+                margin: 4px 0;
+            }
+            ::-webkit-scrollbar-track:hover {
+                background: rgba(255, 255, 255, 0.03);
+            }
+            ::-webkit-scrollbar-thumb {
+                background: linear-gradient(180deg, #4a4a5a 0%, #3a3a48 100%);
+                border-radius: 6px;
+                border: 2px solid transparent;
+                background-clip: padding-box;
+                min-height: 30px;
+            }
+            ::-webkit-scrollbar-thumb:hover {
+                background: linear-gradient(180deg, #5a5a6a 0%, #4a4a58 100%);
+            }
+            ::-webkit-scrollbar-thumb:active {
+                background: linear-gradient(180deg, #6a6a7a 0%, #5a5a68 100%);
+            }
+            ::-webkit-scrollbar-corner {
+                background: transparent;
+            }
+            /* Firefox 滚动条 */
+            * {
+                scrollbar-width: thin;
+                scrollbar-color: #4a4a5a transparent;
+            }
         """
 
         html = f"""
