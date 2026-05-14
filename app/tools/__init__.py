@@ -215,158 +215,58 @@ class BuiltinTools(QObject):
         if hasattr(self._task_tools, '_agent_manager'):
             self._task_tools._agent_manager = agent_manager
 
-    def memory_list(
-            self,
-            limit: int = 10,
-            include_disabled: bool = False,
+    def set_current_project(self, project: str):
+        """设置当前项目（供更新项目笔记时使用）"""
+        self._current_project = project
+
+    def update_project_note(
+        self,
+        note_content: str,
+        append: bool = False,
     ) -> ToolResult:
+        """更新项目笔记
+        
+        **使用时机**：
+        1. 项目探索完成后，记录项目的关键信息（目录结构、技术栈、核心文件、约束条件等）
+        2. 关键内容构建时（设计决策、重要实现、配置变更等）
+        3. 发现对项目有长期价值的洞察时
+        
+        **使用原则**：
+        - 只有当有明确有价值的信息时才更新
+        - 避免记录无意义的闲聊、简单问答或一次性信息
+        - 笔记内容应简洁、具体、可操作
+        - 已有笔记应追加新内容，不要完全重写
+        
+        Args:
+            note_content: 笔记内容
+            append: 是否追加到现有内容（默认替换）
+        """
         if not self._memory_manager:
             return ToolResult(False, error="Memory manager not available")
-
-        memories = self._memory_manager.get_user_memories()
-        if not include_disabled:
-            memories = [item for item in memories if item.get("enabled", True)]
-        memories = memories[: max(1, int(limit or 10))]
-        return ToolResult(
-            True,
-            content={
-                "count": len(memories),
-                "memories": memories,
-                "formatted": self._memory_manager.format_memories_for_prompt(
-                    memories,
-                    title="长期记忆列表",
-                    include_disabled=include_disabled,
-                ),
-            },
-        )
-
-    def memory_search(
-            self,
-            query: str = "",
-            limit: int = 8,
-            include_disabled: bool = False,
-    ) -> ToolResult:
-        if not self._memory_manager:
-            return ToolResult(False, error="Memory manager not available")
-
-        query = str(query or "").strip()
-        memories = self._memory_manager.search_memories(
-            query,
-            include_disabled=include_disabled,
-            limit=max(1, int(limit or 8)),
-        )
-        return ToolResult(
-            True,
-            content={
-                "query": query,
-                "count": len(memories),
-                "memories": memories,
-                "formatted": self._memory_manager.format_memories_for_prompt(
-                    memories,
-                    title=f"长期记忆搜索结果: {query or '全部'}",
-                    include_disabled=include_disabled,
-                ),
-            },
-        )
-
-    def memory_save(
-            self,
-            content: str,
-            confidence: float = 0.8,
-            source: str = "assistant",
-            conflict_group: str = "",
-    ) -> ToolResult:
-        if not self._memory_manager:
-            return ToolResult(False, error="Memory manager not available")
-
-        content = str(content or "").strip()
+        
+        project = getattr(self, '_current_project', '默认项目') or '默认项目'
+        content = str(note_content or "").strip()
+        
         if not content:
-            return ToolResult(False, error="Memory content is empty")
-
-        success = self._memory_manager.add_user_memory(
-            content,
-            source=source or "assistant",
-            confidence=float(confidence or 0.8),
-            conflict_group=str(conflict_group or ""),
-        )
-        if not success:
-            return ToolResult(False, error="Failed to save memory")
-
-        return ToolResult(
-            True,
-            content={
+            return ToolResult(False, error="笔记内容为空")
+        
+        if append:
+            # 追加模式
+            existing = self._memory_manager.get_project_note(project)
+            existing_content = existing.get("content", "") if existing else ""
+            content = existing_content + "\n\n" + content
+        
+        success = self._memory_manager.save_project_note(project, content)
+        
+        if success:
+            return ToolResult(True, content={
                 "saved": True,
-                "content": content,
-                "source": source or "assistant",
-                "confidence": float(confidence or 0.8),
-                "conflict_group": str(conflict_group or ""),
-            },
-        )
-
-    def memory_consolidate(
-            self,
-            max_items: int = 3,
-            save: bool = True,
-    ) -> ToolResult:
-        if not self._memory_manager:
-            return ToolResult(False, error="Memory manager not available")
-        if not callable(self._get_llm_config):
-            return ToolResult(False, error="LLM config getter not available")
-        if not callable(self._get_session_messages):
-            return ToolResult(False, error="Session messages getter not available")
-
-        llm_config = self._get_llm_config() or {}
-        messages = self._get_session_messages() or []
-        if not messages:
-            return ToolResult(False, error="No session messages available")
-
-        max_items = max(1, int(max_items or 3))
-        consolidated = self._memory_manager.consolidate_from_messages(
-            messages,
-            llm_config,
-            max_items=max_items,
-        )
-        if not consolidated:
-            return ToolResult(
-                True,
-                content={
-                    "saved": False,
-                    "count": 0,
-                    "memories": [],
-                    "formatted": "未提炼出适合写入长期记忆的新内容。",
-                },
-            )
-
-        saved_count = 0
-        if save:
-            for item in consolidated:
-                if self._memory_manager.add_user_memory(
-                        item.get("content", ""),
-                        source=item.get("source", "session"),
-                        confidence=float(item.get("confidence", 0.8) or 0.8),
-                        conflict_group=str(item.get("conflict_group", "") or ""),
-                        category=str(item.get("category", "task_preference") or "task_preference"),
-                ):
-                    saved_count += 1
-
-        formatted = self._memory_manager.format_memories_for_prompt(
-            consolidated,
-            title="本轮提炼出的长期记忆",
-            include_disabled=False,
-        )
-        return ToolResult(
-            True,
-            content={
-                "saved": bool(saved_count),
-                "saved_count": saved_count,
-                "count": len(consolidated),
-                "memories": consolidated,
-                "formatted": formatted,
-                "provider_linked": bool(
-                    llm_config.get("API_URL") or llm_config.get("模型名称")
-                ),
-            },
-        )
+                "project": project,
+                "content_length": len(content),
+                "append": append,
+            })
+        else:
+            return ToolResult(False, error="保存项目笔记失败")
 
 
 def create_builtin_tools(homepage=None, workdir: str = None) -> BuiltinTools:
@@ -718,6 +618,21 @@ TOOL_SCHEMAS = [
                     },
                 },
                 "required": ["content"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "update_project_note",
+            "description": "更新项目笔记。**使用时机**：1. 项目探索完成后，记录项目的关键信息（目录结构、技术栈、核心文件、约束条件等）；2. 关键内容构建时（设计决策、重要实现、配置变更等）；3. 发现对项目有长期价值的洞察时。**使用原则**：只有当有明确有价值的信息时才更新，避免记录无意义的闲聊、简单问答或一次性信息。笔记内容应简洁、具体、可操作。已有笔记应追加新内容，不要完全重写。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "note_content": {"type": "string", "description": "笔记内容（完整内容或追加内容，取决于 append 参数）"},
+                    "append": {"type": "boolean", "description": "是否追加到现有内容，默认 false 表示替换", "default": False},
+                },
+                "required": ["note_content"],
             },
         },
     },

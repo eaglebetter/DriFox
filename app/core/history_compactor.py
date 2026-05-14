@@ -392,7 +392,10 @@ class HistoryCompactor:
             )
 
         summary_message = {"role": "user", "content": compact_summary}
-        recent_messages = recent_messages[1:] if recent_messages[0]["role"] == "tool" else recent_messages
+        for i, msg in enumerate(recent_messages):
+            if msg["role"] != "tool":
+                break
+        recent_messages = recent_messages[i:]
         result_messages = [summary_message] + recent_messages
         current_tokens = count_messages_tokens(result_messages)
         kept_count = len(recent_messages)
@@ -592,7 +595,9 @@ class HistoryCompactor:
         for idx, msg in enumerate(messages):
             role = msg.get("role")
             content = contents[idx] if idx < len(contents) else ""
-
+            # 如果工具执行失败，则直接跳过
+            if role == "tool" and not msg.get("success"):
+                continue
             # 对于受保护的工具（如 skill），保留完整内容不截断
             is_protected_tool = False
             if role == "tool":
@@ -601,7 +606,7 @@ class HistoryCompactor:
                     is_protected_tool = True
 
             # 自适应截断：越旧截断越多（受保护工具除外）
-            if not is_protected_tool and role != "user":
+            if not is_protected_tool:
                 content = self._adaptive_truncate(
                     content,
                     position=idx,

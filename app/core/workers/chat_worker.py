@@ -567,7 +567,6 @@ class OpenAIChatWorker(QThread):
                         allow_llm_summary=False,  # 工具迭代中只用启发式，避免嵌套 LLM 调用
                     )
                     if compacted != current_messages:
-                        logger.info(compacted)
                         current_messages = compacted
                         self._last_compaction_state = state
                         self._compaction_cache = cache

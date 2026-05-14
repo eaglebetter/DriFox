@@ -4770,6 +4770,8 @@ class OpenAIChatToolWindow(ToolWindow):
         # 更新 tool_executor 的当前项目
         if hasattr(self, '_tool_executor') and self._tool_executor:
             self._tool_executor.set_current_project(project)
+        if hasattr(self.backend, 'tool_executor') and self.backend.tool_executor:
+            self.backend.tool_executor.set_current_project(project)
         # 刷新记忆卡片的项目（项目笔记、关键文档会跟着刷新）
         if hasattr(self, '_memory_card_popup') and self._memory_card_popup:
             from loguru import logger

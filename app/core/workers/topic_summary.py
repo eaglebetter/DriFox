@@ -120,7 +120,7 @@ class TopicSummaryTask(QRunnable):
                     model=self.llm_config.get("模型名称", "gpt-4o"),
                     messages=[{"role": "user", "content": prompt}],
                     temperature=0.3,
-                    max_tokens=200,
+                    max_tokens=1500,
                 )
 
             resp = create_api_call_with_retry(client, create_task)
@@ -130,7 +130,7 @@ class TopicSummaryTask(QRunnable):
             if result:
                 self.callback({"topic_summary": result.get("topic_summary", "")})
             else:
-                self.callback({"topic_summary": raw_response[:15] if raw_response else ""})
+                self.callback({"topic_summary": self.messages[-1].get("content", "")[:15]})
             
         except Exception as e:
             logger.exception(f"[TopicSummary] 生成摘要失败: {e}")
