@@ -2967,9 +2967,9 @@ class MessageCard(SimpleCardWidget):
             shimmer_pos = (shift_shimmer % N) / N
             shimmer_band_gradient = QLinearGradient(0, 0, w, h)
             shimmer_band_gradient.setColorAt(max(0.0, shimmer_pos - 0.07), QColor(0, 0, 0, 0))
-            shimmer_band_gradient.setColorAt(shimmer_pos - 0.03, QColor(255, 255, 255, int(80 * shimmer)))
+            shimmer_band_gradient.setColorAt(max(0.0, shimmer_pos - 0.03), QColor(255, 255, 255, int(80 * shimmer)))
             shimmer_band_gradient.setColorAt(shimmer_pos, QColor(255, 255, 255, int(150 * shimmer)))
-            shimmer_band_gradient.setColorAt(shimmer_pos + 0.03, QColor(255, 255, 255, int(80 * shimmer)))
+            shimmer_band_gradient.setColorAt(min(1.0, shimmer_pos + 0.03), QColor(255, 255, 255, int(80 * shimmer)))
             shimmer_band_gradient.setColorAt(min(1.0, shimmer_pos + 0.07), QColor(0, 0, 0, 0))
             shimmer_pen = QPen(shimmer_band_gradient, 3)
             painter.setPen(shimmer_pen)
