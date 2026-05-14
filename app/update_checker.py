@@ -218,7 +218,7 @@ class UpdateChecker(QWidget):
         InfoBar.error(
             title,
             content,
-            position=InfoBarPosition.TOP_RIGHT,
+            position=InfoBarPosition.BOTTOM,
             duration=5000,
             parent=self.parent or self,
         )
