@@ -63,6 +63,7 @@ class BuiltinTools(QObject):
         self._memory_manager = None
         self._get_llm_config = None
         self._get_session_messages = None
+        self._current_project = "默认项目"  # 当前项目
 
         logger.info(f"[BuiltinTools] Workdir: {self.workdir}, loaded {len(self._tools)} tool modules")
 
@@ -217,6 +218,7 @@ class BuiltinTools(QObject):
 
     def set_current_project(self, project: str):
         """设置当前项目（供更新项目笔记时使用）"""
+        print(project)
         self._current_project = project
 
     def update_project_note(

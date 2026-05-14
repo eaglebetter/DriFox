@@ -19,6 +19,7 @@ from app.core.memory_manager import MemoryManagerCore
 from app.core.hook_manager import HookManager
 from app.core.tool_executor import ToolExecutor
 from app.utils.history_manager import HistoryManager
+from app.utils.utils import get_app_data_dir
 
 
 class ChatBackend(QObject):
@@ -70,6 +71,7 @@ class ChatBackend(QObject):
         self._sub_agent_manager = None
         self._session_store = None
         self._history_manager = None
+        self._current_project = None
         
         # 配置回调
         self._get_model_config: Optional[Callable] = None
@@ -81,6 +83,10 @@ class ChatBackend(QObject):
         self._initialized = False
     
     # ========== 属性访问 ==========
+
+    @property
+    def current_project(self) -> str:
+        return self._current_project
     
     @property
     def session_manager(self) -> SessionManager:
@@ -194,7 +200,6 @@ class ChatBackend(QObject):
         logger.info(f"[ChatBackend] AgentManager 就绪，{len(self._agent_manager.list_agents())} 个 Agent")
         
         # 加载 .drifox 全局 hooks
-        from app.utils.utils import get_app_data_dir
         global_hooks_file = get_app_data_dir() / "hooks" / "hooks.json"
         if global_hooks_file.exists():
             try:
@@ -227,7 +232,7 @@ class ChatBackend(QObject):
             tool_executor=self._tool_executor,
             agent_manager=self._agent_manager,
             get_chat_cards=getattr(self, '_build_chat_cards_context', None),
-            get_memory_context=None,  # 暂时设为 None，后面通过 setter 设置
+            backend=self,  # 暂时设为 None，后面通过 setter 设置
         )
         logger.info("[ChatBackend] ChatEngine 创建完成")
         
@@ -248,14 +253,7 @@ class ChatBackend(QObject):
         if self._chat_engine:
             for name, callback in callbacks.items():
                 self._chat_engine.set_callback(name, callback)
-    
-    def set_memory_context_getter(self, getter: Callable):
-        """设置记忆上下文获取器"""
-        self._get_memory_context_getter = getter
-        if self._chat_engine and hasattr(self._chat_engine, '_context_builder'):
-            self._chat_engine._context_builder._get_memory_context = getter
-    
-    
+
     # ========== ChatEngine 代理方法 ==========
     
     def stop_streaming(self):
@@ -343,8 +341,7 @@ class ChatBackend(QObject):
         return None
     
     # ========== MemoryManager 代理方法 ==========
-    
-    def get_memory_context_string(self, query: str = "", limit: int = 8, project: str = "默认项目") -> str:
+    def get_memory_context_string(self, limit: int = 8) -> str:
         """获取记忆上下文字符串
         
         Args:
@@ -354,7 +351,7 @@ class ChatBackend(QObject):
         """
         if self._memory_manager:
             return self._memory_manager.format_memories_for_prompt(
-                project=project,
+                project=self._current_project,
                 entry_limit=limit,
                 doc_limit=20
             )

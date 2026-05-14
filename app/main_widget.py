@@ -168,7 +168,7 @@ class OpenAIChatToolWindow(ToolWindow):
             get_model_config=self._get_current_model_config,
             workdir=str(Path(__file__).parent.parent.parent),
         )
-
+        self.backend._current_project = self._current_project
         # 从后端获取组件（前端只负责 UI 逻辑）
         self.history_manager = self.backend.history_manager
         self.session_store = self.backend.session_store
@@ -256,10 +256,6 @@ class OpenAIChatToolWindow(ToolWindow):
 
         # 初始化 UI
         self.setup_ui()
-        
-        # 设置记忆上下文 getter（在 setup_ui 之后，因为 backend 已初始化）
-        if hasattr(self, '_build_memory_context_for_engine'):
-            self.backend.set_memory_context_getter(self._build_memory_context_for_engine)
 
         # 初始化 UI 相关的回调
         self._setup_engine_callbacks()
@@ -563,14 +559,6 @@ class OpenAIChatToolWindow(ToolWindow):
             return saved_providers[selected_name].copy()
 
         return self._valid_configs.get(selected_name, {})
-
-    def _build_memory_context_for_engine(self, query: str = "") -> str:
-        project = getattr(self, '_current_project', "默认项目") or "默认项目"
-        # 确保从 UI 获取最新的 project 值
-        if hasattr(self, '_current_project') and self._current_project:
-            project = self._current_project
-        result = self.backend.get_memory_context_string(query=query, limit=8, project=project)
-        return result
 
     def _get_current_session_messages_for_tools(self) -> List[Dict[str, Any]]:
         session = self.session_manager.get_current_session()
@@ -1560,6 +1548,7 @@ class OpenAIChatToolWindow(ToolWindow):
     def _on_history_project_selected(self, project: str):
         """历史面板项目切换（现在和标题栏同步）"""
         self._current_project = project
+        self.backend._current_project = project
         self._current_history_project = project
         self._history_popup_card.set_current_project(project)
         self._refresh_history_toggle_panel()
@@ -2960,6 +2949,7 @@ class OpenAIChatToolWindow(ToolWindow):
         # 如果会话有自己的项目，显示在标题上
         session_project = session_record.get("project", "默认项目") or "默认项目"
         self._current_project = session_project
+        self.backend._current_project = session_project
         self._project_label.setText(session_project)
 
         self._display_current_session()
@@ -4737,6 +4727,7 @@ class OpenAIChatToolWindow(ToolWindow):
     def _update_project_display(self, project: str):
         """更新项目名称显示"""
         self._current_project = project
+        self.backend._current_project = project
         self._project_label.setText(project)
 
     def _on_project_label_clicked(self, event):
@@ -4764,13 +4755,12 @@ class OpenAIChatToolWindow(ToolWindow):
     def _on_project_selected(self, project: str):
         """切换到选中的项目"""
         self._current_project = project
+        self.backend._current_project = project
         self._project_label.setText(project)
         self.cfg.current_project.value = project
         self.cfg.save()
         # 更新 tool_executor 的当前项目
-        if hasattr(self, '_tool_executor') and self._tool_executor:
-            self._tool_executor.set_current_project(project)
-        if hasattr(self.backend, 'tool_executor') and self.backend.tool_executor:
+        if self.backend and self.backend.tool_executor:
             self.backend.tool_executor.set_current_project(project)
         # 刷新记忆卡片的项目（项目笔记、关键文档会跟着刷新）
         if hasattr(self, '_memory_card_popup') and self._memory_card_popup:
@@ -4787,6 +4777,7 @@ class OpenAIChatToolWindow(ToolWindow):
     def _on_new_project_created(self, project: str):
         """新建项目后"""
         self._current_project = project
+        self.backend._current_project = project
         self._project_label.setText(project)
         # 保存到配置
         self.cfg.current_project.value = project
@@ -4812,6 +4803,7 @@ class OpenAIChatToolWindow(ToolWindow):
             if project_name == self._current_project:
                 default_project = "默认项目"
                 self._current_project = default_project
+                self.backend._current_project = default_project
                 self._project_label.setText(default_project)
                 # 保存到配置
                 self.cfg.current_project.value = default_project

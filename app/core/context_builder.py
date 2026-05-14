@@ -23,8 +23,8 @@ class ContextBuilder:
     def __init__(
         self,
         agent_manager,
-        memory_context_getter: Optional[Callable[[], str]] = None,
         compactor=None,
+        backend=None
     ):
         """
         Args:
@@ -33,7 +33,7 @@ class ContextBuilder:
             compactor: HistoryCompactor 实例
         """
         self._agent_manager = agent_manager
-        self._get_memory_context = memory_context_getter
+        self.backend = backend
         self._compactor = compactor
 
     def build_messages(
@@ -84,6 +84,10 @@ class ContextBuilder:
 
         prompt_parts.append(time_part)
 
+        # 添加记忆上下文
+        memory_context = self.backend.get_memory_context_string()
+        prompt_parts.append(memory_context)
+
         # 使用单一 join 操作
         full_system_content = "\n\n".join(prompt_parts)
 
@@ -106,17 +110,6 @@ class ContextBuilder:
             latest_user_timestamp = history_messages[-1].get("timestamp", "")
             params = history_messages[-1].get("params", {})
             history_messages = history_messages[:-1]
-
-        # 添加记忆上下文
-        if self._get_memory_context:
-            try:
-                memory_context = self._get_memory_context(latest_user_message)
-            except TypeError:
-                memory_context = self._get_memory_context()
-            if memory_context:
-                messages[0]["content"] = (
-                    messages[0]["content"] + "\n\n" + memory_context
-                )
 
         # 上下文压缩
         budget = self._compactor.get_budget(llm_config)
