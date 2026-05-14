@@ -31,7 +31,7 @@ from qfluentwidgets import (
     setFont,
     FluentIcon,
     SingleDirectionScrollArea,
-    TransparentToolButton, StrongBodyLabel, InfoBar, InfoBarPosition,
+    TransparentToolButton, StrongBodyLabel, InfoBar, InfoBarPosition, PushButton,
 )
 
 from app.constants import (
@@ -56,6 +56,7 @@ from app.utils.diff_viewer import (
 )
 from app.utils.file_operation_recorder import FileOperationRecorder
 from app.utils.utils import get_icon, get_font_family_css
+from app.widgets.balance_display import BalanceDisplay
 from app.widgets.base_settings_card import (
     BaseSettingsCard,
 )
@@ -75,6 +76,7 @@ from app.widgets.history_card import (
     HistoryCard,
     get_message_preview,
 )
+from app.widgets.hook_setting_card import HookEditCard
 from app.widgets.llm_settings_card import (
     LLMSettingsCard,
 )
@@ -88,6 +90,7 @@ from app.widgets.message_card import (
 from app.widgets.model_config_card import (
     ModelConfigCard,
 )
+from app.widgets.project_selector_popup import ProjectSelectorPopup
 from app.widgets.provider_edit_card import (
     ProviderEditCard,
 )
@@ -697,10 +700,6 @@ class OpenAIChatToolWindow(ToolWindow):
         session_bar_layout.setContentsMargins(0, 0, 0, 0)
         session_bar_layout.setSpacing(4)
 
-        left_layout = QHBoxLayout()
-        left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.setSpacing(0)
-
         # 项目选择标签
         self._current_project = "默认项目"
         self._project_label = QLabel(self._current_project, self)
@@ -733,15 +732,15 @@ class OpenAIChatToolWindow(ToolWindow):
         self.title_edit.setCursor(Qt.PointingHandCursor)
         self.title_edit.mouseDoubleClickEvent = self._on_title_double_click
 
-        left_layout.addWidget(self._project_label)
-        left_layout.addWidget(self._title_sep)
-        left_layout.addWidget(self.title_edit)
+        session_bar_layout.addWidget(self._project_label)
+        session_bar_layout.addWidget(self._title_sep)
+        session_bar_layout.addWidget(self.title_edit)
 
         self.menu_btn = TransparentToolButton(FluentIcon.MORE, self)
         self.menu_btn.setFixedSize(26, 26)
         self.menu_btn.setToolTip("更多操作")
         self._create_context_menu()
-        left_layout.addWidget(self.menu_btn)
+        session_bar_layout.addWidget(self.menu_btn)
 
         # right_layout 保持简化，显示余额和 context_usage_ring
         right_layout = QHBoxLayout()
@@ -749,7 +748,6 @@ class OpenAIChatToolWindow(ToolWindow):
         right_layout.setSpacing(6)
 
         # 余额显示
-        from app.widgets.balance_display import BalanceDisplay
         self.balance_display = BalanceDisplay(self)
         right_layout.addWidget(self.balance_display)
 
@@ -758,7 +756,6 @@ class OpenAIChatToolWindow(ToolWindow):
         right_layout.addWidget(self.context_usage_ring)
         right_layout.addSpacing(10)
 
-        session_bar_layout.addLayout(left_layout)
         session_bar_layout.addStretch()
         session_bar_layout.addLayout(right_layout)
         layout.addLayout(session_bar_layout)
@@ -775,7 +772,6 @@ class OpenAIChatToolWindow(ToolWindow):
         self._settings_popup.hookListCard.showAddHookCard.connect(self._show_hook_add_card)
 
         # Hook 编辑卡片
-        from app.widgets.hook_setting_card import HookEditCard
         self._hook_edit_card = BaseSettingsCard("Hook 配置", "⚙️", parent=self)
         self._hook_edit_card.setFixedHeight(380)
         self._hook_edit_popup = HookEditCard(parent=self)
@@ -2070,51 +2066,6 @@ class OpenAIChatToolWindow(ToolWindow):
 
         finally:
             self._is_virtual_recycling = False
-
-    def _restore_latest_session(self) -> bool:
-        if not self.history_manager:
-            logger.info("[DEBUG] _restore_latest_session: no history_manager")
-            return False
-
-        latest = self.history_manager.load_most_recently_updated_session()
-        if not latest:
-            logger.info(
-                "[DEBUG] _restore_latest_session: no most recently updated session"
-            )
-            return False
-
-        messages = latest.get("messages", [])
-        if not messages:
-            logger.info("[DEBUG] _restore_latest_session: no messages")
-            return False
-
-        session_id = latest.get("session_id", "")
-        restored = ChatSession.from_dict(
-            {
-                "session_id": session_id,
-                "name": latest.get("title") or latest.get("name") or "最近会话",
-                "messages": messages,
-                "topic_summary": latest.get("title", ""),
-                "compaction_state": latest.get("compaction_state", {}),
-                "compaction_cache": latest.get("compaction_cache", {}),
-                "created_at": latest.get("created_at"),
-                "last_updated": latest.get("last_updated"),
-            }
-        )
-        self.backend.set_current_session(restored)
-        self._history_preview_messages = None
-        self._current_session_id = session_id
-        self.title_edit.setText(latest.get("title") or "最近会话")
-        # 恢复项目
-        project = latest.get("project", "默认项目") or "默认项目"
-        self._current_project = project
-        self._project_label.setText(project)
-        self._load_agent_list()
-        if self.backend.tool_executor:
-            self.backend.set_session_context(self._current_session_id)
-        self._display_current_session()
-        self._refresh_context_usage_indicator()
-        return True
 
     def _open_diff_viewer(self):
         """打开差异查看窗口，显示当前会话修改文件的 git diff"""
@@ -4835,11 +4786,11 @@ class OpenAIChatToolWindow(ToolWindow):
 
     def _on_project_label_clicked(self, event):
         """项目标签点击 - 显示项目选择 popup"""
+        event.accept()
         self._show_project_selector_popup()
 
     def _show_project_selector_popup(self):
         """显示项目选择弹窗"""
-        from app.widgets.project_selector_popup import ProjectSelectorPopup
         if hasattr(self, '_project_selector_popup') and self._project_selector_popup:
             self._project_selector_popup.close()
             self._project_selector_popup.deleteLater()
