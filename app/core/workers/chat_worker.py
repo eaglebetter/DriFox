@@ -171,24 +171,24 @@ class OpenAIChatWorker(QThread):
     def event_bus(self) -> WorkerEventBus:
         """获取事件总线实例"""
         return self._event_bus
-    
+
     def _emit_via_event_bus(self, event: WorkerEvent, *args, **kwargs) -> None:
         """通过事件总线发射事件
-        
+
         推荐使用此方法替代 _emit_with_callback。
         事件总线会自动将事件分发给所有订阅者。
-        
+
         Args:
             event: 事件类型
             *args, **kwargs: 事件数据
         """
         self._event_bus.emit(event, *args, **kwargs)
-    
+
     def _emit_with_callback(self, signal_name: str, signal, *args) -> None:
         """发射信号并尝试直接回调（已废弃，推荐使用 _emit_via_event_bus）
-        
+
         兼容旧接口，内部使用事件总线分发事件。
-        
+
         Args:
             signal_name: 信号名（用于查找直接回调）
             signal: Qt 信号对象（保留用于向后兼容）
@@ -198,11 +198,11 @@ class OpenAIChatWorker(QThread):
         event = self._signal_name_to_event(signal_name)
         if event:
             self._emit_via_event_bus(event, *args)
-        
+
         # 向后兼容：仍然发射 PyQt Signal（UI 层依赖）
         if signal is not None:
             signal.emit(*args)
-    
+
     def _signal_name_to_event(self, signal_name: str) -> Optional[WorkerEvent]:
         """将 signal name 映射到 WorkerEvent"""
         mapping = {
@@ -218,12 +218,12 @@ class OpenAIChatWorker(QThread):
             "error_occurred": WorkerEvent.ERROR,
         }
         return mapping.get(signal_name)
-    
+
     def _emit_direct(self, signal_name: str, *args) -> None:
         """直接调用回调（API 模式，已废弃）
-        
+
         保留以兼容旧的直接回调接口。新代码应使用事件总线。
-        
+
         Args:
             signal_name: 信号名
             *args: 传递给回调的参数
@@ -237,7 +237,7 @@ class OpenAIChatWorker(QThread):
 
     def set_direct_callbacks(self, callbacks: Dict[str, Callable]) -> None:
         """设置直接回调（已废弃，推荐订阅事件总线）
-        
+
         Args:
             callbacks: 回调字典，键为信号名，值为回调函数
         """
@@ -651,7 +651,6 @@ class OpenAIChatWorker(QThread):
                         }
 
         tool_result_map = {}
-        MAX_CONTENT_LENGTH = 6000
         if tool_results:
             for item in tool_results:
                 if not isinstance(item, dict):
@@ -660,22 +659,12 @@ class OpenAIChatWorker(QThread):
                 if not tool_call_id:
                     continue
 
-                content = item.get("content", "")
-                if len(content) > MAX_CONTENT_LENGTH:
-                    head_len = int(MAX_CONTENT_LENGTH * 0.6)
-                    tail_len = MAX_CONTENT_LENGTH - head_len
-                    content = (
-                            content[:head_len]
-                            + f"\n\n... [已截断，原始长度 {len(content)}] ...\n\n"
-                            + content[-tail_len:]
-                    )
-
                 tool_result_map[tool_call_id] = {
                     "role": "tool",
                     "tool_call_id": tool_call_id,
                     "name": item.get("name", "tool"),
                     "arguments": item.get("arguments", {}),
-                    "content": content,
+                    "content": item.get("content", ""),
                     "success": item.get("success", True),
                     "round_id": item.get("round_id"),
                     "timestamp": item.get("timestamp", now_ts),
@@ -992,9 +981,9 @@ class OpenAIChatWorker(QThread):
                 error_str = str(e)
                 # 检测 tool call result 错误码 2013
                 is_tool_call_order_error = (
-                    "2013" in error_str or
-                    "tool call result does not follow tool call" in error_str.lower() or
-                    "tool_calls" in error_str.lower()
+                        "2013" in error_str or
+                        "tool call result does not follow tool call" in error_str.lower() or
+                        "tool_calls" in error_str.lower()
                 )
 
                 if is_tool_call_order_error and attempt < max_retries - 1:
@@ -1052,7 +1041,7 @@ class OpenAIChatWorker(QThread):
                 is_retryable_protocol = isinstance(e, (httpx.ProtocolError, httpcore.ProtocolError))
                 is_rate_limit = isinstance(e, RateLimitError)
                 is_server_overload = isinstance(e, APIError) and (
-                            "2064" in error_str or "overload" in error_str.lower())
+                        "2064" in error_str or "overload" in error_str.lower())
                 is_conn_error = isinstance(e, APIConnectionError)
 
                 should_retry = (
@@ -1213,7 +1202,8 @@ class OpenAIChatWorker(QThread):
                 _reasoning_batch += reasoning_delta
                 now = time.time()
                 if len(_reasoning_batch) >= 10 or (now - _reasoning_batch_time) > 0.05:
-                    self._emit_with_callback("reasoning_content_received", self.reasoning_content_received, _reasoning_batch)
+                    self._emit_with_callback("reasoning_content_received", self.reasoning_content_received,
+                                             _reasoning_batch)
                     _reasoning_batch = ""
                     _reasoning_batch_time = now
 

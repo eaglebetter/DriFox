@@ -309,9 +309,10 @@ class ToolExecutor:
 
         logger.info(f"[ToolExecutor] Executing tool: {tool_name}, args: {args}")
 
-        # Trigger PreToolUse hook (同步执行，输出会加入上下文)
+        # Trigger PreToolUse hook（同步执行，支持跳过和输出回填）
         if self._backend and self._backend.hook_manager:
             import os
+            from app.core.hook_manager import HookDecision
             context = {
                 "project_root": self._workdir or os.getcwd(),
                 "tool_name": tool_name,
@@ -319,6 +320,18 @@ class ToolExecutor:
             file_path = args.get("path") or args.get("file")
             if file_path:
                 context["file"] = file_path
+            # 将工具参数注入 context，供 hook 脚本通过 stdin JSON 读取
+            # webfetch 需要 url，websearch 需要 query，bash 需要 command
+            if "url" in args:
+                context["url"] = args["url"]
+            if "query" in args:
+                context["query"] = args["query"]
+            if "command" in args:
+                context["command"] = args["command"]
+            if "format" in args:
+                context["format"] = args["format"]
+            # 也保留完整的 args 供高级脚本使用
+            context["args"] = args
             current_message_text = ""
             if self._backend.session_manager:
                 session = self._backend.get_current_session()
@@ -327,11 +340,34 @@ class ToolExecutor:
                         if msg.get('role') == 'user':
                             current_message_text = msg.get('content', '')
                             break
-            self._backend.hook_manager.trigger_event(
+            
+            # 同步执行 PreToolUse hooks
+            results = self._backend.hook_manager.trigger_event(
                 "PreToolUse",
                 context=context,
-                current_message=current_message_text
+                current_message=current_message_text,
+                trigger_async=False   # 关键：同步执行，才能检测 BLOCK 决策
             )
+            
+            # 检查是否有 hook 要求跳过工具执行（exit 2 或 JSON {"decision":"block"}）
+            for result in results:
+                if result.decision == HookDecision.BLOCK:
+                    # Hook 要求跳过工具执行，将 hook 输出作为工具结果回填
+                    logger.info(f"[ToolExecutor] PreToolUse hook BLOCK: {tool_name}, output={result.output[:100] if result.output else 'empty'}")
+                    
+                    # 将 hook 输出注入到消息上下文（供 LLM 后续分析）
+                    if result.output and self._backend:
+                        hook_output_msg = f"<hook event=\"PreToolUse\">\n[BLOCKED] Tool '{tool_name}' was blocked by hook.\nHook output:\n{result.output}\n</hook>"
+                        self._backend.message_received.emit({
+                            "role": "assistant",
+                            "content": hook_output_msg
+                        })
+                    
+                    # 返回 hook 输出作为工具结果
+                    return ToolResult(
+                        True,
+                        content=result.output or f"Tool '{tool_name}' was blocked by PreToolUse hook (exit code 2 / decision:block)."
+                    )
 
         # 校验必需参数
         if tool_name in self.REQUIRED_ARGS:

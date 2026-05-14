@@ -11,6 +11,7 @@ from pathlib import Path
 
 import psutil
 import requests
+import yaml
 from PyQt5.QtCore import QThread, pyqtSignal
 from PyQt5.QtGui import QIcon, QFont
 
@@ -214,6 +215,128 @@ def get_icon(icon_name: str) -> QIcon:
 
     # 3. 最终 fallback
     return QIcon()
+
+
+def get_local_skills() -> list:
+    """获取本地技能列表，支持多个搜索路径
+    
+    搜索路径：
+    - app/skills (内置技能)
+    - .opencode/skills (opencode 技能)
+    - ~/.agents/skills (用户技能)
+    - 应用数据目录/skills
+    """
+    skills_dirs = [
+        Path(__file__).parent.parent / "skills",
+        Path(__file__).parent.parent / ".opencode" / "skills",  # opencode 技能
+        get_app_data_dir() / "skills",
+        Path.home() / ".agents" / "skills",
+    ]
+
+    results = []
+    seen = set()
+
+    for skills_base in skills_dirs:
+        if not skills_base.exists():
+            continue
+
+        for skill_dir in skills_base.iterdir():
+            if not skill_dir.is_dir():
+                continue
+            if skill_dir.name.startswith("_") or skill_dir.name.startswith("."):
+                continue
+
+            skill_file = skill_dir / "SKILL.md"
+            if not skill_file.exists():
+                skill_file = skill_dir / "skill.md"
+            if not skill_file.exists():
+                continue
+
+            content = skill_file.read_text(encoding="utf-8")
+            name = skill_dir.name
+            description = ""
+
+            # 解析 frontmatter
+            if content.startswith("---"):
+                try:
+                    frontmatter = content.split("---", 2)[1]
+                    meta = yaml.safe_load(frontmatter)
+                    if meta:
+                        name = meta.get("name", skill_dir.name)
+                        description = meta.get("description", "")
+                except Exception:
+                    pass
+
+            if name not in seen:
+                seen.add(name)
+                results.append({
+                    "name": name,
+                    "description": description
+                })
+
+    return results
+
+
+def get_skill_by_name(name: str) -> dict | None:
+    """根据名称获取技能信息"""
+    skills = get_local_skills()
+    for skill in skills:
+        if skill["name"] == name:
+            return skill
+    return None
+
+
+def load_skill(name: str) -> tuple[bool, str, str]:
+    """加载指定技能，返回 (成功, 内容, 工作目录)
+    
+    Args:
+        name: 技能名称
+        
+    Returns:
+        (成功标志, 内容或错误信息, 技能工作目录路径)
+    """
+    search_paths = [
+        Path(__file__).parent.parent / "skills" / name / "SKILL.md",
+        Path(__file__).parent.parent / ".opencode" / "skills" / name / "SKILL.md",
+        get_app_data_dir() / "skills" / name / "SKILL.md",
+        Path.home() / ".agents" / "skills" / name / "SKILL.md",
+    ]
+    found_path = None
+    for path in search_paths:
+        if path.exists():
+            found_path = path
+            break
+    
+    if not found_path:
+        return (False, f"Skill not found: {name}", "")
+    
+    content = found_path.read_text(encoding="utf-8")
+    # 去除 frontmatter
+    content = content.split("---", 2)[-1].strip()
+    workspace = str(found_path.parent.resolve())
+    
+    return (True, content, workspace)
+
+
+def list_skills_with_intro() -> str:
+    """获取技能列表，包含 SKILLS.md 介绍"""
+    skills = get_local_skills()
+    
+    # 获取技能介绍
+    skills_intro = ""
+    main_skills_dir = Path(__file__).parent.parent / "skills"
+    skills_readme = main_skills_dir / "SKILLS.md"
+    if skills_readme.exists():
+        skills_intro = skills_readme.read_text(encoding="utf-8") + "\n\n"
+    
+    # 生成 XML 格式
+    skills_xml = "<available_skills>\n"
+    for skill in skills:
+        desc = skill.get("description", "").replace("<", "&lt;").replace(">", "&gt;")
+        skills_xml += f"  <skill>\n    <name>{skill['name']}</name>\n    <description>{desc}</description>\n  </skill>\n"
+    skills_xml += "</available_skills>"
+    
+    return skills_intro + skills_xml
 
 
 def get_canvas_font(size=10, bold=False):

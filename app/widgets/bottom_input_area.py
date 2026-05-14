@@ -1,19 +1,18 @@
 # 大模型输入框
-import re
 import os
-from pathlib import Path
+import re
+
+from PyQt5.QtCore import Qt, pyqtSignal, QTimer, QRect, QPoint, QSize
+from PyQt5.QtGui import QKeyEvent, QKeySequence, QTextCursor, QColor, QTextCharFormat
+from PyQt5.QtWidgets import QGraphicsDropShadowEffect
+from PyQt5.QtWidgets import QShortcut, QWidget, QVBoxLayout, QListWidget, QListWidgetItem, QApplication, QLabel
+from qfluentwidgets import FluentIcon, ComboBox
+from qfluentwidgets import TextEdit, TransparentToolButton
+
+from app.utils.utils import get_font_family_css, get_local_skills
 
 # 预编译正则表达式
 _FILE_PREFIX_PATTERN = re.compile(r'^file:/{1,3}')
-
-from PyQt5.QtCore import Qt, pyqtSignal, QTimer, QRect, QPoint, QSize
-from PyQt5.QtGui import QKeyEvent, QKeySequence, QDragEnterEvent, QDropEvent, QTextCursor, QPainter, QFont, QColor, QTextCharFormat
-from PyQt5.QtWidgets import QShortcut, QTextEdit, QWidget, QVBoxLayout, QListWidget, QListWidgetItem, QApplication, QLabel
-from PyQt5.QtWidgets import QGraphicsDropShadowEffect
-from qfluentwidgets import FluentIcon, ComboBox
-from qfluentwidgets import TextEdit, TransparentToolButton
-from qtpy import QtCore
-from app.utils.utils import get_font_family_css
 
 
 class SkillListItem(QWidget):
@@ -300,70 +299,6 @@ class SkillCompleterPopup(QWidget):
         self.show()
         if text_edit is not None:
             text_edit.setFocus(Qt.OtherFocusReason)
-
-
-def get_local_skills() -> list:
-    """获取本地技能列表，与 list_skills 保持一致"""
-    import yaml
-    from app.utils.utils import get_app_data_dir
-
-    skills_dirs = [
-        Path(__file__).parent.parent / "skills",
-        get_app_data_dir() / "skills",
-        Path.home() / ".agents" / "skills",
-    ]
-
-    results = []
-    seen = set()
-
-    for skills_base in skills_dirs:
-        if not skills_base.exists():
-            continue
-
-        for skill_dir in skills_base.iterdir():
-            if not skill_dir.is_dir():
-                continue
-            if skill_dir.name.startswith("_") or skill_dir.name.startswith("."):
-                continue
-
-            skill_file = skill_dir / "SKILL.md"
-            if not skill_file.exists():
-                skill_file = skill_dir / "skill.md"
-            if not skill_file.exists():
-                continue
-
-            content = skill_file.read_text(encoding="utf-8")
-            name = skill_dir.name
-            description = ""
-
-            # 解析 frontmatter
-            if content.startswith("---"):
-                try:
-                    frontmatter = content.split("---", 2)[1]
-                    meta = yaml.safe_load(frontmatter)
-                    if meta:
-                        name = meta.get("name", skill_dir.name)
-                        description = meta.get("description", "")
-                except Exception:
-                    pass
-
-            if name not in seen:
-                seen.add(name)
-                results.append({
-                    "name": name,
-                    "description": description
-                })
-
-    return results
-
-
-def get_skill_by_name(name: str) -> dict | None:
-    """根据名称获取技能信息"""
-    skills = get_local_skills()
-    for skill in skills:
-        if skill["name"] == name:
-            return skill
-    return None
 
 
 class SendableTextEdit(TextEdit):

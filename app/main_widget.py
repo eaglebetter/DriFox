@@ -267,10 +267,6 @@ class OpenAIChatToolWindow(ToolWindow):
             except Exception:
                 pass
 
-        # 监听全局变量变化
-        if hasattr(self.homepage, "global_variables_changed"):
-            self.homepage.global_variables_changed.connect(self._load_model_configs)
-
         # 设置文件操作记录的会话上下文
         if self.backend.tool_executor:
             self.backend.set_session_context(self._current_session_id)
@@ -558,11 +554,6 @@ class OpenAIChatToolWindow(ToolWindow):
         if selected_name in saved_providers:
             return saved_providers[selected_name].copy()
 
-        custom_vars = getattr(self.homepage, "global_variables", None)
-        if custom_vars and hasattr(custom_vars, "custom"):
-            if selected_name in custom_vars.custom:
-                return custom_vars.custom[selected_name].value.copy()
-
         return self._valid_configs.get(selected_name, {})
 
     def _build_memory_context_for_engine(self, query: str = "") -> str:
@@ -779,6 +770,21 @@ class OpenAIChatToolWindow(ToolWindow):
         # 连接服务商添加/编辑信号
         self._settings_popup.llmProviderCard.showAddProviderCard.connect(self._show_provider_add_card)
         self._settings_popup.llmProviderCard.showEditProviderCard.connect(self._show_provider_edit_card)
+
+        # 连接 Hook 添加/编辑信号
+        self._settings_popup.hookListCard.showAddHookCard.connect(self._show_hook_add_card)
+
+        # Hook 编辑卡片
+        from app.widgets.hook_setting_card import HookEditCard
+        self._hook_edit_card = BaseSettingsCard("Hook 配置", "⚙️", parent=self)
+        self._hook_edit_card.setFixedHeight(380)
+        self._hook_edit_popup = HookEditCard(parent=self)
+        self._hook_edit_popup.saved.connect(self._on_hook_edit_saved)
+        self._hook_edit_popup.closed.connect(self._on_hook_edit_closed)
+        self._hook_edit_card.content_layout.addWidget(self._hook_edit_popup)
+        self._hook_edit_card.set_save_button_handler(self._hook_edit_popup._on_save)
+        self._hook_edit_card.setVisible(False)
+        layout.addWidget(self._hook_edit_card)
 
         # 服务商编辑卡片
         self._provider_edit_card = BaseSettingsCard("服务商配置", "⚙️", parent=self)
@@ -1239,6 +1245,46 @@ class OpenAIChatToolWindow(ToolWindow):
         )
         self._provider_edit_card.show()
 
+    # ========== Hook 编辑卡片 ==========
+
+    def _show_hook_add_card(self):
+        """显示添加 Hook 卡片"""
+        from app.widgets.hook_setting_card import HookEditCard
+        self._settings_popup.hide()
+        self._hook_edit_card.set_title("➕ 添加 Hook")
+        # 重新创建 HookEditCard
+        self._hook_edit_popup = HookEditCard(parent=self)
+        self._hook_edit_popup.saved.connect(self._on_hook_edit_saved)
+        self._hook_edit_popup.closed.connect(self._on_hook_edit_closed)
+        while self._hook_edit_card.content_layout.count():
+            item = self._hook_edit_card.content_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        self._hook_edit_card.content_layout.addWidget(self._hook_edit_popup)
+        self._hook_edit_card.set_save_button_handler(
+            lambda: self._hook_edit_popup._on_save()
+        )
+        self._hook_edit_card.show()
+
+    def _on_hook_edit_saved(self, values: dict):
+        """Hook 保存回调"""
+        self._hook_edit_card.hide()
+        self._settings_popup.show()
+        # 通过 HookListSettingCard 添加 hook
+        if hasattr(self._settings_popup, 'hookListCard'):
+            self._settings_popup.hookListCard._add_hook(
+                event=values["event"],
+                command=values["command"],
+                matcher=values["matcher"],
+                hook_type=values["type"],
+                enabled=values["enabled"]
+            )
+
+    def _on_hook_edit_closed(self):
+        """Hook 编辑关闭回调"""
+        self._hook_edit_card.hide()
+        self._settings_popup.show()
+
     def _show_provider_edit_card(self, provider_name: str, provider_info: dict):
         """显示编辑服务商卡片"""
         # 隐藏设置卡片，显示服务商编辑卡片
@@ -1262,6 +1308,46 @@ class OpenAIChatToolWindow(ToolWindow):
             lambda: self._provider_edit_popup._on_save()
         )
         self._provider_edit_card.show()
+
+    # ========== Hook 编辑卡片 ==========
+
+    def _show_hook_add_card(self):
+        """显示添加 Hook 卡片"""
+        from app.widgets.hook_setting_card import HookEditCard
+        self._settings_popup.hide()
+        self._hook_edit_card.set_title("➕ 添加 Hook")
+        # 重新创建 HookEditCard
+        self._hook_edit_popup = HookEditCard(parent=self)
+        self._hook_edit_popup.saved.connect(self._on_hook_edit_saved)
+        self._hook_edit_popup.closed.connect(self._on_hook_edit_closed)
+        while self._hook_edit_card.content_layout.count():
+            item = self._hook_edit_card.content_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        self._hook_edit_card.content_layout.addWidget(self._hook_edit_popup)
+        self._hook_edit_card.set_save_button_handler(
+            lambda: self._hook_edit_popup._on_save()
+        )
+        self._hook_edit_card.show()
+
+    def _on_hook_edit_saved(self, values: dict):
+        """Hook 保存回调"""
+        self._hook_edit_card.hide()
+        self._settings_popup.show()
+        # 通过 HookListSettingCard 添加 hook
+        if hasattr(self._settings_popup, 'hookListCard'):
+            self._settings_popup.hookListCard._add_hook(
+                event=values["event"],
+                command=values["command"],
+                matcher=values["matcher"],
+                hook_type=values["type"],
+                enabled=values["enabled"]
+            )
+
+    def _on_hook_edit_closed(self):
+        """Hook 编辑关闭回调"""
+        self._hook_edit_card.hide()
+        self._settings_popup.show()
 
     def _hide_main_popups(self):
         """隐藏主要的悬浮面板（互斥显示）
@@ -1292,17 +1378,9 @@ class OpenAIChatToolWindow(ToolWindow):
 
         saved_providers = self.cfg.llm_saved_providers.value or {}
         provider_config = saved_providers.get(current_name, {})
-        custom_vars = getattr(self.homepage, "global_variables", None)
-        if current_name in (
-                custom_vars.custom
-                if custom_vars and hasattr(custom_vars, "custom")
-                else {}
-        ):
-            config = custom_vars.custom[current_name].value.copy()
-        else:
-            config = provider_config.copy()
-            config.pop("备注", None)
-            config.pop("获取地址", None)
+        config = provider_config.copy()
+        config.pop("备注", None)
+        config.pop("获取地址", None)
         # 只保留参数配置，移除连接信息
         config.pop("模型名称", None)
         config.pop("API_URL", None)
@@ -1633,61 +1711,21 @@ class OpenAIChatToolWindow(ToolWindow):
         current_name = self._current_provider_name
         if not current_name:
             return
-        is_free_provider = current_name in FREE_PROVIDERS
-
-        if is_free_provider:
-            # 只更新参数，保留连接信息
-            saved_providers = self.cfg.llm_saved_providers.value or {}
-            old_config = saved_providers.get(current_name, self._valid_configs.get(current_name, {}))
-            old_config.update(new_config)
-            self._valid_configs[current_name] = old_config
-            saved_providers[current_name] = old_config
-            self.cfg.set(self.cfg.llm_saved_providers, saved_providers, save=True)
-            self._load_model_configs()
-            InfoBar.success("已保存", "配置已保存到本地。", parent=self, duration=1500, position=InfoBarPosition.TOP)
-        else:
-            if (
-                    hasattr(self.homepage, "global_variables")
-                    and self.homepage.global_variables
-            ):
-                custom_vars = self.homepage.global_variables.custom
-                if current_name in custom_vars:
-                    old_config = custom_vars[current_name].value
-                    old_config.update(new_config)
-                    custom_vars[current_name].value = old_config
-                    self.homepage._on_global_variables_changed(
-                        "custom", current_name, "update"
-                    )
-
-                self._load_model_configs()
-                InfoBar.success(
-                    "已保存", "配置已保存到自定义配置。", parent=self, duration=1500, position=InfoBarPosition.TOP
-                )
-            else:
-                InfoBar.warning(
-                    "无法保存",
-                    "当前页面不支持保存自定义配置。",
-                    parent=self,
-                    duration=1500,
-                    position=InfoBarPosition.TOP,
-                )
+        # 只更新参数，保留连接信息
+        saved_providers = self.cfg.llm_saved_providers.value or {}
+        old_config = saved_providers.get(current_name, self._valid_configs.get(current_name, {}))
+        old_config.update(new_config)
+        self._valid_configs[current_name] = old_config
+        saved_providers[current_name] = old_config
+        self.cfg.set(self.cfg.llm_saved_providers, saved_providers, save=True)
+        self._load_model_configs()
+        InfoBar.success("已保存", "配置已保存到本地。", parent=self, duration=1500, position=InfoBarPosition.TOP)
 
     def _load_model_configs(self):
         saved_model = self.cfg.llm_selected_model.value
         old_provider = self._current_provider_name
-        old_model = self._current_model_name
 
         self._valid_configs.clear()
-        try:
-            custom_vars = getattr(self.homepage, "global_variables", None)
-            if custom_vars and hasattr(custom_vars, "custom"):
-                for config_name, var_obj in custom_vars.custom.items():
-                    if hasattr(var_obj, "value") and isinstance(var_obj.value, dict):
-                        val = var_obj.value
-                        if {"API_URL", "API_KEY", "模型名称"}.issubset(val.keys()):
-                            self._valid_configs[config_name] = val
-        except Exception as e:
-            logger.error(f"[ERROR] 加载自定义模型配置失败: {e}")
 
         saved_providers = self.cfg.llm_saved_providers.value or {}
         for provider_name in saved_providers:
@@ -3028,10 +3066,7 @@ class OpenAIChatToolWindow(ToolWindow):
         # 使用辅助函数创建卡片
         def on_context_action(action, context):
             self.handle_recommended_question(action, context)
-            if hasattr(self.homepage, "on_context_action"):
-                self.homepage.on_context_action(action, context)
-            else:
-                self.contextActionRequested.emit(action, context)
+            self.contextActionRequested.emit(action, context)
 
         card = create_assistant_card_widget(
             parent=self,
@@ -4471,16 +4506,16 @@ class OpenAIChatToolWindow(ToolWindow):
 
     def _refresh_balance(self):
         """刷新余额显示（对话完成后调用）"""
-        print(f"[Balance] _refresh_balance called, provider={getattr(self, '_current_provider_name', 'None')}")
+        logger.debug(f"[Balance] _refresh_balance called, provider={getattr(self, '_current_provider_name', 'None')}")
         balance_display = getattr(self, "balance_display", None)
         if balance_display:
             # 如果当前服务商支持余额查询，则刷新
             provider_name = getattr(self, "_current_provider_name", "")
-            print(f"[Balance] provider_name={provider_name}")
+            logger.debug(f"[Balance] provider_name={provider_name}")
             if provider_name in ("DeepSeek", "SiliconFlow (硅基流动)"):
                 config = self._valid_configs.get(provider_name, {})
                 api_key = config.get("API_KEY", "")
-                print(f"[Balance] api_key exists: {bool(api_key)}")
+                logger.debug(f"[Balance] api_key exists: {bool(api_key)}")
                 if api_key:
                     balance_display.set_provider(provider_name, api_key)
                     return
@@ -4564,6 +4599,7 @@ class OpenAIChatToolWindow(ToolWindow):
         self._notify_if_inactive(f"{current_title} - 错误", error[:100])
 
     def _on_user_message_added(self, user_text: str):
+        """TODO: 实现用户消息添加时的回调处理"""
         pass
 
     def _on_skill_requested(self, method: str, params: dict):
@@ -4637,7 +4673,7 @@ class OpenAIChatToolWindow(ToolWindow):
             self.input_area.setFocus()
 
     def _on_agent_switched(self, agent_name: str):
-        """智能体切换回调 - 丝滑切换，不清空对话"""
+        """TODO: 实现智能体切换时的状态同步"""
         pass
 
     def _on_permission_approval_requested(
@@ -4942,9 +4978,9 @@ class OpenAIChatToolWindow(ToolWindow):
             for msg in session.messages
         )
         if not has_user_message:
-            # 检查是否是 hook 输出消息
+            # 检查是否是 hook 输出消息（兼容新旧格式）
             hook_only = all(
-                msg.get("role") == "assistant" and "# Hook Output" in (msg.get("content") or "")
+                msg.get("role") == "assistant" and ("# Hook Output" in (msg.get("content") or "") or "<hook " in (msg.get("content") or ""))
                 for msg in session.messages
             )
             if hook_only:

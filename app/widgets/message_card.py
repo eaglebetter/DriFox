@@ -379,7 +379,7 @@ def _render_tool_block_content(content: str) -> str:
     if name_match:
         tool_name = name_match.group(1).strip()
 
-    # ========== 解析 args（需要正确处理嵌套 JSON）==========
+    # ========== 解析 args（需要正确处理嵌套 JSON 和数组）==========
     args_start = content.find("args:")
     result_search_start = 0  # 默认值
     tool_args_str = ""
@@ -387,31 +387,53 @@ def _render_tool_block_content(content: str) -> str:
     if args_start != -1:
         brace_start = content.find("{", args_start)
         if brace_start != -1:
+            # 找到最外层的 } 或 ]（结束 JSON/数组）
             depth = 0
             i = brace_start
+            in_string = False
+            
             while i < len(content):
                 c = content[i]
-                if c == "{":
+                
+                # 字符串内不计入深度
+                if in_string:
+                    if c == '\\':
+                        i += 2
+                        continue
+                    elif c == '"':
+                        in_string = False
+                    i += 1
+                    continue
+                
+                if c == '"':
+                    in_string = True
+                    i += 1
+                    continue
+                
+                if c == '{' or c == '[':
                     depth += 1
-                elif c == "}":
+                elif c == '}' or c == ']':
                     depth -= 1
                     if depth == 0:
                         tool_args_str = content[brace_start:i + 1]
                         result_search_start = i + 1
                         break
                 i += 1
-            if depth != 0:  # 循环结束但没找到匹配的 }
-                # JSON 未正确闭合，回退到单行解析
-                tool_args_str = ""
-                # 尝试找到 args: 后的内容作为替代
-                line_match = _TOOL_ARGS_LINE_PATTERN.search(content)
-                if line_match:
-                    tool_args_str = line_match.group(1)
-                    result_search_start = args_start + len(line_match.group(0))
+            
+            # 如果没有找到闭合（JSON 不完整），取已接收的部分
+            if not tool_args_str and brace_start >= 0:
+                tool_args_str = content[brace_start:]
+                result_search_start = i
         else:
             line = content[args_start:].split("\n")[0]
             tool_args_str = line[args_start + 5:].strip()
             result_search_start = args_start + len(line)
+    else:
+        # 没有找到 args:，尝试直接解析整个 JSON 对象
+        brace_start = content.find("{")
+        if brace_start >= 0:
+            tool_args_str = content[brace_start:]
+    
     # ========== 解析 success ==========
     success_match = _TOOL_SUCCESS_PATTERN.search(content)
     if success_match:
@@ -423,15 +445,18 @@ def _render_tool_block_content(content: str) -> str:
         tool_call_id = id_match.group(1).strip()
 
     # ========== 解析 result ==========
-    result_line_match = _TOOL_RESULT_PATTERN.search(content[result_search_start:])
-    if result_line_match:
-        result_content = result_line_match.group(1)
-        remaining = content[result_search_start + result_line_match.end():]
-        next_field_match = _NEXT_FIELD_PATTERN.search(remaining)
-        if next_field_match:
-            tool_result = (result_content + remaining[:next_field_match.start()]).strip()
+    # 关键：从 result: 之后开始搜索，而不是从 result_search_start
+    result_start = content.find("result:")
+    if result_start >= 0:
+        result_after = content[result_start + 7:]  # 跳过 "result:"
+        # 找到 result 内容的结束位置（下一个字段之前）
+        next_field = _NEXT_FIELD_PATTERN.search(result_after)
+        if next_field:
+            tool_result = result_after[:next_field.start()].strip()
         else:
-            tool_result = result_content.strip()
+            tool_result = result_after.strip()
+    else:
+        tool_result = ""
 
     # 转义 result 中的换行符（参数预览和表格不支持多行显示）
     tool_result = tool_result.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\\n")
@@ -439,13 +464,27 @@ def _render_tool_block_content(content: str) -> str:
     # ========== 解析 args JSON 为字典 ==========
     args_dict = {}
     if tool_args_str:
+        # 1. 尝试完整 JSON 解析
         try:
             args_dict = json.loads(tool_args_str)
             if not isinstance(args_dict, dict):
                 args_dict = {}
         except json.JSONDecodeError:
-            # JSON 解析失败，尝试使用正则提取参数
-            args_dict = _extract_args_by_regex(tool_args_str)
+            # JSON 解析失败，可能是因为不完整，尝试智能修复
+            fixed_args_str = tool_args_str.strip()
+            # 如果是未闭合，尝试补全括号
+            if fixed_args_str.startswith('{') and not fixed_args_str.endswith('}'):
+                fixed_args_str += '}'
+                try:
+                    args_dict = json.loads(fixed_args_str)
+                    if not isinstance(args_dict, dict):
+                        args_dict = {}
+                except json.JSONDecodeError:
+                    # 补全后还是失败，再尝试正则提取
+                    args_dict = _extract_args_by_regex(tool_args_str)
+            else:
+                # JSON 解析失败，尝试使用正则提取参数
+                args_dict = _extract_args_by_regex(tool_args_str)
     else:
         # 没有 args，尝试从整个 content 中提取参数
         args_dict = _extract_args_by_regex(content)
@@ -460,68 +499,231 @@ def _render_tool_block_content(content: str) -> str:
     )
 
 
+def _find_string_end(s, start):
+    """从 start 位置开始，找到字符串真正结束的位置
+    
+    规则：只有当引号后面紧跟 , 或 } 或 ] 或 : 时，才认为是字符串结束
+    这避免了把字符串内容中的引号误认为是结束
+    """
+    i = start
+    n = len(s)
+    while i < n:
+        c = s[i]
+        if c == '\\':
+            # 转义序列，跳过下一个字符
+            i += 2
+        elif c == '"':
+            # 检查后面是否是真正的分隔符
+            next_i = i + 1
+            # 跳过空白
+            while next_i < n and s[next_i] in ' \t\n\r':
+                next_i += 1
+            if next_i < n:
+                next_c = s[next_i]
+                # 只有后面是这些字符才是真正结束：, } ] 或 : (key后面的值结束时)
+                if next_c in ',}:]':
+                    return i
+            i += 1
+        else:
+            i += 1
+    return i
+
+
+def _parse_json_partial(json_str: str) -> dict:
+    """部分 JSON 解析 - 在 JSON 不完整时尽可能提取参数"""
+    args = {}
+    i = 0
+    n = len(json_str)
+
+    while i < n:
+        c = json_str[i]
+
+        # 跳过空白
+        if c in ' \t\n\r':
+            i += 1
+            continue
+
+        # 期待 "key"
+        if c != '"':
+            i += 1
+            continue
+
+        # 解析 key
+        key_end = _find_string_end(json_str, i + 1)
+        key = json_str[i+1:key_end]
+        i = key_end + 1
+
+        # 跳过空白和冒号
+        while i < n and json_str[i] in ' \t\n\r:':
+            i += 1
+        if i >= n:
+            break
+
+        c = json_str[i]
+
+        # 解析 value
+        if c == '"':
+            value_end = _find_string_end(json_str, i + 1)
+            value = json_str[i+1:value_end]
+            i = value_end + 1
+            # 处理转义（简化处理）
+            value = value.replace('\\"', '"').replace('\\\\', '\\')
+            args[key] = value
+        elif c == '{':
+            obj_start = i
+            depth = 1
+            i += 1
+            while i < n and depth > 0:
+                ch = json_str[i]
+                if ch == '"':
+                    str_end = _find_string_end(json_str, i + 1)
+                    i = str_end + 1
+                elif ch in '{[':
+                    depth += 1
+                elif ch in '}]':
+                    depth -= 1
+                i += 1
+            obj_str = json_str[obj_start:i]
+            try:
+                args[key] = json.loads(obj_str)
+            except:
+                args[key] = obj_str
+        elif c == '[':
+            arr_start = i
+            depth = 1
+            i += 1
+            while i < n and depth > 0:
+                ch = json_str[i]
+                if ch == '"':
+                    str_end = _find_string_end(json_str, i + 1)
+                    i = str_end + 1
+                elif ch in '{[':
+                    depth += 1
+                elif ch in '}]':
+                    depth -= 1
+                i += 1
+            arr_str = json_str[arr_start:i]
+            try:
+                args[key] = json.loads(arr_str)
+            except:
+                args[key] = arr_str
+        elif c.isdigit() or c == '-':
+            num_str = c
+            i += 1
+            while i < n and json_str[i].isdigit() or json_str[i] in '.eE+-':
+                num_str += json_str[i]
+                i += 1
+            try:
+                args[key] = float(num_str) if '.' in num_str else int(num_str)
+            except:
+                args[key] = num_str
+        elif i + 4 <= n and json_str[i:i+4] == 'true':
+            args[key] = True
+            i += 4
+        elif i + 5 <= n and json_str[i:i+5] == 'false':
+            args[key] = False
+            i += 5
+        elif i + 4 <= n and json_str[i:i+4] == 'null':
+            args[key] = None
+            i += 4
+        else:
+            i += 1
+
+        # 跳过空白和逗号
+        while i < n and json_str[i] in ' \t\n\r,':
+            i += 1
+
+    return args
+
+
+def _find_json_bounds(content: str) -> tuple:
+    """找到 JSON 对象的起始和结束位置"""
+    start = content.find('{')
+    if start == -1:
+        return -1, -1
+    
+    depth = 0
+    i = start
+    in_string = False
+    escape_next = False
+    
+    while i < len(content):
+        c = content[i]
+        
+        if escape_next:
+            escape_next = False
+            i += 1
+            continue
+        if c == '\\':
+            escape_next = True
+            i += 1
+            continue
+        if c == '"':
+            in_string = not in_string
+            i += 1
+            continue
+        if not in_string:
+            if c == '{':
+                depth += 1
+            elif c == '}':
+                depth -= 1
+                if depth == 0:
+                    return start, i + 1
+        i += 1
+    
+    return start, -1
+
+
 def _extract_args_by_regex(content: str) -> dict:
     """
-    当 JSON 解析失败时，使用正则表达式提取参数。
-    处理包含未转义引号、换行符等复杂情况。
+    当 JSON 解析失败时，使用状态机解析任意参数。
+    处理包含复杂代码内容的场景（代码中有引号、括号等）。
     """
+    if not content:
+        return {}
+    
+    # 方法1: 尝试直接解析整个内容
+    content = content.strip()
+    try:
+        result = json.loads(content)
+        if isinstance(result, dict):
+            return result
+    except:
+        pass
+    
+    # 方法2: 找到 JSON 边界，尝试解析
+    start, end = _find_json_bounds(content)
+    if start >= 0:
+        end_pos = end if end > 0 else len(content)
+        json_str = content[start:end_pos]
+        try:
+            result = json.loads(json_str)
+            if isinstance(result, dict):
+                return result
+        except:
+            if end < 0:  # JSON 未闭合，尝试部分解析
+                args = _parse_json_partial(json_str)
+                if args:
+                    return args
+    
+    # 方法3: 直接部分解析
+    args = _parse_json_partial(content)
+    return args if args else {}
+
+
+def _extract_by_regex_fallback(content: str) -> dict:
+    """正则提取后备方案 - 很少使用"""
     import re
     args = {}
-
-    # 1. 先尝试匹配数字类型参数（冒号后无引号）: "limit": 30
-    number_params = ["limit", "offset"]
-    for param in number_params:
-        pattern = rf'"{param}"\s*:\s*(-?\d+(?:\.\d+)?)\s*[,}}]'
-        match = re.search(pattern, content)
-        if match:
-            num_str = match.group(1)
-            args[param] = int(float(num_str)) if '.' not in num_str else float(num_str)
-
-    # 2. 匹配字符串参数（冒号后有引号）: "path": "xxx"
-    string_params = ["path", "oldString", "newString", "command", "url", "pattern", "query", "name", "_raw_args",
-                     "file_path", "old_string", "new_string"]
-
-    for param in string_params:
-        # 查找 "param": " 后面开始的位置
-        pattern = rf'"{param}"\s*:\s*"'
-        match = re.search(pattern, content)
-        if match:
-            start = match.end()
-            # 从 start 开始，找到字符串真正的结束位置
-            # 策略：找到最后一个 " 后面紧跟 , 或 } 的位置
-            i = start
-            last_valid_end = -1  # 最后一个有效的字符串结束位置
-
-            while i < len(content):
-                c = content[i]
-                if c == '\\':
-                    # 转义字符，跳过下一个字符
-                    i += 2
-                    continue
-                elif c == '"':
-                    # 检查这是否是真正的字符串结束
-                    next_i = i + 1
-                    while next_i < len(content) and content[next_i] in ' \t\n\r':
-                        next_i += 1
-                    if next_i < len(content) and content[next_i] in ',}':
-                        # 这是有效的结束位置，记录下来
-                        last_valid_end = i
-                    i += 1
-                else:
-                    i += 1
-
-            # 提取到最后一个有效结束位置的内容
-            if last_valid_end > 0:
-                value = content[start:last_valid_end]
-            else:
-                # 没找到有效结束，取到文件末尾（去掉最后的 }）
-                value = content[start:].rstrip().rstrip('}')
-
-            # 清理截断标记
-            value = value.replace('... [内容已截断]', '')
-            # 替换真实换行为转义的 \n（用于显示）
-            value = value.replace('\r\n', '\\n').replace('\r', '\\n').replace('\n', '\\n')
-            args[param] = value
+    pattern = re.compile(r'"([^"\\]+)"\s*:\s*"([^"]*)"', re.DOTALL)
+    for match in pattern.finditer(content):
+        key = match.group(1)
+        value = match.group(2)
+        quote_count = value.count('"')
+        if quote_count % 2 != 0:
+            continue
+        args[key] = value
+    return args
 
     return args
 
@@ -550,6 +752,56 @@ def _inject_tool_blocks(md_text: str, completed: bool = True) -> str:
     return "".join(parts)
 
 
+def _inject_hook_blocks(md_text: str, completed: bool = True) -> str:
+    """注入 Hook 块 HTML，类似 think 块"""
+    if not md_text:
+        return md_text
+
+    parts = []
+    i = 0
+    while i < len(md_text):
+        start_idx = md_text.find("<hook ", i)
+        if start_idx == -1:
+            parts.append(md_text[i:])
+            break
+        parts.append(md_text[i:start_idx])
+        
+        # 找到 event 属性
+        event_start = md_text.find('event="', start_idx)
+        if event_start == -1 or event_start > start_idx + 10:
+            # 没有 event 属性，跳过这个位置，继续往后找
+            i = start_idx + 6
+            continue
+        
+        event_end = md_text.find('"', event_start + len('event="'))
+        if event_end == -1:
+            parts.append(md_text[start_idx:])
+            break
+        
+        event_name = md_text[event_start + len('event="'):event_end]
+        
+        # 找到闭合标签
+        end_idx = md_text.find("</hook>", start_idx + len("<hook "))
+        if end_idx != -1:
+            content = md_text[start_idx + len('<hook '): end_idx]
+            # 解析内容（event_name 后面的内容）
+            content_start = content.find('>')
+            if content_start != -1:
+                hook_content = content[content_start + 1:].strip()
+            else:
+                hook_content = content.strip()
+            
+            # 使用 render_hook_block 渲染
+            from app.widgets.render_helpers import render_hook_block
+            parts.append(render_hook_block(event_name, hook_content, collapsed=not completed))
+            i = end_idx + len("</hook>")
+        else:
+            # 未闭合的 hook，跳过
+            parts.append(md_text[start_idx:])
+            break
+    return "".join(parts)
+
+
 # 缓存大小阈值（KB）：超过此大小的文本不缓存，防止内存膨胀
 _LRU_CACHE_SIZE_THRESHOLD = 50 * 1024  # 50KB
 
@@ -564,6 +816,7 @@ def _render_markdown_to_html_cached_impl(raw_md: str, reasoning: str) -> str:
     safe_md = _inject_context_links(safe_md)
     processed_md = _inject_think_cards(safe_md, True)
     processed_md = _inject_tool_blocks(processed_md, True)
+    processed_md = _inject_hook_blocks(processed_md, True)
 
     try:
         md = get_markdown_instance()
@@ -799,10 +1052,12 @@ class CodeWebViewer(QWebEngineView):
     # WebEngine 上下文丢失信号
     contextLost = pyqtSignal()
     contextRestored = pyqtSignal()
+    needRecreate = pyqtSignal()  # 需要完全重建控件（恢复失败时）
 
     # WebEngine 最大尺寸限制，防止 GPU 内存溢出
-    MAX_WIDTH = 1600
-    MAX_HEIGHT = 2000
+    # macOS GPU 对过大离屏缓冲分配失败，所以需要保守限制
+    MAX_WIDTH = 1800
+    MAX_HEIGHT = 4000
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -865,6 +1120,12 @@ class CodeWebViewer(QWebEngineView):
             self._context_lost = True
             self._context_lost_count += 1
             self.contextLost.emit()
+            
+            # 如果已经丢失超过1次，直接请求重建
+            if self._context_lost_count > 1:
+                self.needRecreate.emit()
+                return
+            
             # 尝试恢复上下文
             self._schedule_context_restore()
 
@@ -885,6 +1146,8 @@ class CodeWebViewer(QWebEngineView):
                 self._schedule_render(immediate=True)
         except Exception as e:
             print(f"Context restore failed: {e}")
+            # 恢复失败，请求重建
+            self.needRecreate.emit()
 
     def event(self, event):
         """拦截 WebEngine 事件"""
@@ -943,6 +1206,16 @@ class CodeWebViewer(QWebEngineView):
         safe_h = min(h, self.MAX_HEIGHT) if isinstance(h, int) else h
 
         super().resize(safe_w, safe_h)
+    
+    def setFixedHeight(self, height):
+        """限制最大高度，防止 GPU 内存溢出"""
+        safe_h = min(height, self.MAX_HEIGHT)
+        super().setFixedHeight(safe_h)
+    
+    def setFixedWidth(self, width):
+        """限制最大宽度，防止 GPU 内存溢出"""
+        safe_w = min(width, self.MAX_WIDTH)
+        super().setFixedWidth(safe_w)
 
     def _install_dialog_filter(self):
         """安装事件过滤器，监听对话框显示"""
@@ -1054,10 +1327,40 @@ class CodeWebViewer(QWebEngineView):
         """
 
         scrollbar_css = """
-            ::-webkit-scrollbar { width: 10px; height: 10px; }
-            ::-webkit-scrollbar-track { background: #252526; border-radius: 5px; }
-            ::-webkit-scrollbar-thumb { background: #454545; border-radius: 5px; border: 1px solid #3c3c3c; }
-            ::-webkit-scrollbar-thumb:hover { background: #5a5a5a; }
+            /* 统一滚动条样式 - 深色模式适配 */
+            ::-webkit-scrollbar {
+                width: 12px;
+                height: 12px;
+            }
+            ::-webkit-scrollbar-track {
+                background: transparent;
+                border-radius: 6px;
+                margin: 4px 0;
+            }
+            ::-webkit-scrollbar-track:hover {
+                background: rgba(255, 255, 255, 0.03);
+            }
+            ::-webkit-scrollbar-thumb {
+                background: linear-gradient(180deg, #4a4a5a 0%, #3a3a48 100%);
+                border-radius: 6px;
+                border: 2px solid transparent;
+                background-clip: padding-box;
+                min-height: 30px;
+            }
+            ::-webkit-scrollbar-thumb:hover {
+                background: linear-gradient(180deg, #5a5a6a 0%, #4a4a58 100%);
+            }
+            ::-webkit-scrollbar-thumb:active {
+                background: linear-gradient(180deg, #6a6a7a 0%, #5a5a68 100%);
+            }
+            ::-webkit-scrollbar-corner {
+                background: transparent;
+            }
+            /* Firefox 滚动条 */
+            * {
+                scrollbar-width: thin;
+                scrollbar-color: #4a4a5a transparent;
+            }
         """
 
         html = f"""
@@ -1092,7 +1395,9 @@ class CodeWebViewer(QWebEngineView):
                     font-family: "{font_family}", "Segoe UI", sans-serif; font-size: 14px; line-height: 1.5;
                     margin: 0; 
                     padding: 6px 14px; 
-                    overflow: hidden;
+                    max-height: {self.MAX_HEIGHT}px;
+                    overflow-x: hidden;
+                    overflow-y: auto;
                 }}
                 {scrollbar_css}
 
@@ -1452,6 +1757,37 @@ class CodeWebViewer(QWebEngineView):
                     word-break: break-word;
                 }}
 
+                .hook-block {{
+                    margin: 8px 0;
+                    background: rgba(0, 188, 212, 0.08);
+                    border: 1px solid rgba(0, 188, 212, 0.2);
+                    border-left: 3px solid #00BCD4;
+                    border-radius: 10px;
+                    box-shadow: none;
+                    transition: border-color 220ms ease;
+                }}
+                .hook-block[data-expanded="true"] {{
+                    border-color: rgba(0, 188, 212, 0.5);
+                }}
+                .hook-block__summary {{
+                    padding: 8px 12px;
+                    color: #00BCD4;
+                    font-weight: 600;
+                    font-size: 13px;
+                    white-space: normal;
+                }}
+                .hook-content {{
+                    padding: 10px 12px;
+                    border-top: 1px solid rgba(0, 188, 212, 0.2);
+                    background: rgba(0, 188, 212, 0.05);
+                    font-family: Consolas, monospace;
+                    font-size: 12px;
+                    color: #e0e0e0;
+                    white-space: pre-wrap;
+                    word-break: break-word;
+                    line-height: 1.5;
+                }}
+
                 blockquote {{
                     border-left: 3px solid var(--accent-warm);
                     background: rgba(255,182,92,0.08);
@@ -1600,6 +1936,10 @@ class CodeWebViewer(QWebEngineView):
                         }});
 
                         if (window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise();
+                        
+                        // 自动滚动到 body 底部（流式时新内容在底部）
+                        document.body.scrollTop = document.body.scrollHeight;
+                        
                         // 使用延迟报告，确保折叠框高度设为 auto 后浏览器布局完成
                         setTimeout(() => reportHeight(), 50);
                     }}
@@ -1743,6 +2083,8 @@ class CodeWebViewer(QWebEngineView):
                     p.textContent = {json.dumps(escaped)};
                     c.appendChild(p);
                 }}
+                // 流式增量追加时，让 body 内部滚动到最底部
+                document.body.scrollTop = document.body.scrollHeight;
             }})();
             """
             self.page().runJavaScript(js)
@@ -1774,6 +2116,7 @@ class CodeWebViewer(QWebEngineView):
         safe_md = _inject_context_links(safe_md)
         processed_md = _inject_think_cards(safe_md, self._streaming is False)
         processed_md = _inject_tool_blocks(processed_md, self._streaming is False)
+        processed_md = _inject_hook_blocks(processed_md, self._streaming is False)
 
         try:
             md = get_markdown_instance()
@@ -1942,11 +2285,24 @@ class CodeWebViewer(QWebEngineView):
         # 清理页面：先加载空白页释放资源
         try:
             self.setHtml("")
-            if hasattr(self, '_page'):
-                self._page.deleteLater()
-                delattr(self, '_page')
         except RuntimeError:
             pass
+        
+        # 清理页面对象
+        try:
+            if hasattr(self, '_page'):
+                self._page.deleteLater()
+                del self._page
+        except (RuntimeError, AttributeError):
+            pass
+        
+        # 清理代码块缓存
+        if hasattr(self, '_code_block_cache'):
+            self._code_block_cache.clear()
+            self._code_block_cache = None
+        
+        # 清理滚动位置
+        self._last_scroll_position = 0
 
     def deleteLater(self):
         self.cleanup()
@@ -2055,18 +2411,27 @@ class PlainTextViewer(QWidget):
         """
         try:
             self._resize_debounce_timer.stop()
+            self._resize_debounce_timer.deleteLater()
         except RuntimeError:
             pass
 
         # 清理文本缓存
         self._text = ""
 
-        # 清理 QTextEdit
+        # 清理 QTextEdit（关键修复：先清空内容，再释放文档）
         if hasattr(self, 'text_edit') and self.text_edit:
             try:
                 self.text_edit.clear()
+                # 释放文档以释放内存
+                doc = self.text_edit.document()
+                doc.setPlainText("")
+                # 清空undo/redo历史
+                doc.setUndoRedoEnabled(False)
             except RuntimeError:
                 pass
+        
+        # 清理引用
+        self.text_edit = None
 
 
 class MessageCard(SimpleCardWidget):
@@ -2309,6 +2674,7 @@ class MessageCard(SimpleCardWidget):
             # WebEngine 上下文丢失处理
             self.viewer.contextLost.connect(self._on_webengine_context_lost)
             self.viewer.contextRestored.connect(self._on_webengine_context_restored)
+            self.viewer.needRecreate.connect(self._on_webengine_need_recreate)
             self.viewer._install_dialog_filter()
             self._viewer_layout.addWidget(self.viewer)
             main.addWidget(self._viewer_container)
@@ -2402,6 +2768,52 @@ class MessageCard(SimpleCardWidget):
         self._apply_card_style()
         self._webengine_needs_restore = False
         # 重新同步宽度
+        self.sync_width(force=True)
+
+    def _on_webengine_need_recreate(self):
+        """需要完全重建 WebEngine 视图（GPU上下文丢失无法恢复时）"""
+        if not self._lazy_rendered or self.viewer is None:
+            return
+        
+        # 保存当前内容
+        markdown_text = None
+        if hasattr(self.viewer, '_markdown_text'):
+            markdown_text = self.viewer._markdown_text
+        
+        # 销毁旧viewer
+        self.viewer.deleteLater()
+        
+        # 重新创建viewer
+        for i in reversed(range(self._viewer_layout.count())):
+            item = self._viewer_layout.itemAt(i)
+            if item and item.widget():
+                item.widget().deleteLater()
+        
+        self.viewer = CodeWebViewer(self)
+        self.viewer._lazy_markdown_cb = lambda: content_to_markdown(self._content_data)
+        self.viewer.codeActionRequested.connect(self.actionRequested.emit)
+        self.viewer.contextActionRequested.connect(self.contextActionRequested.emit)
+        self.viewer.contentHeightChanged.connect(self._update_height)
+        self.viewer.toolDiffRequested.connect(self.toolDiffRequested.emit)
+        self.viewer.subAgentLogRequested.connect(self.subAgentLogRequested.emit)
+        self.viewer.saveFileRequested.connect(self.saveFileRequested.emit)
+        self.viewer.contextLost.connect(self._on_webengine_context_lost)
+        self.viewer.contextRestored.connect(self._on_webengine_context_restored)
+        self.viewer.needRecreate.connect(self._on_webengine_need_recreate)
+        self.viewer._install_dialog_filter()
+        
+        self._viewer_layout.addWidget(self.viewer)
+        
+        # 恢复内容
+        if markdown_text:
+            self.viewer._markdown_text = markdown_text
+            self.viewer._schedule_render(immediate=True)
+        
+        # 恢复正常样式
+        self._apply_card_style()
+        self._webengine_needs_restore = False
+        
+        # 同步宽度
         self.sync_width(force=True)
 
     def paintEvent(self, event):
@@ -2555,9 +2967,9 @@ class MessageCard(SimpleCardWidget):
             shimmer_pos = (shift_shimmer % N) / N
             shimmer_band_gradient = QLinearGradient(0, 0, w, h)
             shimmer_band_gradient.setColorAt(max(0.0, shimmer_pos - 0.07), QColor(0, 0, 0, 0))
-            shimmer_band_gradient.setColorAt(shimmer_pos - 0.03, QColor(255, 255, 255, int(80 * shimmer)))
+            shimmer_band_gradient.setColorAt(max(0.0, shimmer_pos - 0.03), QColor(255, 255, 255, int(80 * shimmer)))
             shimmer_band_gradient.setColorAt(shimmer_pos, QColor(255, 255, 255, int(150 * shimmer)))
-            shimmer_band_gradient.setColorAt(shimmer_pos + 0.03, QColor(255, 255, 255, int(80 * shimmer)))
+            shimmer_band_gradient.setColorAt(min(1.0, shimmer_pos + 0.03), QColor(255, 255, 255, int(80 * shimmer)))
             shimmer_band_gradient.setColorAt(min(1.0, shimmer_pos + 0.07), QColor(0, 0, 0, 0))
             shimmer_pen = QPen(shimmer_band_gradient, 3)
             painter.setPen(shimmer_pen)
@@ -2764,6 +3176,7 @@ class MessageCard(SimpleCardWidget):
             # WebEngine 上下文丢失处理
             self.viewer.contextLost.connect(self._on_webengine_context_lost)
             self.viewer.contextRestored.connect(self._on_webengine_context_restored)
+            self.viewer.needRecreate.connect(self._on_webengine_need_recreate)
             # 安装对话框过滤
             self.viewer._install_dialog_filter()
 
@@ -3040,16 +3453,26 @@ class MessageCard(SimpleCardWidget):
             except RuntimeError:
                 pass
 
-        # 调用 viewer 的清理方法
+        # 调用 viewer 的清理方法（先清理后释放引用）
         if hasattr(self.viewer, 'cleanup'):
             try:
                 self.viewer.cleanup()
             except RuntimeError:
                 pass
+        self.viewer = None  # 释放 viewer 引用，允许 GC
 
         # 清理大数据缓存
         self._content_data = None
         self._interactive_options = []
+        self._markdown_text = None  # 大 markdown 文本
+        self._last_rendered_html = None  # 大 HTML 字符串
+        self._last_rendered_markdown = None  # 可能很大的 markdown
+        self._rendered_code_blocks = []  # 代码块缓存
+
+        # 清理 markdown_cache 如果存在
+        if hasattr(self, '_markdown_cache') and self._markdown_cache:
+            self._markdown_cache.clear()
+            self._markdown_cache = None
 
     def closeEvent(self, e):
         self.cleanup()

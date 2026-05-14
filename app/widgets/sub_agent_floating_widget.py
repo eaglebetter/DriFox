@@ -27,10 +27,25 @@ class SubTaskLogWidget(QFrame):
         self.task_id = task_id
         self.agent_name = agent_name
         self.task_desc = task_desc
-        self._start_time = time.time()
+        self._start_time = time.time()  # 默认当前时间，运行时会被正确设置
         self._step_count = 0
         self._tool_call_count = 0
+        self._is_finished = False  # 标记是否已完成
         self._setup_ui()
+
+    def set_start_time(self, start_time: float):
+        """设置开始时间（用于显示历史任务的正确时长）"""
+        self._start_time = start_time
+
+    def set_elapsed_seconds(self, elapsed_seconds: int):
+        """设置已消耗的时间（用于显示历史任务的正确时长）"""
+        # 计算出任务的实际开始时间
+        import time
+        self._start_time = time.time() - elapsed_seconds
+
+    def mark_finished(self):
+        """标记任务已完成，停止时间更新"""
+        self._is_finished = True
 
     def _setup_ui(self):
         self.setStyleSheet("""
@@ -124,7 +139,10 @@ class SubTaskLogWidget(QFrame):
         self.log_text.ensureCursorVisible()
 
     def _update_time(self):
-        """更新时间显示"""
+        """更新时间显示（已完成的任务不再更新时间）"""
+        if self._is_finished:
+            # 已完成的任务保持当前显示的时间，不再更新
+            return
         elapsed = int(time.time() - self._start_time)
         mins = elapsed // 60
         secs = elapsed % 60
@@ -171,6 +189,7 @@ class SubTaskLogWidget(QFrame):
 
     def finish_task(self, result: str = None, success: bool = True):
         """完成任务"""
+        self._is_finished = True
         elapsed = int(time.time() - self._start_time)
         mins = elapsed // 60
         secs = elapsed % 60
@@ -397,10 +416,16 @@ class SubAgentFloatingWidget(SimpleCardWidget):
         task_desc = summary.get("task_description", summary.get("task_id", ""))
         result = summary.get("result", "")
         error = summary.get("error", "")
+        elapsed_seconds = summary.get("elapsed_seconds", 0)
 
         # 创建任务日志组件（复用现有样式）
         task_widget = SubTaskLogWidget(task_id, agent_name, task_desc, self.log_container)
         self._tasks[task_id] = task_widget
+
+        # 设置历史任务的正确时长（用于显示）
+        if elapsed_seconds > 0:
+            task_widget.set_elapsed_seconds(elapsed_seconds)
+        task_widget.mark_finished()  # 标记为已完成，停止时间更新
 
         # 更新 Segment（与 add_task 保持一致的命名）
         task_index = len(self._tasks)

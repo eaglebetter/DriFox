@@ -153,35 +153,41 @@ class ChatBackend(QObject):
         # 3. 创建 HookManager（必须在 create_session 之前）
         self._hook_manager = HookManager(self._thread_pool)
         # Hook 完成后，把输出添加到上下文
-        def on_hook_finished(output: str, success: bool):
-            if output.strip() and success:
-                hook_output = f"# Hook Output\n```\n{output}\n```"
-                
-                # 1. 添加到 worker 消息列表（如果正在执行）
-                if self._chat_engine and self._chat_engine._current_worker:
-                    worker = self._chat_engine._current_worker
-                    # 直接追加到 worker 的 API 消息缓存
-                    if hasattr(worker, '_append_to_api_cache'):
-                        worker._append_to_api_cache([{
-                            "role": "assistant",
-                            "content": hook_output,
-                        }])
-                        logger.debug(f"[HookManager] Added hook output to worker messages")
-                
-                # 2. 添加到当前会话（用于 UI 显示）
+        def on_hook_finished(event_name: str, output: str, success: bool):
+            logger.info(f"[HookManager] Hook callback: event={event_name}, success={success}，output={output[:100]}...")
+            
+            # 只有成功执行的 hook 才添加到消息列表
+            if not success:
+                return
+            
+            hook_output = f"<hook event=\"{event_name}\">\n{output}\n</hook>"
+            
+            # SessionStart 和 PreUserMessage 添加到消息列表
+            add_to_messages = event_name in ("SessionStart", "PreUserMessage", "PostUserMessage")
+            
+            if add_to_messages:
                 session = self.get_current_session()
                 if session:
+                    # 对于 PreUserMessage，先删除之前的同类 hook 消息，只保留最新一个
+                    if event_name == "PreUserMessage":
+                        session.messages = [
+                            msg for msg in session.messages
+                            if not (msg.get("role") == "assistant" and "<hook " in (msg.get("content") or "") and 'event="PreUserMessage"' in (msg.get("content") or ""))
+                        ]
+                    
+                    # 添加新消息
                     session.add_assistant_message(hook_output)
                 
-                # 3. 发送消息给前端显示
+                # 发送消息给前端显示
                 self.message_received.emit({
                     "role": "assistant",
                     "content": hook_output
                 })
+                logger.info(f"[HookManager] Hook added to messages: {event_name}")
         self._hook_manager.set_on_finished_callback(on_hook_finished)
         
-        # 4. 使用 create_session() 触发 SessionStart hook（必须在 hook_manager 之后）
-        self.create_session()
+        # 4. 创建初始会话（不触发 SessionStart hook，避免重复初始化）
+        self.create_session(trigger_hook=False)
         
         # 3. 使用传入的 AgentManager 或创建新的
         self._agent_manager = AgentManager(str(Path(__file__).parent.parent / "agents"), self._hook_manager)
@@ -195,7 +201,7 @@ class ChatBackend(QObject):
                 with open(global_hooks_file, 'r', encoding='utf-8') as f:
                     config = json.loads(f.read())
                 skill_root = str(global_hooks_file.parent)
-                count = self._hook_manager.register_hooks_from_json("__global__", skill_root, config)
+                count = self._hook_manager.register_hooks_from_json("__global__", skill_root, config, str(global_hooks_file))
                 if count > 0:
                     logger.info(f"[ChatBackend] Loaded {count} global hooks from {global_hooks_file}")
             except Exception as e:
@@ -380,13 +386,17 @@ class ChatBackend(QObject):
     
     # ========== 会话管理 ==========
     
-    def create_session(self) -> ChatSession:
-        """创建新会话"""
+    def create_session(self, trigger_hook: bool = True) -> ChatSession:
+        """创建新会话
+        
+        Args:
+            trigger_hook: 是否触发 SessionStart hook。初始化时设为 False 避免重复触发。
+        """
         session = self._session_manager.create_new_session()
         self.session_created.emit(session.session_id)
         
         # Trigger SessionStart hook
-        if self._hook_manager:
+        if trigger_hook and self._hook_manager:
             context = {
                 "project_root": os.getcwd(),
             }
@@ -446,22 +456,24 @@ class ChatBackend(QObject):
     
     def get_current_agent(self) -> str:
         """获取当前 Agent"""
-        return self._chat_engine._current_agent if self._chat_engine else "plan"
+        if self._chat_engine:
+            return self._chat_engine.current_agent
+        return "plan"
     
     def set_current_agent(self, agent_name: str):
         """设置当前 Agent"""
         if self._chat_engine:
-            self._chat_engine._current_agent = agent_name
+            self._chat_engine.set_current_agent(agent_name)
     
     def set_streaming_state(self, is_streaming: bool):
         """设置流式状态"""
         if self._chat_engine:
-            self._chat_engine._is_streaming = is_streaming
+            self._chat_engine.set_streaming(is_streaming)
     
     def get_context_usage(self) -> tuple:
         """获取上下文使用情况"""
         if self._chat_engine:
-            return self._chat_engine._get_context_usage()
+            return self._chat_engine.get_context_usage()
         return (0, 0)
     
     # ========== 上下文构建方法 ==========
