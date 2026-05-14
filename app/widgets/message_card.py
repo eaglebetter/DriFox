@@ -1965,8 +1965,11 @@ class CodeWebViewer(QWebEngineView):
                         const act = btn.getAttribute('data-action');
                         const b64 = btn.getAttribute('data-copy');
                         const lang = btn.getAttribute('data-lang') || '';
-                        if (act === 'copy' && navigator.clipboard) navigator.clipboard.writeText(atob(b64));
-                        console.log('pywebview_action:' + act + ':' + b64 + ':' + lang);
+                        // copy 动作：先复制到剪贴板，再发送信号触发 Python 端 InfoBar 提示
+                        if (act === 'copy' && navigator.clipboard) {{
+                            navigator.clipboard.writeText(atob(b64));
+                            console.log('pywebview_action:copy:' + b64 + ':' + lang);
+                        }}
                         return;
                     }}
                     const summary = e.target.closest('.cm-collapsible__summary');

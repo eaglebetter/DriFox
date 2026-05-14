@@ -152,9 +152,13 @@ class OpenAIChatToolWindow(ToolWindow):
     toolStartUiSyncRequested = pyqtSignal(str, str, object, str)
 
     def __init__(self, homepage, button):
+        # 调用父类（会触发 setup_ui -> _create_agent_switch_buttons）
+        super().__init__(homepage, button)
         # 需要在 super().__init__() 之前初始化所有依赖项
         self.homepage = homepage  # 必须在 super() 之前设置，供 backend.initialize 使用
-
+        self.cfg = Settings.get_instance()
+        # 自动检查更新（启动时静默检查）
+        self._init_auto_update_check()
         # 创建后端（后端自己创建所有组件）- 需要在 super() 之前创建并初始化
         # 因为 setup_ui() 中会用到 self.backend.get_primary_agents()
         self.backend = ChatBackend()
@@ -167,9 +171,6 @@ class OpenAIChatToolWindow(ToolWindow):
         self.history_manager = self.backend.history_manager
         self.session_store = self.backend.session_store
         self.session_manager = self.backend.session_manager
-
-        # 调用父类（会触发 setup_ui -> _create_agent_switch_buttons）
-        super().__init__(homepage, button)
         self._session_card_cache: Dict[str, Dict[str, Any]] = {}
         self._current_history_project: Optional[str] = None  # 当前历史面板项目过滤
         self._welcome_card_cache: Dict[str, MessageCard] = {}
@@ -251,6 +252,9 @@ class OpenAIChatToolWindow(ToolWindow):
 
         self._current_session_id = self.session_manager.get_current_session().session_id
 
+        # 初始化 UI
+        self.setup_ui()
+
         # 初始化 UI 相关的回调
         self._setup_engine_callbacks()
 
@@ -258,7 +262,6 @@ class OpenAIChatToolWindow(ToolWindow):
         self._init_sub_agent_manager()
 
         # 初始化历史管理器
-        self.cfg = Settings.get_instance()
         self._current_project = self.cfg.current_project.value
         self._project_label.setText(self._current_project)
 
@@ -276,11 +279,8 @@ class OpenAIChatToolWindow(ToolWindow):
 
     def _init_auto_update_check(self):
         """启动时静默检查更新"""
-        from app.utils.config import Settings
-
-        cfg = Settings.get_instance()
         # 检查是否启用自动更新
-        if not cfg.auto_check_update.value:
+        if not self.cfg.auto_check_update.value:
             return
 
         from app.update_checker import UpdateChecker
@@ -434,7 +434,7 @@ class OpenAIChatToolWindow(ToolWindow):
             # 验证 self 和 homepage 是否有效
             try:
                 if sip.isdeleted(self) or sip.isdeleted(self.homepage):
-                    InfoBar.error("窗口错误", "主窗口已关闭，无法创建新窗口", parent=self, position=InfoBarPosition.TOP)
+                    InfoBar.error("窗口错误", "主窗口已关闭，无法创建新窗口", parent=self, position=InfoBarPosition.BOTTOM)
                     return
             except Exception:
                 pass  # 忽略检查失败
@@ -513,13 +513,13 @@ class OpenAIChatToolWindow(ToolWindow):
 
             # 在 show() 之前再次检查 popup 是否仍然有效
             if sip.isdeleted(popup):
-                InfoBar.error("复制失败", "窗口创建失败，请重试", parent=self, position=InfoBarPosition.TOP)
+                InfoBar.error("复制失败", "窗口创建失败，请重试", parent=self, position=InfoBarPosition.BOTTOM)
                 return
 
             popup.show()
         except Exception as e:
 
-            InfoBar.error("复制失败", str(e), parent=self, position=InfoBarPosition.TOP)
+            InfoBar.error("复制失败", str(e), parent=self, position=InfoBarPosition.BOTTOM)
 
     def _request_tool_start_ui_sync(
             self, tool_call_id: str, tool_name: str, arguments: dict, round_id: str = None
@@ -1003,10 +1003,6 @@ class OpenAIChatToolWindow(ToolWindow):
         hlayout.addWidget(self._toolbar_capsule)
 
         layout.addLayout(hlayout)
-
-        # 自动检查更新（启动时静默检查）
-        self._init_auto_update_check()
-
         # 输入框 - 在工具栏下方
         self.input_area = SendableTextEdit(self)
         self.input_area._agent_combo.hide()  # 隐藏输入框内部的下拉框，用工具栏的按钮组代替
@@ -1208,7 +1204,7 @@ class OpenAIChatToolWindow(ToolWindow):
         # 刷新配置
         self._load_model_configs()
         InfoBar.success("已保存", f"服务商 '{provider_name}' 已保存", parent=self, duration=2000,
-                        position=InfoBarPosition.TOP)
+                        position=InfoBarPosition.BOTTOM)
 
     def _on_provider_edit_closed(self):
         """服务商编辑关闭后的回调"""
@@ -1575,7 +1571,7 @@ class OpenAIChatToolWindow(ToolWindow):
                     # 刷新
                     self._history_popup_card.refreshRequested.emit()
                     InfoBar.success("已移动", f"会话已移至「{project}」项目", duration=2000, parent=self,
-                                    position=InfoBarPosition.TOP)
+                                    position=InfoBarPosition.BOTTOM)
 
     def _refresh_archived_sessions(self):
         """刷新归档会话列表"""
@@ -1715,7 +1711,7 @@ class OpenAIChatToolWindow(ToolWindow):
         saved_providers[current_name] = old_config
         self.cfg.set(self.cfg.llm_saved_providers, saved_providers, save=True)
         self._load_model_configs()
-        InfoBar.success("已保存", "配置已保存到本地。", parent=self, duration=1500, position=InfoBarPosition.TOP)
+        InfoBar.success("已保存", "配置已保存到本地。", parent=self, duration=1500, position=InfoBarPosition.BOTTOM)
 
     def _load_model_configs(self):
         saved_model = self.cfg.llm_selected_model.value
@@ -2073,12 +2069,12 @@ class OpenAIChatToolWindow(ToolWindow):
             # 获取当前会话 ID
             session_id = self._current_session_id
             if not session_id:
-                InfoBar.warning("提示", "当前没有活动会话", parent=self, position=InfoBarPosition.TOP)
+                InfoBar.warning("提示", "当前没有活动会话", parent=self, position=InfoBarPosition.BOTTOM)
                 return
 
             # 从 ToolExecutor 获取当前会话的文件操作记录
             if not self.backend.tool_executor:
-                InfoBar.warning("提示", "工具执行器未初始化", parent=self, position=InfoBarPosition.TOP)
+                InfoBar.warning("提示", "工具执行器未初始化", parent=self, position=InfoBarPosition.BOTTOM)
                 return
 
             file_recorder = FileOperationRecorder(self.session_store)
@@ -2087,14 +2083,14 @@ class OpenAIChatToolWindow(ToolWindow):
             operations = file_recorder.get_all_operations_for_session(session_id)
 
             if not operations:
-                InfoBar.info("提示", "当前会话没有文件修改记录", parent=self, position=InfoBarPosition.TOP)
+                InfoBar.info("提示", "当前会话没有文件修改记录", parent=self, position=InfoBarPosition.BOTTOM)
                 return
 
             # 提取文件路径列表（去重）
             file_paths = list({op.get("file_path") for op in operations if op.get("file_path")})
 
             if not file_paths:
-                InfoBar.info("提示", "未找到修改的文件", parent=self, position=InfoBarPosition.TOP)
+                InfoBar.info("提示", "未找到修改的文件", parent=self, position=InfoBarPosition.BOTTOM)
                 return
 
             # 生成 git diff
@@ -2116,10 +2112,10 @@ class OpenAIChatToolWindow(ToolWindow):
 
         except ImportError as e:
             logger.error(f"[DiffViewer] 导入模块失败: {e}")
-            InfoBar.error("错误", f"功能加载失败: {str(e)}", parent=self, position=InfoBarPosition.TOP)
+            InfoBar.error("错误", f"功能加载失败: {str(e)}", parent=self, position=InfoBarPosition.BOTTOM)
         except Exception as e:
             logger.exception(f"[DiffViewer] 打开差异查看器失败: {e}")
-            InfoBar.error("错误", f"打开差异查看器失败: {str(e)}", parent=self, position=InfoBarPosition.TOP)
+            InfoBar.error("错误", f"打开差异查看器失败: {str(e)}", parent=self, position=InfoBarPosition.BOTTOM)
 
     def _clear_chat_area(self, delete_widgets: bool = True):
         self._current_assistant_card = None
@@ -2784,7 +2780,7 @@ class OpenAIChatToolWindow(ToolWindow):
             InfoBar.success(
                 title="导入成功",
                 content=f"已导入会话：{imported_session.get('title', '新对话')}",
-                position=InfoBarPosition.TOP,
+                position=InfoBarPosition.BOTTOM,
                 duration=3000,
                 parent=self
             )
@@ -2793,7 +2789,7 @@ class OpenAIChatToolWindow(ToolWindow):
             InfoBar.error(
                 title="导入失败",
                 content="无法解析会话文件，请确认文件格式正确",
-                position=InfoBarPosition.TOP,
+                position=InfoBarPosition.BOTTOM,
                 duration=3000,
                 parent=self
             )
@@ -2821,7 +2817,7 @@ class OpenAIChatToolWindow(ToolWindow):
             InfoBar.success(
                 title="恢复成功",
                 content=f"已恢复会话：{imported_session.get('title', '新对话')}",
-                position=InfoBarPosition.TOP,
+                position=InfoBarPosition.BOTTOM,
                 duration=3000,
                 parent=self
             )
@@ -2830,7 +2826,7 @@ class OpenAIChatToolWindow(ToolWindow):
             InfoBar.error(
                 title="恢复失败",
                 content="无法恢复该会话，文件可能已损坏",
-                position=InfoBarPosition.TOP,
+                position=InfoBarPosition.BOTTOM,
                 duration=3000,
                 parent=self
             )
@@ -2862,7 +2858,7 @@ class OpenAIChatToolWindow(ToolWindow):
             InfoBar.success(
                 title="删除成功",
                 content="归档会话已彻底删除",
-                position=InfoBarPosition.TOP,
+                position=InfoBarPosition.BOTTOM,
                 duration=2000,
                 parent=self
             )
@@ -2871,7 +2867,7 @@ class OpenAIChatToolWindow(ToolWindow):
             InfoBar.error(
                 title="删除失败",
                 content=f"无法删除文件：{str(e)}",
-                position=InfoBarPosition.TOP,
+                position=InfoBarPosition.BOTTOM,
                 duration=3000,
                 parent=self
             )
@@ -2899,7 +2895,7 @@ class OpenAIChatToolWindow(ToolWindow):
             InfoBar.success(
                 title="重命名成功",
                 content=f"已更名为：{new_title}",
-                position=InfoBarPosition.TOP,
+                position=InfoBarPosition.BOTTOM,
                 duration=2000,
                 parent=self
             )
@@ -2908,7 +2904,7 @@ class OpenAIChatToolWindow(ToolWindow):
             InfoBar.error(
                 title="重命名失败",
                 content=str(e),
-                position=InfoBarPosition.TOP,
+                position=InfoBarPosition.BOTTOM,
                 duration=3000,
                 parent=self
             )
@@ -3660,7 +3656,7 @@ class OpenAIChatToolWindow(ToolWindow):
                 f"成功: {result.success_count}, 失败: {result.failed_count}\n{failed_list}",
                 parent=self,
                 duration=5000,
-                position=InfoBarPosition.TOP,
+                position=InfoBarPosition.BOTTOM,
             )
         elif result.success_count > 0:
             InfoBar.success(
@@ -3668,7 +3664,7 @@ class OpenAIChatToolWindow(ToolWindow):
                 f"已恢复 {result.success_count} 个文件",
                 parent=self,
                 duration=3000,
-                position=InfoBarPosition.TOP,
+                position=InfoBarPosition.BOTTOM,
             )
 
     def _on_tool_diff_requested(self, tool_call_id: str):
@@ -3707,7 +3703,7 @@ class OpenAIChatToolWindow(ToolWindow):
                     "此工具没有修改任何文件，或备份信息已丢失",
                     duration=3000,
                     parent=self,
-                    position=InfoBarPosition.TOP,
+                    position=InfoBarPosition.BOTTOM,
                 )
                 return
 
@@ -3725,7 +3721,7 @@ class OpenAIChatToolWindow(ToolWindow):
                 str(e),
                 duration=3000,
                 parent=self,
-                position=InfoBarPosition.TOP,
+                position=InfoBarPosition.BOTTOM,
             )
 
     def _on_subagent_log_requested(self, task_ids_str: str):
@@ -3759,7 +3755,7 @@ class OpenAIChatToolWindow(ToolWindow):
                     f"未找到任务: {task_id[:8]}...",
                     duration=3000,
                     parent=self,
-                    position=InfoBarPosition.TOP,
+                    position=InfoBarPosition.BOTTOM,
                 )
                 return
 
@@ -3780,7 +3776,7 @@ class OpenAIChatToolWindow(ToolWindow):
                 "未找到任何任务日志",
                 duration=3000,
                 parent=self,
-                position=InfoBarPosition.TOP,
+                position=InfoBarPosition.BOTTOM,
             )
             return
 
@@ -3827,7 +3823,7 @@ class OpenAIChatToolWindow(ToolWindow):
                     "此对话没有修改任何文件",
                     duration=3000,
                     parent=self,
-                    position=InfoBarPosition.TOP,
+                    position=InfoBarPosition.BOTTOM,
                 )
                 return
 
@@ -3844,7 +3840,7 @@ class OpenAIChatToolWindow(ToolWindow):
                     "此对话没有修改任何文件，或备份信息已丢失",
                     duration=3000,
                     parent=self,
-                    position=InfoBarPosition.TOP,
+                    position=InfoBarPosition.BOTTOM,
                 )
                 return
 
@@ -3861,7 +3857,7 @@ class OpenAIChatToolWindow(ToolWindow):
                 str(e),
                 duration=3000,
                 parent=self,
-                position=InfoBarPosition.TOP,
+                position=InfoBarPosition.BOTTOM,
             )
 
     def _on_save_file_requested(self, code: str, lang: str):
@@ -3897,7 +3893,7 @@ class OpenAIChatToolWindow(ToolWindow):
                 file_path,
                 duration=3000,
                 parent=self,
-                position=InfoBarPosition.TOP,
+                position=InfoBarPosition.BOTTOM,
             )
         except Exception as e:
             logger.error(f"[LLMChatter] 保存文件失败: {e}")
@@ -3906,10 +3902,12 @@ class OpenAIChatToolWindow(ToolWindow):
                 str(e),
                 duration=3000,
                 parent=self,
-                position=InfoBarPosition.TOP,
+                position=InfoBarPosition.BOTTOM,
             )
 
     def _on_code_action(self, code: str, action: str = "copy"):
+        from loguru import logger
+        logger.info(f"[_on_code_action] action={action}, code_len={len(code)}")
         if action == "insert":
             self.insertResponse.emit(code)
         elif action == "create":
@@ -3917,12 +3915,14 @@ class OpenAIChatToolWindow(ToolWindow):
         elif action == "copy":
             clipboard = QApplication.clipboard()
             clipboard.setText(code)
+            # 复制成功提示 - 使用 self 作为 parent
+            logger.info("[_on_code_action] showing InfoBar")
             InfoBar.success(
                 "已复制",
                 "",
                 duration=1500,
-                parent=self.homepage,
-                position=InfoBarPosition.TOP,
+                parent=self,
+                position=InfoBarPosition.BOTTOM,
             )
 
     def _scroll_to_bottom(self, sticky_ms: int = 0):
@@ -4099,7 +4099,7 @@ class OpenAIChatToolWindow(ToolWindow):
                 "请在设置中选择一个可用的模型后再发送消息",
                 parent=self,
                 duration=3000,
-                position=InfoBarPosition.TOP,
+                position=InfoBarPosition.BOTTOM,
             )
             return
 
@@ -4863,7 +4863,7 @@ class OpenAIChatToolWindow(ToolWindow):
                 f"已归档项目「{project_name}」的 {count} 个会话",
                 parent=self,
                 duration=3000,
-                position=InfoBarPosition.TOP
+                position=InfoBarPosition.BOTTOM
             )
         else:
             InfoBar.warning(
@@ -4871,7 +4871,7 @@ class OpenAIChatToolWindow(ToolWindow):
                 f"项目「{project_name}」没有可归档的会话",
                 parent=self,
                 duration=3000,
-                position=InfoBarPosition.TOP
+                position=InfoBarPosition.BOTTOM
             )
 
     def _show_soul_memory(self):
@@ -4892,11 +4892,11 @@ class OpenAIChatToolWindow(ToolWindow):
         """记忆卡片保存后的回调"""
         # 数据已经在 MemoryCardContent 中通过 backend 保存
         # 这里只显示提示信息
-        InfoBar.success("已保存", "长期记忆已更新", parent=self, duration=1500, position=InfoBarPosition.TOP)
+        InfoBar.success("已保存", "长期记忆已更新", parent=self, duration=1500, position=InfoBarPosition.BOTTOM)
 
     def _on_memory_updated(self, memories: list):
         self.backend.update_user_memories(memories)
-        InfoBar.success("已保存", "长期记忆已更新", parent=self, duration=1500, position=InfoBarPosition.TOP)
+        InfoBar.success("已保存", "长期记忆已更新", parent=self, duration=1500, position=InfoBarPosition.BOTTOM)
 
     def _on_title_double_click(self, event):
         from PyQt5.QtWidgets import QInputDialog, QLineEdit
@@ -5020,7 +5020,7 @@ class OpenAIChatToolWindow(ToolWindow):
             content="问答请求已被手动中止。",
             orient=Qt.Horizontal,
             isClosable=True,
-            position=InfoBarPosition.TOP,
+            position=InfoBarPosition.BOTTOM,
             duration=2000,
             parent=self,
         )
@@ -5044,7 +5044,7 @@ class OpenAIChatToolWindow(ToolWindow):
     def _export_conversation(self):
         session = self.session_manager.get_current_session()
         if not session or not session.messages:
-            InfoBar.warning("无法导出", "当前没有对话内容", parent=self, position=InfoBarPosition.TOP)
+            InfoBar.warning("无法导出", "当前没有对话内容", parent=self, position=InfoBarPosition.BOTTOM)
             return
         file_path, _ = QFileDialog.getSaveFileName(
             self,
@@ -5058,10 +5058,10 @@ class OpenAIChatToolWindow(ToolWindow):
             content = export_messages_to_markdown(session.messages)
             with open(file_path, "w", encoding="utf-8") as f:
                 f.write(content)
-            InfoBar.success("导出成功", f"已保存到: {file_path}", parent=self, position=InfoBarPosition.TOP)
+            InfoBar.success("导出成功", f"已保存到: {file_path}", parent=self, position=InfoBarPosition.BOTTOM)
         except Exception as e:
-            InfoBar.error("导出失败", str(e), parent=self, position=InfoBarPosition.TOP)
+            InfoBar.error("导出失败", str(e), parent=self, position=InfoBarPosition.BOTTOM)
 
     def _clear_current_conversation(self):
         self._create_new_session()
-        InfoBar.success("已清空", "开始新的对话", parent=self, duration=1500, position=InfoBarPosition.TOP)
+        InfoBar.success("已清空", "开始新的对话", parent=self, duration=1500, position=InfoBarPosition.BOTTOM)

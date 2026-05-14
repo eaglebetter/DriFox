@@ -80,7 +80,7 @@ class ManualUpdateCard(SettingCard):
                 icon=InfoBarIcon.WARNING,
                 title="检查更新失败",
                 content=msg,
-                position=InfoBarPosition.BOTTOM_RIGHT,
+                position=InfoBarPosition.BOTTOM,
                 duration=3000,
                 parent=self.parent_widget,
             ).show()
