@@ -616,9 +616,17 @@ class HistoryCompactor:
                 summary_lines.append(f"# Assistant\n{content}")
             elif role == "tool":
                 tool_name = msg.get("name", "")
+                arguments = msg.get("arguments", "")
+                arguments = self._adaptive_truncate(
+                    arguments,
+                    position=idx,
+                    total=total_messages,
+                    target_total=target_total_length,
+                    ratios=content_ratios if total_content_length > 1000 else None,
+                )
                 # 标记受保护的工具
                 prefix = "[🔒] " if tool_name in PROTECTED_TOOLS else ""
-                summary_lines.append(f"{prefix}# Tool\n{tool_name}:\n{content}")
+                summary_lines.append(f"{prefix}# {tool_name}\nTool args: {arguments}\nTool Res: {content}")
 
         return "\n".join(summary_lines)
 

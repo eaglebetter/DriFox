@@ -157,6 +157,8 @@ class OpenAIChatToolWindow(ToolWindow):
         # 需要在 super().__init__() 之前初始化所有依赖项
         self.homepage = homepage  # 必须在 super() 之前设置，供 backend.initialize 使用
         self.cfg = Settings.get_instance()
+        # 初始化当前项目（在 backend.initialize 之前）
+        self._current_project = self.cfg.current_project.value or "默认项目"  # 当前项目
         # 自动检查更新（启动时静默检查）
         self._init_auto_update_check()
         # 创建后端（后端自己创建所有组件）- 需要在 super() 之前创建并初始化
@@ -173,7 +175,6 @@ class OpenAIChatToolWindow(ToolWindow):
         self.session_manager = self.backend.session_manager
         self._session_card_cache: Dict[str, Dict[str, Any]] = {}
         self._current_history_project: Optional[str] = None  # 当前历史面板项目过滤
-        self._current_project = self.cfg.current_project.value or "默认项目"  # 当前项目
         self._welcome_card_cache: Dict[str, MessageCard] = {}
         self._displayed_session_id: Optional[str] = None
         self._initial_visible_batch_count = 12
@@ -255,6 +256,10 @@ class OpenAIChatToolWindow(ToolWindow):
 
         # 初始化 UI
         self.setup_ui()
+        
+        # 设置记忆上下文 getter（在 setup_ui 之后，因为 backend 已初始化）
+        if hasattr(self, '_build_memory_context_for_engine'):
+            self.backend.set_memory_context_getter(self._build_memory_context_for_engine)
 
         # 初始化 UI 相关的回调
         self._setup_engine_callbacks()
@@ -561,7 +566,11 @@ class OpenAIChatToolWindow(ToolWindow):
 
     def _build_memory_context_for_engine(self, query: str = "") -> str:
         project = getattr(self, '_current_project', "默认项目") or "默认项目"
-        return self.backend.get_memory_context_string(query=query, limit=8, project=project)
+        # 确保从 UI 获取最新的 project 值
+        if hasattr(self, '_current_project') and self._current_project:
+            project = self._current_project
+        result = self.backend.get_memory_context_string(query=query, limit=8, project=project)
+        return result
 
     def _get_current_session_messages_for_tools(self) -> List[Dict[str, Any]]:
         session = self.session_manager.get_current_session()
@@ -890,6 +899,7 @@ class OpenAIChatToolWindow(ToolWindow):
         self._memory_card.setFixedHeight(400)
         self._memory_card_popup = MemoryCardContent(self.backend.memory_manager, self)
         self._memory_card_popup.memorySaved.connect(self._on_memory_card_saved)
+        self._memory_card_popup.set_project(self._current_project)  # 初始化时设置当前项目
         self._memory_card.content_layout.addWidget(self._memory_card_popup)
         self._memory_card.setVisible(False)
         layout.addWidget(self._memory_card)
@@ -4665,17 +4675,11 @@ class OpenAIChatToolWindow(ToolWindow):
             if idx is not None:
                 previous_summary = self.history_manager.get_topic_summary(idx)
 
-        long_term_memory = self.backend.get_memory_context_string()
-
-        existing_memories = self.backend.get_user_memories()
-
         task = TopicSummaryTask(
             messages=session.messages,
             llm_config=llm_config,
             callback=self._on_topic_summary_generated,
             previous_summary=previous_summary if previous_summary else None,
-            long_term_memory=long_term_memory,
-            existing_memories=existing_memories,
         )
         self._gen_thread_pool.start(task)
 
@@ -4688,21 +4692,8 @@ class OpenAIChatToolWindow(ToolWindow):
 
         if isinstance(result, dict):
             summary = result.get("topic_summary", "")
-            should_update_memory = result.get("should_update_memory", False)
-            memory_content = result.get("memory_content", "")
-            memory_category = result.get("memory_category", "task_preference")
-            hit_memories = result.get("hit_memories", [])
         else:
             summary = result
-            should_update_memory = False
-            memory_content = ""
-            memory_category = "task_preference"
-            hit_memories = []
-
-        if result.get("title_unchanged") and self._current_session_id is not None:
-            # 标题未更新，保持现有标题
-            logger.info("[Topic Summary] 标题未更新，保持现有标题")
-            return
 
         if not summary:
             return
@@ -4739,42 +4730,6 @@ class OpenAIChatToolWindow(ToolWindow):
                 self.history_manager.update_topic_summary(idx, clean_summary)
 
         self._update_title_display(clean_summary)
-
-        if self.backend.memory_manager and ((should_update_memory and memory_content) or hit_memories):
-            # 合并修改：添加新记忆 + touch 现有记忆，只做一次全量保存
-            memory_data = self.backend.load_memory_data()
-            changed = False
-            
-            if should_update_memory and memory_content:
-                # 添加/更新用户记忆
-                self.backend.add_user_memory(
-                    memory_content,
-                    source="topic_summary",
-                    confidence=0.8,
-                    category=memory_category,
-                    memory_data=memory_data
-                )
-                logger.info(
-                    f"[Topic Summary] Added to long-term memory [{memory_category}]: {memory_content[:50]}..."
-                )
-                changed = True
-            
-            if hit_memories:
-                # touch 现有记忆
-                if self.backend.touch_memories(hit_memories, memory_data=memory_data):
-                    changed = True
-            
-            if changed:
-                # 只保存一次
-                self.backend.save_memory_data(memory_data)
-                if hit_memories:
-                    logger.info(
-                        f"[Topic Summary] Touched {len(hit_memories)} existing memories"
-                    )
-        else:
-            logger.info(
-                f"[Topic Summary] Memory update skipped (should_update={should_update_memory}, content={bool(memory_content)}, has_hit={bool(hit_memories)})"
-            )
 
     def _update_title_display(self, title: str):
         self.title_edit.setText(title)

@@ -220,16 +220,18 @@ class ChatBackend(QObject):
             )
         logger.info("[ChatBackend] ToolExecutor 创建完成")
         
-        # 5. 创建 ChatEngine
+        # 5. 创建 ChatEngine（暂时不传 get_memory_context，后面通过 setter 设置）
         self._chat_engine = ChatEngine(
             session_manager=self._session_manager,
             get_model_config=get_model_config,
             tool_executor=self._tool_executor,
             agent_manager=self._agent_manager,
             get_chat_cards=getattr(self, '_build_chat_cards_context', None),
-            get_memory_context=getattr(self, '_build_memory_context', None),
+            get_memory_context=None,  # 暂时设为 None，后面通过 setter 设置
         )
         logger.info("[ChatBackend] ChatEngine 创建完成")
+        
+        self._get_memory_context_getter = None
 
         self._history_manager = HistoryManager()
         
@@ -246,6 +248,13 @@ class ChatBackend(QObject):
         if self._chat_engine:
             for name, callback in callbacks.items():
                 self._chat_engine.set_callback(name, callback)
+    
+    def set_memory_context_getter(self, getter: Callable):
+        """设置记忆上下文获取器"""
+        self._get_memory_context_getter = getter
+        if self._chat_engine and hasattr(self._chat_engine, '_context_builder'):
+            self._chat_engine._context_builder._get_memory_context = getter
+    
     
     # ========== ChatEngine 代理方法 ==========
     

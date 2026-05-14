@@ -18,6 +18,7 @@ from PyQt5.QtWidgets import (
     QTextEdit,
 )
 from PyQt5.QtGui import QDropEvent, QDragEnterEvent, QDragMoveEvent
+from loguru import logger
 from qfluentwidgets import (
     BodyLabel,
     LineEdit,
@@ -377,14 +378,11 @@ class MemoryCardContent(QWidget):
 
     def set_project(self, project: str):
         """设置当前项目"""
-        from loguru import logger
-        logger.info(f"[MemoryCardContent] set_project called: {project}")
         if self._current_project != project:
             self._current_project = project
-        # 强制刷新项目笔记和关键文档（不管当前在哪个 Tab）
+        # 强制刷新项目笔记和关键文档
         self._load_project_note()
         self._load_key_documents()
-        logger.info(f"[MemoryCardContent] Project set to: {self._current_project}, tabs refreshed")
 
     def _init_ui(self):
         self.setStyleSheet(f"""
