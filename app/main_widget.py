@@ -173,6 +173,7 @@ class OpenAIChatToolWindow(ToolWindow):
         self.session_manager = self.backend.session_manager
         self._session_card_cache: Dict[str, Dict[str, Any]] = {}
         self._current_history_project: Optional[str] = None  # 当前历史面板项目过滤
+        self._current_project = self.cfg.current_project.value or "默认项目"  # 当前项目
         self._welcome_card_cache: Dict[str, MessageCard] = {}
         self._displayed_session_id: Optional[str] = None
         self._initial_visible_batch_count = 12
@@ -262,7 +263,6 @@ class OpenAIChatToolWindow(ToolWindow):
         self._init_sub_agent_manager()
 
         # 初始化历史管理器
-        self._current_project = self.cfg.current_project.value
         self._project_label.setText(self._current_project)
 
         # 应用退出时自动保存
@@ -560,7 +560,8 @@ class OpenAIChatToolWindow(ToolWindow):
         return self._valid_configs.get(selected_name, {})
 
     def _build_memory_context_for_engine(self, query: str = "") -> str:
-        return self.backend.get_memory_context_string(query=query, limit=8)
+        project = getattr(self, '_current_project', "默认项目") or "默认项目"
+        return self.backend.get_memory_context_string(query=query, limit=8, project=project)
 
     def _get_current_session_messages_for_tools(self) -> List[Dict[str, Any]]:
         session = self.session_manager.get_current_session()
@@ -701,7 +702,6 @@ class OpenAIChatToolWindow(ToolWindow):
         session_bar_layout.setSpacing(4)
 
         # 项目选择标签
-        self._current_project = "默认项目"
         self._project_label = QLabel(self._current_project, self)
         self._project_label.setStyleSheet(f"""
             QLabel {{
@@ -4812,6 +4812,14 @@ class OpenAIChatToolWindow(ToolWindow):
         self._project_label.setText(project)
         self.cfg.current_project.value = project
         self.cfg.save()
+        # 更新 tool_executor 的当前项目
+        if hasattr(self, '_tool_executor') and self._tool_executor:
+            self._tool_executor.set_current_project(project)
+        # 刷新记忆卡片的项目（项目笔记、关键文档会跟着刷新）
+        if hasattr(self, '_memory_card_popup') and self._memory_card_popup:
+            from loguru import logger
+            logger.info(f"[MainWidget] Calling set_project({project}) on memory_card_popup")
+            self._memory_card_popup.set_project(project)
         # 刷新历史面板（切换项目过滤）
         self._current_history_project = project
         self._history_popup_card.set_current_project(project)
@@ -4826,6 +4834,9 @@ class OpenAIChatToolWindow(ToolWindow):
         # 保存到配置
         self.cfg.current_project.value = project
         self.cfg.save()
+        # 刷新记忆卡片的项目
+        if hasattr(self, '_memory_card_popup') and self._memory_card_popup:
+            self._memory_card_popup.set_project(project)
         # 刷新历史面板
         self._history_popup_card.refreshRequested.emit()
         # 自动触发新建会话

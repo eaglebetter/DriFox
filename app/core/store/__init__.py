@@ -8,6 +8,8 @@ from app.core.store.subagent_log_store import SubAgentLogStore
 from app.core.store.session_repository import SessionRepository
 from app.core.store.memory_repository import MemoryRepository
 from app.core.store.file_operation_repository import FileOperationRepository
+from app.core.store.project_notes_repository import ProjectNotesRepository
+from app.core.store.key_documents_repository import KeyDocumentsRepository
 
 __all__ = [
     "SessionStore",
@@ -15,4 +17,6 @@ __all__ = [
     "SessionRepository",
     "MemoryRepository",
     "FileOperationRepository",
+    "ProjectNotesRepository",
+    "KeyDocumentsRepository",
 ]

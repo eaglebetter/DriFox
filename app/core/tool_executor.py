@@ -255,6 +255,19 @@ class ToolExecutor:
             self._builtin_tools.set_agent_manager(agent_manager)
             logger.info("[ToolExecutor] AgentManager attached to BuiltinTools")
 
+    def set_key_documents_repo(self, repo, project: str = "默认项目"):
+        """设置关键文档仓储和当前项目"""
+        if self._builtin_tools and self._builtin_tools._task_tools:
+            self._builtin_tools._task_tools._key_documents_repo = repo
+            self._builtin_tools._task_tools._current_project = project
+            logger.info(f"[ToolExecutor] KeyDocumentsRepo attached to TaskTools (project={project})")
+
+    def set_current_project(self, project: str):
+        """设置当前项目（项目切换时调用）"""
+        if self._builtin_tools and self._builtin_tools._task_tools:
+            self._builtin_tools._task_tools._current_project = project
+            logger.debug(f"[ToolExecutor] Current project set to: {project}")
+
     # 工具必需参数定义
     REQUIRED_ARGS = {
         "read": ["path"],
