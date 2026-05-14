@@ -171,24 +171,24 @@ class OpenAIChatWorker(QThread):
     def event_bus(self) -> WorkerEventBus:
         """获取事件总线实例"""
         return self._event_bus
-    
+
     def _emit_via_event_bus(self, event: WorkerEvent, *args, **kwargs) -> None:
         """通过事件总线发射事件
-        
+
         推荐使用此方法替代 _emit_with_callback。
         事件总线会自动将事件分发给所有订阅者。
-        
+
         Args:
             event: 事件类型
             *args, **kwargs: 事件数据
         """
         self._event_bus.emit(event, *args, **kwargs)
-    
+
     def _emit_with_callback(self, signal_name: str, signal, *args) -> None:
         """发射信号并尝试直接回调（已废弃，推荐使用 _emit_via_event_bus）
-        
+
         兼容旧接口，内部使用事件总线分发事件。
-        
+
         Args:
             signal_name: 信号名（用于查找直接回调）
             signal: Qt 信号对象（保留用于向后兼容）
@@ -198,11 +198,11 @@ class OpenAIChatWorker(QThread):
         event = self._signal_name_to_event(signal_name)
         if event:
             self._emit_via_event_bus(event, *args)
-        
+
         # 向后兼容：仍然发射 PyQt Signal（UI 层依赖）
         if signal is not None:
             signal.emit(*args)
-    
+
     def _signal_name_to_event(self, signal_name: str) -> Optional[WorkerEvent]:
         """将 signal name 映射到 WorkerEvent"""
         mapping = {
@@ -218,12 +218,12 @@ class OpenAIChatWorker(QThread):
             "error_occurred": WorkerEvent.ERROR,
         }
         return mapping.get(signal_name)
-    
+
     def _emit_direct(self, signal_name: str, *args) -> None:
         """直接调用回调（API 模式，已废弃）
-        
+
         保留以兼容旧的直接回调接口。新代码应使用事件总线。
-        
+
         Args:
             signal_name: 信号名
             *args: 传递给回调的参数
@@ -237,7 +237,7 @@ class OpenAIChatWorker(QThread):
 
     def set_direct_callbacks(self, callbacks: Dict[str, Callable]) -> None:
         """设置直接回调（已废弃，推荐订阅事件总线）
-        
+
         Args:
             callbacks: 回调字典，键为信号名，值为回调函数
         """
@@ -395,13 +395,11 @@ class OpenAIChatWorker(QThread):
         }
 
         skip_params = {"temperature", "top_p", "presence_penalty", "frequency_penalty", "reasoning_effort"}
-        # 排除界面配置参数，这些不应该发送给 API
-        skip_config_params = {"API_KEY", "API_URL", "模型名称", "系统提示", "启用技能", "自动选择工具", "tool_choice", "provider", "base_url"}
         if model and (model.startswith("o1") or model.startswith("o3")):
             skip_params.update({"temperature", "top_p"})
 
         for cn_key, value in self.llm_config.items():
-            if cn_key in skip_config_params:
+            if cn_key in ["API_KEY", "API_URL", "模型名称", "系统提示", "启用技能"]:
                 continue
             en_key = mapping.get(cn_key)
             if not en_key and _VALID_IDENTIFIER_PATTERN.match(cn_key):
@@ -410,17 +408,12 @@ class OpenAIChatWorker(QThread):
                 continue
             if en_key in ["max_tokens"]:
                 continue  # 单独处理
-            # 防御性检查：再次确保跳过中文配置参数
-            if en_key in ["自动选择工具", "自动选择"]:
-                continue
             extra_body[en_key] = value
 
-        # 顶级参数（OpenAI 规范要求这些在顶层，不在 extra_body）
-        top_level_params = {}
-        # 处理 max_tokens - max_tokens 是顶级参数，符合 OpenAI 官方规范
+        # 处理 max_tokens
         max_tokens = self.llm_config.get("最大Token")
         if max_tokens is not None:
-            top_level_params["max_tokens"] = self._cap_max_output_tokens(model, max_tokens)
+            extra_body["max_tokens"] = self._cap_max_output_tokens(model, max_tokens)
 
         # 处理认证
         auth_headers = None
@@ -437,7 +430,6 @@ class OpenAIChatWorker(QThread):
             "_config_key": config_key,
             "model": model,
             "extra_body": extra_body,
-            "top_level_params": top_level_params,
             "_auth_headers": auth_headers,
             "_is_o1_model": is_o1,
         }
@@ -446,7 +438,6 @@ class OpenAIChatWorker(QThread):
             "model": model,
             "stream": self.stream,
             "extra_body": extra_body,
-            "top_level_params": top_level_params,
             "_auth_headers": auth_headers,
             "_is_o1_model": is_o1,
         }
@@ -962,10 +953,6 @@ class OpenAIChatWorker(QThread):
         if cached_config.get("extra_body"):
             req_kwargs["extra_body"] = cached_config["extra_body"]
 
-        # 添加顶级参数（max_tokens 等，符合 OpenAI 官方规范）
-        if cached_config.get("top_level_params"):
-            req_kwargs.update(cached_config["top_level_params"])
-
         # 添加认证头
         if cached_config.get("_auth_headers"):
             req_kwargs["extra_headers"] = cached_config["_auth_headers"]
@@ -973,26 +960,11 @@ class OpenAIChatWorker(QThread):
         # 添加 tools
         if self.tools:
             req_kwargs["tools"] = self.tools
-            # 处理 tool_choice（自动选择工具）参数，作为顶级参数添加
-            # 支持中文配置名"自动选择工具"和英文配置名"tool_choice"
-            tool_choice = self.llm_config.get("tool_choice", self.llm_config.get("自动选择工具"))
-            if tool_choice is not None:
-                # 处理中文选项映射到标准值
-                if isinstance(tool_choice, str):
-                    mapping = {
-                        "自动": "auto",
-                        "none": "none",
-                        "禁用": "none",
-                        "不选择": "none",
-                    }
-                    tool_choice = mapping.get(tool_choice.lower(), tool_choice)
-                req_kwargs["tool_choice"] = tool_choice
 
         # 处理 o1 模型
         if cached_config.get("_is_o1_model"):
             req_kwargs.pop("stream", None)
-            # o1 不支持流式输出，但不应该永久修改 self.stream
-            # self.stream = False （已移除，永久修改实例状态会影响后续工具迭代轮次）
+            self.stream = False
 
         # 性能优化：使用复用的 HTTP 客户端
         client = self._get_http_client()
@@ -1009,9 +981,9 @@ class OpenAIChatWorker(QThread):
                 error_str = str(e)
                 # 检测 tool call result 错误码 2013
                 is_tool_call_order_error = (
-                    "2013" in error_str or
-                    "tool call result does not follow tool call" in error_str.lower() or
-                    "tool_calls" in error_str.lower()
+                        "2013" in error_str or
+                        "tool call result does not follow tool call" in error_str.lower() or
+                        "tool_calls" in error_str.lower()
                 )
 
                 if is_tool_call_order_error and attempt < max_retries - 1:
@@ -1069,7 +1041,7 @@ class OpenAIChatWorker(QThread):
                 is_retryable_protocol = isinstance(e, (httpx.ProtocolError, httpcore.ProtocolError))
                 is_rate_limit = isinstance(e, RateLimitError)
                 is_server_overload = isinstance(e, APIError) and (
-                            "2064" in error_str or "overload" in error_str.lower())
+                        "2064" in error_str or "overload" in error_str.lower())
                 is_conn_error = isinstance(e, APIConnectionError)
 
                 should_retry = (
@@ -1230,7 +1202,8 @@ class OpenAIChatWorker(QThread):
                 _reasoning_batch += reasoning_delta
                 now = time.time()
                 if len(_reasoning_batch) >= 10 or (now - _reasoning_batch_time) > 0.05:
-                    self._emit_with_callback("reasoning_content_received", self.reasoning_content_received, _reasoning_batch)
+                    self._emit_with_callback("reasoning_content_received", self.reasoning_content_received,
+                                             _reasoning_batch)
                     _reasoning_batch = ""
                     _reasoning_batch_time = now
 
@@ -1338,10 +1311,8 @@ class OpenAIChatWorker(QThread):
                                 "first_failure_time": first_time,
                             }
 
-        # fix: 所有 chunks 都已接收完毕（流式响应已结束），不可能再有新的数据
-        # 无论还有多少 pending 参数，都必须标记 args_pending = False，允许继续执行
-        # 否则会导致重新发起 API 请求（无意义的重试，浪费 token）
-        if tool_calls_found:
+        # fix: 所有待处理项都处理完毕后，如果没有任何剩余等待项，标记 args_pending = False
+        if tool_calls_found and not self._tool_calls_buffer and not self._waiting_tool_params:
             tool_args_pending = False
             # 确保所有已识别的 tool call 都有原始 arguments（防止参数被跳过导致为空字符串）
             for tc in self._current_tool_calls.values():

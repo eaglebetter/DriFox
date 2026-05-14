@@ -10,22 +10,43 @@ from loguru import logger
 
 def is_retriable_error(e):
     """检查错误是否应该重试"""
-    from openai import RateLimitError, APIError, APIConnectionError, APITimeoutError
+    from openai import (
+        RateLimitError,
+        APIError,
+        APIConnectionError,
+        APITimeoutError,
+        InternalServerError,
+    )
 
     is_rate_limit = isinstance(e, RateLimitError)
     is_server_overload = isinstance(e, APIError) and "2064" in str(e)
+    is_server_error = isinstance(e, InternalServerError)  # HTTP 5xx (500, 502, 503...)
     is_connection_error = isinstance(e, APIConnectionError)
     is_timeout = isinstance(e, APITimeoutError)
 
-    return is_rate_limit or is_server_overload or is_connection_error or is_timeout
+    return (
+        is_rate_limit
+        or is_server_overload
+        or is_server_error
+        or is_connection_error
+        or is_timeout
+    )
 
 
 def get_error_type_name(e):
     """获取错误类型名称"""
-    from openai import RateLimitError, APIError, APIConnectionError, APITimeoutError
+    from openai import (
+        RateLimitError,
+        APIError,
+        APIConnectionError,
+        APITimeoutError,
+        InternalServerError,
+    )
 
     if isinstance(e, RateLimitError):
         return "RateLimit"
+    elif isinstance(e, InternalServerError):
+        return "ServerError"
     elif isinstance(e, APIError) and "2064" in str(e):
         return "ServerOverload"
     elif isinstance(e, APIConnectionError):
@@ -68,7 +89,7 @@ def retry_on_api_error(max_retries=15, retry_delay=5, backoff_multiplier=1):
                         wait_time = retry_delay * (backoff_multiplier**attempt)
                         error_type = get_error_type_name(e)
                         logger.warning(
-                            f"[API] {error_type} error (code 2064: Server Overload), "
+                            f"[API] {error_type} error, "
                             f"retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})"
                         )
                         time.sleep(wait_time)
@@ -112,7 +133,7 @@ def create_api_call_with_retry(client, create_func, max_retries=15, retry_delay=
                 wait_time = retry_delay * (attempt + 1)
                 error_type = get_error_type_name(e)
                 logger.warning(
-                    f"[API] {error_type} error (code 2064: Server Overload), "
+                    f"[API] {error_type} error, "
                     f"retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})"
                 )
                 time.sleep(wait_time)
