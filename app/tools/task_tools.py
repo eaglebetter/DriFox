@@ -18,6 +18,8 @@ class TaskTools:
         self._skill_workspaces: Dict[str, str] = {}
         self._sub_agent_manager = None
         self._set_stage_callback = None
+        self._key_documents_repo = None  # 关键文档仓储
+        self._current_project = "默认项目"  # 当前项目
 
     def _normalize_todos(self, todos: List[Dict]) -> List[Dict]:
         normalized: List[Dict] = []
@@ -282,8 +284,22 @@ class TaskTools:
                     continue
                 resolved = self._resolve_path(file_path)
                 staged.append(str(resolved))
+                
+                # 自动关联到关键文档
+                if self._key_documents_repo:
+                    self._key_documents_repo.add(
+                        self._current_project,
+                        str(resolved),
+                        added_by="stage_files"
+                    )
+            
             if not staged:
                 return ToolResult(True, content="No files staged")
+            
+            # 添加关键文档关联提示
+            if self._key_documents_repo:
+                return ToolResult(True, content="Staged files:\n" + "\n".join(staged) + f"\n\n[已关联 {len(staged)} 个文件到项目「{self._current_project}」的关键文档]")
+            
             return ToolResult(True, content="Staged files:\n" + "\n".join(staged))
         except Exception as e:
             return ToolResult(False, error=f"stage_files error: {str(e)}")

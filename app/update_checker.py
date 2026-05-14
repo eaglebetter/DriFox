@@ -75,7 +75,7 @@ class UpdateChecker(QWidget):
             content=f"",
             orient=Qt.Vertical,
             isClosable=True,
-            position=InfoBarPosition.BOTTOM_RIGHT,
+            position=InfoBarPosition.BOTTOM,
             duration=-1,
             parent=self.parent or self,
         )
@@ -218,7 +218,7 @@ class UpdateChecker(QWidget):
         InfoBar.error(
             title,
             content,
-            position=InfoBarPosition.TOP_RIGHT,
+            position=InfoBarPosition.BOTTOM,
             duration=5000,
             parent=self.parent or self,
         )

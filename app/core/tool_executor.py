@@ -253,7 +253,19 @@ class ToolExecutor:
         """设置 AgentManager 实例，用于动态生成工具 schema"""
         if self._builtin_tools:
             self._builtin_tools.set_agent_manager(agent_manager)
+
+    def set_current_project(self, project: str):
+        """设置当前项目（供 update_project_note 使用）"""
+        if self._builtin_tools:
+            self._builtin_tools.set_current_project(project)
             logger.info("[ToolExecutor] AgentManager attached to BuiltinTools")
+
+    def set_key_documents_repo(self, repo, project: str = "默认项目"):
+        """设置关键文档仓储和当前项目"""
+        if self._builtin_tools and self._builtin_tools._task_tools:
+            self._builtin_tools._task_tools._key_documents_repo = repo
+            self._builtin_tools._task_tools._current_project = project
+            logger.info(f"[ToolExecutor] KeyDocumentsRepo attached to TaskTools (project={project})")
 
     # 工具必需参数定义
     REQUIRED_ARGS = {
@@ -274,10 +286,7 @@ class ToolExecutor:
         "git_diff": [],
         "get_diagnostics": ["file_path"],
         "summarize_changes": ["text"],
-        "memory_list": [],
-        "memory_search": ["query"],
-        "memory_save": ["content"],
-        "memory_consolidate": [],
+        "update_project_note": ["note_content"],
         "todowrite": ["todos"],
         "todoread": [],
         "task_batch": ["tasks"],
@@ -457,26 +466,10 @@ class ToolExecutor:
             "summarize_changes": lambda: self._builtin_tools.summarize_changes(
                 args.get("text", ""), args.get("limit", 1200)
             ),
-            "memory_list": lambda: self._builtin_tools.memory_list(
-                args.get("limit", 10),
-                args.get("include_disabled", False),
-            ),
-            "memory_search": lambda: self._builtin_tools.memory_search(
-                args.get("query", ""),
-                args.get("limit", 8),
-                args.get("include_disabled", False),
-            ),
-            "memory_save": lambda: self._builtin_tools.memory_save(
-                args.get("content", ""),
-                args.get("confidence", 0.8),
-                args.get("source", "assistant"),
-                args.get("conflict_group", ""),
-            ),
-            "memory_consolidate": lambda: self._builtin_tools.memory_consolidate(
-                args.get("max_items", 3),
-                args.get("save", True),
-            ),
             "todowrite": lambda: self._builtin_tools.todo_write(args.get("todos", [])),
+            "update_project_note": lambda: self._builtin_tools.update_project_note(
+                args.get("note_content", ""),
+                args.get("append", False)),
             "todoread": lambda: self._builtin_tools.todo_read(),
             "task_batch": lambda: (
                 # 【修复】处理 tasks 可能是 JSON 字符串的情况

@@ -261,7 +261,6 @@ class ToolWindow(QWidget):
         self._init_unified_font()
 
         self._init_title_bar()
-        self.setup_ui()
 
     def _init_title_bar(self):
         if self._title_bar:
@@ -352,9 +351,3 @@ class ToolWindow(QWidget):
                 font-family: "{font_name}";
             }}
         """)
-
-    def setup_ui(self):
-        raise NotImplementedError
-
-    def cleanup(self):
-        pass

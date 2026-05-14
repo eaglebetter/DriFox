@@ -35,6 +35,7 @@ class ChatEngine:
         get_memory_context: Optional[Callable[[], str]] = None,
         worker_callbacks: Optional[Dict[str, Callable]] = None,
         api_mode: bool = False,
+        backend: Any = None,
     ):
         self._session_manager = session_manager
         self._get_model_config = get_model_config
@@ -42,7 +43,7 @@ class ChatEngine:
         self._agent_manager = agent_manager
         self._get_chat_cards = get_chat_cards
         self._get_memory_context = get_memory_context
-
+        self._backend = backend
         self._current_worker: Optional[OpenAIChatWorker] = None
         self._is_streaming = False
         self._callbacks: Dict[str, Callable] = {}
@@ -65,8 +66,8 @@ class ChatEngine:
         # 初始化 ContextBuilder
         self._context_builder = ContextBuilder(
             agent_manager=agent_manager,
-            memory_context_getter=get_memory_context,
             compactor=self._compactor,
+            backend=backend
         )
 
     @property

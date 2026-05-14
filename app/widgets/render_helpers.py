@@ -264,7 +264,7 @@ def render_tool_block(
 
     # 文件编辑工具判断
     file_edit_tools = {"write", "edit", "multiedit", "patch"}
-    is_file_edit = tool_name in file_edit_tools and tool_args.get("path")
+    is_file_edit = tool_name in file_edit_tools
 
     # 差异对比按钮
     diff_icon_html = ""
