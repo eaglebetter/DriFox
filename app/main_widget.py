@@ -267,10 +267,6 @@ class OpenAIChatToolWindow(ToolWindow):
             except Exception:
                 pass
 
-        # 监听全局变量变化
-        if hasattr(self.homepage, "global_variables_changed"):
-            self.homepage.global_variables_changed.connect(self._load_model_configs)
-
         # 设置文件操作记录的会话上下文
         if self.backend.tool_executor:
             self.backend.set_session_context(self._current_session_id)
@@ -557,11 +553,6 @@ class OpenAIChatToolWindow(ToolWindow):
         saved_providers = self.cfg.llm_saved_providers.value or {}
         if selected_name in saved_providers:
             return saved_providers[selected_name].copy()
-
-        custom_vars = getattr(self.homepage, "global_variables", None)
-        if custom_vars and hasattr(custom_vars, "custom"):
-            if selected_name in custom_vars.custom:
-                return custom_vars.custom[selected_name].value.copy()
 
         return self._valid_configs.get(selected_name, {})
 
@@ -1387,17 +1378,9 @@ class OpenAIChatToolWindow(ToolWindow):
 
         saved_providers = self.cfg.llm_saved_providers.value or {}
         provider_config = saved_providers.get(current_name, {})
-        custom_vars = getattr(self.homepage, "global_variables", None)
-        if current_name in (
-                custom_vars.custom
-                if custom_vars and hasattr(custom_vars, "custom")
-                else {}
-        ):
-            config = custom_vars.custom[current_name].value.copy()
-        else:
-            config = provider_config.copy()
-            config.pop("备注", None)
-            config.pop("获取地址", None)
+        config = provider_config.copy()
+        config.pop("备注", None)
+        config.pop("获取地址", None)
         # 只保留参数配置，移除连接信息
         config.pop("模型名称", None)
         config.pop("API_URL", None)
@@ -1728,61 +1711,21 @@ class OpenAIChatToolWindow(ToolWindow):
         current_name = self._current_provider_name
         if not current_name:
             return
-        is_free_provider = current_name in FREE_PROVIDERS
-
-        if is_free_provider:
-            # 只更新参数，保留连接信息
-            saved_providers = self.cfg.llm_saved_providers.value or {}
-            old_config = saved_providers.get(current_name, self._valid_configs.get(current_name, {}))
-            old_config.update(new_config)
-            self._valid_configs[current_name] = old_config
-            saved_providers[current_name] = old_config
-            self.cfg.set(self.cfg.llm_saved_providers, saved_providers, save=True)
-            self._load_model_configs()
-            InfoBar.success("已保存", "配置已保存到本地。", parent=self, duration=1500, position=InfoBarPosition.TOP)
-        else:
-            if (
-                    hasattr(self.homepage, "global_variables")
-                    and self.homepage.global_variables
-            ):
-                custom_vars = self.homepage.global_variables.custom
-                if current_name in custom_vars:
-                    old_config = custom_vars[current_name].value
-                    old_config.update(new_config)
-                    custom_vars[current_name].value = old_config
-                    self.homepage._on_global_variables_changed(
-                        "custom", current_name, "update"
-                    )
-
-                self._load_model_configs()
-                InfoBar.success(
-                    "已保存", "配置已保存到自定义配置。", parent=self, duration=1500, position=InfoBarPosition.TOP
-                )
-            else:
-                InfoBar.warning(
-                    "无法保存",
-                    "当前页面不支持保存自定义配置。",
-                    parent=self,
-                    duration=1500,
-                    position=InfoBarPosition.TOP,
-                )
+        # 只更新参数，保留连接信息
+        saved_providers = self.cfg.llm_saved_providers.value or {}
+        old_config = saved_providers.get(current_name, self._valid_configs.get(current_name, {}))
+        old_config.update(new_config)
+        self._valid_configs[current_name] = old_config
+        saved_providers[current_name] = old_config
+        self.cfg.set(self.cfg.llm_saved_providers, saved_providers, save=True)
+        self._load_model_configs()
+        InfoBar.success("已保存", "配置已保存到本地。", parent=self, duration=1500, position=InfoBarPosition.TOP)
 
     def _load_model_configs(self):
         saved_model = self.cfg.llm_selected_model.value
         old_provider = self._current_provider_name
-        old_model = self._current_model_name
 
         self._valid_configs.clear()
-        try:
-            custom_vars = getattr(self.homepage, "global_variables", None)
-            if custom_vars and hasattr(custom_vars, "custom"):
-                for config_name, var_obj in custom_vars.custom.items():
-                    if hasattr(var_obj, "value") and isinstance(var_obj.value, dict):
-                        val = var_obj.value
-                        if {"API_URL", "API_KEY", "模型名称"}.issubset(val.keys()):
-                            self._valid_configs[config_name] = val
-        except Exception as e:
-            logger.error(f"[ERROR] 加载自定义模型配置失败: {e}")
 
         saved_providers = self.cfg.llm_saved_providers.value or {}
         for provider_name in saved_providers:
@@ -3123,10 +3066,7 @@ class OpenAIChatToolWindow(ToolWindow):
         # 使用辅助函数创建卡片
         def on_context_action(action, context):
             self.handle_recommended_question(action, context)
-            if hasattr(self.homepage, "on_context_action"):
-                self.homepage.on_context_action(action, context)
-            else:
-                self.contextActionRequested.emit(action, context)
+            self.contextActionRequested.emit(action, context)
 
         card = create_assistant_card_widget(
             parent=self,

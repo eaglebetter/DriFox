@@ -201,7 +201,7 @@ class ChatBackend(QObject):
                 with open(global_hooks_file, 'r', encoding='utf-8') as f:
                     config = json.loads(f.read())
                 skill_root = str(global_hooks_file.parent)
-                count = self._hook_manager.register_hooks_from_json("__global__", skill_root, config)
+                count = self._hook_manager.register_hooks_from_json("__global__", skill_root, config, str(global_hooks_file))
                 if count > 0:
                     logger.info(f"[ChatBackend] Loaded {count} global hooks from {global_hooks_file}")
             except Exception as e:
