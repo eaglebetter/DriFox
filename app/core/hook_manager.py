@@ -210,6 +210,78 @@ class HookWorker(QRunnable):
         self.event_name = event_name
         self.context = context or {}
     
+    @staticmethod
+    def _run_command_sync(command: str, cwd: Optional[str] = None, timeout: int = 300,
+                          stdin_data: Optional[str] = None) -> tuple:
+        """
+        统一的命令同步执行方法（公共提取，避免代码重复）。
+        返回 (output, success, exit_code)。
+        处理 echo 快捷方式、Windows 编码回退、路径分隔符转换。
+        stdin_data: 可选的 stdin 输入（传递给脚本的 JSON 上下文）
+        """
+        # echo 快捷方式（不需要 stdin）
+        if command.startswith("echo "):
+            output = command[5:].strip()
+            if output.startswith('"') and output.endswith('"'):
+                output = output[1:-1]
+            elif output.startswith("'") and output.endswith("'"):
+                output = output[1:-1]
+            return output, True, 0
+        
+        # 修复路径分隔符问题：Unix / 转 Windows \
+        if os.name == 'nt':
+            command = command.replace('/', '\\')
+        
+        # 构造 subprocess 参数
+        subprocess_kwargs = {
+            'cwd': cwd,
+            'shell': True,
+            'capture_output': True,
+            'text': True,
+            'errors': 'replace',
+            'timeout': timeout,
+        }
+        if stdin_data is not None:
+            subprocess_kwargs['input'] = stdin_data
+        else:
+            subprocess_kwargs['stdin'] = subprocess.DEVNULL
+        
+        if os.name == 'nt':
+            import locale
+            preferred = locale.getpreferredencoding(False) or ''
+            if preferred.upper() not in ('UTF-8', 'UTF8'):
+                try:
+                    result = subprocess.run(
+                        command, encoding='utf-8', **subprocess_kwargs
+                    )
+                except Exception:
+                    result = subprocess.run(
+                        command, encoding=preferred or 'gbk', **subprocess_kwargs
+                    )
+                exit_code = result.returncode
+                if exit_code != 0:
+                    # exit code 2: Claude Code BLOCK 约定，用 stdout 作为 output
+                    if exit_code == 2:
+                        return result.stdout or "", False, exit_code
+                    return result.stderr or f"Command failed with exit code {exit_code}", False, exit_code
+                return result.stdout or "", True, exit_code
+            else:
+                result = subprocess.run(
+                    command, encoding='utf-8', **subprocess_kwargs
+                )
+        else:
+            result = subprocess.run(
+                command, encoding='utf-8', **subprocess_kwargs
+            )
+        
+        exit_code = result.returncode
+        if exit_code != 0:
+            # exit code 2: Claude Code BLOCK 约定，用 stdout 作为 output
+            if exit_code == 2:
+                return result.stdout or "", False, exit_code
+            return result.stderr or f"Command failed with exit code {exit_code}", False, exit_code
+        return result.stdout or "", True, exit_code
+    
     def run(self):
         """执行命令，收集输出"""
         try:
@@ -232,86 +304,14 @@ class HookWorker(QRunnable):
             self.signals.finished.emit(self.event_name, f"Error: {str(e)}", False)
     
     def _execute_command(self) -> tuple:
-        """执行命令"""
-        command = self.hook.command
-        
-        # 在异步执行中也做变量替换（从 context 获取 project_root 等）
-        if hasattr(self, 'context') and self.context:
-            project_root = self.context.get('project_root', '')
-            if project_root and os.name == 'nt':
-                command = command.replace('/', '\\')
-        
-        # 直接在 Python 中执行，避免 Windows cmd 的编码问题
-        if command.startswith("echo "):
-            output = command[5:].strip()
-            if output.startswith('"') and output.endswith('"'):
-                output = output[1:-1]
-            elif output.startswith("'") and output.endswith("'"):
-                output = output[1:-1]
-            return output, True
-        else:
-            # 修复路径分隔符问题：Unix / 转 Windows \（如果在 Windows 上）
-            if os.name == 'nt':
-                command = command.replace('/', '\\')
-            
-            # 根据操作系统选择合适的编码
-            encoding = 'utf-8'
-            if os.name == 'nt':
-                # Windows: 优先尝试 UTF-8（Bash 输出通常是 UTF-8）
-                # 如果 locale 编码是 GBK/CP936 等中文编码，优先用 UTF-8
-                import locale
-                preferred = locale.getpreferredencoding(False) or ''
-                # 如果系统编码不是 UTF-8，优先用 UTF-8 读取 bash 输出
-                if preferred.upper() not in ('UTF-8', 'UTF8'):
-                    # 尝试用 UTF-8，如果失败再用系统编码
-                    try:
-                        result = subprocess.run(
-                            command,
-                            cwd=self.cwd,
-                            shell=True,
-                            capture_output=True,
-                            stdin=subprocess.DEVNULL,
-                            text=True,
-                            encoding='utf-8',
-                            errors='replace',
-                            timeout=self.hook.timeout
-                        )
-                    except Exception:
-                        # 任何异常（如超时）回退到系统编码
-                        result = subprocess.run(
-                            command,
-                            cwd=self.cwd,
-                            shell=True,
-                            capture_output=True,
-                            stdin=subprocess.DEVNULL,
-                            text=True,
-                            encoding=preferred or 'gbk',
-                            errors='replace',
-                            timeout=self.hook.timeout
-                        )
-                    # 检查是否成功
-                    if result.returncode != 0:
-                        return result.stderr or f"Command failed with exit code {result.returncode}", False
-                    return result.stdout or "", True
-            else:
-                # Unix 系统直接用 utf-8
-                preferred = 'utf-8'
-            
-            result = subprocess.run(
-                command,
-                cwd=self.cwd,
-                shell=True,
-                capture_output=True,
-                stdin=subprocess.DEVNULL,
-                text=True,
-                encoding=encoding,
-                errors='replace',
-                timeout=self.hook.timeout
-            )
-            
-            if result.returncode != 0:
-                return result.stderr or f"Command failed with exit code {result.returncode}", False
-            return result.stdout or "", True
+        """执行命令（委托给公共静态方法），传递 context 作为 stdin"""
+        import json as _json
+        stdin_data = _json.dumps(self.context) if self.context else None
+        output, success, _ = HookWorker._run_command_sync(
+            self.hook.command, self.cwd, self.hook.timeout,
+            stdin_data=stdin_data
+        )
+        return output, success
     
     def _execute_http(self) -> tuple:
         """执行 HTTP 请求"""
@@ -767,79 +767,11 @@ class HookManager:
                 _exit2_skip = False  # exit code 2 跳过标记（Claude Code 兼容）
                 
                 if hook.type == HookType.COMMAND.value:
-                    if command.startswith("echo "):
-                        output = command[5:].strip().strip('"\'')
-                        success = True
-                    else:
-                        # 修复路径分隔符问题：Unix / 转 Windows \（如果在 Windows 上）
-                        if os.name == 'nt':
-                            command = command.replace('/', '\\')
-                        
-                        # 根据操作系统选择合适的编码
-                        encoding = 'utf-8'
-                        _exit2_skip = False  # exit code 2 跳过标记
-                        if os.name == 'nt':
-                            # Windows: 优先尝试 UTF-8（Bash 输出通常是 UTF-8）
-                            import locale
-                            preferred = locale.getpreferredencoding(False) or ''
-                            if preferred.upper() not in ('UTF-8', 'UTF8'):
-                                try:
-                                    result = subprocess.run(
-                                        command,
-                                        cwd=cwd,
-                                        shell=True,
-                                        capture_output=True,
-                                        stdin=subprocess.DEVNULL,
-                                        text=True,
-                                        encoding='utf-8',
-                                        errors='replace',
-                                        timeout=hook.timeout
-                                    )
-                                except Exception:
-                                    result = subprocess.run(
-                                        command,
-                                        cwd=cwd,
-                                        shell=True,
-                                        capture_output=True,
-                                        stdin=subprocess.DEVNULL,
-                                        text=True,
-                                        encoding=preferred or 'gbk',
-                                        errors='replace',
-                                        timeout=hook.timeout
-                                    )
-                                success = result.returncode == 0
-                                output = result.stdout if success else (result.stderr or f"Exit code {result.returncode}")
-                                _exit2_skip = (result.returncode == 2)
-                            else:
-                                result = subprocess.run(
-                                    command,
-                                    cwd=cwd,
-                                    shell=True,
-                                    capture_output=True,
-                                    stdin=subprocess.DEVNULL,
-                                    text=True,
-                                    encoding='utf-8',
-                                    errors='replace',
-                                    timeout=hook.timeout
-                                )
-                                success = result.returncode == 0
-                                output = result.stdout if success else (result.stderr or f"Exit code {result.returncode}")
-                                _exit2_skip = (result.returncode == 2)
-                        else:
-                            result = subprocess.run(
-                                command,
-                                cwd=cwd,
-                                shell=True,
-                                capture_output=True,
-                                stdin=subprocess.DEVNULL,
-                                text=True,
-                                encoding='utf-8',
-                                errors='replace',
-                                timeout=hook.timeout
-                            )
-                            success = result.returncode == 0
-                            output = result.stdout if success else (result.stderr or f"Exit code {result.returncode}")
-                            _exit2_skip = (result.returncode == 2)
+                    output, success, exit_code = HookWorker._run_command_sync(
+                        command, cwd, hook.timeout,
+                        stdin_data=json.dumps(context)
+                    )
+                    _exit2_skip = (exit_code == 2)
                 
                 elif hook.type == HookType.HTTP.value:
                     import urllib.request
@@ -882,15 +814,8 @@ class HookManager:
                         decision_str = output_data.get("decision", "continue")
                         if decision_str in ["block", "continue", "defer"]:
                             decision = HookDecision(decision_str)
-                            if decision_str == "block":
-                                # 如果 JSON 中明确指定 block，使用原始 output（可能不是 stdout）
-                                pass
                 except json.JSONDecodeError:
                     pass
-                
-                # 当 exit 2 时，使用 stdout 作为 output（用于回填到工具）
-                if _exit2_skip:
-                    output = result.stdout or output
                 
                 # 触发决策回调
                 if decision != HookDecision.CONTINUE and self._on_decision_callback:

@@ -320,6 +320,18 @@ class ToolExecutor:
             file_path = args.get("path") or args.get("file")
             if file_path:
                 context["file"] = file_path
+            # 将工具参数注入 context，供 hook 脚本通过 stdin JSON 读取
+            # webfetch 需要 url，websearch 需要 query，bash 需要 command
+            if "url" in args:
+                context["url"] = args["url"]
+            if "query" in args:
+                context["query"] = args["query"]
+            if "command" in args:
+                context["command"] = args["command"]
+            if "format" in args:
+                context["format"] = args["format"]
+            # 也保留完整的 args 供高级脚本使用
+            context["args"] = args
             current_message_text = ""
             if self._backend.session_manager:
                 session = self._backend.get_current_session()

@@ -81,66 +81,8 @@ class HookItem(QWidget):
         menu.addAction("删除", lambda: self.removed.emit(self.index))
         menu.exec_(self.mapToGlobal(pos))
 
-
 class AddHookDialog(MessageBoxBase):
     """添加 Hook 对话框"""
-    
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setup_ui()
-    
-    def setup_ui(self):
-        self.titleLabel = BodyLabel("添加 Hook", self)
-        self.resize(400, 360)
-        
-        # 事件选择
-        self.eventLabel = QLabel("事件:", self)
-        self.eventCombo = ComboBox(self)
-        self.eventCombo.addItems([
-            "SessionStart", "PreUserMessage", "PostUserMessage",
-            "PreAssistantMessage", "PostAssistantMessage",
-            "PreToolUse", "PostToolUse"
-        ])
-        
-        # 类型选择
-        self.typeLabel = QLabel("类型:", self)
-        self.typeCombo = ComboBox(self)
-        self.typeCombo.addItems(["command", "http", "python"])
-        
-        # 命令输入
-        self.commandLabel = QLabel("命令/URL/函数:", self)
-        self.commandEdit = LineEdit(self)
-        
-        # Matcher 输入
-        self.matcherLabel = QLabel("Matcher (可选):", self)
-        self.matcherEdit = LineEdit(self)
-        self.matcherEdit.setPlaceholderText("如: tool:bash 或 .*帮助.*")
-        
-        # 启用复选框
-        self.enabledCheck = CheckBox("启用", self)
-        self.enabledCheck.setChecked(True)
-        
-        self.viewLayout.addWidget(self.titleLabel)
-        self.viewLayout.addSpacing(4)
-        self.viewLayout.addWidget(self.eventLabel)
-        self.viewLayout.addWidget(self.eventCombo)
-        self.viewLayout.addWidget(self.typeLabel)
-        self.viewLayout.addWidget(self.typeCombo)
-        self.viewLayout.addWidget(self.commandLabel)
-        self.viewLayout.addWidget(self.commandEdit)
-        self.viewLayout.addWidget(self.matcherLabel)
-        self.viewLayout.addWidget(self.matcherEdit)
-        self.viewLayout.addSpacing(8)
-        self.viewLayout.addWidget(self.enabledCheck)
-        
-        # 设置弹窗按钮
-        self.yesButton = PrimaryPushButton("添加", self)
-        self.cancelButton = PushButton("取消", self)
-        self.yesButton.clicked.connect(self._on_yes)
-        self.cancelButton.clicked.connect(self.reject)
-    
-class AddHookDialog(MessageBoxBase):
-    """保留的旧版弹窗对话框 - 暂时保留以兼容"""
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -315,35 +257,32 @@ class HookListSettingCard(ExpandSettingCard):
         hm_hooks = self._hook_manager.get_all_hooks()
         global_config = str(self.hooks_config_file)
         
+        # 计算 global_config 的 resolved 路径（一次性）
+        try:
+            global_resolved = Path(global_config).resolve()
+        except Exception:
+            global_resolved = Path(global_config)
+        
         for event_name, flat_hooks in hm_hooks.items():
             if event_name not in self.all_hooks:
                 self.all_hooks[event_name] = []
             
-            # 按 matcher 分组，同 matcher 的合入同一规则
-            rule_map = {}  # matcher -> list of hook dicts
+            # 按 (matcher, is_skill) 分组：skill hook 和 global hook 即使 matcher 相同也不合并
+            rule_map = {}  # (matcher, is_skill) -> list of hook dicts
             for hook in flat_hooks:
                 matcher = hook.get("matcher", "")
-                if matcher not in rule_map:
-                    rule_map[matcher] = []
-                rule_map[matcher].append(hook)
+                is_skill = self._is_skill_hook(hook, global_resolved)
+                key = (matcher, is_skill)
+                if key not in rule_map:
+                    rule_map[key] = []
+                rule_map[key].append(hook)
             
-            for matcher, hooks in rule_map.items():
-                # 判断是否全部来自技能目录（非全局配置文件）
-                # 使用 resolve 处理相对/绝对路径差异
-                try:
-                    global_resolved = Path(global_config).resolve()
-                except Exception:
-                    global_resolved = Path(global_config)
-                
-                all_skill = all(
-                    self._is_skill_hook(h, global_resolved)
-                    for h in hooks
-                )
+            for (matcher, is_skill), hooks in rule_map.items():
                 rule_entry = {
                     "matcher": matcher,
                     "hooks": hooks,
                 }
-                if all_skill:
+                if is_skill:
                     rule_entry["_readonly"] = True
                 self.all_hooks[event_name].append(rule_entry)
     
@@ -435,14 +374,14 @@ class HookListSettingCard(ExpandSettingCard):
                     self.viewLayout.addWidget(item)
     
     def _get_hook_index(self, event_name, rule_index, hook_index):
-        """计算 hook 的全局索引（用于 toggle 操作）"""
+        """计算 hook 在事件内的索引（与 HookManager.set_hook_enabled 的事件内索引保持一致）"""
         total = 0
-        for en, rules in self.all_hooks.items():
-            for ri, rule in enumerate(rules):
-                for hi, hook in enumerate(rule.get("hooks", [])):
-                    if en == event_name and ri == rule_index and hi == hook_index:
-                        return total
-                    total += 1
+        rules = self.all_hooks.get(event_name, [])
+        for ri, rule in enumerate(rules):
+            for hi, hook in enumerate(rule.get("hooks", [])):
+                if ri == rule_index and hi == hook_index:
+                    return total
+                total += 1
         return -1
     
     def _add_hook(self, event: str, command: str, matcher: str = "", hook_type: str = "command", enabled: bool = True):
@@ -505,9 +444,9 @@ class HookListSettingCard(ExpandSettingCard):
                     
                     if rule.get("_readonly", False):
                         # 技能 hook：通过 HookManager 保存到技能的 config_file
-                        hook_global_index = self._get_hook_index(event, rule_index, hook_index)
-                        if self._hook_manager and hook_global_index >= 0:
-                            self._hook_manager.set_hook_enabled(event, hook_global_index, enabled)
+                        hook_event_index = self._get_hook_index(event, rule_index, hook_index)
+                        if self._hook_manager and hook_event_index >= 0:
+                            self._hook_manager.set_hook_enabled(event, hook_event_index, enabled)
                     else:
                         # 全局 hook：保存到全局配置文件
                         self._save_hooks()
