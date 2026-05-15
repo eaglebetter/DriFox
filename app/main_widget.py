@@ -5408,15 +5408,25 @@ class OpenAIChatToolWindow(ToolWindow):
 
     def _save_auto_loop_messages_to_session(self, messages: List[Dict]):
         """将 AutoLoop 执行的消息保存到当前会话"""
-        if not messages:
-            return
-        
         session = self.session_manager.get_current_session()
         if not session:
             return
         
         # 获取当前会话已有的消息
         existing_messages = list(session.messages or [])
+        
+        # 确保 user 消息存在（第一条 user 消息）
+        has_user = any(msg.get("role") == "user" for msg in existing_messages + messages)
+        if not has_user and self._auto_loop_worker and self._auto_loop_worker._config:
+            task_prompt = self._auto_loop_worker._config.task_prompt
+            if task_prompt:
+                from datetime import datetime
+                user_msg = {
+                    "role": "user",
+                    "content": task_prompt,
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                }
+                existing_messages.append(user_msg)
         
         # 追加 AutoLoop 消息
         existing_messages.extend(messages)
@@ -5425,6 +5435,11 @@ class OpenAIChatToolWindow(ToolWindow):
         session.set_messages(existing_messages, preserve_compaction=True)
         
         logger.info(f"[AutoLoop] 保存 {len(messages)} 条消息到会话: {self._current_project}")
+        
+        # 触发 topic_summary 生成标题（如果还没有标题）
+        session = self.session_manager.get_current_session()
+        if session and not session.topic_summary:
+            self._maybe_generate_topic_summary()
         
         # 同步保存到历史记录
         self._save_current_session_to_history()

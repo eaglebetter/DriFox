@@ -177,6 +177,12 @@ class AutoLoopWorker(QThread):
                 self._current_worker.start()
                 loop.exec_()  # 等待 worker 完成，但保持事件循环处理信号，这样日志可以正常更新
                 
+                # 检查是否被取消（token 超限等）
+                if self._is_cancelled:
+                    self.log_signal.emit("⏹ 达到限制，AutoLoop 停止")
+                    self.loop_stopped.emit()
+                    return
+                
                 # 等待 finished_with_messages 信号（最多等待 30 秒）
                 if not self._worker_done_event.wait(timeout=30):
                     logger.warning(f"[AutoLoop] Iteration {iteration}: timeout waiting for finished_with_messages")
