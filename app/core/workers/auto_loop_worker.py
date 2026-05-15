@@ -158,8 +158,9 @@ class AutoLoopWorker(QThread):
         return messages
 
     def _build_workflow_context(self, iteration: int) -> str:
-        """构建 Continuous Claude 风格的接力上下文"""
+        """构建 Continuous Claude 风格的接力上下文 + 项目路径"""
         notes = self._engine.read_shared_notes() if iteration > 1 else ""
+        project_path = self._config.project_path or ""
         lines = [
             "## CONTINUOUS WORKFLOW CONTEXT",
             "This is part of a continuous development loop where work happens incrementally across multiple iterations.",
@@ -167,6 +168,13 @@ class AutoLoopWorker(QThread):
             "Just make meaningful progress on ONE thing, then leave clear notes in SHARED_TASK_NOTES.md for the next iteration.",
             "Think of it as a relay race where you're passing the baton.",
             "",
+        ]
+        if project_path:
+            lines.append(f"## Project Root Directory")
+            lines.append(f"ALL file operations MUST be relative to: {project_path}")
+            lines.append(f"Use this path as the base for all read/write/grep/list/glob operations.")
+            lines.append(f"")
+        lines.extend([
             "### SHARED_TASK_NOTES.md Protocol",
             "Before starting work, read SHARED_TASK_NOTES.md to see what was done last time and what's next.",
             "After completing your increment:",
@@ -178,7 +186,7 @@ class AutoLoopWorker(QThread):
             'If the ENTIRE project goal is fully complete, output "DONE" on its own line.',
             "Only use this when absolutely certain — not after completing just one task.",
             "",
-        ]
+        ])
         if notes:
             lines.append("## Current State from SHARED_TASK_NOTES.md")
             lines.append(notes)
@@ -189,7 +197,7 @@ class AutoLoopWorker(QThread):
         """创建 ChatWorker"""
         llm_config = self._model_config_getter() if self._model_config_getter else {}
         session_messages = []
-
+        print(messages)
         worker = OpenAIChatWorker(
             messages=messages,
             session_messages=session_messages,

@@ -994,7 +994,7 @@ class OpenAIChatToolWindow(ToolWindow):
         capsule_layout.setSpacing(0)
 
         # AutoLoop 按钮
-        self.auto_loop_btn = TransparentToolButton(get_icon("drifox"), self._toolbar_capsule)
+        self.auto_loop_btn = TransparentToolButton(get_icon("无限"), self._toolbar_capsule)
         self.auto_loop_btn.setFixedSize(26, 26)
         self.auto_loop_btn.setToolTip("AutoLoop 自动循环")
         self.auto_loop_btn.clicked.connect(self._show_auto_loop_config)
@@ -4182,6 +4182,12 @@ class OpenAIChatToolWindow(ToolWindow):
             self._current_assistant_card.start_streaming_anim()
 
     def _on_content_received(self, content_piece: str):
+        # AutoLoop 模式：如果没有当前卡片，自动创建
+        if not self._current_assistant_card and self._is_auto_loop_running:
+            card = self._append_assistant_message(scroll=False)
+            if card:
+                self._current_assistant_card = card
+                self._current_assistant_card.start_streaming_anim()
         if self._current_assistant_card:
             self._update_assistant_message(self._current_assistant_card, content_piece)
 
@@ -4342,6 +4348,11 @@ class OpenAIChatToolWindow(ToolWindow):
 
         if self._is_auto_loop_running:
             # AutoLoop 模式：只渲染到卡片，不操作浮动窗口
+            if not self._current_assistant_card:
+                card = self._append_assistant_message(scroll=False)
+                if card:
+                    self._current_assistant_card = card
+                    self._current_assistant_card.start_streaming_anim()
             if self._current_assistant_card:
                 if isinstance(result, dict):
                     success = result.get("success", True)
