@@ -118,3 +118,42 @@ A browser-based companion for showing mockups, diagrams, and visual options duri
 A question about a UI topic is not automatically a visual question. "What does personality mean in this context?" is a conceptual question — use the terminal. "Which wizard layout works better?" is a visual question — use the browser.
 If they agree to the companion, read the detailed guide before proceeding:
 `skills/brainstorming/visual-companion.md`
+
+## Background Bash Tool Integration (DriFox)
+
+When using Visual Companion in DriFox, use the `bg_start` tool to launch the server:
+
+```xml
+<bg_start command="powershell -Command \&quot;$env:BRAINSTORM_DIR='C:\tmp\brainstorm'; node server.cjs\&quot;" cwd="D:/work/DriFox/app/skills/brainstorming/scripts" />
+```
+
+**Important:** The tool response does NOT include the port. You MUST call `bg_logs` to extract it:
+
+```xml
+<bg_logs task_id="bg_xxxxxxxx" />
+```
+
+From the logs, find the JSON output containing the port:
+```
+{"type":"server-started","port":56743,"url":"http://localhost:56743",...}
+```
+
+Extract the port number and auto-open browser:
+```xml
+<bash command="start http://localhost:56743" />
+```
+
+Create HTML content files to `/tmp/brainstorm/content/` using the Write tool.
+
+When done, use `bg_stop` to terminate the server:
+```xml
+<bg_stop task_id="bg_xxxxxxxx" />
+```
+
+**Server lifecycle:**
+1. `bg_start` → launch server, get task_id
+2. `bg_logs` → extract port from stdout JSON
+3. `bash` → auto-open browser with `start http://localhost:<port>`
+4. Write HTML → push content to `/tmp/brainstorm/content/`
+5. User sees content in browser (already open)
+6. `bg_stop` → terminate server when finished

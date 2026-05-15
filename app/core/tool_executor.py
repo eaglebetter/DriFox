@@ -277,6 +277,11 @@ class ToolExecutor:
         "glob": ["pattern"],
         "patch": ["path", "patch_content"],
         "bash": ["command"],
+        # 后台任务工具
+        "bg_start": ["command"],
+        "bg_stop": ["task_id"],
+        "bg_logs": ["task_id"],
+        "bg_list": [],
         "webfetch": ["url"],
         "websearch": ["query"],
         "scan_repo": [],
@@ -448,6 +453,19 @@ class ToolExecutor:
             "bash": lambda: self._builtin_tools.execute_bash(
                 args.get("command", ""), args.get("timeout", 120)
             ),
+            # 后台任务工具
+            "bg_start": lambda: self._builtin_tools.bg_start(
+                args.get("command", ""),
+                args.get("cwd")
+            ),
+            "bg_stop": lambda: self._builtin_tools.bg_stop(
+                args.get("task_id", "")
+            ),
+            "bg_logs": lambda: self._builtin_tools.bg_logs(
+                args.get("task_id", ""),
+                args.get("lines", 100)
+            ),
+            "bg_list": lambda: self._builtin_tools.bg_list(),
             "webfetch": lambda: self._builtin_tools.fetch_web(
                 args.get("url", ""), args.get("format", "markdown")
             ),
