@@ -5303,10 +5303,8 @@ class OpenAIChatToolWindow(ToolWindow):
 
     def _on_auto_loop_tokens_updated(self, total_tokens: int):
         """Token 实时更新（同步模式：直接用 engine 的 total_tokens 更新显示）"""
-        logger.debug(f"[AutoLoop] _on_auto_loop_tokens_updated: total_tokens={total_tokens}")
         if self._auto_loop_running_card and self._auto_loop_worker and self._auto_loop_worker._engine:
             engine = self._auto_loop_worker._engine
-            logger.debug(f"[AutoLoop] engine._total_tokens={engine._total_tokens}")
             # 使用 engine 的 _total_tokens 同步更新显示（而非累加本次增量）
             self._auto_loop_running_card.update_tokens(engine._total_tokens)
 

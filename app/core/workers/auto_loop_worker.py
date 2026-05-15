@@ -13,6 +13,7 @@ AutoLoop Worker — 后台循环工作线程
 - 规划阶段：tools 仅允许 scan_repo/glob/grep 和写笔记（限制写代码）
 - 执行阶段：允许所有工具，但每步必须验证通过才能前进
 """
+import re
 import threading
 import time
 from typing import Dict, List, Optional, Any, Callable
@@ -28,7 +29,7 @@ from app.core.workers import OpenAIChatWorker
 # ========== 规划阶段受限工具集 ==========
 PLANNING_TOOLS = {
     # 扫描工具
-    "scan_repo", "glob", "grep", "list", "read",
+    "scan_repo", "glob", "grep", "list", "read", "websearch", "webfetch"
     # 笔记写入工具
     "write",
 }
@@ -200,6 +201,35 @@ class AutoLoopWorker(QThread):
                 # 获取 ChatWorker 的完整消息并追加到列表
                 if self._worker_finished_messages:
                     self._all_messages.extend(self._worker_finished_messages)
+                    
+                # 【新增】强制检查接力文档更新
+                if not self._check_relay_doc_updated(iteration):
+                    # 未更新接力文档，强制要求更新后才能继续
+                    self.log_signal.emit("⚠️【强制】接力文档未更新！正在要求更新...")
+                    
+                    # 重新构建消息，注入强制更新提示
+                    force_messages = self._build_messages(task_prompt, iteration, force_update=True)
+                    
+                    # 创建新的 worker 执行强制更新
+                    self._worker_finished_messages = []
+                    self._worker_done_event.clear()
+                    self._current_worker = self._create_worker(force_messages, current_tools)
+                    
+                    from PyQt5.QtCore import QEventLoop
+                    loop = QEventLoop()
+                    self._current_worker.finished.connect(loop.quit)
+                    self._current_worker.start()
+                    loop.exec_()
+                    
+                    # 再次检查接力文档
+                    if self._check_relay_doc_updated(iteration):
+                        self.log_signal.emit("✅ 接力文档已更新，继续执行...")
+                    else:
+                        self.log_signal.emit("⚠️ 接力文档仍未更新，将继续强制要求")
+                        # 允许继续（避免死循环），但会在下一轮继续检查
+                    
+                    self._emit_progress()
+                    continue
             except Exception as e:
                 logger.error(f"[AutoLoop] Worker error on iteration {iteration}: {e}")
                 self.loop_error.emit(f"第{iteration}轮出错: {str(e)}")
@@ -323,6 +353,7 @@ class AutoLoopWorker(QThread):
         1. 响应中包含 "步骤 N 完成" / "step N complete" / "完成验证"
         2. 笔记中该步骤标记为完成（如 [x] 或 ✓）
         3. 响应末尾包含 DONE
+        4. 笔记中有"步骤 N 结果"或"当前状态"更新
         """
         import re
         
@@ -345,6 +376,9 @@ class AutoLoopWorker(QThread):
             # 或者匹配 "步骤 N 结果" 段落在笔记中出现
             if re.search(rf'步骤\s*{step_num}\s+结果', notes):
                 return True
+            # 或者有"当前状态"包含步骤完成信息
+            if re.search(rf'步骤\s*{step_num}.*完成', notes, re.DOTALL):
+                return True
         
         # 条件3：响应末尾有 DONE
         if response.strip().endswith("DONE"):
@@ -365,26 +399,122 @@ class AutoLoopWorker(QThread):
             return preview[:60].strip() + ('...' if len(preview) > 60 else '')
         return f"步骤 {step_num}"
 
+    def _check_relay_doc_updated(self, iteration: int) -> bool:
+        """检查接力文档是否已更新
+        
+        Returns:
+            True: 已更新，可以继续
+            False: 未更新，需要强制要求更新
+        """
+        notes = self._engine.read_shared_notes() if self._engine else ""
+        
+        # 检查接力文档是否为空或几乎为空
+        if not notes or len(notes.strip()) < 50:
+            logger.warning(f"[AutoLoop] Iteration {iteration}: relay doc is empty or too short")
+            return False
+        
+        # 检查规划阶段：必须有执行计划
+        if self._engine.is_planning_phase():
+            if "## 执行计划" not in notes and "- [步骤" not in notes:
+                logger.warning(f"[AutoLoop] Iteration {iteration}: no execution plan in relay doc")
+                return False
+            return True
+        
+        # 执行阶段：检查当前步骤是否有结果记录
+        current_step = self._engine._current_step if self._engine else 1
+        total_steps = self._engine._total_steps if self._engine else 0
+        
+        if total_steps > 0:
+            # 检查是否有"步骤 X 结果"段落
+            result_pattern = rf'步骤\s*{current_step}\s+结果|## 步骤\s*{current_step}\s+结果'
+            if not re.search(result_pattern, notes, re.IGNORECASE):
+                # 也检查是否有"当前状态"更新
+                if "## 当前状态" not in notes and "当前状态" not in notes:
+                    logger.warning(f"[AutoLoop] Iteration {iteration}: no step {current_step} result recorded")
+                    return False
+        
+        return True
+
+    def _build_forced_update_prompt(self, iteration: int) -> str:
+        """生成强制更新接力文档的提示"""
+        current_step = self._engine._current_step if self._engine else 1
+        total_steps = self._engine._total_steps if self._engine else 0
+        is_planning = self._engine.is_planning_phase() if self._engine else True
+        
+        if is_planning:
+            return f"""
+## ⚠️ 【强制】接力文档未更新！
+
+你（迭代 {iteration} 轮）尚未更新接力文档 `SHARED_TASK_NOTES.md`。
+
+根据规则，你必须：
+1. 使用 `write` 工具将完整的执行计划写入 SHARED_TASK_NOTES.md
+2. 包含所有步骤的描述、目标文件、验证方式
+3. 然后输出 `PLANNING_COMPLETE`
+
+当前接力文档状态：
+```
+{self._engine.read_shared_notes()[:500] if self._engine else ""}...
+```
+
+请立即使用 `write` 工具更新接力文档，然后输出 `PLANNING_COMPLETE`。
+"""
+        else:
+            return f"""
+## ⚠️ 【强制】接力文档未更新！
+
+你（迭代 {iteration} 轮）尚未更新接力文档 `SHARED_TASK_NOTES.md`。
+
+根据规则，你必须：
+1. 更新 SHARED_TASK_NOTES.md 中的"步骤 {current_step} 结果"章节
+2. 记录本轮执行的改动、验证命令和结果
+3. 然后才能继续下一步或输出 DONE
+
+当前接力文档状态：
+```
+{self._engine.read_shared_notes()[:500] if self._engine else ""}...
+```
+
+请立即使用 `write` 工具更新接力文档（追加步骤结果），然后继续执行。
+"""
+
     # ========== 内部辅助 ==========
 
-    def _build_messages(self, task_prompt: str, iteration: int) -> List[Dict]:
-        """构建本轮对话消息 — 两阶段上下文注入"""
+    def _build_messages(self, task_prompt: str, iteration: int, force_update: bool = False) -> List[Dict]:
+        """构建本轮对话消息 — 两阶段上下文注入
+        
+        Args:
+            task_prompt: 原始任务提示
+            iteration: 当前迭代轮次
+            force_update: 是否强制要求更新接力文档
+        """
         system_prompt = self._agent_system_prompt_getter("auto_loop") if self._agent_system_prompt_getter else ""
 
         # 根据阶段注入不同上下文
-        workflow_context = self._build_workflow_context(iteration)
+        workflow_context = self._build_workflow_context(iteration, force_update)
         system_content = system_prompt + "\n\n" + workflow_context
 
         messages = [{"role": "system", "content": system_content}]
         messages.append({"role": "user", "content": task_prompt})
         return messages
 
-    def _build_workflow_context(self, iteration: int) -> str:
-        """根据当前阶段构建工作流上下文"""
+    def _build_workflow_context(self, iteration: int, force_update: bool = False) -> str:
+        """根据当前阶段构建工作流上下文
+        
+        Args:
+            iteration: 当前迭代轮次
+            force_update: 是否强制要求更新接力文档
+        """
         project_path = self._config.project_path or ""
         is_planning = self._engine.is_planning_phase() if self._engine else True
         
         lines = []
+        
+        # 【新增】强制更新提示
+        if force_update:
+            lines.append("## ⚠️ 【强制】接力文档未更新！\n")
+            lines.append("你必须使用 `write` 工具更新 `SHARED_TASK_NOTES.md` 后才能继续。\n")
+            lines.append("**不更新接力文档就继续是违规行为！**\n")
         
         if is_planning:
             # ========== 规划阶段上下文 ==========
@@ -518,7 +648,6 @@ class AutoLoopWorker(QThread):
         self._worker_finished_messages: List[Dict] = []
         
         def on_worker_finished(msgs: list):
-            logger.debug(f"[AutoLoop] on_worker_finished called with {len(msgs) if msgs else 0} messages")
             self._worker_finished_messages = list(msgs) if msgs else []
             
             # 实时计算消息列表的 token 数并更新 UI
@@ -527,7 +656,6 @@ class AutoLoopWorker(QThread):
                 token_count = count_messages_tokens(msgs)
                 self._engine.add_tokens(token_count)
                 self.tokens_updated.emit(self._engine._total_tokens)
-                logger.debug(f"[AutoLoop] tokens from messages: {token_count}, total: {self._engine._total_tokens}")
                 
                 # 检查是否超预算，超预算则取消
                 reason = self._engine.check_budget()
