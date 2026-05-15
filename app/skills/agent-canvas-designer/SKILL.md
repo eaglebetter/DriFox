@@ -203,3 +203,149 @@ explorer "{skill_path}\assets\agent_canvas.html"
 | [PITFALLS.md](references/PITFALLS.md) | 常见错误与避坑指南 |
 | [EXAMPLES/customer-service.json](references/EXAMPLES/customer-service.json) | 客服场景完整示例 |
 | [EXAMPLES/data-analysis.json](references/EXAMPLES/data-analysis.json) | 数据分析场景完整示例 |
+
+---
+
+## 热更新画布流程
+
+使用专用服务器启动画布，实现热更新开发流程。
+
+### 完整流程
+
+```
+1. bg_start 启动画布服务器 (C:/tmp/canvas)
+       ↓
+2. write config.json 写入画布配置
+       ↓
+3. bash 打开浏览器 (start http://localhost:8080/agent_canvas.html)
+       ↓
+4. 用户在画布上编辑（拖拽节点、修改配置）
+       ↓
+5. 用户点击「📤 导出反馈」
+       ↓
+6. 画布自动保存到 C:/tmp/canvas/feedback.json
+       ↓
+7. 用户回到对话告诉大模型"改好了"
+       ↓
+8. 大模型 read feedback.json 获取修改内容
+       ↓
+9. 大模型修复后 write config.json → 画布自动刷新
+```
+
+### 启动服务器（使用专用服务器）
+
+```xml
+<bg_start command="python server.py" cwd="C:/tmp/canvas" />
+```
+
+> ⚠️ 注意：必须使用 `server.py` 而不是 `python -m http.server`，后者不支持保存文件
+
+### 写入配置
+
+```xml
+<write path="C:/tmp/canvas/config.json">
+<content><![CDATA[
+{
+  "version": "2.0",
+  "flow": "custom",
+  "meta": {"title": "流程名"},
+  "nodes": [...],
+  "connections": [...]
+}
+]]></content>
+</write>
+```
+
+### 打开浏览器
+
+```xml
+<bash command="start http://localhost:8080/agent_canvas.html" />
+```
+
+### 读取用户修改
+
+用户点击「📤 导出反馈」后，文件会自动下载到浏览器默认下载目录。
+
+**读取并删除的流程**：
+1. 动态获取用户目录
+2. 读取反馈文件
+3. 处理完成后删除文件，防止重复
+
+```bash
+# 1. 先获取用户目录
+bash command="echo %USERPROFILE%"
+
+# 2. 读取反馈文件（假设返回 C:\Users\mading）
+read path="C:/Users/你的用户名/Downloads/feedback.json"
+
+# 3. 处理完成后删除
+bash command="del \"%USERPROFILE%\\Downloads\\feedback.json\""
+```
+
+> 实际使用时，先执行 `echo %USERPROFILE%` 获取路径，再替换到上面的命令中
+
+### 停止服务器
+
+```xml
+<bg_stop task_id="bg_xxxxxxxx" />
+```
+
+### 文件位置
+
+```
+C:/tmp/canvas/
+├── server.py           # 专用服务器（支持保存）
+├── agent_canvas.html   # 画布主文件
+├── config.json         # 当前配置（大模型写入）
+└── feedback.json       # 用户导出（大模型读取）
+```
+
+### 画布交互
+
+- **📂 加载配置** - 重新加载 config.json
+- **📤 导出反馈** - 导出当前画布到 `C:/tmp/canvas/feedback.json`，同时触发本地下载
+
+### 注意事项
+
+1. Python 在 Windows 上 `C:/tmp` 解析为 C:\tmp
+2. 画布每 3 秒自动检查 config.json 更新
+3. 每次修改配置后，用户刷新页面即可看到新配置
+4. 导出的是完整的画布 JSON，包含节点位置和连线信息
+
+---
+
+## 已知问题与调试
+
+### 连线无法显示
+
+**症状**：从 config.json 加载后，节点显示正常但连线缺失。
+
+**原因**：`loadConfigData` 函数中 `createNode` 返回的是节点 ID 字符串，但后续代码错误地把它当成节点对象访问 `.eps` 属性。
+
+**修复**：通过节点 ID 在 `nodes` 数组中查找真正的节点对象：
+```javascript
+var sourceId = nodeIdMap[conn.sourceId];
+var targetNode = nodes.find(function(n) { return n.id === sourceId; });
+```
+
+**验证**：刷新画布后，检查浏览器控制台是否有 "连接失败" 日志。
+
+### 浏览器控制台调试
+
+画布运行时会输出以下日志：
+- `✅ 已加载配置: xxx` — 配置加载成功
+- `🔄 检测到配置更新，重新加载...` — 热更新触发
+- `连接失败: {sourceId, targetId}` — 连线创建失败
+
+**调试方法**：按 `F12` 打开开发者工具 → Console 面板
+
+### 画布与技能目录同步
+
+画布主文件位于两个位置：
+- `C:/tmp/canvas/agent_canvas.html` — 开发调试用
+- `DriFox/app/skills/agent-canvas-designer/assets/agent_canvas.html` — 技能发布用
+
+修改画布后需要同步到技能目录：
+```bash
+copy /Y "C:\tmp\canvas\agent_canvas.html" "D:\work\DriFox\app\skills\agent-canvas-designer\assets\agent_canvas.html"
+```
