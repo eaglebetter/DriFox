@@ -227,9 +227,70 @@ class KeyDocumentItemWidget(QWidget):
         super().__init__(parent)
         self.doc_id = doc_id
         self.file_path = file_path
-        self._init_ui(file_name, added_by)
+        self._init_ui(file_name, file_path, added_by)
 
-    def _init_ui(self, file_name, added_by):
+    def _get_icon(self, file_name: str, file_path: str) -> str:
+        """根据文件类型获取对应图标，文件夹单独处理"""
+        import os
+        # 先判断是否是文件夹
+        if os.path.isdir(file_path):
+            return "📁"
+        
+        ext = file_name.lower().split('.')[-1] if '.' in file_name else ''
+        
+        icon_map = {
+            # 代码文件
+            'py': '🐍', 'python': '🐍',
+            'js': '🟨', 'javascript': '🟨',
+            'ts': '🔷', 'typescript': '🔷',
+            'jsx': '⚛️', 'tsx': '⚛️',
+            'java': '☕',
+            'go': '🐹',
+            'rs': '🦀', 'rust': '🦀',
+            'c': '🔶', 'cpp': '🔶', 'h': '🔶',
+            'cs': '🔷',
+            'php': '🐘',
+            'rb': '💎',
+            'swift': '🍎',
+            'kt': '🤖',
+            # 文档
+            'md': '📝', 'markdown': '📝',
+            'txt': '📄',
+            'rtf': '📄',
+            'pdf': '📕',
+            'doc': '📘', 'docx': '📘',
+            'xls': '📊', 'xlsx': '📊', 'csv': '📊',
+            'ppt': '📙', 'pptx': '📙',
+            'html': '🌐', 'htm': '🌐',
+            'css': '🎨',
+            'scss': '🎨', 'less': '🎨',
+            'json': '🔧',
+            'yaml': '🔧', 'yml': '🔧',
+            'toml': '🔧',
+            'ini': '🔧',
+            'cfg': '🔧',
+            'conf': '🔧',
+            'xml': '🔧',
+            # 图片
+            'png': '🖼️', 'jpg': '🖼️', 'jpeg': '🖼️',
+            'gif': '🖼️', 'bmp': '🖼️', 'svg': '🖼️',
+            'webp': '🖼️',
+            # 视频音频
+            'mp4': '🎬', 'webm': '🎬',
+            'mp3': '🎵', 'wav': '🎵', 'ogg': '🎵',
+            # 存档
+            'zip': '📦', 'rar': '📦', '7z': '📦',
+            'tar': '📦', 'gz': '📦',
+            # git
+            'gitignore': '🌱',
+            # license/readme
+            'license': '📜', 'licence': '📜',
+            'readme': '📖', 'readme.md': '📖',
+        }
+        
+        return icon_map.get(ext, icon_map.get(file_name.lower(), '📄'))
+
+    def _init_ui(self, file_name, file_path, added_by):
         self.setFixedHeight(44)
         self.setSizePolicy(1, 0)
 
@@ -237,8 +298,9 @@ class KeyDocumentItemWidget(QWidget):
         main_layout.setContentsMargins(8, 4, 8, 4)
         main_layout.setSpacing(4)
 
-        # 文件图标 + 名称
-        icon_label = BodyLabel("📄", self)
+        # 文件/文件夹图标（根据类型显示不同图标）
+        icon = self._get_icon(file_name, file_path)
+        icon_label = BodyLabel(icon, self)
         icon_label.setStyleSheet(f"font-size: 16px; padding: 0 4px;")
 
         name_label = BodyLabel(file_name, self)
@@ -251,12 +313,13 @@ class KeyDocumentItemWidget(QWidget):
         main_layout.addWidget(icon_label)
         main_layout.addWidget(name_label, 1)
 
-        # 来源标签
-        by_label = BodyLabel(f"[{added_by}]", self)
-        by_label.setStyleSheet(
-            f"color: #8c99ad; {get_font_family_css()} font-size: 10px; padding: 0 4px;"
+        # 显示绝对路径
+        path_label = BodyLabel(self.file_path, self)
+        path_label.setStyleSheet(
+            f"color: #8c99ad; {get_font_family_css()} font-size: 10px;"
         )
-        main_layout.addWidget(by_label)
+        path_label.setMaximumWidth(200)
+        main_layout.addWidget(path_label)
 
         # 操作按钮
         self.open_btn = TransparentToolButton(FluentIcon.FOLDER, self)
@@ -622,12 +685,14 @@ class MemoryCardContent(QWidget):
         self.docs_list.files_dropped.connect(self._on_files_dropped)
         layout.addWidget(self.docs_list, 1)
 
-        # 添加按钮（仅按钮）
+        # 添加按钮（右对齐）
         add_btn_layout = QHBoxLayout()
         add_btn_layout.setSpacing(6)
+        add_btn_layout.addStretch()
         
-        self.add_doc_btn = PrimaryPushButton("📁 添加文件", self)
+        self.add_doc_btn = PrimaryPushButton("📄 添加文件", self)
         self.add_doc_btn.setFixedHeight(28)
+        self.add_doc_btn.setFixedWidth(110)
         self.add_doc_btn.setStyleSheet("""
             QPushButton {
                 background-color: #0e639c;
@@ -635,7 +700,7 @@ class MemoryCardContent(QWidget):
                 border: none;
                 border-radius: 4px;
                 font-size: 12px;
-                padding: 0 12px;
+                padding: 0 8px;
             }
             QPushButton:hover {
                 background-color: #1177bb;
@@ -643,14 +708,33 @@ class MemoryCardContent(QWidget):
         """)
         self.add_doc_btn.clicked.connect(self._on_add_file_clicked)
         
+        self.add_folder_btn = PrimaryPushButton("📁 添加文件夹", self)
+        self.add_folder_btn.setFixedHeight(28)
+        self.add_folder_btn.setFixedWidth(120)
+        self.add_folder_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2d882d;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                font-size: 12px;
+                padding: 0 8px;
+            }
+            QPushButton:hover {
+                background-color: #3a9e3a;
+            }
+        """)
+        self.add_folder_btn.clicked.connect(self._on_add_folder_clicked)
+        
         add_btn_layout.addWidget(self.add_doc_btn)
-        add_btn_layout.addStretch()
+        add_btn_layout.addWidget(self.add_folder_btn)
         layout.addLayout(add_btn_layout)
 
         return widget
 
     def _on_add_file_clicked(self):
         """点击添加文件按钮"""
+        from PyQt5.QtWidgets import QFileDialog
         files, _ = QFileDialog.getOpenFileNames(
             self,
             "选择关键文档",
@@ -659,6 +743,18 @@ class MemoryCardContent(QWidget):
         )
         if files:
             self._on_files_dropped(files)
+
+    def _on_add_folder_clicked(self):
+        """点击添加文件夹按钮"""
+        from PyQt5.QtWidgets import QFileDialog
+        folder = QFileDialog.getExistingDirectory(
+            self,
+            "选择文件夹",
+            "",
+            QFileDialog.ShowDirsOnly
+        )
+        if folder:
+            self._on_files_dropped([folder])
 
     def _on_tab_changed(self, tab_key: str):
         """切换 Tab"""
