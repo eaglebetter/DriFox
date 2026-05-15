@@ -109,6 +109,9 @@ class AutoLoopWorker(QThread):
                 loop.exec_()  # 等待 worker 完成，但保持事件循环处理信号，这样日志可以正常更新
 
                 response = self._current_worker.full_response or ""
+                # 尝试从完整响应中提取 usage（解决某些API不在streaming chunks中返回usage的问题）
+                # 确保 _last_usage 一定被设置
+                self._extract_usage_from_full_response()
                 # 优先使用真实 token 统计，否则按字符数 / 4 估算
                 real_usage = self._get_token_usage()
                 if real_usage > 0:
@@ -231,6 +234,41 @@ class AutoLoopWorker(QThread):
 
         return worker
 
+    def _extract_usage_from_full_response(self):
+        """从完整API响应中提取 token usage，放到 _current_worker._last_usage"""
+        try:
+            if not self._current_worker or not hasattr(self._current_worker, 'response'):
+                return
+            
+            response = getattr(self._current_worker, 'response', None)
+            if not response:
+                return
+                
+            # 对于非流式响应，usage 在 response 对象上
+            if hasattr(response, 'usage'):
+                usage = response.usage
+                if usage:
+                    self._current_worker._last_usage = {
+                        "prompt_tokens": getattr(usage, "prompt_tokens", 0),
+                        "completion_tokens": getattr(usage, "completion_tokens", 0),
+                        "total_tokens": getattr(usage, "total_tokens", 0),
+                    }
+                    return
+            # 有些实现在 choices 里
+            if hasattr(response, 'choices') and response.choices:
+                first_choice = response.choices[0]
+                if hasattr(first_choice, 'usage'):
+                    usage = first_choice.usage
+                    self._current_worker._last_usage = {
+                        "prompt_tokens": getattr(usage, "prompt_tokens", 0),
+                        "completion_tokens": getattr(usage, "completion_tokens", 0),
+                        "total_tokens": getattr(usage, "total_tokens", 0),
+                    }
+                    return
+        except Exception as e:
+            logger.warning(f"[AutoLoop] Failed to extract usage from full response: {e}")
+            pass
+            
     def _get_token_usage(self) -> int:
         """获取本轮 token 使用量"""
         try:
