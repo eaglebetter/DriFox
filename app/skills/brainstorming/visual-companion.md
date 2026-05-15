@@ -140,3 +140,56 @@ The brainstorm server lives in `scripts/`. You'll call these in the Bash tool:
 ] [--foreground]`
 - `scripts/stop-server.sh 
 `
+
+## DriFox Integration (bg_start/bg_stop)
+
+On DriFox, use the `bg_start` tool instead of Bash to launch the server. This allows:
+- Non-blocking operation (doesn't stall the conversation)
+- Easy management via `bg_stop` to terminate the server
+- Task ID tracking for debugging
+
+### Launch Sequence
+
+1. **Start server with bg_start (use PowerShell):**
+   ```xml
+   <bg_start command="powershell -Command \&quot;$env:BRAINSTORM_DIR='C:\tmp\brainstorm'; node server.cjs\&quot;" cwd="D:/work/DriFox/app/skills/brainstorming/scripts" />
+   ```
+   This sets BRAINSTORM_DIR so server reads from C:\tmp\brainstorm\content
+
+2. **Get port from bg_logs (NOT from bg_start response):**
+   ```xml
+   <bg_logs task_id="bg_xxxxxxxx" />
+   ```
+   Find the JSON in output:
+   ```
+   {"type":"server-started","port":56743,"url":"http://localhost:56743",...}
+   ```
+
+3. **Auto-open browser:**
+   ```xml
+   <bash command="start http://localhost:56743" />
+   ```
+
+4. **Push content:**
+   Use the Write tool to create HTML files in `C:/tmp/brainstorm/content/`
+
+5. **Stop server with bg_stop:**
+   ```xml
+   <bg_stop task_id="bg_xxxxxxxx" />
+   ```
+
+### Content File Location
+
+Windows PowerShell environment:
+- Server writes to: `\tmp\brainstorm\content\` (Unix path, resolves to `C:\tmp\...`)
+- Write tool path: `C:/tmp/brainstorm/content/<filename>.html`
+
+### Troubleshooting
+
+**Server still running after bg_stop:**
+- The `bg_stop` tool uses `taskkill /T /F /PID` which kills the process tree
+- If process persists, manually kill with: `netstat -ano | findstr "<port>"` then `taskkill /PID <pid> /F`
+
+**Port conflict:**
+- Server auto-selects a random high port (49152-65535)
+- Each bg_start call gets a new port

@@ -129,27 +129,24 @@ class BackgroundTaskManager:
             # Windows: 使用 taskkill /T 杀死进程树（包括子进程）
             if sys.platform == "win32":
                 import subprocess as sp
-                try:
-                    # /T = 杀死进程及其所有子进程
-                    # /F = 强制终止
-                    result = sp.run(
-                        ["taskkill", "/T", "/F", "/PID", str(task.pid)],
-                        capture_output=True,
-                        text=True,
-                        timeout=5
-                    )
-                    if result.returncode == 0:
-                        return True, f"✅ 已终止任务: {task_id} (包含子进程)"
-                    else:
-                        # taskkill 失败，尝试直接 terminate
-                        task.process.terminate()
-                        task.process.wait(timeout=3)
-                        return True, f"✅ 已终止任务: {task_id}"
-                except Exception:
-                    # 备用方案
+                # 先尝试用 taskkill /T 杀死整个进程树
+                result = sp.run(
+                    ["taskkill", "/T", "/F", "/PID", str(task.pid)],
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+                if result.returncode == 0:
+                    return True, f"✅ 已终止任务: {task_id} (PID: {task.pid}, 含子进程)"
+                else:
+                    # taskkill 失败，尝试直接 terminate + wait
                     task.process.terminate()
-                    task.process.wait(timeout=3)
-                    return True, f"✅ 已终止任务: {task_id}"
+                    try:
+                        task.process.wait(timeout=3)
+                    except subprocess.TimeoutExpired:
+                        task.process.kill()
+                        task.process.wait(timeout=1)
+                    return True, f"✅ 已终止任务: {task_id} (使用 terminate/kill)"
             else:
                 # Unix: 使用 terminate 和 SIGTERM
                 task.process.terminate()
