@@ -5132,13 +5132,20 @@ class OpenAIChatToolWindow(ToolWindow):
         # 锁定 UI
         self._lock_ui_for_autoloop()
 
-        # 获取 tools schema — 过滤掉会阻塞自动循环的工具
+        # 获取 auto_loop agent 的工具权限，过滤掉 deny 的工具
+        agent_manager = self.backend.agent_manager
+        agent = agent_manager.get_agent("auto_loop") if agent_manager else None
+        agent_perms = agent.permission if agent else {}
+        denied_tools = {
+            name for name, val in agent_perms.items()
+            if val in ("deny", False)
+        }
+
         from app.tools import get_builtin_tools_schema
-        all_tools = get_builtin_tools_schema(agent_manager=self.backend.agent_manager)
-        _AUTOLOOP_BLOCKED_TOOLS = {"question", "todowrite", "todoread", "ask_question"}
+        all_tools = get_builtin_tools_schema(agent_manager=agent_manager)
         tools_schema = [
             t for t in all_tools
-            if t.get("function", {}).get("name", "") not in _AUTOLOOP_BLOCKED_TOOLS
+            if t.get("function", {}).get("name", "") not in denied_tools
         ]
 
         # 获取 compactor
@@ -5157,6 +5164,14 @@ class OpenAIChatToolWindow(ToolWindow):
                 self.backend.agent_manager.get_agent(name).prompt
                 if self.backend.agent_manager and self.backend.agent_manager.get_agent(name)
                 else ""
+            ),
+            permission_check_callback=(
+                self.backend.chat_engine._check_tool_permission
+                if self.backend.chat_engine else None
+            ),
+            permission_cache=(
+                self.backend.chat_engine._permission_cache
+                if self.backend.chat_engine else None
             ),
             compactor=compactor,
         )

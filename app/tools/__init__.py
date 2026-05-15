@@ -225,7 +225,7 @@ class BuiltinTools(QObject):
         from pathlib import Path
         self.workdir = Path(workdir)
         if self._file_tools:
-            self._file_tools._workdir = self.workdir
+            self._file_tools.workdir = self.workdir
         if hasattr(self, '_task_tools') and self._task_tools:
             self._task_tools.workdir = self.workdir
         logger.info(f"[BuiltinTools] Workdir updated to: {self.workdir}")

@@ -106,17 +106,6 @@ class AutoLoopEngine:
             logger.warning(f"[AutoLoop] Failed to read notes: {e}")
             return ""
 
-    def update_shared_notes(self, notes_text: str):
-        """更新共享笔记文件"""
-        path = self.get_notes_path()
-        if not path:
-            return
-        try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(notes_text, encoding="utf-8")
-        except Exception as e:
-            logger.warning(f"[AutoLoop] Failed to write notes: {e}")
-
     # ========== 获取进度信息 ==========
 
     def get_progress(self) -> dict:

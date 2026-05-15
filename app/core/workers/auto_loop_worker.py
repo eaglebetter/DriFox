@@ -50,6 +50,8 @@ class AutoLoopWorker(QThread):
             tool_executor: Any,
             tools_schema: List[Dict],
             agent_system_prompt_getter: Callable[[str], str],
+            permission_check_callback: Callable[[str, dict], str] = None,
+            permission_cache: Any = None,
             compactor: Any = None,
     ):
         """配置 worker（应在 start() 前调用）"""
@@ -58,6 +60,8 @@ class AutoLoopWorker(QThread):
         self._tool_executor = tool_executor
         self._tools_schema = tools_schema
         self._agent_system_prompt_getter = agent_system_prompt_getter
+        self._permission_check_callback = permission_check_callback
+        self._permission_cache = permission_cache
         self._compactor = compactor
 
     def cancel(self):
@@ -162,11 +166,11 @@ class AutoLoopWorker(QThread):
         ]
         if project_path:
             lines.extend([
-                "## Project Root Directory",
-                f"ALL file operations MUST use absolute paths starting from: {project_path}",
-                "Example: read(path='D:/work/my-project/src/main.py')",
-                "Example: write(path='D:/work/my-project/README.md', content='...')",
-                "Example: glob(pattern='**/*.py', path='D:/work/my-project')",
+                f"## Project Root Directory",
+                f"WORKDIR is set to: {project_path}",
+                f"All file operations use paths relative to this root.",
+                f"Example: write(path='SHARED_TASK_NOTES.md', content='...')  # auto-resolved to {project_path}",
+                f"Example: read(path='src/main.py')  # relative to project root",
                 "",
             ])
         lines.extend([
@@ -200,6 +204,8 @@ class AutoLoopWorker(QThread):
             tools=self._tools_schema or [],
             stream=True,
             tool_executor=self._tool_executor,
+            permission_check_callback=self._permission_check_callback,
+            permission_cache=self._permission_cache,
             compactor=self._compactor,
         )
 

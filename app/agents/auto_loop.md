@@ -51,6 +51,18 @@ hidden: true
 
 ---
 
+## 工作目录
+
+所有文件操作使用相对于 `workdir` 的路径，`workdir` 已由系统设置为项目根目录。
+
+使用相对路径即可，系统会自动解析到项目目录：
+```
+write(path='SHARED_TASK_NOTES.md', content='...')  # → workdir/SHARED_TASK_NOTES.md
+read(path='src/main.py')  # → workdir/src/main.py
+```
+
+---
+
 ## 编码规则
 
 - **一次一件事**：如果任务大，你用多轮完成它
