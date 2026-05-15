@@ -196,7 +196,6 @@ class AutoLoopWorker(QThread):
         """创建 ChatWorker"""
         llm_config = self._model_config_getter() if self._model_config_getter else {}
         session_messages = []
-        print(messages)
         worker = OpenAIChatWorker(
             messages=messages,
             session_messages=session_messages,

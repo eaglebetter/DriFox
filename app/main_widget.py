@@ -49,6 +49,7 @@ from app.core import (
     TopicSummaryTask,
 )
 from app.tool_window import ToolWindow
+from app.tools import get_builtin_tools_schema
 from app.utils.config import Settings
 from app.utils.diff_viewer import (
     DiffHtmlGenerator,
@@ -81,7 +82,7 @@ from app.widgets.llm_settings_card import (
     LLMSettingsCard,
 )
 from app.widgets.memory_card import (
-    MemoryCardContent,
+    MemoryCardContent, TAB_PROJECT_NOTES,
 )
 from app.widgets.message_card import (
     MessageCard,
@@ -4842,7 +4843,6 @@ class OpenAIChatToolWindow(ToolWindow):
         if hasattr(self, '_memory_card_popup') and self._memory_card_popup:
             self._memory_card_popup.set_project(project)
             # 自动切换到项目笔记tab
-            from app.widgets.memory_card import TAB_PROJECT_NOTES
             self._memory_card_popup.tab_widget.setCurrentItem(TAB_PROJECT_NOTES)
             self._memory_card_popup._on_tab_changed(TAB_PROJECT_NOTES)
         # 刷新历史面板
@@ -5141,7 +5141,6 @@ class OpenAIChatToolWindow(ToolWindow):
             if val in ("deny", False)
         }
 
-        from app.tools import get_builtin_tools_schema
         all_tools = get_builtin_tools_schema(agent_manager=agent_manager)
         tools_schema = [
             t for t in all_tools
