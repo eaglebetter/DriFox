@@ -14,8 +14,12 @@ except ImportError:
 
 
 class DiagnosticsTools:
-    def __init__(self, workdir: Path):
-        self.workdir = workdir
+    def __init__(self, owner):
+        self._owner = owner
+
+    @property
+    def workdir(self) -> Path:
+        return self._owner.workdir
 
     def _detect_language(self, file_path: str) -> str:
         ext = Path(file_path).suffix.lower()

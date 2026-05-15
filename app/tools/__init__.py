@@ -69,12 +69,13 @@ class BuiltinTools(QObject):
 
     def _register_tools(self):
         """Register all tool modules - add new tools here"""
-        file_tools = FileTools(self.workdir)
+        # 传入 self（BuiltinTools 实例），各工具通过 workdir 属性动态获取最新 workdir
+        file_tools = FileTools(self)
         self._tools['file'] = file_tools
-        self._tools['web'] = WebTools(self.workdir)
-        self._tools['terminal'] = TerminalTools(self.workdir)
-        self._tools['task'] = TaskTools(self.workdir)
-        self._tools['diagnostics'] = DiagnosticsTools(self.workdir)
+        self._tools['web'] = WebTools(self)
+        self._tools['terminal'] = TerminalTools(self)
+        self._tools['task'] = TaskTools(self)
+        self._tools['diagnostics'] = DiagnosticsTools(self)
 
         # Expose properties for backward compatibility
         self._file_tools = file_tools
@@ -221,13 +222,12 @@ class BuiltinTools(QObject):
         self._current_project = project
 
     def set_workdir(self, workdir: str):
-        """动态更新工作目录（用于 AutoLoop 自定义项目路径）"""
+        """动态更新工作目录（用于 AutoLoop 自定义项目路径）
+        
+        各工具模块通过 workdir 属性动态获取最新值，无需逐个传播。
+        """
         from pathlib import Path
         self.workdir = Path(workdir)
-        if self._file_tools:
-            self._file_tools.workdir = self.workdir
-        if hasattr(self, '_task_tools') and self._task_tools:
-            self._task_tools.workdir = self.workdir
         logger.info(f"[BuiltinTools] Workdir updated to: {self.workdir}")
 
     def edit_project_note(

@@ -11,9 +11,13 @@ from app.utils.utils import load_skill as utils_load_skill
 
 
 class TaskTools:
-    def __init__(self, workdir: Path):
-        self.workdir = workdir
+    def __init__(self, owner):
+        self._owner = owner
         self._todo_list: List[Dict] = []
+
+    @property
+    def workdir(self) -> Path:
+        return self._owner.workdir
         self._loaded_skills: Dict[str, str] = {}
         self._skill_workspaces: Dict[str, str] = {}
         self._sub_agent_manager = None

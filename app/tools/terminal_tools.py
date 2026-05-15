@@ -4,6 +4,7 @@ import time
 import uuid
 import sys
 from pathlib import Path
+from typing import Callable, Optional
 from dataclasses import dataclass, field
 
 from app.tools.result import ToolResult
@@ -34,14 +35,17 @@ class BackgroundTaskManager:
     _instance = None
     _lock = threading.Lock()
     
-    def __new__(cls, workdir: Path = None):
+    def __new__(cls, owner_getter: Callable = None):
         if cls._instance is None:
             with cls._lock:
                 if cls._instance is None:
                     cls._instance = super().__new__(cls)
                     cls._instance._tasks = {}
                     cls._instance._manager_lock = threading.Lock()
-                    cls._instance._workdir = workdir or Path.cwd()
+                    cls._instance._workdir = Path.cwd()
+                    cls._instance._get_workdir = None
+        if owner_getter:
+            cls._instance._get_workdir = owner_getter
         return cls._instance
     
     @classmethod
@@ -52,11 +56,20 @@ class BackgroundTaskManager:
     def set_workdir(self, workdir: Path):
         """设置工作目录"""
         self._workdir = workdir
+
+    def _effective_workdir(self) -> Path:
+        """获取当前有效工作目录（优先动态获取，其次静态缓存）"""
+        if self._get_workdir:
+            try:
+                return self._get_workdir()
+            except Exception:
+                pass
+        return self._workdir
     
     def start(self, command: str, cwd: str = None) -> tuple[str, str]:
         """启动后台任务，返回 (task_id, message)"""
         task_id = f"bg_{uuid.uuid4().hex[:8]}"
-        workdir = Path(cwd) if cwd else self._workdir
+        workdir = Path(cwd) if cwd else self._effective_workdir()
         
         try:
             # Windows: 设置代码页避免编码问题
@@ -221,10 +234,14 @@ PID: {task.pid}
 
 
 class TerminalTools:
-    def __init__(self, workdir: Path):
-        self.workdir = workdir
-        # 注入工作目录给 BackgroundTaskManager
-        BackgroundTaskManager(workdir)
+    def __init__(self, owner):
+        self._owner = owner
+        # 注册动态获取 workdir 的回调给 BackgroundTaskManager
+        BackgroundTaskManager(lambda: self.workdir)
+
+    @property
+    def workdir(self) -> Path:
+        return self._owner.workdir
 
     def execute_bash(self, command: str, timeout: int = 120) -> ToolResult:
         """执行 shell 命令，支持可靠的 timeout
