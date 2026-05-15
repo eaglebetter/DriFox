@@ -5161,17 +5161,19 @@ class OpenAIChatToolWindow(ToolWindow):
             return
 
         # 设置项目路径（工作目录）
-        if config.project_path:
-            project_path = config.project_path.strip()
-            if project_path:
-                import os
-                abs_path = os.path.abspath(project_path)
-                if os.path.isdir(abs_path):
-                    if self.backend.tool_executor and self.backend.tool_executor.builtin_tools:
-                        self._saved_workdir = str(self.backend.tool_executor.builtin_tools.workdir)
-                        self.backend.tool_executor.builtin_tools.set_workdir(abs_path)
-                    config.project_path = abs_path
-                    logger.info(f"[AutoLoop] Workdir set to: {abs_path}")
+        import os
+        project_path = config.project_path.strip() if config.project_path else ""
+        if not project_path:
+            # 如果用户没有填写项目路径，默认使用当前工作目录
+            project_path = os.getcwd()
+        
+        abs_path = os.path.abspath(project_path)
+        if os.path.isdir(abs_path):
+            if self.backend.tool_executor and self.backend.tool_executor.builtin_tools:
+                self._saved_workdir = str(self.backend.tool_executor.builtin_tools.workdir)
+                self.backend.tool_executor.builtin_tools.set_workdir(abs_path)
+            config.project_path = abs_path
+            logger.info(f"[AutoLoop] Workdir set to: {abs_path}")
         else:
             self._saved_workdir = None
 
