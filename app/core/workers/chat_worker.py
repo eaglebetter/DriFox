@@ -1521,6 +1521,11 @@ class OpenAIChatWorker(QThread):
                     except (json.JSONDecodeError, TypeError):
                         options = []
                 multiple = arguments.get("multiple", False)
+                # 确保 multiple 是 bool 类型（模型可能生成字符串 "true"/"false"）
+                if isinstance(multiple, str):
+                    multiple = multiple.strip().lower() in ["true", "1", "yes", "y"]
+                elif not isinstance(multiple, bool):
+                    multiple = bool(multiple)
                 self._emit_with_callback("question_asked", self.question_asked, tool_call_id, question_text, options,
                                          multiple)
                 self._question_pending = {
