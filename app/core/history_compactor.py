@@ -38,7 +38,7 @@ from app.core.provider_profile import get_provider_profile
 MAX_HISTORY_SNIPPET_CHARS = 1200
 RECENT_HISTORY_MIN_MESSAGES = 6
 SOFT_LIMIT_RATIO = 0.7  # 触发压缩检查
-TARGET_LIMIT_RATIO = 0.5  # 压缩目标
+TARGET_LIMIT_RATIO = 0.4  # 压缩目标
 MIN_RECENT_TOKEN_RATIO = 0.85  # 最小保留 token 比例
 SUMMARY_OVERHEAD = 500  # 摘要基础开销
 
@@ -621,17 +621,17 @@ class HistoryCompactor:
                 summary_lines.append(f"# Assistant\n{content}")
             elif role == "tool":
                 tool_name = msg.get("name", "")
-                arguments = msg.get("arguments", "")
-                arguments = self._adaptive_truncate(
-                    arguments,
-                    position=idx,
-                    total=total_messages,
-                    target_total=target_total_length,
-                    ratios=content_ratios if total_content_length > 1000 else None,
-                )
+                # arguments = msg.get("arguments", "")
+                # arguments = self._adaptive_truncate(
+                #     arguments,
+                #     position=idx,
+                #     total=total_messages,
+                #     target_total=int(budget *  content_ratios[idx]),
+                #     ratios=content_ratios if total_content_length > 1000 else None,
+                # )
                 # 标记受保护的工具
                 prefix = "[🔒] " if tool_name in PROTECTED_TOOLS else ""
-                summary_lines.append(f"{prefix}# {tool_name}\nTool args: {arguments}\nTool Res: {content}")
+                summary_lines.append(f"{prefix}# {tool_name}\nTool Res: {content}")
 
         return "\n".join(summary_lines)
 
