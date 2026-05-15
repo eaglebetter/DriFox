@@ -476,6 +476,62 @@ TOOL_SCHEMAS = [
             },
         },
     },
+    # 后台任务管理工具
+    {
+        "type": "function",
+        "function": {
+            "name": "bg_start",
+            "description": "启动后台命令，不阻塞当前对话。用于启动需要持续运行的服务（如开发服务器）。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {"type": "string", "description": "要执行的 shell 命令"},
+                    "cwd": {"type": "string", "description": "工作目录（可选，默认为项目根目录）"},
+                },
+                "required": ["command"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "bg_stop",
+            "description": "停止指定的后台任务",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task_id": {"type": "string", "description": "任务 ID，格式为 bg_xxxxxxxx"},
+                },
+                "required": ["task_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "bg_logs",
+            "description": "获取后台任务的输出日志",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task_id": {"type": "string", "description": "任务 ID"},
+                    "lines": {"type": "integer", "description": "返回最近 N 行（默认 100）"},
+                },
+                "required": ["task_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "bg_list",
+            "description": "列出所有后台任务的状态",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+            },
+        },
+    },
     {
         "type": "function",
         "function": {
