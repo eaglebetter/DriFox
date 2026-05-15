@@ -6,7 +6,7 @@
 3. 关键文档 - 列表 + 拖拽添加
 """
 import os
-from PyQt5.QtCore import pyqtSignal, Qt
+from PyQt5.QtCore import pyqtSignal, Qt, QSize, QTimer
 from PyQt5.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -16,6 +16,7 @@ from PyQt5.QtWidgets import (
     QMenu,
     QAction,
     QTextEdit,
+    QSizePolicy,
 )
 from PyQt5.QtGui import QDropEvent, QDragEnterEvent, QDragMoveEvent
 from loguru import logger
@@ -103,58 +104,63 @@ class EntryMemoryItemWidget(QWidget):
         self._init_ui(enabled, source)
 
     def _init_ui(self, enabled, source):
-        self.setFixedHeight(50)
-        self.setSizePolicy(1, 0)
+        # 高度自适应内容，不固定高度
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.MinimumExpanding)
+        self.setMinimumHeight(44)
 
         main_layout = QHBoxLayout(self)
-        main_layout.setContentsMargins(8, 4, 8, 4)
-        main_layout.setSpacing(4)
+        main_layout.setContentsMargins(8, 8, 8, 8)
+        main_layout.setSpacing(6)
 
         # 内容区域
         self.text_widget = QWidget(self)
-        self.text_widget.setSizePolicy(1, 0)
+        # 允许收缩，适应小窗口
+        self.text_widget.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.MinimumExpanding)
+        self.text_widget.setMinimumWidth(100)
         text_layout = QVBoxLayout(self.text_widget)
         text_layout.setContentsMargins(0, 0, 0, 0)
-        text_layout.setSpacing(1)
+        text_layout.setSpacing(0)
 
         self.content_label = BodyLabel(self._content, self.text_widget)
         self.content_label.setWordWrap(True)
+        # 允许收缩，最小宽度小一点，适应小窗口
+        self.content_label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.MinimumExpanding)
+        self.content_label.setMinimumWidth(100)
         self.content_label.setStyleSheet(
-            f"padding: 2px 4px 0 4px; {get_font_family_css()} font-size: 12px;"
+            f"padding: 4px; {get_font_family_css()} font-size: 12px;"
         )
         text_layout.addWidget(self.content_label)
 
-        self.meta_label = BodyLabel(f"source={source}", self.text_widget)
-        self.meta_label.setStyleSheet(
-            f"padding: 0 4px 2px 4px; color: #8c99ad; {get_font_family_css()} font-size: 10px;"
-        )
-        text_layout.addWidget(self.meta_label)
-
         main_layout.addWidget(self.text_widget, 1)
 
-        # 编辑输入框（初始隐藏）
+        # 编辑输入框（初始隐藏，使用 TextEdit 支持多行）
         self.edit_widget = QWidget(self)
-        self.edit_widget.setSizePolicy(1, 0)
+        self.edit_widget.setSizePolicy(1, QSizePolicy.MinimumExpanding)
         self.edit_widget.setVisible(False)
         edit_layout = QVBoxLayout(self.edit_widget)
         edit_layout.setContentsMargins(0, 0, 0, 0)
-        edit_layout.setSpacing(2)
+        edit_layout.setSpacing(0)
 
-        self.edit_line = LineEdit(self.edit_widget)
-        self.edit_line.setText(self._content)
-        self.edit_line.setStyleSheet(f"""
-            QLineEdit {{
+        from qfluentwidgets import TextEdit
+        self.edit_text = TextEdit(self.edit_widget)
+        self.edit_text.setText(self._content)
+        self.edit_text.setPlaceholderText("编辑条目记忆...")
+        self.edit_text.setStyleSheet(f"""
+            QTextEdit {{
                 background-color: rgba(50, 50, 50, 200);
                 border: 1px solid rgba(14, 99, 156, 200);
                 color: #e0e0e0;
-                padding: 2px 6px;
+                padding: 4px 6px;
                 border-radius: 3px;
                 {get_font_family_css()} font-size: 12px;
             }}
         """)
-        self.edit_line.returnPressed.connect(self._finish_edit)
-        self.edit_line.setFixedHeight(24)
-        edit_layout.addWidget(self.edit_line)
+        self.edit_text.setMinimumHeight(36)
+        self.edit_text.setMaximumHeight(200)  # 限制最大高度，超出可滚动
+        self.edit_text.document().documentLayout().documentSizeChanged.connect(self._adjust_edit_height)
+        # 失去焦点自动保存
+        self.edit_text.focusOutEvent = lambda e: self._on_focus_out(e)
+        edit_layout.addWidget(self.edit_text)
 
         main_layout.addWidget(self.edit_widget, 1)
 
@@ -184,29 +190,49 @@ class EntryMemoryItemWidget(QWidget):
 
         main_layout.addLayout(btn_layout)
 
+    def _adjust_edit_height(self):
+        """根据内容调整编辑框高度，不超过最大高度，超出可滚动"""
+        doc = self.edit_text.document()
+        doc_height = int(doc.size().height() + 10)
+        height = max(36, min(doc_height, 200))
+        self.edit_text.setFixedHeight(height)
+        # 如果内容超过最大高度，QTextEdit 会自动出现滚动条，可以滚动查看
+    
     def _start_edit(self):
         """开始编辑"""
         self._editing = True
         self.text_widget.setVisible(False)
         self.edit_widget.setVisible(True)
-        self.edit_line.setFocus()
-        self.edit_line.selectAll()
+        self._adjust_edit_height()
+        self.edit_text.setFocus()
+        # 选中文本
+        cursor = self.edit_text.textCursor()
+        cursor.select(cursor.Document)
+        self.edit_text.setTextCursor(cursor)
 
     def _finish_edit(self):
         """完成编辑"""
-        new_content = self.edit_line.text().strip()
+        new_content = self.edit_text.toPlainText().strip()
         if new_content and new_content != self._content:
             self.edited.emit(self.memory_id, new_content)
             self._content = new_content
             self.content_label.setText(new_content)
         self._cancel_edit()
 
+    def _on_focus_out(self, event):
+        """失去焦点时自动保存完成编辑"""
+        if self._editing:
+            self._finish_edit()
+        # 继续传递事件
+        if event:
+            event.ignore()
+    
     def _cancel_edit(self):
         """取消编辑"""
         self._editing = False
         self.text_widget.setVisible(True)
         self.edit_widget.setVisible(False)
-        self.edit_line.setText(self._content)
+        self.edit_text.setText(self._content)
 
 
 class KeyDocumentItemWidget(QWidget):
@@ -626,28 +652,18 @@ class MemoryCardContent(QWidget):
         # Markdown 编辑器
         self.notes_editor = TextEdit(self)
         self.notes_editor.setPlaceholderText("在此记录项目笔记，支持 Markdown 格式...")
-        # 监听内容变化更新统计
+        # 监听内容变化更新统计并触发自动保存（带节流）
         self.notes_editor.textChanged.connect(self._update_notes_stats)
+        self.notes_editor.textChanged.connect(self._on_notes_changed)
+        
+        # 自动保存定时器（节流防频繁保存）
+        from PyQt5.QtCore import QTimer
+        self._auto_save_timer = QTimer(self)
+        self._auto_save_timer.setSingleShot(True)
+        self._auto_save_timer.setInterval(1000)  # 1秒后保存
+        self._auto_save_timer.timeout.connect(self._save_project_note)
+        
         main_layout.addWidget(self.notes_editor, 1)
-
-        # 保存按钮
-        self.notes_save_btn = PrimaryPushButton("保存笔记", self)
-        self.notes_save_btn.setFixedHeight(28)
-        self.notes_save_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #0e639c;
-                color: white;
-                border: none;
-                border-radius: 4px;
-                font-size: 12px;
-                padding: 0 12px;
-            }
-            QPushButton:hover {
-                background-color: #1177bb;
-            }
-        """)
-        self.notes_save_btn.clicked.connect(self._save_project_note)
-        main_layout.addWidget(self.notes_save_btn)
 
         return widget
 
@@ -659,6 +675,12 @@ class MemoryCardContent(QWidget):
         # 中文占比高，按字符数的 0.8 估算
         token_estimate = int(char_count * 0.8)
         self.notes_stats_label.setText(f"{char_count:,} 字 / {token_estimate:,} token")
+
+    def _on_notes_changed(self):
+        """内容变化时触发自动保存（带节流）"""
+        # 重置定时器，用户持续输入时不会保存，停止 1 秒后才保存
+        if hasattr(self, '_auto_save_timer') and self._auto_save_timer:
+            self._auto_save_timer.start()
 
     def _create_docs_tab(self) -> QWidget:
         """创建关键文档 Tab"""
@@ -792,7 +814,7 @@ class MemoryCardContent(QWidget):
             source = entry.get("source", "manual")
 
             item = QListWidgetItem()
-            item.setSizeHint(self._get_entry_item_size())
+            item.setSizeHint(self._get_entry_item_size(content))
             widget = EntryMemoryItemWidget(memory_id, content, enabled, source)
             widget.deleted.connect(self._delete_entry)
             widget.toggled.connect(self._toggle_entry)
@@ -800,12 +822,22 @@ class MemoryCardContent(QWidget):
             self.entries_list.addItem(item)
             self.entries_list.setItemWidget(item, widget)
 
-    def _get_entry_item_size(self):
+    def _get_entry_item_size(self, content: str):
         from PyQt5.QtCore import QSize
         width = self.entries_list.size().width()
         if width <= 0:
             width = 400
-        return QSize(width, 50)
+        
+        # 根据内容估算行数，12px字体，每行约30个中文，加上边距
+        lines = content.count('\n') + 1
+        # 自动换行，按宽度估算额外行数
+        chars_per_line = int(width / 7)  # 每个中文字符约7-8px
+        if chars_per_line > 0:
+            lines += (len(content) + chars_per_line - 1) // chars_per_line - 1
+        
+        # 行高约 20px，上下边距 + 按钮空间，多留一些余量避免遮挡
+        height = max(48, int(20 * lines) + 20)
+        return QSize(width, height)
 
     def _on_search_changed(self, text: str):
         """搜索变化"""
