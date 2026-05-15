@@ -110,6 +110,7 @@ class OpenAIChatWorker(QThread):
             "note": "",
         }
         self._current_session_messages = list(self.session_messages)
+        self._last_usage = None  # 保存最后一次 API 调用的 token usage
 
         # ========== 工具迭代中压缩支持 ==========
         self._compactor = compactor
@@ -1267,6 +1268,15 @@ class OpenAIChatWorker(QThread):
                 )
                 self._emit_with_callback("content_received", self.content_received, content)
 
+            # 保存 token usage（如果这个 chunk 包含 usage 信息，OpenAI/Groq 流式最后一个chunk会带）
+            usage = getattr(chunk, "usage", None)
+            if usage:
+                self._last_usage = {
+                    "prompt_tokens": getattr(usage, "prompt_tokens", 0),
+                    "completion_tokens": getattr(usage, "completion_tokens", 0),
+                    "total_tokens": getattr(usage, "total_tokens", 0),
+                }
+            
             # 每处理 5 个 chunk 就让渡一次 CPU，确保主线程能及时处理排队的 Qt 信号
             # 避免 content_received 等信号堆积到工具执行完毕后一次性处理
             chunk_count += 1

@@ -100,20 +100,33 @@ class AutoLoopWorker(QThread):
             # 创建并运行 worker
             try:
                 self._current_worker = self._create_worker(messages)
+                
+                # 使用本地事件循环等待 worker 完成，保持事件循环运行以便信号转发
+                from PyQt5.QtCore import QEventLoop
+                loop = QEventLoop()
+                self._current_worker.finished.connect(loop.quit)
                 self._current_worker.start()
-                self._current_worker.wait()  # 阻塞等待 worker 结束
+                loop.exec_()  # 等待 worker 完成，但保持事件循环处理信号，这样日志可以正常更新
 
                 response = self._current_worker.full_response or ""
-                # 近似 token 统计：按字符数 / 4 估算
-                token_usage = max(1, len(response) // 4)
+                # 优先使用真实 token 统计，否则按字符数 / 4 估算
+                real_usage = self._get_token_usage()
+                if real_usage > 0:
+                    token_usage = real_usage
+                else:
+                    token_usage = max(1, len(response) // 4)
                 self._engine.add_tokens(token_usage)
+                # 立即更新进度显示
+                self._emit_progress()
             except Exception as e:
                 logger.error(f"[AutoLoop] Worker error on iteration {iteration}: {e}")
-                self.error_occurred.emit(f"第{iteration}轮出错: {str(e)}")
+                self.loop_error.emit(f"第{iteration}轮出错: {str(e)}")
                 self._engine._consecutive_failures += 1
                 if self._engine._consecutive_failures >= 3:
                     self.loop_error.emit("连续失败 3 次，已停止")
                     return
+                # 更新进度显示
+                self._emit_progress()
                 continue
 
             # 生成摘要

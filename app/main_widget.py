@@ -5176,13 +5176,14 @@ class OpenAIChatToolWindow(ToolWindow):
         )
 
         # 连接信号
-        self._auto_loop_worker.iteration_started.connect(self._on_auto_loop_iteration_started)
-        self._auto_loop_worker.iteration_completed.connect(self._on_auto_loop_iteration_completed)
-        self._auto_loop_worker.progress_updated.connect(self._on_auto_loop_progress)
-        self._auto_loop_worker.loop_completed.connect(self._on_auto_loop_completed)
-        self._auto_loop_worker.loop_error.connect(self._on_auto_loop_error)
-        self._auto_loop_worker.loop_stopped.connect(self._on_auto_loop_stopped)
-        self._auto_loop_worker.log_signal.connect(self._on_auto_loop_log)
+        from PyQt5.QtCore import Qt
+        self._auto_loop_worker.iteration_started.connect(self._on_auto_loop_iteration_started, Qt.QueuedConnection)
+        self._auto_loop_worker.iteration_completed.connect(self._on_auto_loop_iteration_completed, Qt.QueuedConnection)
+        self._auto_loop_worker.progress_updated.connect(self._on_auto_loop_progress, Qt.QueuedConnection)
+        self._auto_loop_worker.loop_completed.connect(self._on_auto_loop_completed, Qt.QueuedConnection)
+        self._auto_loop_worker.loop_error.connect(self._on_auto_loop_error, Qt.QueuedConnection)
+        self._auto_loop_worker.loop_stopped.connect(self._on_auto_loop_stopped, Qt.QueuedConnection)
+        self._auto_loop_worker.log_signal.connect(self._on_auto_loop_log, Qt.QueuedConnection)
 
         self._is_auto_loop_running = True
         self._auto_loop_worker.start()
