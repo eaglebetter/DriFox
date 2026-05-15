@@ -5127,6 +5127,9 @@ class OpenAIChatToolWindow(ToolWindow):
         # 隐藏配置卡，显示运行卡
         self._auto_loop_config_card.hide()
         self._auto_loop_running_card.show()
+        # 确保停止按钮可见（彻底修复完成后重新运行时停止按钮消失的问题）
+        if hasattr(self._auto_loop_running_card, '_stop_btn'):
+            self._auto_loop_running_card._stop_btn.show()
         self._auto_loop_running_card.start_animation()
 
         # 锁定 UI
