@@ -90,6 +90,7 @@ class SkillCompleterPopup(QWidget):
         self.setMaximumHeight(280)
 
         self._list_widget = QListWidget(self)
+        self._list_widget.setFrameShape(QListWidget.NoFrame)  # 去掉默认 frame，尺寸完全由样式表控制
         self._list_widget.setFocusPolicy(Qt.NoFocus)
         self._list_widget.setStyleSheet(f"""
             QListWidget {{
@@ -110,9 +111,9 @@ class SkillCompleterPopup(QWidget):
             }}
         """)
         self._list_widget.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._list_widget.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self._list_widget.itemClicked.connect(self._on_item_clicked)
         self._list_widget.itemDoubleClicked.connect(self._on_item_double_clicked)
-        self._list_widget.itemSelectionChanged.connect(self._on_selection_changed)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
@@ -122,46 +123,53 @@ class SkillCompleterPopup(QWidget):
         self._current_query = ""
 
     def load_skills(self, skills: list, query: str = ""):
-        """加载技能列表"""
+        """加载技能列表——只添加匹配的项，不再操作隐藏项"""
         self._skills = skills
         self._current_query = query
         self._list_widget.clear()
-        
-        visible_count = 0
+
+        matched_count = 0
         for skill in skills:
+            name = skill["name"]
+            if query and query.lower() not in name.lower():
+                continue  # 不匹配直接跳过，不创建 item
+            matched_count += 1
             item = QListWidgetItem()
-            item.setData(Qt.UserRole, skill["name"])
-            
-            # 匹配过滤
-            if query and query.lower() not in skill["name"].lower():
-                item.setHidden(True)
-            else:
-                visible_count += 1
-                # 设置自定义widget
-                widget = SkillListItem(skill["name"], query)
-                item.setSizeHint(QSize(212, 36))
-                self._list_widget.addItem(item)
-                self._list_widget.setItemWidget(item, widget)
-        
-        # 没有可见项则隐藏
-        if visible_count == 0:
+            item.setData(Qt.UserRole, name)
+            widget = SkillListItem(name, query)
+            item.setSizeHint(QSize(212, 36))
+            self._list_widget.addItem(item)
+            self._list_widget.setItemWidget(item, widget)
+
+        # 没有匹配项则隐藏弹窗
+        if matched_count == 0:
             self.hide()
             return
-            
-        if self._list_widget.count() > 0:
-            self._list_widget.setCurrentRow(0)
-            
-        # 调整高度
+
+        self._list_widget.setCurrentRow(0)
         self._adjust_height()
-        
+
     def _adjust_height(self):
-        """调整弹窗高度"""
-        visible_count = sum(1 for i in range(self._list_widget.count()) if not self._list_widget.item(i).isHidden())
-        height = min(visible_count * 36 + 8, 288)
-        self.setFixedHeight(max(40, height))
-        # 触发位置重计算
-        if hasattr(self.parent(), '_on_at_trigger_check'):
-            self._pending_resize = True
+        """精确计算弹窗高度，基于已知像素值，避免 QListWidget 内部坐标系的歧义"""
+        count = self._list_widget.count()
+        if count == 0:
+            self.hide()
+            return
+
+        # 各层空间消耗（像素值均来自样式表/布局设置）：
+        #   SkillCompleterPopup 布局 margin:    4 top + 4 bottom = 8
+        #   QListWidget 样式表 border:          1 top + 1 bottom = 2
+        #   QListWidget 样式表 padding:         4 top + 4 bottom = 8
+        #   items (每个 36px):                  count * 36
+        #   总计: count * 36 + 18
+        item_area = count * 36
+        list_border_and_padding = 10  # 1(border-top) + 1(border-bottom) + 4(padding-top) + 4(padding-bottom)
+        layout_margins = self.layout().contentsMargins()
+        margin_vertical = layout_margins.top() + layout_margins.bottom()
+
+        outer_height = item_area + list_border_and_padding + margin_vertical
+        outer_height = min(outer_height, 280)
+        self.setFixedHeight(max(40, outer_height))
 
     def _on_item_clicked(self, item):
         self._select_current()
@@ -169,26 +177,13 @@ class SkillCompleterPopup(QWidget):
     def _on_item_double_clicked(self, item):
         self._select_current()
 
-    def _on_selection_changed(self):
-        """选中项变化时更新高亮"""
-        pass  # 可以在这里做额外处理
-
     def _select_current(self):
-        """选择当前项（使用可见项索引）"""
-        visible_items = [i for i in range(self._list_widget.count()) 
-                       if not self._list_widget.item(i).isHidden()]
-        if not visible_items:
-            return
-            
+        """选择当前行（所有行都是可见的）"""
         current_row = self._list_widget.currentRow()
-        if current_row in visible_items:
-            skill_name = self._list_widget.item(current_row).data(Qt.UserRole)
-            self.skillSelected.emit(skill_name)
-        else:
-            # 选中第一个可见项
-            self._list_widget.setCurrentRow(visible_items[0])
-            skill_name = self._list_widget.item(visible_items[0]).data(Qt.UserRole)
-            self.skillSelected.emit(skill_name)
+        if current_row < 0 or current_row >= self._list_widget.count():
+            return
+        skill_name = self._list_widget.item(current_row).data(Qt.UserRole)
+        self.skillSelected.emit(skill_name)
         self.hide()
 
     def key_event(self, event: QKeyEvent):
@@ -213,24 +208,19 @@ class SkillCompleterPopup(QWidget):
         return False
 
     def _move_selection(self, delta: int):
-        """移动选择，只在可见项间移动"""
-        visible_items = [i for i in range(self._list_widget.count()) if not self._list_widget.item(i).isHidden()]
-        if not visible_items:
+        """移动选择（所有项都是可见的，简化循环逻辑）"""
+        count = self._list_widget.count()
+        if count == 0:
             return
 
         current = self._list_widget.currentRow()
-        try:
-            idx = visible_items.index(current)
-        except ValueError:
-            idx = -1
-
-        new_idx = idx + delta
+        new_idx = current + delta
         if new_idx < 0:
-            new_idx = len(visible_items) - 1
-        elif new_idx >= len(visible_items):
+            new_idx = count - 1
+        elif new_idx >= count:
             new_idx = 0
-            
-        self._list_widget.setCurrentRow(visible_items[new_idx])
+
+        self._list_widget.setCurrentRow(new_idx)
 
     def show_at_cursor(self, text_edit, cursor_top_global: QPoint, prefer_below: bool = True):
         """在光标位置显示，自动换向避免超出屏幕
@@ -450,52 +440,41 @@ class SendableTextEdit(TextEdit):
         self._initializing = False
 
     def _on_at_trigger_check(self):
-        """检测 @ 触发"""
+        """检测 @ 触发——统一逻辑：始终检查光标前是否有 @，不再依赖弹窗可见性"""
         try:
             cursor = self.textCursor()
             text = self.toPlainText()
             cursor_pos = cursor.position()
-            
-            # 安全检查：确保位置有效
+
             if cursor_pos < 0 or cursor_pos > len(text):
                 return
-                
-            if cursor_pos > 0 and cursor_pos - 1 < len(text) and text[cursor_pos - 1] == "@":
-                # 找到 @ 的位置
-                self._at_trigger_pos = cursor_pos - 1
 
-                # 显示补全弹窗
-                skills = get_local_skills()
-                self._completer_popup.load_skills(skills, "")
-                self._show_completer_popup()
-            elif self._completer_popup.isVisible():
-                # 检查是否还在 @ 后面
-                text_before_cursor = text[:cursor_pos] if cursor_pos <= len(text) else text
-                last_at = text_before_cursor.rfind("@")
-                if last_at == -1:
-                    self._completer_popup.hide()
-                else:
-                    # 计算 @ 后面的内容
-                    query = text_before_cursor[last_at + 1:] if last_at + 1 <= len(text_before_cursor) else ""
-                    # 如果有空格则关闭
-                    if " " in query or "\n" in query:
+            text_before_cursor = text[:cursor_pos]
+            last_at = text_before_cursor.rfind("@")
+
+            if last_at >= 0:
+                query = text_before_cursor[last_at + 1:]
+                # 如果有空格或换行，说明 @ 触发已结束
+                if " " in query or "\n" in query:
+                    if self._completer_popup.isVisible():
                         self._completer_popup.hide()
-                    else:
-                        # 重新加载并调整位置
-                        old_height = self._completer_popup.height()
-                        self._completer_popup.load_skills(get_local_skills(), query)
-                        new_height = self._completer_popup.height()
-                        
-                        # 如果高度变化，重新计算位置
-                        if old_height != new_height and hasattr(self._completer_popup, '_show_below'):
-                            # 获取当前光标位置重新定位
-                            rect = self.cursorRect()
-                            viewport_pos = self.viewport().mapToGlobal(QPoint(0, 0))
-                            cursor_x = viewport_pos.x() + rect.left()
-                            cursor_y = viewport_pos.y() + rect.top()
-                            self._completer_popup.show_at_cursor(self, QPoint(cursor_x, cursor_y))
+                    self._at_trigger_pos = -1
+                    return
+
+                # 还在 @ 触发中
+                self._at_trigger_pos = last_at
+                self._completer_popup.load_skills(get_local_skills(), query)
+
+                # load_skills 只会在无匹配时隐藏弹窗，但不会主动显示（首次触发时弹窗处于隐藏状态）
+                # 因此需要根据是否有匹配项来决定是否显示
+                if self._completer_popup._list_widget.count() > 0:
+                    self._show_completer_popup()
+            else:
+                # 没有 @ 符号
+                if self._completer_popup.isVisible():
+                    self._completer_popup.hide()
+                self._at_trigger_pos = -1
         except Exception:
-            # 确保任何错误都不会导致崩溃
             pass
 
     def _show_completer_popup(self):
@@ -515,27 +494,31 @@ class SendableTextEdit(TextEdit):
         text = self.toPlainText()
         cursor_pos = cursor.position()
 
-        if self._at_trigger_pos >= 0:
+        # 用局部变量保存，防止后续 insertText() 触发 textChanged → _on_at_trigger_check
+        # 递归修改 self._at_trigger_pos 导致定位错乱
+        trigger_pos = self._at_trigger_pos
+
+        if trigger_pos >= 0:
             # 删除 @ 符号和后面的内容
-            cursor.setPosition(self._at_trigger_pos)
+            cursor.setPosition(trigger_pos)
             cursor.setPosition(cursor_pos, QTextCursor.KeepAnchor)
-            
+
             # 插入技能名，@符号也保留但给 @ 高亮
             insert_text = f"@{skill_name} "
             cursor.insertText(insert_text)
-            
+
             # 高亮显示 @ 部分（用特殊颜色）
-            cursor.setPosition(self._at_trigger_pos)
-            cursor.setPosition(self._at_trigger_pos + 1 + len(skill_name), QTextCursor.KeepAnchor)
-            
+            cursor.setPosition(trigger_pos)
+            cursor.setPosition(trigger_pos + 1 + len(skill_name), QTextCursor.KeepAnchor)
+
             # 创建高亮格式
             highlight_format = cursor.charFormat()
             highlight_format.setForeground(QColor("#C9A85C"))
             highlight_format.setFontWeight(700)
             cursor.setCharFormat(highlight_format)
-            
+
             # 恢复光标到插入文本之后
-            cursor.setPosition(self._at_trigger_pos + len(insert_text))
+            cursor.setPosition(trigger_pos + len(insert_text))
             self.setTextCursor(cursor)
 
         self._completer_popup.hide()
