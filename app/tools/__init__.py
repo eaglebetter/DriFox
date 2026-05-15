@@ -218,8 +218,17 @@ class BuiltinTools(QObject):
 
     def set_current_project(self, project: str):
         """设置当前项目（供更新项目笔记时使用）"""
-        print(project)
         self._current_project = project
+
+    def set_workdir(self, workdir: str):
+        """动态更新工作目录（用于 AutoLoop 自定义项目路径）"""
+        from pathlib import Path
+        self.workdir = Path(workdir)
+        if self._file_tools:
+            self._file_tools._workdir = self.workdir
+        if hasattr(self, '_task_tools') and self._task_tools:
+            self._task_tools.workdir = self.workdir
+        logger.info(f"[BuiltinTools] Workdir updated to: {self.workdir}")
 
     def edit_project_note(
         self,

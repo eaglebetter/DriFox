@@ -151,6 +151,7 @@ class OpenAIChatToolWindow(ToolWindow):
     _auto_loop_config_card: Optional[AutoLoopConfigCard] = None
     _auto_loop_running_card: Optional[AutoLoopRunningCard] = None
     _auto_loop_worker: Optional[AutoLoopWorker] = None
+    _saved_workdir: Optional[str] = None
     _history_preview_messages: Optional[List[dict]] = None
     _history_preview_title: str = ""
     insertResponse = pyqtSignal(str)
@@ -4339,6 +4340,24 @@ class OpenAIChatToolWindow(ToolWindow):
     ):
         import time
 
+        if self._is_auto_loop_running:
+            # AutoLoop 模式：只渲染到卡片，不操作浮动窗口
+            if self._current_assistant_card:
+                if isinstance(result, dict):
+                    success = result.get("success", True)
+                    content = result.get("content", "") or result.get("error", "")
+                else:
+                    success = getattr(result, "success", True) if hasattr(result, "success") else True
+                    content = str(result) if result else ""
+                self._current_assistant_card.append_tool_result(
+                    tool_name=tool_name,
+                    arguments=arguments or {},
+                    result=content,
+                    success=success,
+                    tool_call_id=tool_call_id,
+                )
+            return
+
         if (
                 self._tool_cancelled_by_user
                 and tool_call_id == self._cancelled_tool_call_id
@@ -5103,6 +5122,21 @@ class OpenAIChatToolWindow(ToolWindow):
         if self._is_auto_loop_running:
             return
 
+        # 设置项目路径（工作目录）
+        if config.project_path:
+            project_path = config.project_path.strip()
+            if project_path:
+                import os
+                abs_path = os.path.abspath(project_path)
+                if os.path.isdir(abs_path):
+                    if self.backend.tool_executor and self.backend.tool_executor.builtin_tools:
+                        self._saved_workdir = str(self.backend.tool_executor.builtin_tools.workdir)
+                        self.backend.tool_executor.builtin_tools.set_workdir(abs_path)
+                    config.project_path = abs_path
+                    logger.info(f"[AutoLoop] Workdir set to: {abs_path}")
+        else:
+            self._saved_workdir = None
+
         # 隐藏配置卡，显示运行卡
         self._auto_loop_config_card.hide()
         self._auto_loop_running_card.show()
@@ -5234,6 +5268,16 @@ class OpenAIChatToolWindow(ToolWindow):
     def _finish_auto_loop(self, message: str):
         """清理 AutoLoop 状态"""
         self._is_auto_loop_running = False
+
+        # 恢复工作目录
+        if self._saved_workdir:
+            try:
+                if self.backend.tool_executor and self.backend.tool_executor.builtin_tools:
+                    self.backend.tool_executor.builtin_tools.set_workdir(self._saved_workdir)
+                    logger.info(f"[AutoLoop] Workdir restored to: {self._saved_workdir}")
+            except Exception as e:
+                logger.warning(f"[AutoLoop] Failed to restore workdir: {e}")
+            self._saved_workdir = None
 
         # 停止动画
         if self._auto_loop_running_card:

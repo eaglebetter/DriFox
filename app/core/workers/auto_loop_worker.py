@@ -121,7 +121,7 @@ class AutoLoopWorker(QThread):
             summary = self._extract_summary(response, iteration)
             self.iteration_completed.emit(iteration, summary)
 
-            # 更新共享笔记
+            # 更新共享笔记（agent 可能自己更新了，这里也保留一份系统级备份）
             notes = self._build_notes(iteration, summary, response)
             self._engine.update_shared_notes(notes)
 
@@ -146,22 +146,44 @@ class AutoLoopWorker(QThread):
     # ========== 内部辅助 ==========
 
     def _build_messages(self, task_prompt: str, iteration: int) -> List[Dict]:
-        """构建本轮对话消息"""
-        # 使用 auto_loop 专用智能体提示词
+        """构建本轮对话消息 — 注入共享笔记实现接力"""
         system_prompt = self._agent_system_prompt_getter("auto_loop") if self._agent_system_prompt_getter else ""
 
-        shared_notes = self._engine.read_shared_notes() if iteration > 1 else ""
-
-        if shared_notes:
-            context = f"\n\n## 共享笔记（上一轮状态）\n{shared_notes}\n"
-        else:
-            context = ""
-
-        system_content = system_prompt + context
+        # 注入接力上下文
+        workflow_context = self._build_workflow_context(iteration)
+        system_content = system_prompt + "\n\n" + workflow_context
 
         messages = [{"role": "system", "content": system_content}]
         messages.append({"role": "user", "content": task_prompt})
         return messages
+
+    def _build_workflow_context(self, iteration: int) -> str:
+        """构建 Continuous Claude 风格的接力上下文"""
+        notes = self._engine.read_shared_notes() if iteration > 1 else ""
+        lines = [
+            "## CONTINUOUS WORKFLOW CONTEXT",
+            "This is part of a continuous development loop where work happens incrementally across multiple iterations.",
+            "**Important**: You don't need to complete the entire goal in one iteration.",
+            "Just make meaningful progress on ONE thing, then leave clear notes in SHARED_TASK_NOTES.md for the next iteration.",
+            "Think of it as a relay race where you're passing the baton.",
+            "",
+            "### SHARED_TASK_NOTES.md Protocol",
+            "Before starting work, read SHARED_TASK_NOTES.md to see what was done last time and what's next.",
+            "After completing your increment:",
+            "1. Update SHARED_TASK_NOTES.md with: what you did, current status, what to do next",
+            "2. Keep it concise and actionable — like a handoff note, not a full report",
+            "3. Remove outdated information to keep it current",
+            "",
+            "### Completion Signal",
+            'If the ENTIRE project goal is fully complete, output "DONE" on its own line.',
+            "Only use this when absolutely certain — not after completing just one task.",
+            "",
+        ]
+        if notes:
+            lines.append("## Current State from SHARED_TASK_NOTES.md")
+            lines.append(notes)
+
+        return "\n".join(lines)
 
     def _create_worker(self, messages: List[Dict]) -> OpenAIChatWorker:
         """创建 ChatWorker"""
