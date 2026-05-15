@@ -381,7 +381,7 @@ class AutoLoopRunningCard(QFrame):
         token_layout.setContentsMargins(0, 0, 0, 0)
         token_layout.setSpacing(8)
         token_layout.addWidget(QLabel("🔢"))
-        self._token_label = QLabel("0 / 500,000")
+        self._token_label = QLabel("0 / 500K")
         self._token_label.setStyleSheet(f"color: #A7F3D0; font-weight: bold; font-size: 13px; {FONT_CSS}")
         token_layout.addWidget(self._token_label)
         self._token_progress = QProgressBar()
@@ -584,25 +584,27 @@ class AutoLoopRunningCard(QFrame):
         # 移除 self.update() 避免与 update_tokens() 竞争导致 token 显示被覆盖
 
     def update_tokens(self, total_tokens: int):
-        """更新 token 显示（同步模式：直接用 engine 的 total_tokens 更新显示）
-        
-        注意：参数 total_tokens 是 engine 的完整 _total_tokens，而非增量。
-        调用方(_on_auto_loop_tokens_updated)已传入 engine._total_tokens。
-        """
-        # 同步模式：直接更新为传入值，不再累加
+        """更新 token 显示（使用紧凑的数字格式 K/M）"""
         self._current_tokens = total_tokens
+        
+        # 数字格式化：使用 K/M 缩写
+        def format_token(n: int) -> str:
+            if n >= 1000000:
+                return f"{n / 1000000:.1f}M"
+            elif n >= 1000:
+                return f"{n / 1000:.1f}K"
+            return str(n)
         
         # Token 显示：当前使用 / 设定总数 + 百分比
         if self._max_tokens > 0:
-            self._token_label.setText(f"{total_tokens:,} / {self._max_tokens:,}")
+            self._token_label.setText(f"{format_token(total_tokens)} / {format_token(self._max_tokens)}")
             percentage = min(100, int(total_tokens * 100 / self._max_tokens))
             self._token_progress.setValue(percentage)
             self._token_percent_label.setText(f"{percentage}%")
         else:
-            self._token_label.setText(f"{total_tokens:,}")
+            self._token_label.setText(format_token(total_tokens))
             self._token_percent_label.setText("")
         
-        # 移除 update() 调用避免频繁重绘导致闪烁
         self._token_label.repaint()
 
     def set_max_tokens(self, max_tokens: int):
