@@ -584,7 +584,6 @@ class OpenAIChatWorker(QThread):
                     self._append_to_api_cache(response_sequence)
                 self._emit_with_callback("finished_with_messages", self.finished_with_messages,
                                          current_session_messages)
-                self._check_and_notify_stage_change()
 
                 QCoreApplication.processEvents()
                 time.sleep(0.01)
@@ -1773,19 +1772,6 @@ class OpenAIChatWorker(QThread):
             )
 
         return results
-
-    def _check_and_notify_stage_change(self):
-        if not self.stage_changed_callback:
-            return
-
-        import re
-
-        pattern = re.compile(r"\[STAGE:\s*(\w+)\]", re.IGNORECASE)
-        matches = pattern.findall(self.full_response)
-
-        if matches:
-            new_stage = matches[-1].lower()
-            self.stage_changed_callback(new_stage)
 
     def _handle_error(self, error):
         from openai import (

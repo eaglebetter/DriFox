@@ -5184,6 +5184,7 @@ class OpenAIChatToolWindow(ToolWindow):
             self._auto_loop_running_card._stop_btn.update()
         self._auto_loop_running_card.start_animation()
         self._auto_loop_running_card.set_max_tokens(config.max_tokens)
+        self._auto_loop_running_card.set_task(config.task_prompt)
 
         # 锁定 UI
         self._lock_ui_for_autoloop()
@@ -5278,14 +5279,17 @@ class OpenAIChatToolWindow(ToolWindow):
                 else:
                     # 执行阶段
                     self._auto_loop_running_card.set_phase("executing")
-                    # 显示当前步骤
+                    # 显示当前步骤在状态文本中
                     step = engine._current_step
                     total_steps = engine._total_steps
                     if total_steps > 0:
-                        self._auto_loop_running_card.set_step_progress(step, total_steps)
-                    self._auto_loop_running_card._status_label.setText(
-                        f"▶ 第 {current} 轮 / 共 {total} 轮 | 步骤 {step}/{total_steps}"
-                    )
+                        self._auto_loop_running_card._status_label.setText(
+                            f"▶ 第 {current} 轮 / 共 {total} 轮 | 步骤 {step}/{total_steps}"
+                        )
+                    else:
+                        self._auto_loop_running_card._status_label.setText(
+                            f"▶ 第 {current} 轮 / 共 {total} 轮"
+                        )
 
     def _on_auto_loop_iteration_completed(self, iteration: int, summary: str):
         """迭代完成"""
@@ -5297,15 +5301,21 @@ class OpenAIChatToolWindow(ToolWindow):
         if self._auto_loop_running_card:
             self._auto_loop_running_card.append_log(text)
 
-    def _on_auto_loop_tokens_updated(self, tokens: int):
-        """Token 实时更新（直接追加到运行卡 UI）"""
-        if self._auto_loop_running_card:
-            self._auto_loop_running_card.update_tokens(tokens)
+    def _on_auto_loop_tokens_updated(self, total_tokens: int):
+        """Token 实时更新（同步模式：直接用 engine 的 total_tokens 更新显示）"""
+        if self._auto_loop_running_card and self._auto_loop_worker and self._auto_loop_worker._engine:
+            engine = self._auto_loop_worker._engine
+            # 使用 engine 的 _total_tokens 同步更新显示（而非累加本次增量）
+            self._auto_loop_running_card.update_tokens(engine._total_tokens)
 
     def _on_auto_loop_progress(self, progress: dict):
-        """更新运行卡进度"""
+        """更新运行卡进度（不更新 token，因为 update_tokens() 会专门处理）
+        
+        注意：token 更新由 update_tokens() 专门处理，避免与 progress_updated 信号的竞争条件
+        导致 token 显示被覆盖的问题。
+        """
         if self._auto_loop_running_card:
-            self._auto_loop_running_card.update_progress(progress)
+            self._auto_loop_running_card.update_progress_no_token(progress)
 
     def _on_auto_loop_completed(self, message: str):
         """AutoLoop 完成"""
@@ -5347,6 +5357,15 @@ class OpenAIChatToolWindow(ToolWindow):
         self._auto_loop_running_card.stop_animation()
         self._auto_loop_running_card.hide()
 
+        # 保存 AutoLoop 消息到会话历史
+        if self._auto_loop_worker:
+            try:
+                messages = self._auto_loop_worker.get_all_messages()
+                if messages:
+                    self._save_auto_loop_messages_to_session(messages)
+            except Exception as e:
+                logger.warning(f"[AutoLoop] Failed to save messages to session: {e}")
+
         # 清理 worker
         if self._auto_loop_worker:
             try:
@@ -5384,3 +5403,26 @@ class OpenAIChatToolWindow(ToolWindow):
         # 重新聚焦输入框
         self.input_area.setFocus()
         logger.info("[AutoLoop] UI unlocked")
+
+    def _save_auto_loop_messages_to_session(self, messages: List[Dict]):
+        """将 AutoLoop 执行的消息保存到当前会话"""
+        if not messages:
+            return
+        
+        session = self.session_manager.get_current_session()
+        if not session:
+            return
+        
+        # 获取当前会话已有的消息
+        existing_messages = list(session.messages or [])
+        
+        # 追加 AutoLoop 消息
+        existing_messages.extend(messages)
+        
+        # 更新会话
+        session.set_messages(existing_messages, preserve_compaction=True)
+        
+        logger.info(f"[AutoLoop] 保存 {len(messages)} 条消息到会话: {self._current_project}")
+        
+        # 同步保存到历史记录
+        self._save_current_session_to_history()

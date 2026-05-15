@@ -8,25 +8,17 @@ AutoLoop 卡片组件 — 配置卡 + 运行卡
 import time
 
 from PyQt5.QtCore import (
-    Qt, pyqtSignal, QTimer, QRectF,
-    QPropertyAnimation, QEasingCurve, QVariantAnimation,
+    Qt, pyqtSignal, QTimer, QVariantAnimation,
 )
-from PyQt5.QtCore import QObject
 from PyQt5.QtGui import (
     QPainter, QPen, QBrush, QLinearGradient, QColor,
-    QFont, QFontMetrics,
 )
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QTextEdit, QLineEdit, QSpinBox,
-    QFrame, QProgressBar, QSizePolicy,
-)
-from loguru import logger
+    QTextEdit, QFrame, QProgressBar, )
 from qfluentwidgets import (
-    PrimaryPushButton, PushButton, TransparentToolButton,
-    FluentIcon, BodyLabel, StrongBodyLabel, LineEdit,
-    SpinBox, ComboBox, TextEdit,
-)
+    PrimaryPushButton, PushButton, BodyLabel, StrongBodyLabel, LineEdit,
+    SpinBox, )
 from qfluentwidgets.components.widgets.card_widget import CardSeparator
 
 from app.core.auto_loop_config import AutoLoopConfig
@@ -296,40 +288,36 @@ class AutoLoopRunningCard(QFrame):
         # Token 实时累加
         self._current_tokens = 0
         self._max_tokens = 0
+        self._token_percent_label = None  # 在 _build_ui 中初始化
 
         # 当前阶段：planning / executing / completed
         self._current_phase = "preparing"
-        
-        # 步骤进度
-        self._current_step = 0
-        self._total_steps = 0
 
         self._build_ui()
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setContentsMargins(18, 12, 18, 12)
         layout.setSpacing(8)
 
-        # 标题行
+        # ---- 标题行 ----
         title_bar = QHBoxLayout()
+        title_bar.setSpacing(8)
         icon_label = QLabel("🤖")
-        icon_label.setStyleSheet("font-size: 22px;")
+        icon_label.setStyleSheet("font-size: 18px;")
         title_bar.addWidget(icon_label)
-
         title = QLabel("AutoLoop 运行中")
-        title.setStyleSheet(f"color: #EAF2FF; font-size: 15px; font-weight: bold; {FONT_CSS}")
+        title.setStyleSheet(f"color: #EAF2FF; font-size: 14px; font-weight: bold; {FONT_CSS}")
         title_bar.addWidget(title)
         title_bar.addStretch()
-
         self._stop_btn = PushButton("⏹ 停止")
-        self._stop_btn.setFixedSize(80, 30)
+        self._stop_btn.setFixedSize(70, 26)
         self._stop_btn.setStyleSheet(f"""
             PushButton {{
                 background: rgba(255, 80, 80, 0.8);
                 color: white;
                 border: none;
-                border-radius: 8px;
+                border-radius: 6px;
                 {FONT_CSS} font-size: 12px;
                 font-weight: bold;
             }}
@@ -341,57 +329,67 @@ class AutoLoopRunningCard(QFrame):
         title_bar.addWidget(self._stop_btn)
         layout.addLayout(title_bar)
 
-        # 状态区域
+        # ---- 任务目标（显示任务描述前60字）----
+        self._task_label = QLabel("")
+        self._task_label.setStyleSheet(f"""
+            color: #9BB0D3;
+            font-size: 12px;
+            {FONT_CSS}
+            padding: 4px 8px;
+            background: rgba(0,0,0,0.15);
+            border-radius: 6px;
+        """)
+        self._task_label.setWordWrap(False)
+        layout.addWidget(self._task_label)
+
+        # ---- 信息区（两行布局）----
         self._status_widget = QWidget()
-        self._status_widget.setStyleSheet("background: rgba(0,0,0,0.2); border-radius: 8px;")
+        self._status_widget.setStyleSheet("background: rgba(0,0,0,0.1); border-radius: 6px;")
         status_layout = QVBoxLayout(self._status_widget)
-        status_layout.setContentsMargins(12, 12, 12, 12)
-        status_layout.setSpacing(10)
+        status_layout.setContentsMargins(12, 10, 12, 10)
+        status_layout.setSpacing(8)
 
-        # 迭代进度
-        iter_row = QHBoxLayout()
-        iter_row.setSpacing(8)
-        iter_label = QLabel("📚 迭代")
-        iter_label.setStyleSheet(f"color: #9BB0D3; font-size: 13px; {FONT_CSS}")
-        iter_row.addWidget(iter_label)
+        # 第一行：迭代 | 耗时 | Token + 进度条 + 百分比
+        row1 = QHBoxLayout()
+        row1.setSpacing(20)
+
+        # 迭代
+        iter_w = QWidget()
+        iter_layout = QHBoxLayout(iter_w)
+        iter_layout.setContentsMargins(0, 0, 0, 0)
+        iter_layout.setSpacing(6)
+        iter_layout.addWidget(QLabel("📚"))
         self._iter_label = QLabel("0 / 0")
-        self._iter_label.setStyleSheet(f"color: #C9A85C; font-weight: bold; font-size: 14px; {FONT_CSS}")
-        iter_row.addStretch()
-        iter_row.addWidget(self._iter_label)
-        status_layout.addLayout(iter_row)
+        self._iter_label.setStyleSheet(f"color: #C9A85C; font-weight: bold; font-size: 13px; {FONT_CSS}")
+        iter_layout.addWidget(self._iter_label)
+        row1.addWidget(iter_w)
 
-        # 时间
-        time_row = QHBoxLayout()
-        time_row.setSpacing(8)
-        time_label = QLabel("⏱️ 耗时")
-        time_label.setStyleSheet(f"color: #9BB0D3; font-size: 13px; {FONT_CSS}")
-        time_row.addWidget(time_label)
+        # 耗时
+        time_w = QWidget()
+        time_layout = QHBoxLayout(time_w)
+        time_layout.setContentsMargins(0, 0, 0, 0)
+        time_layout.setSpacing(6)
+        time_layout.addWidget(QLabel("⏱"))
         self._time_label = QLabel("0秒")
-        self._time_label.setStyleSheet(f"color: #7FDBFF; font-weight: bold; font-size: 14px; {FONT_CSS}")
-        time_row.addStretch()
-        time_row.addWidget(self._time_label)
-        status_layout.addLayout(time_row)
+        self._time_label.setStyleSheet(f"color: #7FDBFF; font-weight: bold; font-size: 13px; {FONT_CSS}")
+        time_layout.addWidget(self._time_label)
+        row1.addWidget(time_w)
 
-        # Token 使用
-        token_row = QVBoxLayout()
-        token_row.setSpacing(4)
-        token_header = QHBoxLayout()
-        token_header.setSpacing(8)
-        token_label = QLabel("🔢 Token 使用")
-        token_label.setStyleSheet(f"color: #9BB0D3; font-size: 13px; {FONT_CSS}")
-        token_header.addWidget(token_label)
-        self._token_label = QLabel("0")
-        self._token_label.setStyleSheet(f"color: #A7F3D0; font-weight: bold; font-size: 14px; {FONT_CSS}")
-        token_header.addStretch()
-        token_header.addWidget(self._token_label)
-        token_row.addLayout(token_header)
-        
-        # Token 进度条
+        # Token 使用 + 进度条 + 百分比
+        token_w = QWidget()
+        token_layout = QHBoxLayout(token_w)
+        token_layout.setContentsMargins(0, 0, 0, 0)
+        token_layout.setSpacing(8)
+        token_layout.addWidget(QLabel("🔢"))
+        self._token_label = QLabel("0 / 500,000")
+        self._token_label.setStyleSheet(f"color: #A7F3D0; font-weight: bold; font-size: 13px; {FONT_CSS}")
+        token_layout.addWidget(self._token_label)
         self._token_progress = QProgressBar()
         self._token_progress.setRange(0, 100)
         self._token_progress.setValue(0)
         self._token_progress.setTextVisible(False)
         self._token_progress.setFixedHeight(8)
+        self._token_progress.setMinimumWidth(100)
         self._token_progress.setStyleSheet("""
             QProgressBar {
                 background: rgba(255, 255, 255, 0.1);
@@ -404,67 +402,58 @@ class AutoLoopRunningCard(QFrame):
                 border-radius: 4px;
             }
         """)
-        token_row.addWidget(self._token_progress)
-        status_layout.addLayout(token_row)
+        token_layout.addWidget(self._token_progress)
+        self._token_percent_label = QLabel("0%")
+        self._token_percent_label.setStyleSheet(f"color: #7FDBFF; font-size: 12px; {FONT_CSS}")
+        self._token_percent_label.setFixedWidth(32)
+        token_layout.addWidget(self._token_percent_label)
+        row1.addWidget(token_w, 1)
 
-        # 状态文本
-        status_row = QHBoxLayout()
-        status_row.setSpacing(8)
-        status_label_text = QLabel("📊 状态")
-        status_label_text.setStyleSheet(f"color: #9BB0D3; font-size: 13px; {FONT_CSS}")
-        status_row.addWidget(status_label_text)
-        status_row.addStretch()
+        status_layout.addLayout(row1)
+
+        # 第二行：状态 | 阶段
+        row2 = QHBoxLayout()
+        row2.setSpacing(20)
+
+        status_w = QWidget()
+        status_layout2 = QHBoxLayout(status_w)
+        status_layout2.setContentsMargins(0, 0, 0, 0)
+        status_layout2.setSpacing(6)
+        status_layout2.addWidget(QLabel("📊"))
         self._status_label = QLabel("▶ 准备中...")
-        self._status_label.setStyleSheet(f"color: #E5E7EB; font-weight: 600; font-size: 14px; {FONT_CSS}")
-        status_row.addWidget(self._status_label)
-        status_layout.addLayout(status_row)
+        self._status_label.setStyleSheet(f"color: #E5E7EB; font-size: 13px; {FONT_CSS}")
+        status_layout2.addWidget(self._status_label)
+        row2.addWidget(status_w)
 
-        # 阶段指示器（规划阶段 / 执行阶段）
-        phase_row = QHBoxLayout()
-        phase_row.setSpacing(8)
-        phase_label = QLabel("🎯 阶段")
-        phase_label.setStyleSheet(f"color: #9BB0D3; font-size: 13px; {FONT_CSS}")
-        phase_row.addWidget(phase_label)
-        phase_row.addStretch()
+        phase_w = QWidget()
+        phase_layout = QHBoxLayout(phase_w)
+        phase_layout.setContentsMargins(0, 0, 0, 0)
+        phase_layout.setSpacing(6)
+        phase_layout.addWidget(QLabel("🎯"))
         self._phase_label = QLabel("待开始")
         self._phase_label.setStyleSheet(f"color: #C9A85C; font-weight: bold; font-size: 13px; {FONT_CSS}")
-        phase_row.addWidget(self._phase_label)
-        status_layout.addLayout(phase_row)
-        
-        # 步骤进度指示器（执行阶段显示）
-        step_row = QHBoxLayout()
-        step_row.setSpacing(8)
-        step_label = QLabel("📋 步骤")
-        step_label.setStyleSheet(f"color: #9BB0D3; font-size: 13px; {FONT_CSS}")
-        step_row.addWidget(step_label)
-        step_row.addStretch()
-        self._step_label = QLabel("-")
-        self._step_label.setStyleSheet(f"color: #E5E7EB; font-weight: bold; font-size: 13px; {FONT_CSS}")
-        step_row.addWidget(self._step_label)
-        status_layout.addLayout(step_row)
+        phase_layout.addWidget(self._phase_label)
+        row2.addWidget(phase_w)
+
+        row2.addStretch()
+        status_layout.addLayout(row2)
 
         layout.addWidget(self._status_widget)
 
-        # 可视化日志行（单行滚动）
+        # ---- 日志行 ----
         self._log_label = QLabel("")
         self._log_label.setFixedHeight(20)
         self._log_label.setStyleSheet(f"""
             color: #7A9BBF;
             font-size: 11px;
             {FONT_CSS}
-            padding: 2px 4px;
-            background: rgba(0,0,0,0.15);
+            padding: 3px 6px;
+            background: rgba(0,0,0,0.1);
             border-radius: 4px;
         """)
         self._log_label.setWordWrap(False)
         self._log_label.setTextFormat(Qt.PlainText)
         layout.addWidget(self._log_label)
-
-        # 设置标签样式
-        for label in self._status_widget.findChildren(QLabel):
-            current = label.styleSheet()
-            if "color" not in current and label != self._iter_label:
-                label.setStyleSheet(f"color: #9BB0D3; {FONT_CSS}")
 
     def paintEvent(self, event):
         """绘制彩虹边框"""
@@ -527,7 +516,17 @@ class AutoLoopRunningCard(QFrame):
         """追加一行日志到可视化区域（单行滚动）"""
         timestamp = time.strftime("%H:%M:%S")
         self._log_label.setText(f"[{timestamp}] {text}")
-        self.update()
+        self._log_label.repaint()
+
+    def set_task(self, task: str):
+        """设置任务目标显示（显示前60字）"""
+        if task:
+            preview = task[:60]
+            if len(task) > 60:
+                preview += "..."
+            self._task_label.setText(f"🎯 {preview}")
+        else:
+            self._task_label.setText("🎯 <未设置>")
 
     def set_phase(self, phase: str):
         """设置当前阶段（planning / executing / completed）"""
@@ -558,42 +557,21 @@ class AutoLoopRunningCard(QFrame):
         
         self.update()
 
-    def set_step_progress(self, current: int, total: int):
-        """设置步骤进度"""
-        self._current_step = current
-        self._total_steps = total
-        if total > 0:
-            self._step_label.setText(f"{current} / {total}")
-        else:
-            self._step_label.setText("-")
-        self.update()
-
     # ========== 更新方法 ==========
 
-    def update_progress(self, progress: dict):
-        """更新进度显示（迭代/时间/总token）"""
+    def update_progress_no_token(self, progress: dict):
+        """更新进度显示（不更新 token，避免与 update_tokens() 竞争）
+        
+        注意：token 更新由 update_tokens() 专门处理，避免竞争条件导致显示被覆盖。
+        这个方法只更新迭代、时间、状态。
+        """
         iteration = progress.get("iteration", 0)
         max_iter = progress.get("max_iterations", 0)
         elapsed = progress.get("elapsed_str", "0秒")
-        tokens = progress.get("total_tokens", 0)
-        max_tokens = progress.get("max_tokens", 0)
         state = progress.get("state", "")
-        
-        # 步骤进度
-        current_step = progress.get("current_step", 0)
-        total_steps = progress.get("total_steps", 0)
-        if total_steps > 0:
-            self._step_label.setText(f"{current_step} / {total_steps}")
-            self._current_step = current_step
-            self._total_steps = total_steps
 
         self._iter_label.setText(f"{iteration} / {max_iter}")
         self._time_label.setText(elapsed)
-
-        # 注意：token 显示由 update_tokens() 维护（累加模式），这里不覆盖
-        # 只在 max_tokens 变化时更新 _max_tokens（用于 update_tokens 的计算）
-        if max_tokens > 0:
-            self._max_tokens = max_tokens
 
         if state == "running":
             self._status_label.setText(f"▶ 第 {iteration} 轮进行中...")
@@ -603,22 +581,29 @@ class AutoLoopRunningCard(QFrame):
             self._status_label.setText("⏹ 已停止")
         elif state == "error":
             self._status_label.setText("❌ 出错")
-        self._token_label.update()
-        self.update()
+        # 移除 self.update() 避免与 update_tokens() 竞争导致 token 显示被覆盖
 
-    def update_tokens(self, tokens: int):
-        """实时追加 token（来自 worker 的 token_update_callback，直接更新UI）"""
+    def update_tokens(self, total_tokens: int):
+        """更新 token 显示（同步模式：直接用 engine 的 total_tokens 更新显示）
+        
+        注意：参数 total_tokens 是 engine 的完整 _total_tokens，而非增量。
+        调用方(_on_auto_loop_tokens_updated)已传入 engine._total_tokens。
+        """
+        # 同步模式：直接更新为传入值，不再累加
+        self._current_tokens = total_tokens
+        
+        # Token 显示：当前使用 / 设定总数 + 百分比
         if self._max_tokens > 0:
-            new_total = self._current_tokens + tokens
-            self._current_tokens = new_total
-            self._token_label.setText(f"{new_total:,} / {self._max_tokens:,}")
-            percentage = min(100, int(new_total * 100 / self._max_tokens))
+            self._token_label.setText(f"{total_tokens:,} / {self._max_tokens:,}")
+            percentage = min(100, int(total_tokens * 100 / self._max_tokens))
             self._token_progress.setValue(percentage)
+            self._token_percent_label.setText(f"{percentage}%")
         else:
-            self._current_tokens += tokens
-            self._token_label.setText(f"{self._current_tokens:,}")
-        self._token_progress.update()
-        self._token_label.update()
+            self._token_label.setText(f"{total_tokens:,}")
+            self._token_percent_label.setText("")
+        
+        # 移除 update() 调用避免频繁重绘导致闪烁
+        self._token_label.repaint()
 
     def set_max_tokens(self, max_tokens: int):
         """设置最大 token 上限（启动时从 config 传入）"""

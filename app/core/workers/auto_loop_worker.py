@@ -53,6 +53,9 @@ class AutoLoopWorker(QThread):
 
     # === Token 实时更新信号（直接更新运行卡 UI）===
     tokens_updated = pyqtSignal(int)  # 追加的 token 数量
+    
+    # === 消息日志列表信号（用于保存到会话）===
+    messages_logged = pyqtSignal(list)  # 发送完整的消息日志列表
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -72,6 +75,12 @@ class AutoLoopWorker(QThread):
         
         # 规划阶段标志：记录首次规划后的状态，防止模型一次性完成
         self._first_planning_done = False
+        
+        # 汇总的完整消息列表（从每个 ChatWorker 获取）
+        self._all_messages: List[Dict] = []
+        
+        # Worker 完成事件（用于同步等待 finished_with_messages 信号）
+        self._worker_done_event = threading.Event()
 
     def _configure_tools_for_phase(self, tools_schema: List[Dict]) -> List[Dict]:
         """根据当前阶段配置工具集"""
@@ -127,6 +136,9 @@ class AutoLoopWorker(QThread):
         self._last_step = 0
         self._first_planning_done = False
         
+        # 清空消息列表
+        self._all_messages = []
+        
         # 发送阶段信号：规划中
         self.phase_changed.emit("planning")
         self.log_signal.emit("📋 进入规划阶段：拆解任务...")
@@ -152,6 +164,10 @@ class AutoLoopWorker(QThread):
 
             # 创建并运行 worker
             try:
+                # 重置完成事件和消息列表
+                self._worker_finished_messages = []
+                self._worker_done_event.clear()
+                
                 self._current_worker = self._create_worker(messages, current_tools)
                 
                 # 使用本地事件循环等待 worker 完成，保持事件循环运行以便信号转发
@@ -160,6 +176,10 @@ class AutoLoopWorker(QThread):
                 self._current_worker.finished.connect(loop.quit)
                 self._current_worker.start()
                 loop.exec_()  # 等待 worker 完成，但保持事件循环处理信号，这样日志可以正常更新
+                
+                # 等待 finished_with_messages 信号（最多等待 30 秒）
+                if not self._worker_done_event.wait(timeout=30):
+                    logger.warning(f"[AutoLoop] Iteration {iteration}: timeout waiting for finished_with_messages")
 
                 response = self._current_worker.full_response or ""
                 self._extract_usage_from_full_response()
@@ -170,6 +190,10 @@ class AutoLoopWorker(QThread):
                     token_usage = max(1, len(response) // 4)
                 self._engine.add_tokens(token_usage)
                 self._emit_progress()
+                
+                # 获取 ChatWorker 的完整消息并追加到列表
+                if self._worker_finished_messages:
+                    self._all_messages.extend(self._worker_finished_messages)
             except Exception as e:
                 logger.error(f"[AutoLoop] Worker error on iteration {iteration}: {e}")
                 self.loop_error.emit(f"第{iteration}轮出错: {str(e)}")
@@ -484,6 +508,13 @@ class AutoLoopWorker(QThread):
         llm_config = self._model_config_getter() if self._model_config_getter else {}
         session_messages = []
         
+        # 用于接收 worker 完成的信号和数据
+        self._worker_finished_messages: List[Dict] = []
+        
+        def on_worker_finished(msgs: list):
+            self._worker_finished_messages = list(msgs) if msgs else []
+            self._worker_done_event.set()
+        
         # 使用传入的 tools（已根据阶段过滤），如果没有则使用默认
         effective_tools = tools if tools is not None else (self._all_tools_schema or self._tools_schema or [])
         
@@ -493,8 +524,9 @@ class AutoLoopWorker(QThread):
                 self._engine.add_tokens(tokens)
                 # 更新进度显示（迭代/时间/总token）
                 self._emit_progress()
-                # 直接发射信号到运行卡，实现真正的实时更新（绕过 engine 的 get_progress）
-                self.tokens_updated.emit(tokens)
+                # 发送 engine 的 _total_tokens（总量）到运行卡，保持与 update_progress() 一致
+                # 注意：tokens 参数是本次增量，engine._total_tokens 是累加后的总量
+                self.tokens_updated.emit(self._engine._total_tokens)
                 # 检查是否已经超预算，如果超了立即取消
                 reason = self._engine.check_budget()
                 if reason:
@@ -515,6 +547,9 @@ class AutoLoopWorker(QThread):
             compactor=self._compactor,
             token_update_callback=on_token_update,
         )
+        
+        # 连接完成信号，等待消息
+        worker.finished_with_messages.connect(on_worker_finished)
 
         # 只转发日志信号到运行卡显示
         worker.content_received.connect(lambda t: self.log_signal.emit(f"生成内容..."))
@@ -601,3 +636,7 @@ class AutoLoopWorker(QThread):
     def _check_planning_complete(self, response: str) -> bool:
         """检测规划阶段是否完成（旧方法，保留兼容性）"""
         return "PLANNING_COMPLETE" in response.upper()
+    
+    def get_all_messages(self) -> List[Dict]:
+        """获取所有消息（用于保存到会话）"""
+        return self._all_messages.copy()
