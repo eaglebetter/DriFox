@@ -115,6 +115,11 @@ from app.widgets.ui_helpers import add_message_to_layout, refresh_history_card_i
     log_deletion_stats, restore_input_from_card, find_last_tool_call_id_after_round, get_first_file_operation, \
     show_diff_viewer, render_batch_to_assistant_card, find_user_round_index
 
+from app.core.auto_loop_config import AutoLoopConfig
+from app.core.auto_loop_engine import AutoLoopEngine, LoopState
+from app.core.workers.auto_loop_worker import AutoLoopWorker
+from app.widgets.auto_loop_card import AutoLoopConfigCard, AutoLoopRunningCard
+
 
 class OpenAIChatToolWindow(ToolWindow):
     name = "飘狐 DriFox"
@@ -141,6 +146,11 @@ class OpenAIChatToolWindow(ToolWindow):
     _question_floating_widget = None
     _question_tool_call_id = None
     _window_active: bool = True
+    # AutoLoop 状态
+    _is_auto_loop_running: bool = False
+    _auto_loop_config_card: Optional[AutoLoopConfigCard] = None
+    _auto_loop_running_card: Optional[AutoLoopRunningCard] = None
+    _auto_loop_worker: Optional[AutoLoopWorker] = None
     _history_preview_messages: Optional[List[dict]] = None
     _history_preview_title: str = ""
     insertResponse = pyqtSignal(str)
@@ -892,6 +902,18 @@ class OpenAIChatToolWindow(ToolWindow):
         self._memory_card.setVisible(False)
         layout.addWidget(self._memory_card)
 
+        # AutoLoop 配置卡片 - 和历史会话/记忆卡片同位置
+        self._auto_loop_config_card = AutoLoopConfigCard()
+        self._auto_loop_config_card.startRequested.connect(self._on_auto_loop_start)
+        self._auto_loop_config_card.setVisible(False)
+        layout.addWidget(self._auto_loop_config_card)
+
+        # AutoLoop 运行卡片 - 同上位置
+        self._auto_loop_running_card = AutoLoopRunningCard()
+        self._auto_loop_running_card.stopRequested.connect(self._on_auto_loop_stop)
+        self._auto_loop_running_card.setVisible(False)
+        layout.addWidget(self._auto_loop_running_card)
+
         self.node_preview = ConversationNodePreview(self)
         self.node_preview.nodeClicked.connect(self._on_node_preview_clicked)
         layout.addWidget(self.node_preview)
@@ -969,6 +991,20 @@ class OpenAIChatToolWindow(ToolWindow):
         capsule_layout = QHBoxLayout(self._toolbar_capsule)
         capsule_layout.setContentsMargins(4, 2, 4, 2)
         capsule_layout.setSpacing(0)
+
+        # AutoLoop 按钮
+        self.auto_loop_btn = TransparentToolButton(get_icon("drifox"), self._toolbar_capsule)
+        self.auto_loop_btn.setFixedSize(26, 26)
+        self.auto_loop_btn.setToolTip("AutoLoop 自动循环")
+        self.auto_loop_btn.clicked.connect(self._show_auto_loop_config)
+        capsule_layout.addWidget(self.auto_loop_btn)
+
+        # 分隔竖线
+        sep = QFrame(self._toolbar_capsule)
+        sep.setFrameShape(QFrame.VLine)
+        sep.setStyleSheet("color: rgba(255,255,255,0.12); margin: 2px 0;")
+        sep.setFixedWidth(1)
+        capsule_layout.addWidget(sep)
 
         # Diff 按钮 - 查看文件差异
         self.diff_btn = TransparentToolButton(get_icon("差异对比"), self._toolbar_capsule)
@@ -1342,7 +1378,7 @@ class OpenAIChatToolWindow(ToolWindow):
     def _hide_main_popups(self):
         """隐藏主要的悬浮面板（互斥显示）
 
-        包括：系统设置、模型配置、历史会话、记忆管理
+        包括：系统设置、模型配置、历史会话、记忆管理、AutoLoop
         不包括：工具悬浮、Todo、子智能体等工具类浮窗
         """
         self._model_config_card.hide()
@@ -1350,6 +1386,9 @@ class OpenAIChatToolWindow(ToolWindow):
         self._settings_popup.hide()
         self._memory_card.hide()
         self._provider_edit_card.hide()
+        self._auto_loop_config_card.hide()
+        if not self._is_auto_loop_running:
+            self._auto_loop_running_card.hide()
 
     def _toggle_model_config_card(self):
         """切换模型配置卡片的显示"""
@@ -1844,6 +1883,9 @@ class OpenAIChatToolWindow(ToolWindow):
                 self.current_model_btn.setToolTip(f"{agent.name}: {agent.description}\nMode: {mode}, {hidden}")
 
     def _create_new_session(self):
+        if self._is_auto_loop_running:
+            InfoBar.warning("AutoLoop", "运行中无法新建会话，请先停止 AutoLoop", parent=self, duration=3000, position=InfoBarPosition.BOTTOM)
+            return
         if self.backend.chat_engine:
             self.backend.stop_streaming()
 
@@ -4082,6 +4124,10 @@ class OpenAIChatToolWindow(ToolWindow):
         self._on_send_clicked(user_text=question.strip())
 
     def _on_send_clicked(self, user_text: str = ""):
+        if self._is_auto_loop_running:
+            InfoBar.warning("AutoLoop", "运行中无法发送消息，请先停止 AutoLoop", parent=self, duration=3000, position=InfoBarPosition.BOTTOM)
+            self.input_area.clear()
+            return
         if self._is_streaming:
             self._on_stop_clicked()
 
@@ -4165,6 +4211,10 @@ class OpenAIChatToolWindow(ToolWindow):
         # 模型开始调用工具时激活彩虹边框（即使返回内容不含文本）
         if self._current_assistant_card:
             self._current_assistant_card.start_streaming_anim()
+
+        # AutoLoop 运行期间不弹出浮动组件
+        if self._is_auto_loop_running:
+            return
 
         if tool_name == "question":
             question_text = arguments.get("question", "")
@@ -5032,3 +5082,201 @@ class OpenAIChatToolWindow(ToolWindow):
     def _clear_current_conversation(self):
         self._create_new_session()
         InfoBar.success("已清空", "开始新的对话", parent=self, duration=1500, position=InfoBarPosition.BOTTOM)
+
+    # ================================================================
+    #  AutoLoop 相关方法
+    # ================================================================
+
+    def _show_auto_loop_config(self):
+        """显示/隐藏 AutoLoop 配置卡（类似记忆卡片，点击切换）"""
+        if self._is_auto_loop_running:
+            return
+
+        if self._auto_loop_config_card.isVisible():
+            self._auto_loop_config_card.hide()
+        else:
+            self._hide_main_popups()
+            self._auto_loop_config_card.show()
+
+    def _on_auto_loop_start(self, config: AutoLoopConfig):
+        """开始 AutoLoop"""
+        if self._is_auto_loop_running:
+            return
+
+        # 隐藏配置卡，显示运行卡
+        self._auto_loop_config_card.hide()
+        self._auto_loop_running_card.show()
+        self._auto_loop_running_card.start_animation()
+
+        # 锁定 UI
+        self._lock_ui_for_autoloop()
+
+        # 获取 tools schema — 过滤掉会阻塞自动循环的工具
+        from app.tools import get_builtin_tools_schema
+        all_tools = get_builtin_tools_schema(agent_manager=self.backend.agent_manager)
+        _AUTOLOOP_BLOCKED_TOOLS = {"question", "todowrite", "todoread", "ask_question"}
+        tools_schema = [
+            t for t in all_tools
+            if t.get("function", {}).get("name", "") not in _AUTOLOOP_BLOCKED_TOOLS
+        ]
+
+        # 获取 compactor
+        compactor = None
+        if self.backend.chat_engine and hasattr(self.backend.chat_engine, '_compactor'):
+            compactor = self.backend.chat_engine._compactor
+
+        # 创建并启动 worker
+        self._auto_loop_worker = AutoLoopWorker()
+        self._auto_loop_worker.configure(
+            config=config,
+            model_config_getter=self._get_current_model_config,
+            tool_executor=self.backend.tool_executor,
+            tools_schema=tools_schema,
+            agent_system_prompt_getter=lambda name: (
+                self.backend.agent_manager.get_agent(name).prompt
+                if self.backend.agent_manager and self.backend.agent_manager.get_agent(name)
+                else ""
+            ),
+            compactor=compactor,
+        )
+
+        # 连接信号
+        self._auto_loop_worker.iteration_started.connect(self._on_auto_loop_iteration_started)
+        self._auto_loop_worker.iteration_completed.connect(self._on_auto_loop_iteration_completed)
+        self._auto_loop_worker.progress_updated.connect(self._on_auto_loop_progress)
+        self._auto_loop_worker.loop_completed.connect(self._on_auto_loop_completed)
+        self._auto_loop_worker.loop_error.connect(self._on_auto_loop_error)
+        self._auto_loop_worker.loop_stopped.connect(self._on_auto_loop_stopped)
+
+        # 转发消息信号到聊天区（用于填充 assistant card）
+        self._auto_loop_worker.content_received.connect(self._on_content_received)
+        self._auto_loop_worker.reasoning_content_received.connect(self._on_reasoning_content_received)
+        self._auto_loop_worker.thinking_started.connect(self._on_thinking_started)
+        # 工具调用内容直接渲染到卡片（跳过浮动弹窗）
+        self._auto_loop_worker.tool_call_started.connect(self._on_tool_call_started_autoloop)
+        self._auto_loop_worker.tool_result_received.connect(self._on_tool_result_received)
+        self._auto_loop_worker.error_occurred.connect(self._on_auto_loop_error)
+
+        self._is_auto_loop_running = True
+        self._auto_loop_worker.start()
+
+    def _on_auto_loop_stop(self):
+        """停止 AutoLoop（用户主动停止）"""
+        if self._auto_loop_worker and self._auto_loop_worker.isRunning():
+            self._auto_loop_worker.cancel()
+            self._auto_loop_worker.wait(5000)
+
+        self._finish_auto_loop("⏹ 用户手动停止")
+
+    def _on_auto_loop_iteration_started(self, current: int, total: int):
+        """迭代开始 — 创建消息卡片，准备接收内容"""
+        # 更新运行卡
+        if self._auto_loop_running_card:
+            self._auto_loop_running_card._status_label.setText(
+                f"▶ 第 {current} 轮 / 共 {total} 轮 — 执行中..."
+            )
+
+        # 创建用户消息卡片 — 显示本轮开始标记
+        try:
+            from datetime import datetime
+            now = datetime.now().strftime("%H:%M:%S")
+            user_text = f"🤖 AutoLoop 第 {current}/{total} 轮 [{now}]"
+            self._append_user_message(user_text, scroll=False)
+
+            # 创建 assistant 卡片用于接收流式内容
+            assistant_card = self._append_assistant_message()
+            if assistant_card:
+                self._current_assistant_card = assistant_card
+                self._current_assistant_card.start_streaming_anim()
+
+            QTimer.singleShot(100, self._scroll_to_bottom)
+        except Exception as e:
+            logger.warning(f"[AutoLoop] Failed to setup iteration cards: {e}")
+
+    def _on_auto_loop_iteration_completed(self, iteration: int, summary: str):
+        """迭代完成 — 结束当前 assistant 卡片"""
+        if self._current_assistant_card:
+            self._current_assistant_card.finish_streaming()
+            self._current_assistant_card = None
+        # 更新时间同步
+        if self._auto_loop_running_card:
+            self._auto_loop_running_card._refresh_elapsed()
+        QTimer.singleShot(100, self._scroll_to_bottom)
+
+    def _on_tool_call_started_autoloop(self, tool_call_id: str, tool_name: str, arguments: dict, round_id: str = None):
+        """AutoLoop 模式下工具调用直接渲染到卡片，不弹浮动窗口"""
+        if self._current_assistant_card:
+            self._current_assistant_card.start_streaming_anim()
+        # 工具调用内容会被渲染到 assistant card 中
+        # 不显示浮动弹窗
+
+    def _on_auto_loop_progress(self, progress: dict):
+        """更新运行卡进度"""
+        if self._auto_loop_running_card:
+            self._auto_loop_running_card.update_progress(progress)
+
+    def _on_auto_loop_completed(self, message: str):
+        """AutoLoop 完成"""
+        if self._auto_loop_running_card:
+            self._auto_loop_running_card.show_completed(message)
+        self._finish_auto_loop(message)
+
+    def _on_auto_loop_error(self, message: str):
+        """AutoLoop 出错"""
+        if self._auto_loop_running_card:
+            self._auto_loop_running_card.show_error(message)
+        self._finish_auto_loop(f"❌ {message}")
+
+    def _on_auto_loop_stopped(self):
+        """AutoLoop 已停止"""
+        self._finish_auto_loop("⏹ 已停止")
+
+    def _finish_auto_loop(self, message: str):
+        """清理 AutoLoop 状态"""
+        self._is_auto_loop_running = False
+
+        # 停止动画
+        if self._auto_loop_running_card:
+            self._auto_loop_running_card.stop_animation()
+
+        # 隐藏运行卡
+        self._auto_loop_running_card.stop_animation()
+        self._auto_loop_running_card.hide()
+
+        # 清理 worker
+        if self._auto_loop_worker:
+            try:
+                self._auto_loop_worker.quit()
+                self._auto_loop_worker.wait(1000)
+            except Exception:
+                pass
+            self._auto_loop_worker.deleteLater()
+            self._auto_loop_worker = None
+
+        # 解锁 UI
+        self._unlock_ui_after_autoloop()
+
+        # 通知用户
+        InfoBar.success("AutoLoop", message, parent=self, duration=5000, position=InfoBarPosition.BOTTOM)
+
+    def _lock_ui_for_autoloop(self):
+        """锁定 UI — 禁止发送消息和新建会话"""
+        # 禁用输入框
+        self.input_area.setDisabled(True)
+        self.input_area.setPlaceholderText("AutoLoop 运行中... 点运行卡 [⏹ 停止] 恢复操作")
+
+        # 禁用新建按钮
+        self.new_session_btn.setDisabled(True)
+
+        # 记录原有状态，用于解锁
+        logger.info("[AutoLoop] UI locked")
+
+    def _unlock_ui_after_autoloop(self):
+        """解锁 UI"""
+        self.input_area.setDisabled(False)
+        self.input_area.setPlaceholderText("给 DriFox 发送消息，Enter 发送，Shift+Enter 换行")
+        self.new_session_btn.setDisabled(False)
+
+        # 重新聚焦输入框
+        self.input_area.setFocus()
+        logger.info("[AutoLoop] UI unlocked")
