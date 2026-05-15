@@ -10,70 +10,86 @@ stays aligned with software-level provider settings.
 from typing import Any, Dict
 
 
+# 合理的输出 token 上限（基于各模型已知的 API 限制）
+# 这些值作为用户未指定 max_tokens 时的默认值，
+# 不再作为硬性截断上限（具体截断逻辑在 chat_worker 中处理）
 PROVIDER_CAPABILITIES = {
     "anthropic": {
         "context_limit": 200000,
-        "max_output_tokens": 8192,
+        "max_output_tokens": 8192,   # Claude-3.5 官方上限
+        "absolute_limit": 65536,
         "supports_vision": True,
     },
     "openai": {
         "context_limit": 128000,
-        "max_output_tokens": 16384,
+        "max_output_tokens": 16384,  # GPT-4o 官方上限
+        "absolute_limit": 65536,
         "supports_vision": True,
     },
     "gemini": {
         "context_limit": 1000000,
         "max_output_tokens": 8192,
+        "absolute_limit": 65536,
         "supports_vision": True,
     },
     "dashscope": {
         "context_limit": 1000000,
         "max_output_tokens": 8192,
+        "absolute_limit": 65536,
         "supports_vision": True,
     },
     "zhipu": {
         "context_limit": 128000,
         "max_output_tokens": 8192,
+        "absolute_limit": 65536,
         "supports_vision": True,
     },
     "deepseek": {
         "context_limit": 320000,
         "max_output_tokens": 8192,
+        "absolute_limit": 65536,
         "supports_vision": False,
     },
     "groq": {
         "context_limit": 128000,
         "max_output_tokens": 8192,
+        "absolute_limit": 65536,
         "supports_vision": False,
     },
     "minimax": {
         "context_limit": 1000000,
         "max_output_tokens": 8192,
+        "absolute_limit": 65536,
         "supports_vision": False,
     },
     "baidu_qianfan": {
         "context_limit": 128000,
         "max_output_tokens": 8192,
+        "absolute_limit": 65536,
         "supports_vision": False,
     },
     "ollama": {
         "context_limit": 128000,
         "max_output_tokens": 8192,
+        "absolute_limit": 65536,
         "supports_vision": True,
     },
     "volcengine": {
         "context_limit": 1000000,
         "max_output_tokens": 8192,
+        "absolute_limit": 65536,
         "supports_vision": False,
     },
     "lmstudio": {
         "context_limit": 128000,
         "max_output_tokens": 8192,
+        "absolute_limit": 65536,
         "supports_vision": True,
     },
     "custom": {
         "context_limit": 128000,
         "max_output_tokens": 8192,
+        "absolute_limit": 65536,
         "supports_vision": False,
     },
 }

@@ -277,6 +277,11 @@ class ToolExecutor:
         "glob": ["pattern"],
         "patch": ["path", "patch_content"],
         "bash": ["command"],
+        # 后台任务工具
+        "bg_start": ["command"],
+        "bg_stop": ["task_id"],
+        "bg_logs": ["task_id"],
+        "bg_list": [],
         "webfetch": ["url"],
         "websearch": ["query"],
         "scan_repo": [],
@@ -286,7 +291,8 @@ class ToolExecutor:
         "git_diff": [],
         "get_diagnostics": ["file_path"],
         "summarize_changes": ["text"],
-        "update_project_note": ["note_content"],
+        "edit_project_note": ["old_string", "new_string"],
+        "read_project_note": [],
         "todowrite": ["todos"],
         "todoread": [],
         "task_batch": ["tasks"],
@@ -448,6 +454,19 @@ class ToolExecutor:
             "bash": lambda: self._builtin_tools.execute_bash(
                 args.get("command", ""), args.get("timeout", 120)
             ),
+            # 后台任务工具
+            "bg_start": lambda: self._builtin_tools.bg_start(
+                args.get("command", ""),
+                args.get("cwd")
+            ),
+            "bg_stop": lambda: self._builtin_tools.bg_stop(
+                args.get("task_id", "")
+            ),
+            "bg_logs": lambda: self._builtin_tools.bg_logs(
+                args.get("task_id", ""),
+                args.get("lines", 100)
+            ),
+            "bg_list": lambda: self._builtin_tools.bg_list(),
             "webfetch": lambda: self._builtin_tools.fetch_web(
                 args.get("url", ""), args.get("format", "markdown")
             ),
@@ -467,9 +486,12 @@ class ToolExecutor:
                 args.get("text", ""), args.get("limit", 1200)
             ),
             "todowrite": lambda: self._builtin_tools.todo_write(args.get("todos", [])),
-            "update_project_note": lambda: self._builtin_tools.update_project_note(
-                args.get("note_content", ""),
-                args.get("append", False)),
+            "edit_project_note": lambda: self._builtin_tools.edit_project_note(
+                args.get("old_string", ""),
+                args.get("new_string", "")),
+            "read_project_note": lambda: self._builtin_tools.read_project_note(
+                args.get("offset", 1),
+                args.get("limit", 500)),
             "todoread": lambda: self._builtin_tools.todo_read(),
             "task_batch": lambda: (
                 # 【修复】处理 tasks 可能是 JSON 字符串的情况

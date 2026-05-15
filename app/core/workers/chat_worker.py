@@ -1075,19 +1075,55 @@ class OpenAIChatWorker(QThread):
         return self._process_response(response)
 
     def _cap_max_output_tokens(self, model: str, requested: int) -> int:
+        """
+        计算 max_tokens 的合理上限。
+
+        核心原则：
+        - 用户明确设置的 max_tokens 应被尊重，provider 默认值不再作为硬上限
+        - 仅对已知的模型特定限制做软提示（不强制截断）
+        - 对于 write/edit 等工具调用场景，需要足够的输出 token
+          来生成完整的 arguments JSON（含长 content）
+
+        Args:
+            model: 模型名称
+            requested: 用户配置中请求的 max_tokens
+
+        Returns:
+            合理的 max_tokens 值
+        """
         try:
             requested_int = int(requested)
         except Exception:
             return requested
+
         profile = get_provider_profile(self.llm_config)
-        cap = int(profile.get("max_output_tokens", requested_int))
-        if profile.get("family") == "openai":
-            model_name = (model or "").lower()
+
+        # 1. 如果用户没有设置或设置值 <= 0，使用 provider 默认值
+        if requested_int <= 0:
+            return int(profile.get("max_output_tokens", 8192))
+
+        # 2. 获取绝对上限（防止用户设置极端值）
+        absolute_limit = int(profile.get("absolute_limit", 65536))
+
+        # 3. 针对特定模型系列的软限制（仅当用户设置值超出时才生效）
+        family = profile.get("family", "")
+        model_name = (model or "").lower()
+
+        if family == "openai":
             if "gpt-4-turbo" in model_name:
-                cap = min(cap, 4096)
-            elif "o1" in model_name or "o3" in model_name:
-                cap = max(cap, min(requested_int, 32768))
-        return min(requested_int, cap)
+                # GPT-4-Turbo 实际限制 4096，超出会报错
+                if requested_int > 4096:
+                    return 4096
+            # o1/o3 系列支持高输出
+            # 其他 openai 模型一般 16384，但用户明确设更高就尊重
+        elif family == "anthropic":
+            # Claude 系列上限一般为 8192
+            pass
+        elif family == "minimax":
+            pass  # MiniMax 支持高输出
+
+        # 4. 只做绝对上限保护（避免明显错误的极值）
+        return min(requested_int, absolute_limit)
 
     def _process_response(self, response):
         self._response_content_blocks = []
@@ -1167,26 +1203,43 @@ class OpenAIChatWorker(QThread):
                     if tc.function and tc.function.arguments:
                         buffer["function"]["arguments"] += tc.function.arguments
 
+                    # 【优化】不在此处逐 chunk 执行 json.loads()。
+                    # 对于 write/edit 等超长 content 参数，arguments 可能分 50-200 个 chunks 到达。
+                    # 每次全量 json.loads() 都会失败并产生异常开销。
+                    # 改为流结束后在 _process_response 末尾一次性解析。
                     if buffer["function"]["name"] and buffer["function"]["arguments"]:
-                        try:
-                            parsed_args = json.loads(buffer["function"]["arguments"])
-                            tool_args_pending = False
-                            # 更新 _current_tool_calls 中对应 id 的 arguments
-                            if tc_id in self._current_tool_calls:
-                                self._current_tool_calls[tc_id]["function"]["arguments"] = buffer["function"][
-                                    "arguments"]
-                            # 标记已完成解析（用于决定是否发送 tool_call_started）
-                            self._current_tool_calls[tc_id]["_args_parsed"] = True
-                            self._tool_calls_buffer.pop(tc_id, None)
-                        except json.JSONDecodeError:
-                            # JSON 解析失败，记录到等待队列，等待后续 chunk
+                        # 仅在累积字符串达到一定长度时才尝试预解析（用于更新预览状态）
+                        # 对于超长场景（>1000 字符），跳过所有逐块解析，等流结束再做
+                        args_len = len(buffer["function"]["arguments"])
+                        if args_len <= 1000:
+                            try:
+                                parsed_args = json.loads(buffer["function"]["arguments"])
+                                tool_args_pending = False
+                                # 更新 _current_tool_calls 中对应 id 的 arguments
+                                if tc_id in self._current_tool_calls:
+                                    self._current_tool_calls[tc_id]["function"]["arguments"] = buffer["function"][
+                                        "arguments"]
+                                # 标记已完成解析（用于决定是否发送 tool_call_started）
+                                self._current_tool_calls[tc_id]["_args_parsed"] = True
+                                self._tool_calls_buffer.pop(tc_id, None)
+                            except json.JSONDecodeError:
+                                # 短参数的 JSON 解析失败，记录到等待队列
+                                if tc_id not in self._waiting_tool_params:
+                                    self._waiting_tool_params[tc_id] = {
+                                        "buffer": buffer,
+                                        "attempt_count": 0,
+                                        "first_failure_time": time.time(),
+                                    }
+                                self._waiting_tool_params[tc_id]["attempt_count"] += 1
+                        else:
+                            # 参数已超过 1000 字符，跳过逐块解析以节省开销
+                            # 放入等待队列，等流结束后一次性解析
                             if tc_id not in self._waiting_tool_params:
                                 self._waiting_tool_params[tc_id] = {
                                     "buffer": buffer,
                                     "attempt_count": 0,
-                                    "first_failure_time": time.time(),
+                                    "first_failure_time": None,  # None 表示流中不计算超时
                                 }
-                            # 标记已尝试解析（即使失败）
                             self._waiting_tool_params[tc_id]["attempt_count"] += 1
 
             # 提取 reasoning_content (DeepSeek V4 thinking mode)
@@ -1376,91 +1429,109 @@ class OpenAIChatWorker(QThread):
                         # 确实是空字符串
                         arguments = {}
                     else:
-                        # 无法修复，检查是否是参数太长
-                        args_len = len(arguments)
-                        if args_len > 10000:
-                            # 参数太长，返回明确的错误提示
-                            logger.warning(
-                                f"[ToolCall] ⚠️ 工具参数过长: tool={tool_name}, "
-                                f"args_len={args_len}, 请减少参数长度"
+                        # 【优化】尝试三阶段修复（不再对 10000 字符设硬限制）
+                        # 阶段1: 再次调用 smart_parse_arguments（重试一次）
+                        retry_fixed = smart_parse_arguments(arguments, tool_name)
+                        if retry_fixed is not None:
+                            arguments = retry_fixed
+                            logger.info(
+                                f"[ToolCall] ✓ 二次 JSON 智能修复成功: tool={tool_name}, "
+                                f"args_len={len(arguments)}, args={list(retry_fixed.keys())}"
                             )
-                            # 检查是否需要发送 tool_call_started 信号（参数在流式传输时未发送）
-                            preview_args = {"_raw_args": raw_args[:500], "_status": "parse_failed"}
-
-                            error_result = {
-                                "success": False,
-                                "content": None,
-                                "error": f"[参数过长] 工具参数长度 {args_len} 字符，超过限制。\n"
-                                         f"工具: {tool_name}\n"
-                                         f"建议: 请减少参数长度（建议不超过 5000 字符），"
-                                         f"可以将内容拆分为多次工具调用，例如先 write 文件头，"
-                                         f"再用 edit 追加内容，或使用其他方式分批处理。",
-                            }
-                            self._emit_with_callback(
-                                "tool_result_received",
-                                self.tool_result_received,
-                                tool_call_id, tool_name, preview_args,
-                                error_result
-                            )
-                            if not self._legacy_direct_callbacks:
-                                QApplication.processEvents()
-                            results.append({
-                                "role": "tool",
-                                "tool_call_id": tool_call_id,
-                                "name": tool_name,
-                                "arguments": {"_raw_args": raw_args[:500]},
-                                "content": error_result["error"],
-                                "success": False,
-                                "round_id": round_id,
-                            })
-                            continue
                         else:
-                            # 其他 JSON 解析错误
-                            logger.warning(
-                                f"[ToolCall] ⚠️ JSON 解析失败且无法修复，tool={tool_name}, "
-                                f"error={str(e)}, "
-                                f"raw_args='{arguments[:300]}...'"
-                            )
-                            tool_call_id = tc["id"]
-                            raw_args = tc["function"]["arguments"]
-                            round_id = f"round_{id(tc)}"
-
-                            # 检查是否需要发送 tool_call_started 信号
-                            preview_args = {"_raw_args": raw_args[:500], "_status": "parse_failed"}
-                            if self.tool_start_callback:
-                                self.tool_start_callback(tool_call_id, tool_name, preview_args, round_id)
+                            # 阶段2: 对于 write/edit 工具，尝试从原始字符串提取关键参数
+                            if tool_name in ("write", "edit", "patch", "multiedit"):
+                                extracted = _extract_tool_args_from_raw(arguments, tool_name)
+                                if extracted:
+                                    arguments = extracted
+                                    logger.info(
+                                        f"[ToolCall] ✓ 原始参数提取成功: tool={tool_name}, "
+                                        f"keys={list(extracted.keys())}"
+                                    )
+                                else:
+                                    # 阶段3: 彻底失败
+                                    logger.warning(
+                                        f"[ToolCall] ⚠️ JSON 解析失败且无法修复，tool={tool_name}, "
+                                        f"error={str(e)}, "
+                                        f"args_len={len(arguments)}, "
+                                        f"preview='{arguments[:200]}...'"
+                                    )
+                                    preview_args = {"_raw_args": raw_args[:500], "_status": "parse_failed"}
+                                    if self.tool_start_callback:
+                                        self.tool_start_callback(tool_call_id, tool_name, preview_args, round_id)
+                                    else:
+                                        self._emit_with_callback(
+                                            "tool_call_started",
+                                            self.tool_call_started,
+                                            tool_call_id, tool_name, preview_args, round_id
+                                        )
+                                    error_result = {
+                                        "success": False,
+                                        "content": None,
+                                        "error": f"[参数错误] JSON 格式无效: {str(e)}\n"
+                                                 f"工具: {tool_name}\n"
+                                                 f"原始内容(前500字): {arguments[:500]}...\n"
+                                                 f"提示: 可尝试分批执行，或使用 patch 工具替代 write。",
+                                    }
+                                    self._emit_with_callback(
+                                        "tool_result_received",
+                                        self.tool_result_received,
+                                        tool_call_id, tool_name, preview_args,
+                                        error_result
+                                    )
+                                    if not self._legacy_direct_callbacks:
+                                        QApplication.processEvents()
+                                    results.append({
+                                        "role": "tool",
+                                        "tool_call_id": tool_call_id,
+                                        "name": tool_name,
+                                        "arguments": {"_raw_args": raw_args[:500]},
+                                        "content": error_result["error"],
+                                        "success": False,
+                                        "round_id": round_id,
+                                    })
+                                    continue
                             else:
-                                self._emit_with_callback(
-                                    "tool_call_started",
-                                    self.tool_call_started,
-                                    tool_call_id, tool_name, preview_args, round_id
+                                # 非文件工具，无法修复
+                                logger.warning(
+                                    f"[ToolCall] ⚠️ JSON 解析失败且无法修复，tool={tool_name}, "
+                                    f"error={str(e)}, "
+                                    f"preview='{arguments[:200]}...'"
                                 )
-
-                            error_result = {
-                                "success": False,
-                                "content": None,
-                                "error": f"[参数错误] JSON 格式无效: {str(e)}\n"
-                                         f"工具: {tool_name}\n"
-                                         f"原始内容(前500字): {arguments[:500]}...",
-                            }
-                            self._emit_with_callback(
-                                "tool_result_received",
-                                self.tool_result_received,
-                                tool_call_id, tool_name, preview_args,
-                                error_result
-                            )
-                            if not self._legacy_direct_callbacks:
-                                QApplication.processEvents()
-                            results.append({
-                                "role": "tool",
-                                "tool_call_id": tool_call_id,
-                                "name": tool_name,
-                                "arguments": {"_raw_args": raw_args[:500]},
-                                "content": error_result["error"],
-                                "success": False,
-                                "round_id": round_id,
-                            })
-                            continue
+                                preview_args = {"_raw_args": raw_args[:500], "_status": "parse_failed"}
+                                if self.tool_start_callback:
+                                    self.tool_start_callback(tool_call_id, tool_name, preview_args, round_id)
+                                else:
+                                    self._emit_with_callback(
+                                        "tool_call_started",
+                                        self.tool_call_started,
+                                        tool_call_id, tool_name, preview_args, round_id
+                                    )
+                                error_result = {
+                                    "success": False,
+                                    "content": None,
+                                    "error": f"[参数错误] JSON 格式无效: {str(e)}\n"
+                                             f"工具: {tool_name}\n"
+                                             f"原始内容(前500字): {arguments[:500]}...",
+                                }
+                                self._emit_with_callback(
+                                    "tool_result_received",
+                                    self.tool_result_received,
+                                    tool_call_id, tool_name, preview_args,
+                                    error_result
+                                )
+                                if not self._legacy_direct_callbacks:
+                                    QApplication.processEvents()
+                                results.append({
+                                    "role": "tool",
+                                    "tool_call_id": tool_call_id,
+                                    "name": tool_name,
+                                    "arguments": {"_raw_args": raw_args[:500]},
+                                    "content": error_result["error"],
+                                    "success": False,
+                                    "round_id": round_id,
+                                })
+                                continue
 
             # 检查必需参数
             required_args = self.tool_executor.REQUIRED_ARGS.get(tool_name, [])
@@ -1521,6 +1592,11 @@ class OpenAIChatWorker(QThread):
                     except (json.JSONDecodeError, TypeError):
                         options = []
                 multiple = arguments.get("multiple", False)
+                # 确保 multiple 是 bool 类型（模型可能生成字符串 "true"/"false"）
+                if isinstance(multiple, str):
+                    multiple = multiple.strip().lower() in ["true", "1", "yes", "y"]
+                elif not isinstance(multiple, bool):
+                    multiple = bool(multiple)
                 self._emit_with_callback("question_asked", self.question_asked, tool_call_id, question_text, options,
                                          multiple)
                 self._question_pending = {
@@ -1704,10 +1780,29 @@ class OpenAIChatWorker(QThread):
             return
 
         if isinstance(error, BadRequestError):
-            if "json" in error_msg.lower() or "format" in error_msg.lower():
+            # 检测参数过大相关错误（不同 provider 的不同错误信息）
+            if any(kw in error_msg.lower() for kw in
+                   ["too large", "too long", "exceeds", "maximum length",
+                    "413", "payload", "request entity"]):
+                self._emit_with_callback(
+                    "error_occurred", self.error_occurred,
+                    f"[参数过长] 请求参数超出 provider 限制。\n"
+                    f"这可能是工具调用的参数（如 write 的 content）过长导致的。\n"
+                    f"建议: 减少一次性写入的内容长度，分批写入。\n"
+                    f"详情: {error_msg[:300]}"
+                )
+            elif "json" in error_msg.lower() or "format" in error_msg.lower():
                 self._emit_with_callback(
                     "error_occurred", self.error_occurred,
                     f"[JSON格式错误] 请确保输入有效的JSON格式: {error_msg}"
+                )
+            elif "tool" in error_msg.lower() and any(kw in error_msg.lower()
+                                                      for kw in ["argument", "parameter", "missing", "required"]):
+                self._emit_with_callback(
+                    "error_occurred", self.error_occurred,
+                    f"[工具参数错误] 模型生成的工具参数不完整或格式错误。\n"
+                    f"建议: 重新发送请求重试。\n"
+                    f"详情: {error_msg[:300]}"
                 )
             else:
                 self._emit_with_callback("error_occurred", self.error_occurred, f"[请求错误] {error_msg}")
@@ -1754,3 +1849,176 @@ class OpenAIChatWorker(QThread):
                                      f"[认证错误] API Key无效或已过期，请检查配置。")
         else:
             self._emit_with_callback("error_occurred", self.error_occurred, f"[未知错误] {error_msg}")
+
+
+def _extract_tool_args_from_raw(raw_str: str, tool_name: str) -> dict:
+    """
+    从无法解析的原始 JSON 字符串中，针对文件操作工具提取关键参数。
+
+    适用于 LLM 生成的 write/edit/patch 等工具的 arguments 字符串，
+    当标准 JSON 解析和 smart_parse_arguments 都失败时使用。
+    通过精确的字符串搜索提取 path、content、oldString、newString 等字段。
+
+    Args:
+        raw_str: 原始 arguments 字符串
+        tool_name: 工具名称
+
+    Returns:
+        提取的参数字典，提取失败返回空 dict
+    """
+    import re as _re
+
+    result = {}
+
+    # 提取 path 字段
+    path_match = _re.search(r'"path"\s*:\s*"((?:[^"\\]|\\.)*)"', raw_str)
+    if path_match:
+        result["path"] = path_match.group(1)
+
+    # 提取 filePath 字段（如果 path 没找到）
+    if "path" not in result:
+        fp_match = _re.search(r'"filePath"\s*:\s*"((?:[^"\\]|\\.)*)"', raw_str)
+        if fp_match:
+            result["path"] = fp_match.group(1)
+
+    # 提取 content 字段（write 工具）
+    # 策略：找到 "content": " 然后找到其对应的闭合 "，
+    # 对于超长 content，从 content 开始到字符串末尾提取，
+    # 然后移除末尾多余的 JSON 后缀（如 ", "path": ...})
+    if tool_name == "write":
+        content_start = raw_str.find('"content"')
+        if content_start >= 0:
+            colon = raw_str.find(':', content_start)
+            if colon >= 0:
+                # 找到 content 值的起始引号
+                first_quote = raw_str.find('"', colon)
+                if first_quote >= 0:
+                    content_begin = first_quote + 1
+                    # 尝试找闭合引号（考虑转义）
+                    content_end = -1
+                    i = content_begin
+                    while i < len(raw_str):
+                        if raw_str[i] == '\\' and i + 1 < len(raw_str):
+                            i += 2  # 跳过转义序列
+                        elif raw_str[i] == '"':
+                            content_end = i
+                            break
+                        else:
+                            i += 1
+                    if content_end > content_begin:
+                        result["content"] = raw_str[content_begin:content_end]
+
+    # 提取 oldString 和 newString（edit 工具）
+    if tool_name == "edit":
+        old_start = raw_str.find('"oldString"')
+        if old_start >= 0:
+            colon = raw_str.find(':', old_start)
+            first_quote = raw_str.find('"', colon) if colon >= 0 else -1
+            if first_quote >= 0:
+                begin = first_quote + 1
+                end = -1
+                i = begin
+                while i < len(raw_str):
+                    if raw_str[i] == '\\' and i + 1 < len(raw_str):
+                        i += 2
+                    elif raw_str[i] == '"':
+                        end = i
+                        break
+                    else:
+                        i += 1
+                if end > begin:
+                    result["oldString"] = raw_str[begin:end]
+
+        new_start = raw_str.find('"newString"')
+        if new_start >= 0:
+            colon = raw_str.find(':', new_start)
+            first_quote = raw_str.find('"', colon) if colon >= 0 else -1
+            if first_quote >= 0:
+                begin = first_quote + 1
+                end = -1
+                i = begin
+                while i < len(raw_str):
+                    if raw_str[i] == '\\' and i + 1 < len(raw_str):
+                        i += 2
+                    elif raw_str[i] == '"':
+                        end = i
+                        break
+                    else:
+                        i += 1
+                if end > begin:
+                    result["newString"] = raw_str[begin:end]
+
+    # 提取 patch_content（patch 工具）
+    if tool_name == "patch":
+        pc_start = raw_str.find('"patch_content"')
+        if pc_start >= 0:
+            colon = raw_str.find(':', pc_start)
+            first_quote = raw_str.find('"', colon) if colon >= 0 else -1
+            if first_quote >= 0:
+                begin = first_quote + 1
+                end = -1
+                i = begin
+                while i < len(raw_str):
+                    if raw_str[i] == '\\' and i + 1 < len(raw_str):
+                        i += 2
+                    elif raw_str[i] == '"':
+                        end = i
+                        break
+                    else:
+                        i += 1
+                if end > begin:
+                    result["patch_content"] = raw_str[begin:end]
+
+    # 提取 edits 数组（multiedit 工具）
+    if tool_name == "multiedit":
+        edits_start = raw_str.find('"edits"')
+        if edits_start >= 0:
+            colon = raw_str.find(':', edits_start)
+            if colon >= 0:
+                arr_start = raw_str.find('[', colon)
+                if arr_start >= 0:
+                    # 找匹配的 ]（考虑嵌套）
+                    depth = 0
+                    arr_end = -1
+                    for i in range(arr_start, len(raw_str)):
+                        if raw_str[i] == '[':
+                            depth += 1
+                        elif raw_str[i] == ']':
+                            depth -= 1
+                            if depth == 0:
+                                arr_end = i + 1
+                                break
+                    if arr_end > arr_start:
+                        try:
+                            import json
+                            result["edits"] = json.loads(raw_str[arr_start:arr_end])
+                        except json.JSONDecodeError:
+                            pass
+
+    # 也尝试从旧格式提取（content 直接作为第二个关键字段）
+    if "content" not in result and tool_name in ("write", "edit"):
+        # 如果 content 提取失败，尝试将整个字符串的剩余部分作为 content
+        # （如 truncated JSON 场景）
+        if "path" in result:
+            # 从 path 值之后的所有内容
+            path_val = result["path"]
+            path_pos = raw_str.find(path_val)
+            after_path = raw_str[path_pos + len(path_val) + 1:] if path_pos >= 0 else raw_str
+            # 尝试在 after_path 中找到 content
+            if '"content"' in after_path:
+                con_start = after_path.find('"content"')
+                colon = after_path.find(':', con_start)
+                first_quote = after_path.find('"', colon) if colon >= 0 else -1
+                if first_quote >= 0:
+                    content_begin = first_quote + 1
+                    # 找最后一个 " 或 }
+                    last_quote = after_path.rfind('"')
+                    last_brace = after_path.rfind('}')
+                    end_pos = max(last_quote, last_brace) if last_brace > last_quote else last_brace
+                    if end_pos > content_begin:
+                        candidate = after_path[content_begin:end_pos]
+                        candidate = candidate.rstrip('"').rstrip(',').rstrip()
+                        if candidate:
+                            result["content"] = candidate
+
+    return result

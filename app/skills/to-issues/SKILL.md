@@ -1,81 +1,349 @@
 ---
 name: to-issues
-description: Break a plan, spec, or PRD into independently-grabbable issues on the project issue tracker using tracer-bullet vertical slices. Use when user wants to convert a plan into issues, create implementation tickets, or break down work into issues.
+description: 快速分析项目并提交 GitHub Issues。用于代码审查、bug 报告、需求拆分。使用简单，无需用户交互，自动完成。
 ---
 
-# To Issues
+# to-issues
 
-Break a plan into independently-grabbable issues using vertical slices (tracer bullets).
+**快速将分析结果提交为 GitHub Issues。无需用户交互，自动完成。**
 
-The issue tracker and triage label vocabulary should have been provided to you — run `/setup-matt-pocock-skills` if not.
+## 核心能力
 
-## Process
+1. **智能分析** - 分析代码发现问题并描述
+2. **自动提交** - 使用项目配置的 token 和 repo 直接提交
+3. **支持多种输入**:
+   - `@to-issues 分析XXX` - 分析并提交
+   - `@to-issues #29` - 获取已有 issue 并补充分析
+   - `@to-issues fix:xxx` - 提交 bug fix issue
+   - `@to-issues feat:xxx` - 提交功能增强 issue
 
-### 1. Gather context
+## 自动推断配置
 
-Work from whatever is already in the conversation context. If the user passes an issue reference (issue number, URL, or path) as an argument, fetch it from the issue tracker and read its full body and comments.
+技能会按以下顺序获取配置：
 
-### 2. Explore the codebase (optional)
+1. **GitHub Token** (优先级):
+   - 从长期记忆 `minimax apikey` 或 `github token` 中读取
+   - 或从项目 `.drifox/app.config` 中读取
+   - 或从环境变量 `GITHUB_TOKEN` 获取
 
-If you have not already explored the codebase, do so to understand the current state of the code. Issue titles and descriptions should use the project's domain glossary vocabulary, and respect ADRs in the area you're touching.
+2. **仓库地址**:
+   - 从项目 `.git/config` 中的 `remote.origin.url` 获取
+   - 或从项目配置中读取
 
-### 3. Draft vertical slices
+3. **仓库名称格式**: `owner/repo` (自动从 git URL 解析)
 
-Break the plan into **tracer bullet** issues. Each issue is a thin vertical slice that cuts through ALL integration layers end-to-end, NOT a horizontal slice of one layer.
+## 使用流程
 
-Slices may be 'HITL' or 'AFK'. HITL slices require human interaction, such as an architectural decision or a design review. AFK slices can be implemented and merged without human interaction. Prefer AFK over HITL where possible.
+### 模式 1: 快速分析提交 (推荐)
 
-<vertical-slice-rules>
-- Each slice delivers a narrow but COMPLETE path through every layer (schema, API, UI, tests)
-- A completed slice is demoable or verifiable on its own
-- Prefer many thin slices over few thick ones
-</vertical-slice-rules>
+```
+@to-issues 分析当前项目的内存泄漏问题
+```
 
-### 4. Quiz the user
+**执行步骤:**
+1. 扫描项目代码
+2. 识别问题点
+3. 生成 issue 描述
+4. 直接提交到 GitHub
 
-Present the proposed breakdown as a numbered list. For each slice, show:
+### 模式 2: Bug 报告
 
-- **Title**: short descriptive name
-- **Type**: HITL / AFK
-- **Blocked by**: which other slices (if any) must complete first
-- **User stories covered**: which user stories this addresses (if the source material has them)
+```
+@to-issues fix: BackgroundTaskManager 线程安全问题
+```
 
-Ask the user:
+**自动生成:**
+- 标题: `[Bug] BackgroundTaskManager 线程安全问题`
+- 标签: `bug, high-priority`
+- 模板: 包含问题描述、复现步骤、预期行为
 
-- Does the granularity feel right? (too coarse / too fine)
-- Are the dependency relationships correct?
-- Should any slices be merged or split further?
-- Are the correct slices marked as HITL and AFK?
+### 模式 3: 功能增强
 
-Iterate until the user approves the breakdown.
+```
+@to-issues feat: 添加上下文压缩可视化
+```
 
-### 5. Publish the issues to the issue tracker
+**自动生成:**
+- 标题: `[Enhancement] 添加上下文压缩可视化`
+- 标签: `enhancement`
+- 模板: 包含功能描述、验收标准、技术方案
 
-For each approved slice, publish a new issue to the issue tracker. Use the issue body template below. Apply the `needs-triage` triage label so each issue enters the normal triage flow.
+### 模式 4: 代码审查issue (参考已有issue)
 
-Publish issues in dependency order (blockers first) so you can reference real issue identifiers in the "Blocked by" field.
+```
+@to-issues 参考 #29 分析代码并提交新issue
+```
 
-<issue-template>
-## Parent
+## 提交脚本模板
 
-A reference to the parent issue on the issue tracker (if the source was an existing issue, otherwise omit this section).
+技能内置提交脚本，可在项目根目录执行：
 
-## What to build
+```python
+#!/usr/bin/env python3
+"""
+快速提交 issue 到 GitHub
+"""
+import requests
+import json
+import sys
+import re
 
-A concise description of this vertical slice. Describe the end-to-end behavior, not layer-by-layer implementation.
+# ========== 配置 (自动获取) ==========
+TOKEN = ''  # 将在运行时从以下来源获取
+REPO = ''   # 将在运行时从 git config 获取
 
-## Acceptance criteria
+def get_config():
+    """自动获取配置"""
+    config = {}
+    
+    # 1. 从环境变量
+    config['token'] = os.environ.get('GITHUB_TOKEN', '')
+    config['repo'] = os.environ.get('GITHUB_REPO', '')
+    
+    # 2. 从 .drifox/app.config
+    config_file = Path('.drifox/app.config')
+    if config_file.exists():
+        try:
+            with open(config_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                config['token'] = config.get('token') or data.get('github_token', '')
+                config['repo'] = config.get('repo') or data.get('github_repo', '')
+        except:
+            pass
+    
+    # 3. 从 .git/config 解析 repo
+    git_config = Path('.git/config')
+    if git_config.exists() and not config.get('repo'):
+        with open(git_config, 'r', encoding='utf-8') as f:
+            content = f.read()
+            match = re.search(r'git@github\.com:([^/]+)/([^.]+)\.git', content)
+            if match:
+                config['repo'] = f"{match.group(1)}/{match.group(2)}"
+    
+    # 4. 从长期记忆读取 token
+    # 注意: 需要在调用时传入 token
+    
+    return config
 
-- [ ] Criterion 1
-- [ ] Criterion 2
-- [ ] Criterion 3
+def submit_issue(title, body, labels=None):
+    """提交单个 issue"""
+    config = get_config()
+    if not config.get('token'):
+        print("❌ 未找到 GitHub Token")
+        return None
+    
+    repo = config.get('repo') or 'martin98-afk/DriFox'  # 默认值
+    
+    headers = {
+        'Authorization': f"token {config['token']}",
+        'Accept': 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+        'Content-Type': 'application/json'
+    }
+    
+    data = {
+        'title': title,
+        'body': body,
+        'labels': labels or []
+    }
+    
+    try:
+        resp = requests.post(
+            f'https://api.github.com/repos/{repo}/issues',
+            headers=headers,
+            json=data,
+            timeout=15
+        )
+        
+        if resp.status_code == 201:
+            result = resp.json()
+            print(f"✅ Created #{result['number']}: {result['html_url']}")
+            return result
+        elif resp.status_code == 403:
+            # 尝试无 labels 重试
+            data['labels'] = []
+            resp = requests.post(
+                f'https://api.github.com/repos/{repo}/issues',
+                headers=headers,
+                json=data,
+                timeout=15
+            )
+            if resp.status_code == 201:
+                result = resp.json()
+                print(f"✅ Created #{result['number']} (no labels): {result['html_url']}")
+                return result
+            print(f"❌ 403: {resp.text[:200]}")
+        else:
+            print(f"❌ Failed: {resp.status_code} - {resp.text[:200]}")
+    except Exception as e:
+        print(f"❌ Error: {e}")
+    
+    return None
 
-## Blocked by
+def batch_submit(issues):
+    """批量提交 issues"""
+    results = []
+    for issue in issues:
+        print(f"\n📝 提交: {issue['title']}")
+        result = submit_issue(
+            title=issue['title'],
+            body=issue['body'],
+            labels=issue.get('labels', [])
+        )
+        results.append(result)
+        if result:
+            time.sleep(0.5)  # 避免限流
+    return results
 
-- A reference to the blocking ticket (if any)
+if __name__ == '__main__':
+    # 示例: 从命令行参数获取 issues
+    issues_json = sys.argv[1] if len(sys.argv) > 1 else '[]'
+    issues = json.loads(issues_json)
+    batch_submit(issues)
+```
 
-Or "None - can start immediately" if no blockers.
+## 常用 Issue 模板
 
-</issue-template>
+### Bug 模板
+```markdown
+## 问题描述
 
-Do NOT close or modify any parent issue.
+[简洁描述问题]
+
+## 复现步骤
+
+1. [步骤1]
+2. [步骤2]
+3. [步骤3]
+
+## 预期行为
+
+[期望的正确行为]
+
+## 实际行为
+
+[实际发生的错误行为]
+
+## 影响范围
+
+[哪些功能/模块受影响]
+
+## 优先级
+
+- [ ] 高 - 服务不可用
+- [ ] 中 - 功能受损但可 workaround
+- [ ] 低 - 体验问题
+```
+
+### Enhancement 模板
+```markdown
+## 功能描述
+
+[简洁描述要实现的功能]
+
+## 背景/动机
+
+[为什么需要这个功能]
+
+## 验收标准
+
+- [ ] 标准1
+- [ ] 标准2
+- [ ] 标准3
+
+## 技术方案
+
+[简要技术方案，如果有的话]
+
+## 风险评估
+
+- [ ] 影响范围
+- [ ] 回滚方案
+```
+
+### Question 模板
+```markdown
+## 问题
+
+[具体问题]
+
+## 上下文
+
+[相关代码片段或截图]
+
+## 已尝试的方案
+
+[已尝试的方案及结果]
+
+## 环境信息
+
+- Python: x.x.x
+- OS: Windows/Linux
+- 相关配置: xxx
+```
+
+## 快速执行示例
+
+### 分析并提交单个问题
+```python
+submit_issue(
+    title="[Bug] 虚拟滚动内存泄漏",
+    body="""## 问题描述
+    
+长会话后内存持续增长。
+
+## 验收标准
+
+- [ ] 回收的消息批次数据也被清理
+- [ ] 长时间运行内存稳定
+""",
+    labels=["bug", "performance"]
+)
+```
+
+### 批量提交
+```python
+issues = [
+    {"title": "[Bug] Hook重复触发", "body": "...", "labels": ["bug"]},
+    {"title": "[Enhancement] 权限缓存失效", "body": "...", "labels": ["enhancement"]},
+]
+batch_submit(issues)
+```
+
+## 错误处理
+
+| 错误码 | 处理方式 |
+|--------|----------|
+| 401 | 提示 Token 无效，建议检查配置 |
+| 403 | 移除 labels 后重试，或提示权限不足 |
+| 404 | 提示仓库不存在，检查 repo 配置 |
+| 422 | 提示请求格式错误，检查 issue 内容 |
+| 网络错误 | 自动重试 2 次，间隔 2 秒 |
+
+## 标签推荐
+
+| 场景 | 标签 |
+|------|------|
+| Bug 修复 | `bug` |
+| 功能增强 | `enhancement` |
+| 性能优化 | `performance` |
+| 代码重构 | `refactoring` |
+| 文档改进 | `documentation` |
+| 测试相关 | `tests` |
+| 高优先级 | `high-priority` |
+| 需要审查 | `needs-review` |
+| 讨论中 | `discussion` |
+
+## 最佳实践
+
+1. **标题格式**: `[类型] 简洁描述` (如 `[Bug] 内存泄漏`)
+2. **一个 issue 一个问题**: 便于追踪和管理
+3. **包含验收标准**: 让实现者清楚知道完成条件
+4. **添加相关标签**: 便于筛选和优先级排序
+5. **引用相关 issue**: 使用 `#number` 关联相关问题
+
+## 与其他技能配合
+
+- `@brainstorming` 后 → 用 `@to-issues` 拆分为可执行任务
+- `@diagnose` 后 → 用 `@to-issues` 提交发现的问题
+- 代码审查后 → 直接用 `@to-issues` 提交改进建议

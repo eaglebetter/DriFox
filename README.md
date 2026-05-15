@@ -18,19 +18,21 @@
 
 <h1 align="center">DriFox 飘狐 — 一个轻量化 AI 桌面对话助手</h1>
 
-![对话框界面](images/上下文压缩.png)
-
 ---
 
 ## 设计理念
 
 **不做大而全的 IDE。** DriFox 只是一个对话框 —— 随时调出，随意提问，随性分支。
 
+### 核心特性
+
 | 特性 | 说明 |
 |------|------|
 | 🎯 **极简界面** | 仅一个悬浮置顶对话框，无项目概念，随开随用 |
 | 🔀 **分支会话** | 问题分叉，多个窗口并行探索不同答案，互不干扰 |
-| 🧩 **多窗口粘合** | 多个窗口粘合后可一起拖动一起管理，双击边框快速拆分 |
+| 🔄 **会话并行** | 多窗口并行处理不同任务，会话管理+历史追踪 |
+| 📊 **上下文压缩** | 智能 Token 预算控制，长对话自动摘要压缩 |
+| 🧩 **多窗口粘合** | 🔜 窗口组管理，批量拖拽（Roadmap） |
 | 🧠 **长记忆** | 越用越懂你的偏好、习惯、禁忌 |
 | 🔌 **Hook 系统** | 可扩展的事件钩子系统，支持在特定事件触发自定义脚本 |
 | 🛠️ **代码工具** | 30+ 工具：读、写、搜索、执行、diff |
@@ -69,25 +71,99 @@ python main.py
 
 ---
 
-## 使用方式
+## 核心功能详解
 
-### 基本操作
-1. **提问** – 底部输入框发送消息，回车即发
-2. **分支** – 标题栏点击「分支」按钮，从当前对话创建并行窗口
-3. **复制窗口** – 创建多个独立对话框，同时处理不同任务
+### 会话并行
 
-### 窗口操作
-| 操作 | 说明 |
+DriFox 支持多窗口并行处理不同任务，让你可以同时探索多个解决方案。
+
+![会话并行](images/会话并行.png)
+
+| 功能 | 说明 |
 |------|------|
-| 点击标题栏「分支」| 从当前对话分叉，创建新窗口继续探索 |
-| 点击标题栏「复制」| 创建当前窗口的独立副本 |
-| 拖拽标题栏 | 移动窗口位置 |
-| `Ctrl+L` | 清除当前会话 |
+| 分支会话 | 从当前对话分叉，创建独立的新窗口 |
+| 会话管理 | 查看最近会话和最活跃会话，方便任务切换 |
+| 并行探索 | 多个窗口同时运行，互不干扰 |
+| 待办追踪 | 内置待办清单功能，跟踪任务进度 |
+
+---
+
+### 代码差异对比
+
+DriFox 内置可视化的代码差异对比工具，让你可以清晰看到 AI 助手的修改内容。
+
+![代码差异对比](images/代码差异对比.png)
+
+| 功能 | 说明 |
+|------|------|
+| 文件列表 | 侧边栏显示所有已修改的文件及其增减行数 |
+| 差异高亮 | 新增内容绿色显示，删除内容红色显示 |
+| 多文件对比 | 支持同时查看多个文件的修改 |
+| 统计摘要 | 显示总体的代码增减统计 |
+
+---
+
+### 上下文压缩
+
+DriFox 内置智能的上下文压缩系统，确保长对话不会超出 Token 限制。
+
+![上下文压缩](images/上下文压缩.png)
+
+| 机制 | 说明 |
+|------|------|
+| Token 预算控制 | 实时显示当前上下文占用和预算上限 |
+| 智能压缩策略 | 尾保留策略 + 工具调用配对保护 |
+| LLM 摘要 | 使用专门的 compaction agent 生成摘要 |
+| 可视化显示 | 通过环形图直观显示占用比例 |
+
+**压缩触发条件：**
+- Token 占用超过预算阈值（默认 80%）
+- 工具迭代中自动增量压缩
+- 手动触发压缩（通过指令）
+
+---
+
+### Hook 系统
+
+DriFox 支持通过可视化界面配置和管理 Hook 事件钩子。
+
+![Hook配置](images/hooks配置.png)
+
+#### 支持的事件类型
+
+| 事件 | 触发时机 |
+|------|----------|
+| **SessionStart** | 新会话启动时 |
+| **PreUserMessage** | 用户消息发送前 |
+| **PostUserMessage** | 用户消息发送后 |
+| **PreAssistantMessage** | AI 助手回复前 |
+| **PreToolUse** | 工具执行前（可 BLOCK） |
+| **PostToolUse** | 工具执行后 |
+
+#### Hook 配置
+
+- 通过设置界面可视化配置 Hook
+- 支持启用/禁用单个 Hook
+- 支持自定义工作目录和环境变量
+- 支持输出结构化显示
+- 支持三种类型：**command** / **http** / **python function**
+
+#### 决策控制
+
+Hook 可通过以下方式控制流程：
+- Exit code 2 → BLOCK（跳过工具执行）
+- JSON 输出 `{"decision": "block"}` → BLOCK
+- JSON 输出 `{"decision": "continue"}` → 继续
+
+---
 
 ### 浮动窗口特性
-- **穿透模式**：鼠标可穿透窗口到达下层应用
-- **透明度调节**：0-100% 可调
-- **锁定按钮**：在穿透模式下仍可交互的独立控制点
+
+| 特性 | 说明 |
+|------|------|
+| 穿透模式 | 鼠标可穿透窗口到达下层应用 |
+| 透明度调节 | 0-100% 可调 |
+| 锁定按钮 | 在穿透模式下仍可交互的独立控制点 |
 
 ---
 
@@ -108,9 +184,10 @@ python main.py
 ├─────────────────────────────────────────────────────────┤
 │  引擎层                                                  │
 │  ├── ChatEngine – 对话上下文组装与 LLM 调用              │
+│  ├── ContextBuilder – 消息规范化与系统提示注入          │
 │  ├── ToolExecutor – 工具执行（文件/终端/网络）          │
 │  ├── AgentManager – Agent 定义加载与切换                │
-│  ├── ContextManager – Token 预算控制与压缩              │
+│  ├── HistoryCompactor – 上下文压缩                       │
 │  ├── SubAgentExecutor – 子智能体并行执行                │
 │  └── HookManager – Hook 生命周期管理与事件触发          │
 ├─────────────────────────────────────────────────────────┤
@@ -158,7 +235,7 @@ permission:
 
 ## 工具系统（30+）
 
-### 内置工具 (BuiltinTools)
+### 内置工具
 
 | 类别 | 工具 |
 |------|------|
@@ -172,91 +249,46 @@ permission:
 
 ---
 
-## Hook 系统
-
-Hook 系统允许你在特定事件触发时执行自定义脚本，扩展 DriFox 的能力：
-
-### 支持的事件类型
-| 事件 | 触发时机 |
-|------|----------|
-| **SessionStart** | 新会话启动时 |
-| **BeforeReply** | AI 回复之前 |
-| **AfterReply** | AI 回复之后 |
-| **ToolComplete** | 工具执行完成后 |
-
-### Hook 配置
-- 通过设置界面可视化配置 Hook
-- 支持启用/禁用单个 Hook
-- 支持自定义工作目录和环境变量
-- 支持输出结构化显示
-
-### Hook 脚本支持
-- 支持任何可执行脚本（.py, .sh, .cmd, .bat 等）
-- 事件信息通过环境变量传递给脚本
-- 脚本输出会被捕获并显示在聊天窗口
-
----
-
 ## Skills 系统
 
-Skills 是扩展 AI 能力的可安装模块，每个 Skill 包含 `SKILL.md` 定义工作流程：
+Skills 是扩展 AI 能力的可安装模块，每个 Skill 包含 `SKILL.md` 定义工作流程。
 
 ### 内置 Skills (18个)
 
 | Skill | 功能 | 触发条件 |
 |-------|------|----------|
-| **brainstorming** | 头脑风暴与创意发散 | 用户表达创意需求 |
-| **caveman** | 极简压缩沟通（减少75% token）| 用户说 "caveman mode" |
-| **diagnose** | 硬 bug 与性能回归诊断 | 用户报告 bug |
-| **find-skills** | 发现和安装新技能 | 用户询问如何做某事 |
-| **tdd** | 测试驱动开发（红-绿-重构）| 用户要求 TDD 开发 |
-| **to-issues** | 将计划转换为 Issue 清单 | 用户需要拆解任务 |
-| **write-a-skill** | 创建新的 Skill | 用户要创建技能 |
-| **writing-plans** | 计划文档编写 | 用户有需求要规划 |
-| **git-commit** | 智能 git 提交 | 用户要求提交代码 |
-| **grill-me** | 挑战性提问评审 | 用户需要挑战性反馈 |
-| **grill-with-docs** | 基于文档的问答评审 | 用户提供文档审查 |
-| **triage** | 任务分类与优先级排序 | 用户需要任务分诊 |
-| **improve-codebase-architecture** | 代码架构改进 | 用户要重构代码 |
-| **setup-matt-pocock-skills** | Matt Pocock 学习路径 | 用户想学习技能 |
-| **minimax-image-understanding** | MiniMax 图片理解 | 用户发送截图 |
-| **zoom-out** | 宏观视角分析 | 用户需要全局视野 |
-| **to-prd** | 需求文档生成 | 用户需要 PRD |
-| **skill-creator** | Skill 创建指南 | 用户要创建技能 |
+| brainstorming | 头脑风暴与创意发散 | 用户表达创意需求 |
+| caveman | 极简压缩沟通（减少75% token）| 用户说 "caveman mode" |
+| diagnose | 硬 bug 与性能回归诊断 | 用户报告 bug |
+| find-skills | 发现和安装新技能 | 用户询问如何做某事 |
+| tdd | 测试驱动开发（红-绿-重构）| 用户要求 TDD 开发 |
+| to-issues | 将计划转换为 Issue 清单 | 用户需要拆解任务 |
+| write-a-skill | 创建新的 Skill | 用户要创建技能 |
+| writing-plans | 计划文档编写 | 用户有需求要规划 |
+| git-commit | 智能 git 提交 | 用户要求提交代码 |
+| grill-me | 挑战性提问评审 | 用户需要挑战性反馈 |
+| grill-with-docs | 基于文档的问答评审 | 用户提供文档审查 |
+| triage | 任务分类与优先级排序 | 用户需要任务分诊 |
+| improve-codebase-architecture | 代码架构改进 | 用户要重构代码 |
+| setup-matt-pocock-skills | Matt Pocock 学习路径 | 用户想学习技能 |
+| minimax-image-understanding | MiniMax 图片理解 | 用户发送截图 |
+| zoom-out | 宏观视角分析 | 用户需要全局视野 |
+| to-prd | 需求文档生成 | 用户需要 PRD |
+| skill-creator | Skill 创建指南 | 用户要创建技能 |
 
 ### Skill 标准结构
 
 ```
 skill-name/
 ├── SKILL.md              # 主文件 (必需)
-├── REFERENCES.md         # 参考文档 (可选)
-├── scripts/              # 工具脚本 (可选)
-├── references/           # 参考资料 (可选)
+├── references/           # 参考文档 (可选)
+├── scripts/               # 工具脚本 (可选)
 └── assets/               # 资源文件 (可选)
-```
-
-### SKILL.md 格式
-
-```yaml
----
-name: skill-name
-description: "功能描述。Use when [触发条件]"
----
-
-# 内容...
 ```
 
 ### 自定义 Skill
 
-在 `.drifox/skills/<name>/` 下添加 Skill：
-
-```bash
-.drifox/skills/my-skill/
-├── SKILL.md          # 必填，技能定义
-└── references/       # 可选，参考文档
-```
-
-使用 `@技能名` 触发，如 `@brainstorming`
+在 `.drifox/skills/<name>/` 下添加 Skill，使用 `@技能名` 触发。
 
 ---
 
@@ -267,110 +299,37 @@ description: "功能描述。Use when [触发条件]"
 - **冲突管理**：相同组的新记忆压制旧记忆
 - **分类组织**：偏好/约束/习惯分类存储
 
-### SQLite 数据库结构
+### SQLite 数据库
 
 数据库文件：`.drifox/sessions.db`
 
 | 表名 | 用途 | 主要字段 |
 |------|------|----------|
-| `sessions` | 会话历史 | session_id, canvas_id, title, messages(JSON), system_prompt, compaction_state, created_at, updated_at |
-| `memories` | 长期记忆 | memory_id, canvas_id, content, enabled, confidence, category, source, last_accessed |
-| `file_operations` | 文件操作撤销 | id, session_id, call_id, tool_name, file_path, backup_path |
+| sessions | 会话历史 | session_id, title, messages, compaction_state, created_at |
+| memories | 长期记忆 | memory_id, content, confidence, category, source |
+| file_operations | 文件操作撤销 | id, tool_name, file_path, backup_path |
 
-### 数据目录结构
+### 数据目录
 
 ```
 .drifox/
 ├── sessions.db            # SQLite 数据库
 ├── skills/                # 用户自定义 skills
-├── issues/               # Issue 追踪 (0001_xxx.md)
-├── tasks/                # 定时任务 (.task.md)
-├── backups/             # 增量备份 (UUID命名)
-└── archived/            # 会话归档 (JSON格式)
-```
-
-### 归档策略
-
-- **会话归档**：`.drifox/archived/*.json` - 压缩后的会话历史
-- **文件备份**：`.drifox/backups/<UUID>/` - 文件修改前后备份
-- **文件操作撤销**：通过 `file_operations` 表记录，支持回滚
-
----
-
-## 项目结构
-
-```
-DriFox/
-├── main.py                    # 运行入口
-├── requirements.txt           # 依赖
-├── app/
-│   ├── main_widget.py         # 主窗口
-│   ├── side_dock_area.py      # 浮动窗口管理
-│   ├── agents/                # Agent 定义
-│   │   ├── build.md
-│   │   ├── plan.md
-│   │   ├── explore.md
-│   │   ├── summary.md
-│   │   ├── compaction.md
-│   │   └── ...
-│   ├── skills/                # Skills 定义
-│   │   ├── SKILLS.md
-│   │   ├── brainstorming/
-│   │   ├── tdd/
-│   │   ├── caveman/
-│   │   └── ...
-│   ├── tools/                 # 工具实现
-│   │   ├── __init__.py        # BuiltinTools 注册
-│   │   ├── file_tools.py
-│   │   ├── terminal_tools.py
-│   │   ├── web_tools.py
-│   │   ├── task_tools.py
-│   │   └── diagnostics_tools.py
-│   ├── core/                  # 核心引擎
-│   │   ├── chat_engine.py
-│   │   ├── agent_manager.py
-│   │   ├── memory_manager.py
-│   │   ├── context_manager.py
-│   │   └── hook_manager.py     # Hook 管理
-│   ├── utils/                 # 工具模块
-│   │   ├── chat_session.py
-│   │   ├── session_store.py
-│   │   ├── memory_store.py
-│   │   ├── config.py           # 配置与版本
-│   │   └── update_checker.py   # 自动更新检查
-│   └── widgets/               # UI 组件
-│       ├── message_card.py
-│       ├── diff_viewer.py
-│       ├── segment_widget.py
-│       ├── hook_setting_card.py # Hook 设置卡片
-│       ├── context_usage_ring.py
-│       └── ...
-├── .drifox/                   # 应用数据
-│   ├── sessions.db            # SQLite 会话与记忆
-│   ├── skills/                # 用户自定义 skills
-│   ├── issues/               # Issue 追踪
-│   ├── tasks/                # 任务管理
-│   ├── backups/              # 文件备份
-│   └── archived/             # 归档会话
-├── docs/
-│   ├── adr/                  # 架构决策记录
-│   └── superpowers/          # 扩展能力规格
-├── icons/                    # 图标资源
-└── images/                   # Logo 等图片
+├── issues/               # Issue 追踪
+├── tasks/                # 定时任务
+├── backups/             # 增量备份
+└── archived/            # 会话归档
 ```
 
 ---
 
-## 技术选型
+## Roadmap
 
-| 技术 | 用途 |
-|------|------|
-| **PyQt5** | GUI 框架 |
-| **PyQt-Fluent-Widgets** | Fluent Design 组件库 |
-| **Loguru** | 日志系统 |
-| **SQLite** | 会话与记忆持久化 |
-| **OpenAI Python Client** | LLM API 调用 |
-| **FastAPI** | 可能的 Web 扩展 |
+以下功能正在规划中：
+
+| 功能 | 说明 | 状态 |
+|------|------|------|
+| 🧩 **多窗口粘合** | 窗口组管理，多个窗口粘合后可一起拖动一起管理 | 🔜 开发中 |
 
 ---
 
@@ -394,16 +353,21 @@ permission:
 
 ### 自定义 Skill
 
-使用 `skill-creator` Skill 创建新技能：
-
-```
-.drifox/skills/my-skill/
-├── SKILL.md          # 必填，技能定义
-├── docs/             # 可选，参考文档
-└── references/       # 可选，资源文件
-```
-
 使用 `@skill-creator` 开始创建流程。
+
+### 工具注册
+
+在 `app/tools/` 的对应模块中添加工具函数：
+
+```python
+# app/tools/file_tools.py
+from app.tools import register_tool
+
+@register_tool
+def my_tool(arg1: str) -> ToolResult:
+    """工具说明"""
+    return ToolResult(success=True, data="result")
+```
 
 ### Issue 格式
 
@@ -420,53 +384,66 @@ permission:
 
 ## 建议的修复方向
 ...
-
-## 验证建议
-...
-```
-
-### Task 格式
-
-在 `.drifox/tasks/` 创建 `.task.md` 文件，详见 `docs/superpowers/specs/`。
-
-### 工具注册
-
-在 `app/tools/` 的对应模块中添加工具函数：
-
-```python
-# app/tools/file_tools.py
-from app.tools import register_tool
-
-@register_tool
-def my_tool(arg1: str) -> ToolResult:
-    """工具说明"""
-    return ToolResult(success=True, data="result")
 ```
 
 ---
 
-## 架构决策记录 (ADR)
+## 项目结构
 
-项目维护架构决策文档，见 `docs/adr/0001-architecture-decisions.md`：
+```
+DriFox/
+├── main.py                    # 运行入口
+├── requirements.txt           # 依赖
+├── app/
+│   ├── main_widget.py         # 主窗口
+│   ├── side_dock_area.py      # 浮动窗口管理
+│   ├── agents/                # Agent 定义
+│   ├── skills/                # Skills 定义
+│   ├── tools/                 # 工具实现
+│   │   ├── file_tools.py
+│   │   ├── terminal_tools.py
+│   │   ├── web_tools.py
+│   │   ├── task_tools.py
+│   │   └── diagnostics_tools.py
+│   ├── core/                  # 核心引擎
+│   │   ├── chat_engine.py
+│   │   ├── context_builder.py
+│   │   ├── history_compactor.py
+│   │   ├── agent_manager.py
+│   │   ├── memory_manager.py
+│   │   └── hook_manager.py
+│   ├── widgets/               # UI 组件
+│   └── utils/                 # 工具模块
+├── .drifox/                   # 应用数据
+├── docs/
+│   ├── adr/                  # 架构决策记录
+│   └── superpowers/          # 扩展能力规格
+└── images/                   # 图片资源
+```
 
-- ADR-0001: 内置工具集中注册
-- ADR-0002: 会话持久化使用 SQLite
-- ADR-0003: 浮动窗口穿透模式使用 Windows API
-- ADR-0004: Agent 定义使用 Markdown + YAML frontmatter
-- ADR-0005: 对话引擎依赖链注入
-- ADR-0006: 测试优先顺序
+---
+
+## 技术选型
+
+| 技术 | 用途 |
+|------|------|
+| PyQt5 | GUI 框架 |
+| PyQt-Fluent-Widgets | Fluent Design 组件库 |
+| Loguru | 日志系统 |
+| SQLite | 会话与记忆持久化 |
+| OpenAI Python Client | LLM API 调用 |
 
 ---
 
 ## 更新日志
 
 ### v0.1.4 (2024)
-- ✨ **Hook 管理系统**：新增 Hook 管理功能和可视化 UI 配置界面
-- ✨ **自动更新**：添加自动检查更新功能
-- 🐛 **Windows 兼容**：修复 Windows 平台下路径分隔符和编码问题
-- 🔧 **架构重构**：移除任务观察系统，重构聊天引擎架构和后端内存管理
-- 🔧 **技能管理**：重构技能管理功能以统一实现
-- 🎨 **UI 优化**：重构 Hook 设置卡片布局
+- ✨ Hook 管理系统：新增 Hook 管理功能和可视化 UI 配置界面
+- ✨ 自动更新：添加自动检查更新功能
+- 🐛 Windows 兼容：修复 Windows 平台下路径分隔符和编码问题
+- 🔧 架构重构：移除任务观察系统，重构聊天引擎架构和后端内存管理
+- 🔧 技能管理：重构技能管理功能以统一实现
+- 🎨 UI 优化：重构 Hook 设置卡片布局
 
 ### v0.1.2
 - 新增多窗口粘合功能：支持窗口一起拖动一起管理，双击粘合边框可自动拆分
@@ -492,7 +469,6 @@ MIT License
 - [PyQt-Fluent-Widgets](https://github.com/zhiyiYo/PyQt-Fluent-Widgets) – UI 库
 - [Loguru](https://github.com/Delgan/loguru) – 日志
 - [OpenAI Python Client](https://github.com/openai/openai-python) – API 客户端
-- [FastAPI](https://github.com/tiangolo/fastapi) – Web 框架
 
 ---
 
