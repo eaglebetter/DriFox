@@ -212,6 +212,21 @@ class AutoLoopWorker(QThread):
         """创建 ChatWorker"""
         llm_config = self._model_config_getter() if self._model_config_getter else {}
         session_messages = []
+        
+        # 定义 token 更新回调：每次内部 API 调用后实时更新到引擎
+        def on_token_update(tokens: int):
+            if self._engine:
+                self._engine.add_tokens(tokens)
+                # 更新进度显示
+                self._emit_progress()
+                # 检查是否已经超预算，如果超了立即取消
+                reason = self._engine.check_budget()
+                if reason:
+                    self.log_signal.emit(f"⚠️ {reason}，正在停止...")
+                    self._is_cancelled = True
+                    if self._current_worker:
+                        self._current_worker._is_cancelled = True
+
         worker = OpenAIChatWorker(
             messages=messages,
             session_messages=session_messages,
@@ -222,6 +237,7 @@ class AutoLoopWorker(QThread):
             permission_check_callback=self._permission_check_callback,
             permission_cache=self._permission_cache,
             compactor=self._compactor,
+            token_update_callback=on_token_update,
         )
 
         # 只转发日志信号到运行卡显示
@@ -253,6 +269,10 @@ class AutoLoopWorker(QThread):
                         "completion_tokens": getattr(usage, "completion_tokens", 0),
                         "total_tokens": getattr(usage, "total_tokens", 0),
                     }
+                    # 累加到 _accumulated_tokens
+                    total = getattr(usage, "total_tokens", 0) or 0
+                    if hasattr(self._current_worker, '_accumulated_tokens'):
+                        self._current_worker._accumulated_tokens += total
                     return
             # 有些实现在 choices 里
             if hasattr(response, 'choices') and response.choices:
@@ -264,16 +284,25 @@ class AutoLoopWorker(QThread):
                         "completion_tokens": getattr(usage, "completion_tokens", 0),
                         "total_tokens": getattr(usage, "total_tokens", 0),
                     }
+                    # 累加到 _accumulated_tokens
+                    total = getattr(usage, "total_tokens", 0) or 0
+                    if hasattr(self._current_worker, '_accumulated_tokens'):
+                        self._current_worker._accumulated_tokens += total
                     return
         except Exception as e:
             logger.warning(f"[AutoLoop] Failed to extract usage from full response: {e}")
             pass
             
     def _get_token_usage(self) -> int:
-        """获取本轮 token 使用量"""
+        """获取本轮 token 使用量（包含所有内部工具迭代调用）"""
         try:
             if hasattr(self._current_worker, 'llm_config') and self._current_worker.llm_config:
-                # 部分 worker 会记录 usage
+                # 如果有累加后的总 token 数，优先使用（包含所有内部工具迭代调用）
+                if hasattr(self._current_worker, '_accumulated_tokens'):
+                    accumulated = getattr(self._current_worker, '_accumulated_tokens', 0)
+                    if accumulated > 0:
+                        return accumulated
+                # 否则回退到使用最后一次 usage
                 usage = getattr(self._current_worker, '_last_usage', None)
                 if usage:
                     return (usage.get("prompt_tokens", 0) or 0) + (usage.get("completion_tokens", 0) or 0)

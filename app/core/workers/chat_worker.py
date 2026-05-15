@@ -61,8 +61,10 @@ class OpenAIChatWorker(QThread):
             permission_cache: PermissionCache = None,
             compactor=None,
             initial_compaction_cache: Dict = None,
+            token_update_callback: Callable[[int], None] = None,
     ):
         super().__init__()
+        self._token_update_callback = token_update_callback
         self.messages = messages
         self.session_messages = consolidate_messages(session_messages or [])
         self.llm_config = llm_config
@@ -111,6 +113,7 @@ class OpenAIChatWorker(QThread):
         }
         self._current_session_messages = list(self.session_messages)
         self._last_usage = None  # 保存最后一次 API 调用的 token usage
+        self._accumulated_tokens = 0  # 累加本轮所有 API 调用（含多轮工具迭代）的总 token 使用量
 
         # ========== 工具迭代中压缩支持 ==========
         self._compactor = compactor
@@ -488,6 +491,7 @@ class OpenAIChatWorker(QThread):
             self._clear_pending_response_state()
             self._api_messages_cache = None  # 重置缓存，下次 API 调用时重建
             self._api_messages_built = False
+            self._accumulated_tokens = 0  # 重置 token 累加，每个新的对话从零开始
 
             # 开始新对话时，清理 round 缓存，但保留 session 缓存
             self._permission_cache.clear_round()
@@ -1276,12 +1280,33 @@ class OpenAIChatWorker(QThread):
                     "completion_tokens": getattr(usage, "completion_tokens", 0),
                     "total_tokens": getattr(usage, "total_tokens", 0),
                 }
+                # 累加到总 token 计数，这样多轮工具迭代的所有 token 都会被统计
+                total = getattr(usage, "total_tokens", 0) or 0
+                self._accumulated_tokens += total
+                # 实时通知外部（如 AutoLoop）更新 token 计数
+                if self._token_update_callback and total > 0:
+                    self._token_update_callback(total)
             
             # 每处理 5 个 chunk 就让渡一次 CPU，确保主线程能及时处理排队的 Qt 信号
             # 避免 content_received 等信号堆积到工具执行完毕后一次性处理
             chunk_count += 1
             if chunk_count % 5 == 0:
                 QCoreApplication.processEvents()
+
+        # 非流式响应：usage 在 response 对象本身（而非 chunk）
+        if not self.stream:
+            usage = getattr(response, "usage", None)
+            if usage:
+                self._last_usage = {
+                    "prompt_tokens": getattr(usage, "prompt_tokens", 0),
+                    "completion_tokens": getattr(usage, "completion_tokens", 0),
+                    "total_tokens": getattr(usage, "total_tokens", 0),
+                }
+                total = getattr(usage, "total_tokens", 0) or 0
+                self._accumulated_tokens += total
+                # 实时通知外部（如 AutoLoop）更新 token 计数
+                if self._token_update_callback and total > 0:
+                    self._token_update_callback(total)
 
         # 冲刷剩余的 reasoning batch
         if _reasoning_batch:
