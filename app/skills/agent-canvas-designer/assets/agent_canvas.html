@@ -412,15 +412,20 @@ jsp = jsPlumb.getInstance({
     Container:"canvas",
     Connector:["Flowchart",{cornerRadius:6,gap:8}],
     PaintStyle:{stroke:"#94a3b8",strokeWidth:2},
-    Endpoint:["Dot",{radius:4}],
     EndpointStyle:{fill:"#94a3b8",stroke:"#fff",strokeWidth:1.5},
     HoverPaintStyle:{stroke:"#3b82f6",strokeWidth:3},
     EndpointHoverStyle:{fill:"#3b82f6"},
-    Anchor:"AutoDefault",
-    DragOptions:{cursor:"move",zIndex:2000}
+    DragOptions:{cursor:"move",zIndex:2000},
+    // 允许从端点拖拽创建连接
+    ConnectionsDetachable:true,
+    ReattachConnections:true
 });
 jsp.bind("connection",function(info){connectionsUpdate();});
 jsp.bind("connectionDetached",function(info){connectionsUpdate();});
+// 允许拖拽创建连接
+jsp.bind("beforeDrop",function(info){
+    return true;
+});
 initDragDrop();
 initCanvasEvents();
 
@@ -592,16 +597,18 @@ jsp.draggable(el,dragOpts);
 var eps=[];
 // 输入端口（左侧）
 var epIn = jsp.addEndpoint(id,{
-    uuid:id+'_in',anchor:'Left',isSource:false,isTarget:true,
-    maxConnections:-1, dragAllowed:true,
+    uuid:id+'_in',anchor:'Left',
+    isSource:false,isTarget:true,
+    maxConnections:-1,
     paintStyle:{fill:'#3b82f6',stroke:'#1d4ed8',strokeWidth:3,radius:6},
     hoverPaintStyle:{fill:'#2563eb',stroke:'#1e40af',strokeWidth:3,radius:7}
 });
 eps.push(epIn.getUuid());
 // 输出端口（右侧）
 var epOut = jsp.addEndpoint(id,{
-    uuid:id+'_out',anchor:'Right',isSource:true,isTarget:false,
-    maxConnections:-1, dragAllowed:true,
+    uuid:id+'_out',anchor:'Right',
+    isSource:true,isTarget:false,
+    maxConnections:-1,
     paintStyle:{fill:'#3b82f6',stroke:'#1d4ed8',strokeWidth:3,radius:6},
     hoverPaintStyle:{fill:'#2563eb',stroke:'#1e40af',strokeWidth:3,radius:7}
 });

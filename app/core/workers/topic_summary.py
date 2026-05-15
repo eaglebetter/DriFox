@@ -89,7 +89,7 @@ class TopicSummaryTask(QRunnable):
                     "输出JSON：\n"
                     "```json\n"
                     "{\n"
-                    '  "topic_summary": "简短标题（≤15字）"\n'
+                    '  "topic_summary": ""\n'
                     "}\n"
                     "```"
                 )
@@ -105,7 +105,7 @@ class TopicSummaryTask(QRunnable):
                     "输出JSON：\n"
                     "```json\n"
                     "{\n"
-                    '  "topic_summary": "简短标题（≤15字）"\n'
+                    '  "topic_summary": ""\n'
                     "}\n"
                     "```"
                 )
