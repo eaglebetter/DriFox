@@ -28,13 +28,8 @@ class AutoLoopWorker(QThread):
     loop_error = pyqtSignal(str)  # 错误消息
     loop_stopped = pyqtSignal()  # 用户手动停止
 
-    # === 迭代过程中的消息转发（用于在聊天区显示）===
-    content_received = pyqtSignal(str)
-    reasoning_content_received = pyqtSignal(str)
-    thinking_started = pyqtSignal()
-    tool_call_started = pyqtSignal(str, str, dict, str)
-    tool_result_received = pyqtSignal(str, str, dict, object)
-    error_occurred = pyqtSignal(str)
+    # === 迭代过程中的消息转发（用于日志显示）===
+    log_signal = pyqtSignal(str)  # 日志消息
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -121,10 +116,6 @@ class AutoLoopWorker(QThread):
             summary = self._extract_summary(response, iteration)
             self.iteration_completed.emit(iteration, summary)
 
-            # 更新共享笔记（agent 可能自己更新了，这里也保留一份系统级备份）
-            notes = self._build_notes(iteration, summary, response)
-            self._engine.update_shared_notes(notes)
-
             # 检查完成信号
             if self._engine.check_completion(response):
                 self.loop_completed.emit("任务完成 — 检测到完成信号！🎉")
@@ -146,7 +137,7 @@ class AutoLoopWorker(QThread):
     # ========== 内部辅助 ==========
 
     def _build_messages(self, task_prompt: str, iteration: int) -> List[Dict]:
-        """构建本轮对话消息 — 注入共享笔记实现接力"""
+        """构建本轮对话消息 — 注入接力上下文 + 项目路径"""
         system_prompt = self._agent_system_prompt_getter("auto_loop") if self._agent_system_prompt_getter else ""
 
         # 注入接力上下文
@@ -158,7 +149,7 @@ class AutoLoopWorker(QThread):
         return messages
 
     def _build_workflow_context(self, iteration: int) -> str:
-        """构建 Continuous Claude 风格的接力上下文 + 项目路径"""
+        """构建 Continuous Claude 风格的接力上下文"""
         notes = self._engine.read_shared_notes() if iteration > 1 else ""
         project_path = self._config.project_path or ""
         lines = [
@@ -170,10 +161,14 @@ class AutoLoopWorker(QThread):
             "",
         ]
         if project_path:
-            lines.append(f"## Project Root Directory")
-            lines.append(f"ALL file operations MUST be relative to: {project_path}")
-            lines.append(f"Use this path as the base for all read/write/grep/list/glob operations.")
-            lines.append(f"")
+            lines.extend([
+                "## Project Root Directory",
+                f"ALL file operations MUST use absolute paths starting from: {project_path}",
+                "Example: read(path='D:/work/my-project/src/main.py')",
+                "Example: write(path='D:/work/my-project/README.md', content='...')",
+                "Example: glob(pattern='**/*.py', path='D:/work/my-project')",
+                "",
+            ])
         lines.extend([
             "### SHARED_TASK_NOTES.md Protocol",
             "Before starting work, read SHARED_TASK_NOTES.md to see what was done last time and what's next.",
@@ -208,13 +203,13 @@ class AutoLoopWorker(QThread):
             compactor=self._compactor,
         )
 
-        # 转发信号到主线程
-        worker.content_received.connect(self.content_received.emit)
-        worker.reasoning_content_received.connect(self.reasoning_content_received.emit)
-        worker.thinking_started.connect(self.thinking_started.emit)
-        worker.tool_call_started.connect(self.tool_call_started.emit)
-        worker.tool_result_received.connect(self.tool_result_received.emit)
-        worker.error_occurred.connect(self.error_occurred.emit)
+        # 只转发日志信号到运行卡显示
+        worker.content_received.connect(lambda t: self.log_signal.emit(f"生成内容..."))
+        worker.reasoning_content_received.connect(lambda t: self.log_signal.emit(f"思考中..."))
+        worker.thinking_started.connect(lambda: self.log_signal.emit(f"开始推理"))
+        worker.tool_call_started.connect(lambda tid, name, args, rid: self.log_signal.emit(f"调用工具: {name}"))
+        worker.tool_result_received.connect(lambda tid, name, args, res: self.log_signal.emit(f"工具完成: {name}"))
+        worker.error_occurred.connect(lambda e: self.log_signal.emit(f"错误: {e}"))
 
         return worker
 
@@ -236,17 +231,6 @@ class AutoLoopWorker(QThread):
         # 取前 3 行作为摘要
         summary_lines = [l for l in lines if l.strip() and not l.startswith("```")][:3]
         return " | ".join(summary_lines) if summary_lines else f"第{iteration}轮完成"
-
-    def _build_notes(self, iteration: int, summary: str, full_response: str) -> str:
-        """构建共享笔记内容"""
-        return (
-            f"# AutoLoop Shared Notes\n\n"
-            f"## Iteration {iteration}\n"
-            f"摘要: {summary}\n\n"
-            f"---\n"
-            f"Last updated: {time.strftime('%Y-%m-%d %H:%M:%S')}\n"
-            f"Total iterations so far: {iteration}\n"
-        )
 
     def _emit_progress(self):
         """发射进度信号"""

@@ -4182,12 +4182,6 @@ class OpenAIChatToolWindow(ToolWindow):
             self._current_assistant_card.start_streaming_anim()
 
     def _on_content_received(self, content_piece: str):
-        # AutoLoop 模式：如果没有当前卡片，自动创建
-        if not self._current_assistant_card and self._is_auto_loop_running:
-            card = self._append_assistant_message(scroll=False)
-            if card:
-                self._current_assistant_card = card
-                self._current_assistant_card.start_streaming_anim()
         if self._current_assistant_card:
             self._update_assistant_message(self._current_assistant_card, content_piece)
 
@@ -4347,27 +4341,9 @@ class OpenAIChatToolWindow(ToolWindow):
         import time
 
         if self._is_auto_loop_running:
-            # AutoLoop 模式：只渲染到卡片，不操作浮动窗口
-            if not self._current_assistant_card:
-                card = self._append_assistant_message(scroll=False)
-                if card:
-                    self._current_assistant_card = card
-                    self._current_assistant_card.start_streaming_anim()
-            if self._current_assistant_card:
-                if isinstance(result, dict):
-                    success = result.get("success", True)
-                    content = result.get("content", "") or result.get("error", "")
-                else:
-                    success = getattr(result, "success", True) if hasattr(result, "success") else True
-                    content = str(result) if result else ""
-                self._current_assistant_card.append_tool_result(
-                    tool_name=tool_name,
-                    arguments=arguments or {},
-                    result=content,
-                    success=success,
-                    tool_call_id=tool_call_id,
-                )
-            return
+            # AutoLoop 模式：只记录日志，不操作 UI
+            if self._auto_loop_running_card:
+                self._auto_loop_running_card.append_log(f"工具完成: {tool_name}")
 
         if (
                 self._tool_cancelled_by_user
@@ -5192,15 +5168,7 @@ class OpenAIChatToolWindow(ToolWindow):
         self._auto_loop_worker.loop_completed.connect(self._on_auto_loop_completed)
         self._auto_loop_worker.loop_error.connect(self._on_auto_loop_error)
         self._auto_loop_worker.loop_stopped.connect(self._on_auto_loop_stopped)
-
-        # 转发消息信号到聊天区（用于填充 assistant card）
-        self._auto_loop_worker.content_received.connect(self._on_content_received)
-        self._auto_loop_worker.reasoning_content_received.connect(self._on_reasoning_content_received)
-        self._auto_loop_worker.thinking_started.connect(self._on_thinking_started)
-        # 工具调用内容直接渲染到卡片（跳过浮动弹窗）
-        self._auto_loop_worker.tool_call_started.connect(self._on_tool_call_started_autoloop)
-        self._auto_loop_worker.tool_result_received.connect(self._on_tool_result_received)
-        self._auto_loop_worker.error_occurred.connect(self._on_auto_loop_error)
+        self._auto_loop_worker.log_signal.connect(self._on_auto_loop_log)
 
         self._is_auto_loop_running = True
         self._auto_loop_worker.start()
@@ -5214,46 +5182,21 @@ class OpenAIChatToolWindow(ToolWindow):
         self._finish_auto_loop("⏹ 用户手动停止")
 
     def _on_auto_loop_iteration_started(self, current: int, total: int):
-        """迭代开始 — 创建消息卡片，准备接收内容"""
-        # 更新运行卡
+        """迭代开始"""
         if self._auto_loop_running_card:
             self._auto_loop_running_card._status_label.setText(
-                f"▶ 第 {current} 轮 / 共 {total} 轮 — 执行中..."
+                f"▶ 第 {current} 轮 / 共 {total} 轮"
             )
 
-        # 创建用户消息卡片 — 显示本轮开始标记
-        try:
-            from datetime import datetime
-            now = datetime.now().strftime("%H:%M:%S")
-            user_text = f"🤖 AutoLoop 第 {current}/{total} 轮 [{now}]"
-            self._append_user_message(user_text, scroll=False)
-
-            # 创建 assistant 卡片用于接收流式内容
-            assistant_card = self._append_assistant_message()
-            if assistant_card:
-                self._current_assistant_card = assistant_card
-                self._current_assistant_card.start_streaming_anim()
-
-            QTimer.singleShot(100, self._scroll_to_bottom)
-        except Exception as e:
-            logger.warning(f"[AutoLoop] Failed to setup iteration cards: {e}")
-
     def _on_auto_loop_iteration_completed(self, iteration: int, summary: str):
-        """迭代完成 — 结束当前 assistant 卡片"""
-        if self._current_assistant_card:
-            self._current_assistant_card.finish_streaming()
-            self._current_assistant_card = None
-        # 更新时间同步
+        """迭代完成"""
         if self._auto_loop_running_card:
-            self._auto_loop_running_card._refresh_elapsed()
-        QTimer.singleShot(100, self._scroll_to_bottom)
+            self._auto_loop_running_card.append_log(f"第 {iteration} 轮完成: {summary[:40]}")
 
-    def _on_tool_call_started_autoloop(self, tool_call_id: str, tool_name: str, arguments: dict, round_id: str = None):
-        """AutoLoop 模式下工具调用直接渲染到卡片，不弹浮动窗口"""
-        if self._current_assistant_card:
-            self._current_assistant_card.start_streaming_anim()
-        # 工具调用内容会被渲染到 assistant card 中
-        # 不显示浮动弹窗
+    def _on_auto_loop_log(self, text: str):
+        """可视化日志更新"""
+        if self._auto_loop_running_card:
+            self._auto_loop_running_card.append_log(text)
 
     def _on_auto_loop_progress(self, progress: dict):
         """更新运行卡进度"""
@@ -5270,6 +5213,7 @@ class OpenAIChatToolWindow(ToolWindow):
         """AutoLoop 出错"""
         if self._auto_loop_running_card:
             self._auto_loop_running_card.show_error(message)
+            self._auto_loop_running_card.append_log(f"❌ {message[:50]}")
         self._finish_auto_loop(f"❌ {message}")
 
     def _on_auto_loop_stopped(self):
