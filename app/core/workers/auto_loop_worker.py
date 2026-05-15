@@ -522,31 +522,19 @@ class AutoLoopWorker(QThread):
                 self._engine.add_tokens(token_count)
                 self.tokens_updated.emit(self._engine._total_tokens)
                 logger.debug(f"[AutoLoop] tokens from messages: {token_count}, total: {self._engine._total_tokens}")
-            
-            self._worker_done_event.set()
-        
-        # 使用传入的 tools（已根据阶段过滤），如果没有则使用默认
-        effective_tools = tools if tools is not None else (self._all_tools_schema or self._tools_schema or [])
-        
-        # 定义 token 更新回调：每次内部 API 调用后实时更新到引擎和 UI
-        def on_token_update(tokens: int):
-            logger.debug(f"[AutoLoop] on_token_update called: tokens={tokens}, engine={self._engine}")
-            if self._engine:
-                self._engine.add_tokens(tokens)
-                logger.debug(f"[AutoLoop] after add_tokens: _total_tokens={self._engine._total_tokens}")
-                # 更新进度显示（迭代/时间/总token）
-                self._emit_progress()
-                # 发送 engine 的 _total_tokens（总量）到运行卡，保持与 update_progress() 一致
-                # 注意：tokens 参数是本次增量，engine._total_tokens 是累加后的总量
-                self.tokens_updated.emit(self._engine._total_tokens)
-                logger.debug(f"[AutoLoop] tokens_updated emitted: {self._engine._total_tokens}")
-                # 检查是否已经超预算，如果超了立即取消
+                
+                # 检查是否超预算，超预算则取消
                 reason = self._engine.check_budget()
                 if reason:
                     self.log_signal.emit(f"⚠️ {reason}，正在停止...")
                     self._is_cancelled = True
                     if self._current_worker:
                         self._current_worker._is_cancelled = True
+            
+            self._worker_done_event.set()
+        
+        # 使用传入的 tools（已根据阶段过滤），如果没有则使用默认
+        effective_tools = tools if tools is not None else (self._all_tools_schema or self._tools_schema or [])
 
         worker = OpenAIChatWorker(
             messages=messages,
@@ -558,7 +546,6 @@ class AutoLoopWorker(QThread):
             permission_check_callback=self._permission_check_callback,
             permission_cache=self._permission_cache,
             compactor=self._compactor,
-            token_update_callback=on_token_update,
         )
         
         # 连接完成信号，等待消息
