@@ -11,6 +11,7 @@ from PyQt5.QtCore import (
     Qt, pyqtSignal, QTimer, QRectF,
     QPropertyAnimation, QEasingCurve, QVariantAnimation,
 )
+from PyQt5.QtCore import QObject
 from PyQt5.QtGui import (
     QPainter, QPen, QBrush, QLinearGradient, QColor,
     QFont, QFontMetrics,
@@ -292,6 +293,17 @@ class AutoLoopRunningCard(QFrame):
         self._timer.setInterval(1000)
         self._timer.timeout.connect(self._refresh_elapsed)
 
+        # Token 实时累加
+        self._current_tokens = 0
+        self._max_tokens = 0
+
+        # 当前阶段：planning / executing / completed
+        self._current_phase = "preparing"
+        
+        # 步骤进度
+        self._current_step = 0
+        self._total_steps = 0
+
         self._build_ui()
 
     def _build_ui(self):
@@ -407,6 +419,30 @@ class AutoLoopRunningCard(QFrame):
         status_row.addWidget(self._status_label)
         status_layout.addLayout(status_row)
 
+        # 阶段指示器（规划阶段 / 执行阶段）
+        phase_row = QHBoxLayout()
+        phase_row.setSpacing(8)
+        phase_label = QLabel("🎯 阶段")
+        phase_label.setStyleSheet(f"color: #9BB0D3; font-size: 13px; {FONT_CSS}")
+        phase_row.addWidget(phase_label)
+        phase_row.addStretch()
+        self._phase_label = QLabel("待开始")
+        self._phase_label.setStyleSheet(f"color: #C9A85C; font-weight: bold; font-size: 13px; {FONT_CSS}")
+        phase_row.addWidget(self._phase_label)
+        status_layout.addLayout(phase_row)
+        
+        # 步骤进度指示器（执行阶段显示）
+        step_row = QHBoxLayout()
+        step_row.setSpacing(8)
+        step_label = QLabel("📋 步骤")
+        step_label.setStyleSheet(f"color: #9BB0D3; font-size: 13px; {FONT_CSS}")
+        step_row.addWidget(step_label)
+        step_row.addStretch()
+        self._step_label = QLabel("-")
+        self._step_label.setStyleSheet(f"color: #E5E7EB; font-weight: bold; font-size: 13px; {FONT_CSS}")
+        step_row.addWidget(self._step_label)
+        status_layout.addLayout(step_row)
+
         layout.addWidget(self._status_widget)
 
         # 可视化日志行（单行滚动）
@@ -463,6 +499,8 @@ class AutoLoopRunningCard(QFrame):
         self._start_timestamp = time.time()
         self._anim.start()
         self._timer.start()
+        # 重置 token 累加（每轮新的循环从零开始）
+        self._current_tokens = 0
         # 确保停止按钮可见（修复完成后重新运行时停止按钮消失的问题）
         self._stop_btn.show()
         # 强制更新UI，确保按钮显示
@@ -491,28 +529,71 @@ class AutoLoopRunningCard(QFrame):
         self._log_label.setText(f"[{timestamp}] {text}")
         self.update()
 
+    def set_phase(self, phase: str):
+        """设置当前阶段（planning / executing / completed）"""
+        self._current_phase = phase
+        phase_text = {
+            "planning": "📋 规划中",
+            "executing": "🔨 执行中",
+            "completed": "✅ 已完成",
+        }.get(phase, "未知")
+        self._phase_label.setText(phase_text)
+        
+        # 根据阶段调整颜色
+        color_map = {
+            "planning": "#7FDBFF",  # 蓝色
+            "executing": "#C9A85C",  # 金色
+            "completed": "#10B981",  # 绿色
+        }
+        color = color_map.get(phase, "#C9A85C")
+        self._phase_label.setStyleSheet(f"color: {color}; font-weight: bold; font-size: 13px; {FONT_CSS}")
+        
+        # 阶段变更时更新状态文本
+        if phase == "planning":
+            self._status_label.setText("▶ 拆解任务中...")
+        elif phase == "executing":
+            self._status_label.setText("▶ 执行中...")
+        elif phase == "completed":
+            self._status_label.setText("✅ 全部完成")
+        
+        self.update()
+
+    def set_step_progress(self, current: int, total: int):
+        """设置步骤进度"""
+        self._current_step = current
+        self._total_steps = total
+        if total > 0:
+            self._step_label.setText(f"{current} / {total}")
+        else:
+            self._step_label.setText("-")
+        self.update()
+
     # ========== 更新方法 ==========
 
     def update_progress(self, progress: dict):
-        """更新进度显示"""
+        """更新进度显示（迭代/时间/总token）"""
         iteration = progress.get("iteration", 0)
         max_iter = progress.get("max_iterations", 0)
         elapsed = progress.get("elapsed_str", "0秒")
         tokens = progress.get("total_tokens", 0)
         max_tokens = progress.get("max_tokens", 0)
         state = progress.get("state", "")
+        
+        # 步骤进度
+        current_step = progress.get("current_step", 0)
+        total_steps = progress.get("total_steps", 0)
+        if total_steps > 0:
+            self._step_label.setText(f"{current_step} / {total_steps}")
+            self._current_step = current_step
+            self._total_steps = total_steps
 
         self._iter_label.setText(f"{iteration} / {max_iter}")
         self._time_label.setText(elapsed)
 
+        # 注意：token 显示由 update_tokens() 维护（累加模式），这里不覆盖
+        # 只在 max_tokens 变化时更新 _max_tokens（用于 update_tokens 的计算）
         if max_tokens > 0:
-            self._token_label.setText(f"{tokens:,} / {max_tokens:,}")
-            percentage = min(100, int(tokens * 100 / max_tokens))
-            self._token_progress.setValue(percentage)
-        else:
-            self._token_label.setText(f"{tokens:,}")
-            self._token_progress.setValue(0)
-        self._token_progress.update()
+            self._max_tokens = max_tokens
 
         if state == "running":
             self._status_label.setText(f"▶ 第 {iteration} 轮进行中...")
@@ -524,6 +605,24 @@ class AutoLoopRunningCard(QFrame):
             self._status_label.setText("❌ 出错")
         self._token_label.update()
         self.update()
+
+    def update_tokens(self, tokens: int):
+        """实时追加 token（来自 worker 的 token_update_callback，直接更新UI）"""
+        if self._max_tokens > 0:
+            new_total = self._current_tokens + tokens
+            self._current_tokens = new_total
+            self._token_label.setText(f"{new_total:,} / {self._max_tokens:,}")
+            percentage = min(100, int(new_total * 100 / self._max_tokens))
+            self._token_progress.setValue(percentage)
+        else:
+            self._current_tokens += tokens
+            self._token_label.setText(f"{self._current_tokens:,}")
+        self._token_progress.update()
+        self._token_label.update()
+
+    def set_max_tokens(self, max_tokens: int):
+        """设置最大 token 上限（启动时从 config 传入）"""
+        self._max_tokens = max_tokens
 
     def show_completed(self, message: str):
         """显示完成状态"""
