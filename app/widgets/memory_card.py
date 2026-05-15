@@ -533,21 +533,39 @@ class MemoryCardContent(QWidget):
     def _create_notes_tab(self) -> QWidget:
         """创建项目笔记 Tab"""
         widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(6)
+        main_layout = QVBoxLayout(widget)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(6)
+
+        # 顶部水平布局：左边项目名，右边字数/token统计
+        top_layout = QHBoxLayout()
+        top_layout.setSpacing(0)
 
         # 项目名标签
         self.project_name_label = BodyLabel(f"项目: {self._current_project}", self)
         self.project_name_label.setStyleSheet(
             f"color: #8c99ad; {get_font_family_css()} font-size: 11px; padding: 0 4px;"
         )
-        layout.addWidget(self.project_name_label)
+        top_layout.addWidget(self.project_name_label)
+
+        # 占位拉伸
+        top_layout.addStretch()
+
+        # 字数/token统计标签
+        self.notes_stats_label = BodyLabel("0 字 / 0 token", self)
+        self.notes_stats_label.setStyleSheet(
+            f"color: #8c99ad; {get_font_family_css()} font-size: 11px; padding: 0 4px;"
+        )
+        top_layout.addWidget(self.notes_stats_label)
+
+        main_layout.addLayout(top_layout)
 
         # Markdown 编辑器
         self.notes_editor = TextEdit(self)
         self.notes_editor.setPlaceholderText("在此记录项目笔记，支持 Markdown 格式...")
-        layout.addWidget(self.notes_editor, 1)
+        # 监听内容变化更新统计
+        self.notes_editor.textChanged.connect(self._update_notes_stats)
+        main_layout.addWidget(self.notes_editor, 1)
 
         # 保存按钮
         self.notes_save_btn = PrimaryPushButton("保存笔记", self)
@@ -566,9 +584,18 @@ class MemoryCardContent(QWidget):
             }
         """)
         self.notes_save_btn.clicked.connect(self._save_project_note)
-        layout.addWidget(self.notes_save_btn)
+        main_layout.addWidget(self.notes_save_btn)
 
         return widget
+
+    def _update_notes_stats(self):
+        """更新字数和 token 统计"""
+        content = self.notes_editor.toPlainText()
+        char_count = len(content)
+        # 简单估算 token：按中文字符约 1:1，英文约 4:1，这里用近似算法
+        # 中文占比高，按字符数的 0.8 估算
+        token_estimate = int(char_count * 0.8)
+        self.notes_stats_label.setText(f"{char_count:,} 字 / {token_estimate:,} token")
 
     def _create_docs_tab(self) -> QWidget:
         """创建关键文档 Tab"""
@@ -729,9 +756,10 @@ class MemoryCardContent(QWidget):
             return
 
         self.project_name_label.setText(f"项目: {self._current_project}")
-        note = memory_mgr.get_project_note(self._current_project)
+        note = memory_mgr.get_or_create_project_note(self._current_project)
         content = note.get("content", "") if note else ""
         self.notes_editor.setPlainText(content)
+        self._update_notes_stats()
 
     def _save_project_note(self):
         """保存项目笔记"""
