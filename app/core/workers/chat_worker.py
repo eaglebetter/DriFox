@@ -1282,8 +1282,10 @@ class OpenAIChatWorker(QThread):
                 # 累加到总 token 计数，这样多轮工具迭代的所有 token 都会被统计
                 total = getattr(usage, "total_tokens", 0) or 0
                 self._accumulated_tokens += total
+                logger.debug(f"[ChatWorker] usage total={total}, callback={self._token_update_callback}")
                 # 实时通知外部（如 AutoLoop）更新 token 计数
                 if self._token_update_callback and total > 0:
+                    logger.debug(f"[ChatWorker] calling _token_update_callback with {total}")
                     self._token_update_callback(total)
             
             # 每处理 5 个 chunk 就让渡一次 CPU，确保主线程能及时处理排队的 Qt 信号
