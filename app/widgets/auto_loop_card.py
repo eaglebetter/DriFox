@@ -1,0 +1,539 @@
+# -*- coding: utf-8 -*-
+"""
+AutoLoop 卡片组件 — 配置卡 + 运行卡
+
+- AutoLoopConfigCard: 配置参数 + 任务输入 + 开始按钮（竖排布局，插入到聊天区）
+- AutoLoopRunningCard: 运行状态显示 + 停止按钮（彩虹渐变边框动画）
+"""
+import time
+
+from PyQt5.QtCore import (
+    Qt, pyqtSignal, QTimer, QRectF,
+    QPropertyAnimation, QEasingCurve, QVariantAnimation,
+)
+from PyQt5.QtGui import (
+    QPainter, QPen, QBrush, QLinearGradient, QColor,
+    QFont, QFontMetrics,
+)
+from PyQt5.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel,
+    QPushButton, QTextEdit, QLineEdit, QSpinBox,
+    QFrame, QProgressBar, QSizePolicy,
+)
+from loguru import logger
+from qfluentwidgets import (
+    PrimaryPushButton, PushButton, TransparentToolButton,
+    FluentIcon, BodyLabel, StrongBodyLabel, LineEdit,
+    SpinBox, ComboBox, TextEdit,
+)
+from qfluentwidgets.components.widgets.card_widget import CardSeparator
+
+from app.core.auto_loop_config import AutoLoopConfig
+from app.utils.utils import get_font_family_css
+
+FONT_CSS = get_font_family_css()
+
+
+# ============================================================
+#  AutoLoop 配置卡
+# ============================================================
+
+class AutoLoopConfigCard(QFrame):
+    """AutoLoop 配置卡片 — 插入到聊天区的竖排布局"""
+
+    startRequested = pyqtSignal(AutoLoopConfig)  # 用户点击开始
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("autoLoopConfigCard")
+        self.setStyleSheet(f"""
+            #autoLoopConfigCard {{
+                background: rgba(22, 30, 45, 230);
+                border: 1px solid #2B3850;
+                border-radius: 12px;
+                {FONT_CSS}
+            }}
+        """)
+        self._build_ui()
+
+    def _build_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 10, 16, 10)
+        layout.setSpacing(6)
+
+        # ---- 标题栏（含开始按钮） ----
+        title_layout = QHBoxLayout()
+        icon_label = QLabel("🤖")
+        icon_label.setStyleSheet("font-size: 18px;")
+        title_layout.addWidget(icon_label)
+        title = StrongBodyLabel("AutoLoop 自动循环")
+        title.setStyleSheet(f"color: #EAF2FF; font-size: 14px; {FONT_CSS}")
+        title_layout.addWidget(title)
+        title_layout.addStretch()
+
+        self._start_btn = PrimaryPushButton("▶ 开始 AutoLoop")
+        self._start_btn.setFixedSize(120, 28)
+        self._start_btn.setStyleSheet(f"""
+            PrimaryPushButton {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #C9A85C, stop:1 #B8956A);
+                color: #1A1F2B;
+                border: none;
+                border-radius: 8px;
+                padding: 4px 14px;
+                {FONT_CSS} font-size: 12px;
+                font-weight: bold;
+            }}
+            PrimaryPushButton:hover {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #D4B878, stop:1 #C9A060);
+            }}
+        """)
+        self._start_btn.clicked.connect(self._on_start)
+        title_layout.addWidget(self._start_btn)
+        layout.addLayout(title_layout)
+
+        layout.addWidget(CardSeparator())
+
+        # ---- 基本配置（两列） ----
+        config_grid = QHBoxLayout()
+        config_grid.setSpacing(12)
+
+        # 左列
+        left_col = QVBoxLayout()
+        left_col.setSpacing(4)
+
+        left_col.addWidget(BodyLabel("最大迭代轮数"))
+        self._iteration_spin = SpinBox()
+        self._iteration_spin.setRange(1, 10000)
+        self._iteration_spin.setValue(50)
+        self._iteration_spin.setFixedHeight(26)
+        self._iteration_spin.setStyleSheet(self._spin_style())
+        left_col.addWidget(self._iteration_spin)
+
+        left_col.addWidget(BodyLabel("Token 上限"))
+        self._token_spin = SpinBox()
+        self._token_spin.setRange(1000, 100000000)
+        self._token_spin.setValue(500000)
+        self._token_spin.setSingleStep(100000)
+        self._token_spin.setFixedHeight(26)
+        self._token_spin.setStyleSheet(self._spin_style())
+        left_col.addWidget(self._token_spin)
+
+        left_col.addWidget(BodyLabel("最大时长(分钟)"))
+        self._duration_spin = SpinBox()
+        self._duration_spin.setRange(0, 14400)
+        self._duration_spin.setValue(120)
+        self._duration_spin.setSuffix(" 分钟")
+        self._duration_spin.setSpecialValueText("不限")
+        self._duration_spin.setFixedHeight(26)
+        self._duration_spin.setStyleSheet(self._spin_style())
+        left_col.addWidget(self._duration_spin)
+
+        config_grid.addLayout(left_col, 2)
+
+        # 右列
+        right_col = QVBoxLayout()
+        right_col.setSpacing(4)
+
+        right_col.addWidget(BodyLabel("完成信号词"))
+        self._signal_edit = LineEdit()
+        self._signal_edit.setText("DONE")
+        self._signal_edit.setFixedHeight(26)
+        self._signal_edit.setStyleSheet(self._line_style())
+        right_col.addWidget(self._signal_edit)
+
+        right_col.addWidget(BodyLabel("连续确认次数"))
+        self._threshold_spin = SpinBox()
+        self._threshold_spin.setRange(1, 10)
+        self._threshold_spin.setValue(3)
+        self._threshold_spin.setFixedHeight(26)
+        self._threshold_spin.setStyleSheet(self._spin_style())
+        right_col.addWidget(self._threshold_spin)
+
+        right_col.addWidget(BodyLabel("项目路径（工作目录）"))
+        path_row = QHBoxLayout()
+        path_row.setSpacing(4)
+        self._path_edit = LineEdit()
+        self._path_edit.setPlaceholderText("默认为当前工作目录")
+        self._path_edit.setFixedHeight(26)
+        self._path_edit.setStyleSheet(self._line_style())
+        path_row.addWidget(self._path_edit, 1)
+        self._path_browse_btn = PushButton("📂 浏览")
+        self._path_browse_btn.setFixedSize(52, 26)
+        self._path_browse_btn.setStyleSheet(f"""
+            PushButton {{
+                background: rgba(255, 255, 255, 0.08);
+                color: #EAF2FF;
+                border: 1px solid rgba(255, 255, 255, 0.12);
+                border-radius: 6px;
+                padding: 2px 6px;
+                {FONT_CSS} font-size: 11px;
+            }}
+            PushButton:hover {{
+                background: rgba(255, 255, 255, 0.15);
+                border-color: #C9A85C;
+            }}
+        """)
+        self._path_browse_btn.clicked.connect(self._browse_folder)
+        path_row.addWidget(self._path_browse_btn)
+        right_col.addLayout(path_row)
+
+        config_grid.addLayout(right_col, 3)
+        layout.addLayout(config_grid)
+
+        layout.addWidget(CardSeparator())
+
+        # ---- 任务描述 ----
+        self._prompt_edit = QTextEdit()
+        self._prompt_edit.setPlaceholderText("📝 描述 AutoLoop 要完成的任务...")
+        self._prompt_edit.setMinimumHeight(60)
+        self._prompt_edit.setMaximumHeight(120)
+        self._prompt_edit.setStyleSheet(f"""
+            QTextEdit {{
+                background: rgba(255, 255, 255, 0.05);
+                color: #EAF2FF;
+                border: 1px solid rgba(255, 255, 255, 0.12);
+                border-radius: 8px;
+                padding: 6px 10px;
+                {FONT_CSS} font-size: 13px;
+            }}
+            QTextEdit:focus {{
+                border: 1px solid #C9A85C;
+            }}
+        """)
+        layout.addWidget(self._prompt_edit)
+
+    def _on_start(self):
+        config = AutoLoopConfig(
+            max_iterations=self._iteration_spin.value(),
+            max_tokens=self._token_spin.value(),
+            max_duration_minutes=self._duration_spin.value(),
+            completion_signal=self._signal_edit.text().strip() or "DONE",
+            completion_threshold=self._threshold_spin.value(),
+            project_path=self._path_edit.text().strip(),
+            task_prompt=self._prompt_edit.toPlainText().strip(),
+        )
+        self.startRequested.emit(config)
+
+    def _browse_folder(self):
+        """打开文件夹选择对话框"""
+        from PyQt5.QtWidgets import QFileDialog
+        folder = QFileDialog.getExistingDirectory(
+            self, "选择项目文件夹",
+            self._path_edit.text().strip() or "",
+        )
+        if folder:
+            self._path_edit.setText(folder)
+
+    def _spin_style(self) -> str:
+        return f"""
+            SpinBox {{
+                background: rgba(255, 255, 255, 0.05);
+                color: #EAF2FF;
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                border-radius: 6px;
+                padding: 4px 8px;
+                {FONT_CSS} font-size: 13px;
+            }}
+            SpinBox:focus {{
+                border-color: #C9A85C;
+            }}
+        """
+
+    def _line_style(self) -> str:
+        return f"""
+            LineEdit {{
+                background: rgba(255, 255, 255, 0.05);
+                color: #EAF2FF;
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                border-radius: 6px;
+                padding: 6px 8px;
+                {FONT_CSS} font-size: 13px;
+            }}
+            LineEdit:focus {{
+                border-color: #C9A85C;
+            }}
+        """
+
+
+# ============================================================
+#  AutoLoop 运行卡（彩虹边框动画）
+# ============================================================
+
+class AutoLoopRunningCard(QFrame):
+    """AutoLoop 运行状态卡 — 彩虹渐变边框 + 进度 + 停止按钮"""
+
+    stopRequested = pyqtSignal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("autoLoopRunningCard")
+        self.setStyleSheet(f"""
+            #autoLoopRunningCard {{
+                background: rgba(22, 30, 45, 230);
+                border-radius: 12px;
+                {FONT_CSS}
+            }}
+        """)
+
+        # 彩虹边框动画
+        self._hue_offset = 0
+        self._anim = QVariantAnimation(self)
+        self._anim.setDuration(3000)
+        self._anim.setStartValue(0)
+        self._anim.setEndValue(360)
+        self._anim.setLoopCount(-1)
+        self._anim.valueChanged.connect(self._on_hue_changed)
+
+        # 每秒更新时间
+        self._start_timestamp = 0.0
+        self._timer = QTimer(self)
+        self._timer.setInterval(1000)
+        self._timer.timeout.connect(self._refresh_elapsed)
+
+        self._build_ui()
+
+    def _build_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(8)
+
+        # 标题行
+        title_bar = QHBoxLayout()
+        icon_label = QLabel("🤖")
+        icon_label.setStyleSheet("font-size: 22px;")
+        title_bar.addWidget(icon_label)
+
+        title = QLabel("AutoLoop 运行中")
+        title.setStyleSheet(f"color: #EAF2FF; font-size: 15px; font-weight: bold; {FONT_CSS}")
+        title_bar.addWidget(title)
+        title_bar.addStretch()
+
+        self._stop_btn = PushButton("⏹ 停止")
+        self._stop_btn.setFixedSize(80, 30)
+        self._stop_btn.setStyleSheet(f"""
+            PushButton {{
+                background: rgba(255, 80, 80, 0.8);
+                color: white;
+                border: none;
+                border-radius: 8px;
+                {FONT_CSS} font-size: 12px;
+                font-weight: bold;
+            }}
+            PushButton:hover {{
+                background: rgba(255, 60, 60, 1.0);
+            }}
+        """)
+        self._stop_btn.clicked.connect(self.stopRequested.emit)
+        title_bar.addWidget(self._stop_btn)
+        layout.addLayout(title_bar)
+
+        # 状态区域
+        self._status_widget = QWidget()
+        self._status_widget.setStyleSheet("background: rgba(0,0,0,0.2); border-radius: 8px;")
+        status_layout = QVBoxLayout(self._status_widget)
+        status_layout.setContentsMargins(12, 12, 12, 12)
+        status_layout.setSpacing(10)
+
+        # 迭代进度
+        iter_row = QHBoxLayout()
+        iter_row.setSpacing(8)
+        iter_label = QLabel("📚 迭代")
+        iter_label.setStyleSheet(f"color: #9BB0D3; font-size: 13px; {FONT_CSS}")
+        iter_row.addWidget(iter_label)
+        self._iter_label = QLabel("0 / 0")
+        self._iter_label.setStyleSheet(f"color: #C9A85C; font-weight: bold; font-size: 14px; {FONT_CSS}")
+        iter_row.addStretch()
+        iter_row.addWidget(self._iter_label)
+        status_layout.addLayout(iter_row)
+
+        # 时间
+        time_row = QHBoxLayout()
+        time_row.setSpacing(8)
+        time_label = QLabel("⏱️ 耗时")
+        time_label.setStyleSheet(f"color: #9BB0D3; font-size: 13px; {FONT_CSS}")
+        time_row.addWidget(time_label)
+        self._time_label = QLabel("0秒")
+        self._time_label.setStyleSheet(f"color: #7FDBFF; font-weight: bold; font-size: 14px; {FONT_CSS}")
+        time_row.addStretch()
+        time_row.addWidget(self._time_label)
+        status_layout.addLayout(time_row)
+
+        # Token 使用
+        token_row = QVBoxLayout()
+        token_row.setSpacing(4)
+        token_header = QHBoxLayout()
+        token_header.setSpacing(8)
+        token_label = QLabel("🔢 Token 使用")
+        token_label.setStyleSheet(f"color: #9BB0D3; font-size: 13px; {FONT_CSS}")
+        token_header.addWidget(token_label)
+        self._token_label = QLabel("0")
+        self._token_label.setStyleSheet(f"color: #A7F3D0; font-weight: bold; font-size: 14px; {FONT_CSS}")
+        token_header.addStretch()
+        token_header.addWidget(self._token_label)
+        token_row.addLayout(token_header)
+        
+        # Token 进度条
+        self._token_progress = QProgressBar()
+        self._token_progress.setRange(0, 100)
+        self._token_progress.setValue(0)
+        self._token_progress.setTextVisible(False)
+        self._token_progress.setFixedHeight(8)
+        self._token_progress.setStyleSheet("""
+            QProgressBar {
+                background: rgba(255, 255, 255, 0.1);
+                border-radius: 4px;
+                border: none;
+            }
+            QProgressBar::chunk {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #10B981, stop:1 #34D399);
+                border-radius: 4px;
+            }
+        """)
+        token_row.addWidget(self._token_progress)
+        status_layout.addLayout(token_row)
+
+        # 状态文本
+        status_row = QHBoxLayout()
+        status_row.setSpacing(8)
+        status_label_text = QLabel("📊 状态")
+        status_label_text.setStyleSheet(f"color: #9BB0D3; font-size: 13px; {FONT_CSS}")
+        status_row.addWidget(status_label_text)
+        status_row.addStretch()
+        self._status_label = QLabel("▶ 准备中...")
+        self._status_label.setStyleSheet(f"color: #E5E7EB; font-weight: 600; font-size: 14px; {FONT_CSS}")
+        status_row.addWidget(self._status_label)
+        status_layout.addLayout(status_row)
+
+        layout.addWidget(self._status_widget)
+
+        # 可视化日志行（单行滚动）
+        self._log_label = QLabel("")
+        self._log_label.setFixedHeight(20)
+        self._log_label.setStyleSheet(f"""
+            color: #7A9BBF;
+            font-size: 11px;
+            {FONT_CSS}
+            padding: 2px 4px;
+            background: rgba(0,0,0,0.15);
+            border-radius: 4px;
+        """)
+        self._log_label.setWordWrap(False)
+        self._log_label.setTextFormat(Qt.PlainText)
+        layout.addWidget(self._log_label)
+
+        # 设置标签样式
+        for label in self._status_widget.findChildren(QLabel):
+            current = label.styleSheet()
+            if "color" not in current and label != self._iter_label:
+                label.setStyleSheet(f"color: #9BB0D3; {FONT_CSS}")
+
+    def paintEvent(self, event):
+        """绘制彩虹边框"""
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        # 彩虹渐变边框
+        rect = self.rect()
+        gradient = QLinearGradient(0, 0, rect.width(), rect.height())
+        hue = self._hue_offset
+        colors = [
+            (0.0, QColor.fromHsv(hue % 360, 255, 200, 160)),
+            (0.25, QColor.fromHsv((hue + 72) % 360, 255, 200, 160)),
+            (0.5, QColor.fromHsv((hue + 144) % 360, 255, 200, 160)),
+            (0.75, QColor.fromHsv((hue + 216) % 360, 255, 200, 160)),
+            (1.0, QColor.fromHsv((hue + 288) % 360, 255, 200, 160)),
+        ]
+        for pos, color in colors:
+            gradient.setColorAt(pos, color)
+
+        painter.setPen(QPen(QBrush(gradient), 3))
+        painter.drawRoundedRect(rect.adjusted(2, 2, -2, -2), 10, 10)
+
+        painter.end()
+
+    def _on_hue_changed(self, value: int):
+        self._hue_offset = value
+        self.update()  # 触发重绘
+
+    def start_animation(self):
+        """开始彩虹动画和计时器"""
+        self._start_timestamp = time.time()
+        self._anim.start()
+        self._timer.start()
+        # 确保停止按钮可见（修复完成后重新运行时停止按钮消失的问题）
+        self._stop_btn.show()
+        # 强制更新UI，确保按钮显示
+        self._stop_btn.update()
+        self.update()
+
+    def stop_animation(self):
+        """停止彩虹动画和计时器"""
+        self._anim.stop()
+        self._timer.stop()
+
+    def _refresh_elapsed(self):
+        """每秒刷新已用时间"""
+        if self._start_timestamp > 0:
+            elapsed = time.time() - self._start_timestamp
+            m, s = divmod(int(elapsed), 60)
+            h, m = divmod(m, 60)
+            if h > 0:
+                self._time_label.setText(f"{h}时{m}分{s}秒")
+            else:
+                self._time_label.setText(f"{m}分{s}秒")
+
+    def append_log(self, text: str):
+        """追加一行日志到可视化区域（单行滚动）"""
+        timestamp = time.strftime("%H:%M:%S")
+        self._log_label.setText(f"[{timestamp}] {text}")
+        self.update()
+
+    # ========== 更新方法 ==========
+
+    def update_progress(self, progress: dict):
+        """更新进度显示"""
+        iteration = progress.get("iteration", 0)
+        max_iter = progress.get("max_iterations", 0)
+        elapsed = progress.get("elapsed_str", "0秒")
+        tokens = progress.get("total_tokens", 0)
+        max_tokens = progress.get("max_tokens", 0)
+        state = progress.get("state", "")
+
+        self._iter_label.setText(f"{iteration} / {max_iter}")
+        self._time_label.setText(elapsed)
+
+        if max_tokens > 0:
+            self._token_label.setText(f"{tokens:,} / {max_tokens:,}")
+            percentage = min(100, int(tokens * 100 / max_tokens))
+            self._token_progress.setValue(percentage)
+        else:
+            self._token_label.setText(f"{tokens:,}")
+            self._token_progress.setValue(0)
+        self._token_progress.update()
+
+        if state == "running":
+            self._status_label.setText(f"▶ 第 {iteration} 轮进行中...")
+        elif state == "completed":
+            self._status_label.setText("✅ 已完成")
+        elif state == "stopped":
+            self._status_label.setText("⏹ 已停止")
+        elif state == "error":
+            self._status_label.setText("❌ 出错")
+        self._token_label.update()
+        self.update()
+
+    def show_completed(self, message: str):
+        """显示完成状态"""
+        self._status_label.setText(f"✅ {message}")
+        self.stop_animation()
+        self._stop_btn.hide()
+        self.update()
+
+    def show_error(self, message: str):
+        """显示错误状态"""
+        self._status_label.setText(f"❌ {message}")
+        self.stop_animation()
+        self.update()
