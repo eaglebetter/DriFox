@@ -221,12 +221,12 @@ class BuiltinTools(QObject):
         print(project)
         self._current_project = project
 
-    def update_project_note(
+    def edit_project_note(
         self,
-        note_content: str,
-        append: bool = False,
+        old_string: str,
+        new_string: str,
     ) -> ToolResult:
-        """更新项目笔记
+        """编辑项目笔记，通过精确字符串替换更新
         
         **使用时机**：
         1. 项目探索完成后，记录项目的关键信息（目录结构、技术栈、核心文件、约束条件等）
@@ -237,38 +237,91 @@ class BuiltinTools(QObject):
         - 只有当有明确有价值的信息时才更新
         - 避免记录无意义的闲聊、简单问答或一次性信息
         - 笔记内容应简洁、具体、可操作
-        - 已有笔记应追加新内容，不要完全重写
+        - 通过精确字符串替换编辑，不允许直接覆盖重写整个笔记
         
         Args:
-            note_content: 笔记内容
-            append: 是否追加到现有内容（默认替换）
+            old_string: 要被替换的原始精确文本块
+            new_string: 替换后的新文本块
         """
         if not self._memory_manager:
             return ToolResult(False, error="Memory manager not available")
         
         project = getattr(self, '_current_project', '默认项目') or '默认项目'
-        content = str(note_content or "").strip()
         
-        if not content:
-            return ToolResult(False, error="笔记内容为空")
+        # 获取现有内容
+        existing = self._memory_manager.get_project_note(project)
+        existing_content = existing.get("content", "") if existing else ""
         
-        if append:
-            # 追加模式
-            existing = self._memory_manager.get_project_note(project)
-            existing_content = existing.get("content", "") if existing else ""
-            content = existing_content + "\n\n" + content
+        if old_string not in existing_content:
+            return ToolResult(False, error=f"未找到匹配的文本片段，替换失败")
         
-        success = self._memory_manager.save_project_note(project, content)
+        # 执行精确替换
+        new_content = existing_content.replace(old_string, new_string)
+        
+        if new_content == existing_content:
+            return ToolResult(False, error="替换后内容未发生变化")
+        
+        success = self._memory_manager.save_project_note(project, new_content)
         
         if success:
             return ToolResult(True, content={
                 "saved": True,
                 "project": project,
-                "content_length": len(content),
-                "append": append,
+                "content_length": len(new_content),
+                "replaced": True,
             })
         else:
             return ToolResult(False, error="保存项目笔记失败")
+
+    def read_project_note(
+        self,
+        offset: int = 1,
+        limit: int = 500,
+    ) -> ToolResult:
+        """读取当前项目笔记内容，支持读取部分内容
+        
+        **使用时机**：
+        需要查看或引用当前项目笔记内容时使用。
+        内容很长时可以通过 offset/limit 分页读取。
+        
+        Args:
+            offset: 起始行号（从 1 开始），默认 1
+            limit: 读取行数，默认 500
+        
+        Returns:
+            项目笔记的内容
+        """
+        if not self._memory_manager:
+            return ToolResult(False, error="Memory manager not available")
+        
+        project = getattr(self, '_current_project', '默认项目') or '默认项目'
+        note = self._memory_manager.get_project_note(project)
+        full_content = note.get("content", "") if note else ""
+        
+        if not full_content:
+            full_content = "(项目笔记为空)"
+        
+        # 按行分割，支持分页读取
+        lines = full_content.splitlines()
+        total_lines = len(lines)
+        
+        if offset < 1:
+            offset = 1
+        
+        start = offset - 1
+        end = start + limit if limit > 0 else None
+        selected_lines = lines[start:end]
+        content = '\n'.join(selected_lines)
+        
+        return ToolResult(True, content={
+            "project": project,
+            "content": content,
+            "total_lines": total_lines,
+            "offset": offset,
+            "limit": limit if limit > 0 else total_lines,
+            "returned_lines": len(selected_lines),
+            "total_length": len(full_content),
+        })
 
 
 def create_builtin_tools(homepage=None, workdir: str = None) -> BuiltinTools:
@@ -618,15 +671,30 @@ TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
-            "name": "update_project_note",
-            "description": "更新项目笔记。**使用时机**：1. 项目探索完成后，记录项目的关键信息（目录结构、技术栈、核心文件、约束条件等）；2. 关键内容构建时（设计决策、重要实现、配置变更等）；3. 发现对项目有长期价值的洞察时。**使用原则**：只有当有明确有价值的信息时才更新，避免记录无意义的闲聊、简单问答或一次性信息。笔记内容应简洁、具体、可操作。已有笔记应追加新内容，不要完全重写。",
+            "name": "edit_project_note",
+            "description": "编辑项目笔记，通过精确字符串替换更新。**使用时机**：1. 项目探索完成后，记录项目的关键信息（目录结构、技术栈、核心文件、约束条件等）；2. 关键内容构建时（设计决策、重要实现、配置变更等）；3. 发现对项目有长期价值的洞察时。**使用原则**：只有当有明确有价值的信息时才更新，避免记录无意义的闲聊、简单问答或一次性信息。笔记内容应简洁、具体、可操作。通过精确字符串替换编辑，不允许直接覆盖重写整个笔记。",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "note_content": {"type": "string", "description": "笔记内容（完整内容或追加内容，取决于 append 参数）"},
-                    "append": {"type": "boolean", "description": "是否追加到现有内容，默认 false 表示替换", "default": False},
+                    "old_string": {"type": "string", "description": "要被替换的原始精确文本块"},
+                    "new_string": {"type": "string", "description": "替换后的新文本块"},
                 },
-                "required": ["note_content"],
+                "required": ["old_string", "new_string"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_project_note",
+            "description": "读取当前项目笔记内容，支持读取部分内容。需要查看或引用当前项目笔记内容时使用。内容很长时可以通过 offset/limit 分页读取，和普通 read 工具用法一致。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "offset": {"type": "integer", "description": "起始行号（从 1 开始），默认 1"},
+                    "limit": {"type": "integer", "description": "读取行数，默认 500"},
+                },
+                "required": [],
             },
         },
     },

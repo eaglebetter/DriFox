@@ -6,7 +6,7 @@
 3. 关键文档 - 列表 + 拖拽添加
 """
 import os
-from PyQt5.QtCore import pyqtSignal, Qt
+from PyQt5.QtCore import pyqtSignal, Qt, QSize, QTimer
 from PyQt5.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -16,6 +16,7 @@ from PyQt5.QtWidgets import (
     QMenu,
     QAction,
     QTextEdit,
+    QSizePolicy,
 )
 from PyQt5.QtGui import QDropEvent, QDragEnterEvent, QDragMoveEvent
 from loguru import logger
@@ -103,58 +104,63 @@ class EntryMemoryItemWidget(QWidget):
         self._init_ui(enabled, source)
 
     def _init_ui(self, enabled, source):
-        self.setFixedHeight(50)
-        self.setSizePolicy(1, 0)
+        # 高度自适应内容，不固定高度
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.MinimumExpanding)
+        self.setMinimumHeight(44)
 
         main_layout = QHBoxLayout(self)
-        main_layout.setContentsMargins(8, 4, 8, 4)
-        main_layout.setSpacing(4)
+        main_layout.setContentsMargins(8, 8, 8, 8)
+        main_layout.setSpacing(6)
 
         # 内容区域
         self.text_widget = QWidget(self)
-        self.text_widget.setSizePolicy(1, 0)
+        # 允许收缩，适应小窗口
+        self.text_widget.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.MinimumExpanding)
+        self.text_widget.setMinimumWidth(100)
         text_layout = QVBoxLayout(self.text_widget)
         text_layout.setContentsMargins(0, 0, 0, 0)
-        text_layout.setSpacing(1)
+        text_layout.setSpacing(0)
 
         self.content_label = BodyLabel(self._content, self.text_widget)
         self.content_label.setWordWrap(True)
+        # 允许收缩，最小宽度小一点，适应小窗口
+        self.content_label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.MinimumExpanding)
+        self.content_label.setMinimumWidth(100)
         self.content_label.setStyleSheet(
-            f"padding: 2px 4px 0 4px; {get_font_family_css()} font-size: 12px;"
+            f"padding: 4px; {get_font_family_css()} font-size: 12px;"
         )
         text_layout.addWidget(self.content_label)
 
-        self.meta_label = BodyLabel(f"source={source}", self.text_widget)
-        self.meta_label.setStyleSheet(
-            f"padding: 0 4px 2px 4px; color: #8c99ad; {get_font_family_css()} font-size: 10px;"
-        )
-        text_layout.addWidget(self.meta_label)
-
         main_layout.addWidget(self.text_widget, 1)
 
-        # 编辑输入框（初始隐藏）
+        # 编辑输入框（初始隐藏，使用 TextEdit 支持多行）
         self.edit_widget = QWidget(self)
-        self.edit_widget.setSizePolicy(1, 0)
+        self.edit_widget.setSizePolicy(1, QSizePolicy.MinimumExpanding)
         self.edit_widget.setVisible(False)
         edit_layout = QVBoxLayout(self.edit_widget)
         edit_layout.setContentsMargins(0, 0, 0, 0)
-        edit_layout.setSpacing(2)
+        edit_layout.setSpacing(0)
 
-        self.edit_line = LineEdit(self.edit_widget)
-        self.edit_line.setText(self._content)
-        self.edit_line.setStyleSheet(f"""
-            QLineEdit {{
+        from qfluentwidgets import TextEdit
+        self.edit_text = TextEdit(self.edit_widget)
+        self.edit_text.setText(self._content)
+        self.edit_text.setPlaceholderText("编辑条目记忆...")
+        self.edit_text.setStyleSheet(f"""
+            QTextEdit {{
                 background-color: rgba(50, 50, 50, 200);
                 border: 1px solid rgba(14, 99, 156, 200);
                 color: #e0e0e0;
-                padding: 2px 6px;
+                padding: 4px 6px;
                 border-radius: 3px;
                 {get_font_family_css()} font-size: 12px;
             }}
         """)
-        self.edit_line.returnPressed.connect(self._finish_edit)
-        self.edit_line.setFixedHeight(24)
-        edit_layout.addWidget(self.edit_line)
+        self.edit_text.setMinimumHeight(36)
+        self.edit_text.setMaximumHeight(200)  # 限制最大高度，超出可滚动
+        self.edit_text.document().documentLayout().documentSizeChanged.connect(self._adjust_edit_height)
+        # 失去焦点自动保存
+        self.edit_text.focusOutEvent = lambda e: self._on_focus_out(e)
+        edit_layout.addWidget(self.edit_text)
 
         main_layout.addWidget(self.edit_widget, 1)
 
@@ -184,29 +190,49 @@ class EntryMemoryItemWidget(QWidget):
 
         main_layout.addLayout(btn_layout)
 
+    def _adjust_edit_height(self):
+        """根据内容调整编辑框高度，不超过最大高度，超出可滚动"""
+        doc = self.edit_text.document()
+        doc_height = int(doc.size().height() + 10)
+        height = max(36, min(doc_height, 200))
+        self.edit_text.setFixedHeight(height)
+        # 如果内容超过最大高度，QTextEdit 会自动出现滚动条，可以滚动查看
+    
     def _start_edit(self):
         """开始编辑"""
         self._editing = True
         self.text_widget.setVisible(False)
         self.edit_widget.setVisible(True)
-        self.edit_line.setFocus()
-        self.edit_line.selectAll()
+        self._adjust_edit_height()
+        self.edit_text.setFocus()
+        # 选中文本
+        cursor = self.edit_text.textCursor()
+        cursor.select(cursor.Document)
+        self.edit_text.setTextCursor(cursor)
 
     def _finish_edit(self):
         """完成编辑"""
-        new_content = self.edit_line.text().strip()
+        new_content = self.edit_text.toPlainText().strip()
         if new_content and new_content != self._content:
             self.edited.emit(self.memory_id, new_content)
             self._content = new_content
             self.content_label.setText(new_content)
         self._cancel_edit()
 
+    def _on_focus_out(self, event):
+        """失去焦点时自动保存完成编辑"""
+        if self._editing:
+            self._finish_edit()
+        # 继续传递事件
+        if event:
+            event.ignore()
+    
     def _cancel_edit(self):
         """取消编辑"""
         self._editing = False
         self.text_widget.setVisible(True)
         self.edit_widget.setVisible(False)
-        self.edit_line.setText(self._content)
+        self.edit_text.setText(self._content)
 
 
 class KeyDocumentItemWidget(QWidget):
@@ -227,9 +253,70 @@ class KeyDocumentItemWidget(QWidget):
         super().__init__(parent)
         self.doc_id = doc_id
         self.file_path = file_path
-        self._init_ui(file_name, added_by)
+        self._init_ui(file_name, file_path, added_by)
 
-    def _init_ui(self, file_name, added_by):
+    def _get_icon(self, file_name: str, file_path: str) -> str:
+        """根据文件类型获取对应图标，文件夹单独处理"""
+        import os
+        # 先判断是否是文件夹
+        if os.path.isdir(file_path):
+            return "📁"
+        
+        ext = file_name.lower().split('.')[-1] if '.' in file_name else ''
+        
+        icon_map = {
+            # 代码文件
+            'py': '🐍', 'python': '🐍',
+            'js': '🟨', 'javascript': '🟨',
+            'ts': '🔷', 'typescript': '🔷',
+            'jsx': '⚛️', 'tsx': '⚛️',
+            'java': '☕',
+            'go': '🐹',
+            'rs': '🦀', 'rust': '🦀',
+            'c': '🔶', 'cpp': '🔶', 'h': '🔶',
+            'cs': '🔷',
+            'php': '🐘',
+            'rb': '💎',
+            'swift': '🍎',
+            'kt': '🤖',
+            # 文档
+            'md': '📝', 'markdown': '📝',
+            'txt': '📄',
+            'rtf': '📄',
+            'pdf': '📕',
+            'doc': '📘', 'docx': '📘',
+            'xls': '📊', 'xlsx': '📊', 'csv': '📊',
+            'ppt': '📙', 'pptx': '📙',
+            'html': '🌐', 'htm': '🌐',
+            'css': '🎨',
+            'scss': '🎨', 'less': '🎨',
+            'json': '🔧',
+            'yaml': '🔧', 'yml': '🔧',
+            'toml': '🔧',
+            'ini': '🔧',
+            'cfg': '🔧',
+            'conf': '🔧',
+            'xml': '🔧',
+            # 图片
+            'png': '🖼️', 'jpg': '🖼️', 'jpeg': '🖼️',
+            'gif': '🖼️', 'bmp': '🖼️', 'svg': '🖼️',
+            'webp': '🖼️',
+            # 视频音频
+            'mp4': '🎬', 'webm': '🎬',
+            'mp3': '🎵', 'wav': '🎵', 'ogg': '🎵',
+            # 存档
+            'zip': '📦', 'rar': '📦', '7z': '📦',
+            'tar': '📦', 'gz': '📦',
+            # git
+            'gitignore': '🌱',
+            # license/readme
+            'license': '📜', 'licence': '📜',
+            'readme': '📖', 'readme.md': '📖',
+        }
+        
+        return icon_map.get(ext, icon_map.get(file_name.lower(), '📄'))
+
+    def _init_ui(self, file_name, file_path, added_by):
         self.setFixedHeight(44)
         self.setSizePolicy(1, 0)
 
@@ -237,8 +324,9 @@ class KeyDocumentItemWidget(QWidget):
         main_layout.setContentsMargins(8, 4, 8, 4)
         main_layout.setSpacing(4)
 
-        # 文件图标 + 名称
-        icon_label = BodyLabel("📄", self)
+        # 文件/文件夹图标（根据类型显示不同图标）
+        icon = self._get_icon(file_name, file_path)
+        icon_label = BodyLabel(icon, self)
         icon_label.setStyleSheet(f"font-size: 16px; padding: 0 4px;")
 
         name_label = BodyLabel(file_name, self)
@@ -251,12 +339,13 @@ class KeyDocumentItemWidget(QWidget):
         main_layout.addWidget(icon_label)
         main_layout.addWidget(name_label, 1)
 
-        # 来源标签
-        by_label = BodyLabel(f"[{added_by}]", self)
-        by_label.setStyleSheet(
-            f"color: #8c99ad; {get_font_family_css()} font-size: 10px; padding: 0 4px;"
+        # 显示绝对路径
+        path_label = BodyLabel(self.file_path, self)
+        path_label.setStyleSheet(
+            f"color: #8c99ad; {get_font_family_css()} font-size: 10px;"
         )
-        main_layout.addWidget(by_label)
+        path_label.setMaximumWidth(200)
+        main_layout.addWidget(path_label)
 
         # 操作按钮
         self.open_btn = TransparentToolButton(FluentIcon.FOLDER, self)
@@ -533,42 +622,65 @@ class MemoryCardContent(QWidget):
     def _create_notes_tab(self) -> QWidget:
         """创建项目笔记 Tab"""
         widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(6)
+        main_layout = QVBoxLayout(widget)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(6)
+
+        # 顶部水平布局：左边项目名，右边字数/token统计
+        top_layout = QHBoxLayout()
+        top_layout.setSpacing(0)
 
         # 项目名标签
         self.project_name_label = BodyLabel(f"项目: {self._current_project}", self)
         self.project_name_label.setStyleSheet(
             f"color: #8c99ad; {get_font_family_css()} font-size: 11px; padding: 0 4px;"
         )
-        layout.addWidget(self.project_name_label)
+        top_layout.addWidget(self.project_name_label)
+
+        # 占位拉伸
+        top_layout.addStretch()
+
+        # 字数/token统计标签
+        self.notes_stats_label = BodyLabel("0 字 / 0 token", self)
+        self.notes_stats_label.setStyleSheet(
+            f"color: #8c99ad; {get_font_family_css()} font-size: 11px; padding: 0 4px;"
+        )
+        top_layout.addWidget(self.notes_stats_label)
+
+        main_layout.addLayout(top_layout)
 
         # Markdown 编辑器
         self.notes_editor = TextEdit(self)
         self.notes_editor.setPlaceholderText("在此记录项目笔记，支持 Markdown 格式...")
-        layout.addWidget(self.notes_editor, 1)
-
-        # 保存按钮
-        self.notes_save_btn = PrimaryPushButton("保存笔记", self)
-        self.notes_save_btn.setFixedHeight(28)
-        self.notes_save_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #0e639c;
-                color: white;
-                border: none;
-                border-radius: 4px;
-                font-size: 12px;
-                padding: 0 12px;
-            }
-            QPushButton:hover {
-                background-color: #1177bb;
-            }
-        """)
-        self.notes_save_btn.clicked.connect(self._save_project_note)
-        layout.addWidget(self.notes_save_btn)
+        # 监听内容变化更新统计并触发自动保存（带节流）
+        self.notes_editor.textChanged.connect(self._update_notes_stats)
+        self.notes_editor.textChanged.connect(self._on_notes_changed)
+        
+        # 自动保存定时器（节流防频繁保存）
+        from PyQt5.QtCore import QTimer
+        self._auto_save_timer = QTimer(self)
+        self._auto_save_timer.setSingleShot(True)
+        self._auto_save_timer.setInterval(1000)  # 1秒后保存
+        self._auto_save_timer.timeout.connect(self._save_project_note)
+        
+        main_layout.addWidget(self.notes_editor, 1)
 
         return widget
+
+    def _update_notes_stats(self):
+        """更新字数和 token 统计"""
+        content = self.notes_editor.toPlainText()
+        char_count = len(content)
+        # 简单估算 token：按中文字符约 1:1，英文约 4:1，这里用近似算法
+        # 中文占比高，按字符数的 0.8 估算
+        token_estimate = int(char_count * 0.8)
+        self.notes_stats_label.setText(f"{char_count:,} 字 / {token_estimate:,} token")
+
+    def _on_notes_changed(self):
+        """内容变化时触发自动保存（带节流）"""
+        # 重置定时器，用户持续输入时不会保存，停止 1 秒后才保存
+        if hasattr(self, '_auto_save_timer') and self._auto_save_timer:
+            self._auto_save_timer.start()
 
     def _create_docs_tab(self) -> QWidget:
         """创建关键文档 Tab"""
@@ -595,12 +707,14 @@ class MemoryCardContent(QWidget):
         self.docs_list.files_dropped.connect(self._on_files_dropped)
         layout.addWidget(self.docs_list, 1)
 
-        # 添加按钮（仅按钮）
+        # 添加按钮（右对齐）
         add_btn_layout = QHBoxLayout()
         add_btn_layout.setSpacing(6)
+        add_btn_layout.addStretch()
         
-        self.add_doc_btn = PrimaryPushButton("📁 添加文件", self)
+        self.add_doc_btn = PrimaryPushButton("📄 添加文件", self)
         self.add_doc_btn.setFixedHeight(28)
+        self.add_doc_btn.setFixedWidth(110)
         self.add_doc_btn.setStyleSheet("""
             QPushButton {
                 background-color: #0e639c;
@@ -608,7 +722,7 @@ class MemoryCardContent(QWidget):
                 border: none;
                 border-radius: 4px;
                 font-size: 12px;
-                padding: 0 12px;
+                padding: 0 8px;
             }
             QPushButton:hover {
                 background-color: #1177bb;
@@ -616,14 +730,33 @@ class MemoryCardContent(QWidget):
         """)
         self.add_doc_btn.clicked.connect(self._on_add_file_clicked)
         
+        self.add_folder_btn = PrimaryPushButton("📁 添加文件夹", self)
+        self.add_folder_btn.setFixedHeight(28)
+        self.add_folder_btn.setFixedWidth(120)
+        self.add_folder_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2d882d;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                font-size: 12px;
+                padding: 0 8px;
+            }
+            QPushButton:hover {
+                background-color: #3a9e3a;
+            }
+        """)
+        self.add_folder_btn.clicked.connect(self._on_add_folder_clicked)
+        
         add_btn_layout.addWidget(self.add_doc_btn)
-        add_btn_layout.addStretch()
+        add_btn_layout.addWidget(self.add_folder_btn)
         layout.addLayout(add_btn_layout)
 
         return widget
 
     def _on_add_file_clicked(self):
         """点击添加文件按钮"""
+        from PyQt5.QtWidgets import QFileDialog
         files, _ = QFileDialog.getOpenFileNames(
             self,
             "选择关键文档",
@@ -632,6 +765,18 @@ class MemoryCardContent(QWidget):
         )
         if files:
             self._on_files_dropped(files)
+
+    def _on_add_folder_clicked(self):
+        """点击添加文件夹按钮"""
+        from PyQt5.QtWidgets import QFileDialog
+        folder = QFileDialog.getExistingDirectory(
+            self,
+            "选择文件夹",
+            "",
+            QFileDialog.ShowDirsOnly
+        )
+        if folder:
+            self._on_files_dropped([folder])
 
     def _on_tab_changed(self, tab_key: str):
         """切换 Tab"""
@@ -669,7 +814,7 @@ class MemoryCardContent(QWidget):
             source = entry.get("source", "manual")
 
             item = QListWidgetItem()
-            item.setSizeHint(self._get_entry_item_size())
+            item.setSizeHint(self._get_entry_item_size(content))
             widget = EntryMemoryItemWidget(memory_id, content, enabled, source)
             widget.deleted.connect(self._delete_entry)
             widget.toggled.connect(self._toggle_entry)
@@ -677,12 +822,22 @@ class MemoryCardContent(QWidget):
             self.entries_list.addItem(item)
             self.entries_list.setItemWidget(item, widget)
 
-    def _get_entry_item_size(self):
+    def _get_entry_item_size(self, content: str):
         from PyQt5.QtCore import QSize
         width = self.entries_list.size().width()
         if width <= 0:
             width = 400
-        return QSize(width, 50)
+        
+        # 根据内容估算行数，12px字体，每行约30个中文，加上边距
+        lines = content.count('\n') + 1
+        # 自动换行，按宽度估算额外行数
+        chars_per_line = int(width / 7)  # 每个中文字符约7-8px
+        if chars_per_line > 0:
+            lines += (len(content) + chars_per_line - 1) // chars_per_line - 1
+        
+        # 行高约 20px，上下边距 + 按钮空间，多留一些余量避免遮挡
+        height = max(48, int(20 * lines) + 20)
+        return QSize(width, height)
 
     def _on_search_changed(self, text: str):
         """搜索变化"""
@@ -729,9 +884,10 @@ class MemoryCardContent(QWidget):
             return
 
         self.project_name_label.setText(f"项目: {self._current_project}")
-        note = memory_mgr.get_project_note(self._current_project)
+        note = memory_mgr.get_or_create_project_note(self._current_project)
         content = note.get("content", "") if note else ""
         self.notes_editor.setPlainText(content)
+        self._update_notes_stats()
 
     def _save_project_note(self):
         """保存项目笔记"""

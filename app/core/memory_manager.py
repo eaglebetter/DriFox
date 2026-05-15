@@ -194,10 +194,8 @@ class MemoryManagerCore:
         entries = self.get_entry_memories(limit=entry_limit)
         if entries:
             for idx, entry in enumerate(entries, 1):
-                confidence = entry.get("confidence", 0.8)
-                source = entry.get("source", "manual")
                 content = entry.get("content", "")
-                lines.append(f"- (source={source}, conf={confidence:.2f}) {content}")
+                lines.append(f"- {content}")
         else:
             lines.append("- 暂无条目记忆")
         lines.append("")
