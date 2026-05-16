@@ -339,11 +339,20 @@ class HistoryCompactor:
         执行压缩的核心逻辑：
         1. 从后向前尾保留（不拆分 tool 配对）
         2. 对被截断的部分生成摘要
+
+        性能优化：
+        - 预先计算所有消息的 token 数，避免循环内重复调用 count_messages_tokens
+        - 使用 append + reverse 替代 list.insert(0)，将 O(n) 改为 O(1)
         """
         target_limit = self._get_target_limit(budget)
         min_recent_tokens = int(target_limit * MIN_RECENT_TOKEN_RATIO)
 
+        # ========== 性能优化：预先计算 token 数 ==========
+        # 避免循环内重复调用 count_messages_tokens
+        msg_tokens_list = [count_messages_tokens([msg]) for msg in normalized]
+
         # ========== 尾保留（从后向前） ==========
+        # 性能优化：使用 append 后 reverse，替代 list.insert(0)
         recent_messages: List[Dict[str, Any]] = []
         recent_tokens = 0
         pending_tool_results: set = set()  # 等待找到对应 assistant 的 tool_call_id
@@ -353,7 +362,7 @@ class HistoryCompactor:
         single_msg_max = max(500, int(budget * MAX_SINGLE_MESSAGE_RATIO))
         while i >= 0:
             msg = normalized[i]
-            msg_tokens = count_messages_tokens([msg])
+            msg_tokens = msg_tokens_list[i]
             role = msg.get("role")
             
             # 工具调用配对保护
@@ -396,8 +405,8 @@ class HistoryCompactor:
                 # 重新计算 token
                 msg_tokens = count_messages_tokens([msg])
 
-            # 添加到 recent（从后向前插入）
-            recent_messages.insert(0, msg)
+            # 添加到 recent（性能优化：append 后 reverse，替代 list.insert(0)）
+            recent_messages.append(msg)
             recent_tokens += msg_tokens
 
             # 停止条件
@@ -422,6 +431,9 @@ class HistoryCompactor:
                 break
 
             i -= 1
+
+        # 性能优化：反转列表（因为是从后向前 append 的）
+        recent_messages.reverse()
 
         # 没有需要压缩的内容
         if len(recent_messages) == len(normalized):
@@ -520,19 +532,22 @@ class HistoryCompactor:
         紧急预算保障：当压缩结果仍超过 budget 时，
         迭代减少直到 fit。
 
+        性能优化：
+        - 使用字典缓存每条消息的 token 数，避免重复计算
+
         Returns:
             (result_messages, kept_count, note)
         """
         emergency_target = int(budget * EMERGENCY_TARGET_RATIO)
         kept_count = len(recent_messages)
         note = f"紧急缩减：原始 {normalized_len} 条"
-        
+
         # 摘要保留底线：至少 2000 字符（约 500 tokens），
         # 保证压缩结果对早期对话仍有可用信息
         MIN_SUMMARY_CHARS = 2000
 
         result_tokens = count_messages_tokens(result_messages)
-        
+
         # 策略1：截断超大摘要内容（保留底线）
         if result_tokens > emergency_target:
             summary_content = summary_message.get("content", "")
@@ -550,13 +565,16 @@ class HistoryCompactor:
                     result_tokens = count_messages_tokens(result_messages)
                     note = "紧急缩减：截断摘要"
 
+        # 性能优化：预计算 tail 消息的 token 数
+        tail_token_cache = {id(msg): count_messages_tokens([msg]) for msg in recent_messages}
+
         # 策略2：从 tail 中移除最旧的消息
         while result_tokens > emergency_target and len(result_messages) > 2:
             removed = result_messages.pop(1)  # index 0 是 summary
+            result_tokens -= tail_token_cache.get(id(removed), 0)
             if removed in recent_messages:
                 recent_messages.remove(removed)
                 kept_count -= 1
-            result_tokens = count_messages_tokens(result_messages)
 
         # 策略3：截断剩余 tail 中的工具消息内容
         if result_tokens > emergency_target:
@@ -572,7 +590,9 @@ class HistoryCompactor:
                         new_msg = dict(msg)
                         new_msg["content"] = content[:MAX_TOOL_CONTENT_CHARS // 2] + "\n\n...[工具结果截断]...\n\n" + content[-MAX_TOOL_CONTENT_CHARS // 2:]
                         result_messages[idx] = new_msg
-                        result_tokens = count_messages_tokens(result_messages)
+                        # 只更新当前消息的 token
+                        tail_token_cache[id(new_msg)] = count_messages_tokens([new_msg])
+                        result_tokens = sum(tail_token_cache.values()) + count_messages_tokens([summary_message])
                         note = f"紧急缩减：截断工具 {tool_name} 的内容"
 
         kept_count = len([m for m in recent_messages if m in result_messages])

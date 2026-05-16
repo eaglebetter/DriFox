@@ -14,6 +14,7 @@ import re
 from typing import Dict, List, Optional, Callable
 from pathlib import Path
 import os
+from functools import lru_cache
 
 from PyQt5.QtCore import QObject, pyqtSignal, QThreadPool, QRunnable
 from loguru import logger
@@ -21,6 +22,50 @@ from app.tools.result import ToolResult
 from app.tools.patch_applier import PatchApplier
 
 MAX_GREP_CONTENT_LENGTH = 15000
+
+# ========== 性能优化：模块级别常量和缓存 ==========
+# Grep 排除目录（性能优化：预创建集合）
+_GREP_EXCLUDE_DIRS = frozenset({
+    '.drifox', '.mypy_cache', '.git', 'node_modules', '__pycache__',
+    'venv', '.venv', 'dist', 'build', '.idea', '.vscode'
+})
+
+
+@lru_cache(maxsize=128)
+def _compile_grep_pattern(pattern: str) -> re.Pattern:
+    """
+    编译 grep 正则表达式（带缓存）
+
+    性能优化：避免每次调用都重新编译相同的正则表达式
+    """
+    return re.compile(pattern, re.IGNORECASE)
+
+
+def _resolve_path(workdir: Path, path: str) -> Path:
+    """
+    解析相对路径为绝对路径
+
+    Args:
+        workdir: 工作目录
+        path: 要解析的路径
+
+    Returns:
+        解析后的绝对路径
+    """
+    if not path:
+        return workdir
+    try:
+        expanded = os.path.expandvars(path)
+        if expanded != path:
+            path = expanded
+        p = Path(path)
+        if p.is_absolute():
+            return p.resolve()
+        else:
+            return (workdir / p).resolve()
+    except (ValueError, OSError, RuntimeError) as e:
+        logger.warning(f"[FileTools] Failed to resolve path {path}: {e}")
+        return workdir
 
 
 class GrepTask(QRunnable):
@@ -52,28 +97,28 @@ class GrepTask(QRunnable):
             if not self.path:
                 search_root = self.workdir
             else:
-                search_root = self._resolve_path(self.path)
-            
-            regex = re.compile(self.pattern, re.IGNORECASE)
+                search_root = _resolve_path(self.workdir, self.path)
+
+            # 性能优化：使用带缓存的编译函数
+            regex = _compile_grep_pattern(self.pattern)
+
             results = []
-            
-            exclude_dirs = {'.drifox', '.mypy_cache', '.git', 'node_modules', '__pycache__', 'venv', '.venv',
-                           'dist', 'build', '.idea', '.vscode'}
-            
+
             for root, dirs, files in os.walk(search_root):
                 # 定期检查取消标志
                 if self.cancelled_ref and self.cancelled_ref[0]:
                     return ToolResult(False, error="搜索已取消")
-                
-                dirs[:] = [d for d in dirs if d not in exclude_dirs]
-                
+
+                # 性能优化：使用 frozenset
+                dirs[:] = [d for d in dirs if d not in _GREP_EXCLUDE_DIRS]
+
                 for filename in files:
                     if self.cancelled_ref and self.cancelled_ref[0]:
                         return ToolResult(False, error="搜索已取消")
-                    
+
                     if self.include and not fnmatch.fnmatch(filename, self.include):
                         continue
-                    
+
                     file_path = Path(root) / filename
                     try:
                         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
@@ -91,29 +136,17 @@ class GrepTask(QRunnable):
                                             results) + "\n\n... (Too many matches, please refine your search pattern)")
                     except:
                         continue
-            
+
             content = "\n".join(results) if results else "No matches found."
             if len(content) > MAX_GREP_CONTENT_LENGTH:
                 content = content[:MAX_GREP_CONTENT_LENGTH] + f"\n\n... (Content truncated, exceeds {MAX_GREP_CONTENT_LENGTH} characters limit)"
             return ToolResult(True, content=content)
         except Exception as e:
             return ToolResult(False, error=f"Grep error: {str(e)}")
-    
+
     def _resolve_path(self, path: str) -> Path:
-        if not path:
-            return self.workdir
-        try:
-            expanded = os.path.expandvars(path)
-            if expanded != path:
-                path = expanded
-            p = Path(path)
-            if p.is_absolute():
-                return p.resolve()
-            else:
-                return (self.workdir / p).resolve()
-        except (ValueError, OSError, RuntimeError) as e:
-            logger.warning(f"[GrepTask] Failed to resolve path {path}: {e}")
-            return self.workdir
+        """委托给模块级函数"""
+        return _resolve_path(self.workdir, path)
 
 
 class FileTools:
@@ -149,20 +182,8 @@ class FileTools:
         self._grep_cancelled[0] = False
     
     def _resolve_path(self, path: str) -> Path:
-        if not path:
-            return self.workdir
-        try:
-            expanded = os.path.expandvars(path)
-            if expanded != path:
-                path = expanded
-            p = Path(path)
-            if p.is_absolute():
-                return p.resolve()
-            else:
-                return (self.workdir / p).resolve()
-        except (ValueError, OSError, RuntimeError) as e:
-            logger.warning(f"[FileTools] Failed to resolve path {path}: {e}")
-            return self.workdir
+        """委托给模块级函数"""
+        return _resolve_path(self.workdir, path)
 
     def _check_file_modified(self, full_path: Path) -> Optional[ToolResult]:
         """
@@ -328,19 +349,18 @@ class FileTools:
         """同步执行 grep"""
         try:
             search_root = self._resolve_path(path)
-            regex = re.compile(pattern, re.IGNORECASE)
+            # 性能优化：使用带缓存的编译函数
+            regex = _compile_grep_pattern(pattern)
             results = []
 
-            exclude_dirs = {'.mypy_cache', '.git', 'node_modules', '__pycache__', 'venv', '.venv',
-                           'dist', 'build', '.idea', '.vscode'}
-
             for root, dirs, files in os.walk(search_root):
-                dirs[:] = [d for d in dirs if d not in exclude_dirs]
+                # 性能优化：使用 frozenset
+                dirs[:] = [d for d in dirs if d not in _GREP_EXCLUDE_DIRS]
 
                 for filename in files:
                     if self._grep_cancelled[0]:
                         return ToolResult(False, error="搜索已取消")
-                    
+
                     if include and not fnmatch.fnmatch(filename, include):
                         continue
 

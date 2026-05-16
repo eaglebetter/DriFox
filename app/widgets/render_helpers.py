@@ -15,6 +15,8 @@ _CODE_BLOCK_FINAL_PATTERN = re.compile(r"```")
 _HTML_CODE_BLOCK_PATTERN = re.compile(r"<(pre|code)[^>]*>.*?</\1>", re.DOTALL | re.IGNORECASE)
 # HTML 标签清理正则（避免每次调用 re.sub）
 _HTML_TAG_PATTERN = re.compile(r"<[^>]+>")
+# UUID 模式（用于提取 task_id）
+_UUID_PATTERN = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', re.IGNORECASE)
 # Null 字符清理（编译一次，多次使用）
 _NULL_CHAR = '\x00'  # 避免 str.replace 被重复调用
 
@@ -220,9 +222,8 @@ def _parse_subagent_task_ids(result: str) -> str:
         pass
     
     # 尝试从文本中提取 task_id（UUID 格式）
-    import re
-    uuid_pattern = r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
-    matches = re.findall(uuid_pattern, result)
+    # 使用预编译的 _UUID_PATTERN
+    matches = _UUID_PATTERN.findall(result)
     if matches:
         return ",".join(matches)
     

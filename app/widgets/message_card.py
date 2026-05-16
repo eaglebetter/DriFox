@@ -18,6 +18,7 @@ MessageCard - 消息卡片组件
 import base64
 import hashlib
 import math
+import random
 import re
 import time
 import urllib.parse
@@ -936,13 +937,11 @@ WELCOME_GREETINGS = [
 
 def get_random_tip() -> str:
     """获取随机 Tips"""
-    import random
     return random.choice(WELCOME_TIPS)
 
 
 def get_random_greeting() -> str:
     """获取随机欢迎语"""
-    import random
     return random.choice(WELCOME_GREETINGS)
 
 
