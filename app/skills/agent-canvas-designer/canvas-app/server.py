@@ -260,5 +260,5 @@ if __name__ == '__main__':
     print(f'   POST /save-feedback  → feedback.json')
     print(f'   GET  /get-state     返回 config.json')
 
-    with socketserver.TCPServer(('0.0.0.0', PORT), CanvasHandler) as httpd:
+    with socketserver.TCPServer(('127.0.0.1', PORT), CanvasHandler) as httpd:
         httpd.serve_forever()

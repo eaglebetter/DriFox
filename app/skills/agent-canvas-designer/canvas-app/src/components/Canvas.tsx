@@ -94,8 +94,9 @@ const CanvasInner: React.FC = () => {
       onSelect: selectNode,
       onDelete: deleteNode,
       onToggleCollapse: toggleNodeCollapse,
+      onUpdate: updateNode,
     }),
-    [selectNode, deleteNode, toggleNodeCollapse]
+    [selectNode, deleteNode, toggleNodeCollapse, updateNode]
   );
 
   const flowNodes: FlowNode[] = useMemo(

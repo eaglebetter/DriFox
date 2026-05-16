@@ -215,38 +215,22 @@ const NODE_CONFIGS: Record<NodeType, NodeConfigMeta> = {
   },
   container: {
     fields: [
-      {
-        key: 'title', label: '容器名称', type: 'text', default: '循环',
-      },
-      {
-        key: 'loop_var', label: '循环变量/列表', type: 'text', default: '{{items}}',
-      },
-      {
-        key: 'loop_desc', label: '循环说明', type: 'textarea',
-        default: '对列表中的每个元素执行子流程',
-        hint: '循环：遍历列表中的每个元素',
-      },
+      { key: 'title', label: '容器名称', type: 'text', default: '循环' },
+      { key: 'width', label: '宽度(px)', type: 'text', default: '320' },
+      { key: 'height', label: '高度(px)', type: 'text', default: '160' },
+      { key: 'loop_var', label: '循环变量/列表', type: 'text', default: '{{items}}' },
+      { key: 'loop_desc', label: '循环说明', type: 'textarea', default: '对列表中的每个元素执行子流程', hint: '循环：遍历列表中的每个元素' },
     ],
   },
   iteration: {
     fields: [
-      {
-        key: 'title', label: '迭代名称', type: 'text', default: '迭代',
-      },
-      {
-        key: 'max_iterations', label: '最大迭代次数', type: 'text', default: '5',
-      },
-      {
-        key: 'convergence_var', label: '收敛判断变量', type: 'text', default: '{{score}}',
-      },
-      {
-        key: 'convergence_threshold', label: '收敛阈值', type: 'text', default: '0.01',
-      },
-      {
-        key: 'loop_desc', label: '迭代说明', type: 'textarea',
-        default: '反复执行子流程直到指标收敛',
-        hint: '迭代：反复优化直到收敛条件满足',
-      },
+      { key: 'title', label: '迭代名称', type: 'text', default: '迭代' },
+      { key: 'width', label: '宽度(px)', type: 'text', default: '320' },
+      { key: 'height', label: '高度(px)', type: 'text', default: '160' },
+      { key: 'max_iterations', label: '最大迭代次数', type: 'text', default: '5' },
+      { key: 'convergence_var', label: '收敛判断变量', type: 'text', default: '{{score}}' },
+      { key: 'convergence_threshold', label: '收敛阈值', type: 'text', default: '0.01' },
+      { key: 'loop_desc', label: '迭代说明', type: 'textarea', default: '反复执行子流程直到指标收敛', hint: '迭代：反复优化直到收敛条件满足' },
     ],
   },
   'doc-extractor': {

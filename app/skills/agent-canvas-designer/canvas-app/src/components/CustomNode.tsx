@@ -1,10 +1,10 @@
-import React, { memo, useCallback } from 'react';
+import React, { memo, useCallback, useRef, useState } from 'react';
 import { Handle, Position, NodeProps } from '@xyflow/react';
 import { NodeType } from '../types/canvas';
 import { NODE_ICONS, NODE_COLORS } from '../stores/nodeConfigs';
 
 const ROUND_TYPES = new Set<NodeType>(['start', 'end']);
-const CONTAINER_TYPES = new Set<NodeType>(['container', 'iteration']);
+const BOX_TYPES = new Set<NodeType>(['container', 'iteration']);
 
 interface CustomNodeData {
   label: string;
@@ -13,40 +13,27 @@ interface CustomNodeData {
   collapsed: boolean;
   onToggleCollapse: (id: string) => void;
   onSelect: (id: string) => void;
+  onUpdate?: (id: string, patch: object) => void;
 }
 
 const CustomNode = memo(({ id, data, selected }: NodeProps) => {
-  const { label, nodeType, config = {}, collapsed = false, onToggleCollapse, onSelect } =
+  const { label, nodeType, config = {}, collapsed = false, onToggleCollapse, onSelect, onUpdate } =
     data as unknown as CustomNodeData;
 
   const color = NODE_COLORS[nodeType] || '#6b7280';
   const isRound = ROUND_TYPES.has(nodeType);
-  const isContainer = CONTAINER_TYPES.has(nodeType);
+  const isBox = BOX_TYPES.has(nodeType);
 
-  // 整节点可点击
   const handleClick = useCallback(
-    (e: React.MouseEvent) => {
-      e.stopPropagation();
-      onSelect?.(id);
-    },
+    (e: React.MouseEvent) => { e.stopPropagation(); onSelect?.(id); },
     [id, onSelect]
   );
-
-  // 双击打开详情
   const handleDoubleClick = useCallback(
-    (e: React.MouseEvent) => {
-      e.stopPropagation();
-      onSelect?.(id);
-    },
+    (e: React.MouseEvent) => { e.stopPropagation(); onSelect?.(id); },
     [id, onSelect]
   );
-
-  // 折叠
   const handleToggle = useCallback(
-    (e: React.MouseEvent) => {
-      e.stopPropagation();
-      onToggleCollapse?.(id);
-    },
+    (e: React.MouseEvent) => { e.stopPropagation(); onToggleCollapse?.(id); },
     [id, onToggleCollapse]
   );
 
@@ -68,16 +55,19 @@ const CustomNode = memo(({ id, data, selected }: NodeProps) => {
     );
   }
 
-  // 容器节点
-  if (isContainer) {
+  // 容器/迭代节点
+  if (isBox) {
     return (
-      <LoopContainerNode
+      <BoxNode
         id={id}
         label={label}
-        selected={selected}
+        nodeType={nodeType}
+        selected={!!selected}
         color={color}
+        config={config}
         onClick={handleClick}
         onDoubleClick={handleDoubleClick}
+        onUpdate={onUpdate}
       />
     );
   }
@@ -103,13 +93,11 @@ const CustomNode = memo(({ id, data, selected }: NodeProps) => {
           {collapsed ? '▼' : '▲'}
         </button>
       </div>
-
       {!collapsed && (
         <div className="dif-card-body">
           <NodeBodyPreview nodeType={nodeType} config={config} />
         </div>
       )}
-
       <Handle type="target" position={Position.Left} className="handle handle-in" />
       <Handle type="source" position={Position.Right} className="handle handle-out" />
     </div>
@@ -118,44 +106,100 @@ const CustomNode = memo(({ id, data, selected }: NodeProps) => {
 
 CustomNode.displayName = 'CustomNode';
 
-/* ===== 循环/迭代容器节点 ===== */
-interface LoopNodeProps {
+/* ===== 容器/迭代节点（支持 resize + 多端口） ===== */
+interface BoxNodeProps {
   id: string;
   label: string;
+  nodeType: NodeType;
   selected: boolean;
   color: string;
+  config: Record<string, string>;
   onClick: (e: React.MouseEvent) => void;
   onDoubleClick: (e: React.MouseEvent) => void;
+  onUpdate?: (id: string, patch: object) => void;
 }
 
-function LoopContainerNode({ id, label, selected, color, onClick, onDoubleClick }: LoopNodeProps) {
-  // 容器固定尺寸，不做 runtime resize（避免与 ReactFlow 拖拽冲突）
-  // 用户可通过右侧面板配置 width/height
+function BoxNode({ id, label, nodeType, selected, color, config, onClick, onDoubleClick, onUpdate }: BoxNodeProps) {
+  const [size, setSize] = useState({
+    w: parseInt(config.width as string) || 320,
+    h: parseInt(config.height as string) || 160,
+  });
+  const dragging = useRef(false);
+  const start = useRef({ x: 0, y: 0, w: 0, h: 0 });
 
-  const isLoop = label.includes('循环');
+  // 手动 resize
+  const handleResizeMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragging.current = true;
+    start.current = { x: e.clientX, y: e.clientY, w: size.w, h: size.h };
+
+    const onMove = (ev: MouseEvent) => {
+      if (!dragging.current) return;
+      const newW = Math.max(200, start.current.w + (ev.clientX - start.current.x));
+      const newH = Math.max(100, start.current.h + (ev.clientY - start.current.y));
+      setSize({ w: newW, h: newH });
+    };
+
+    const onUp = (ev: MouseEvent) => {
+      if (!dragging.current) return;
+      dragging.current = false;
+      const finalW = Math.max(200, start.current.w + (ev.clientX - start.current.x));
+      const finalH = Math.max(100, start.current.h + (ev.clientY - start.current.y));
+      // 持久化到 config
+      onUpdate?.(id, { config: { ...config, width: String(finalW), height: String(finalH) } });
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, [size, config, id, onUpdate]);
+
+  const isLoop = nodeType === 'container';
   const icon = isLoop ? '🔄' : '⟳';
   const tag = isLoop ? '循环' : '迭代';
 
   return (
     <div
-      className={`custom-node container-node ${selected ? 'selected' : ''}`}
+      className={`custom-node box-node ${selected ? 'selected' : ''}`}
+      style={{ width: size.w, height: size.h } as React.CSSProperties}
       onClick={onClick}
       onDoubleClick={onDoubleClick}
     >
-      {/* 顶部标题栏 */}
-      <div className="container-header">
-        <span className="container-icon" style={{ background: color }}>{icon}</span>
-        <span className="container-label">{label}</span>
-        <span className="container-type-tag">{tag}</span>
+      {/* 标题栏 */}
+      <div className="box-header" style={{ borderBottom: `2px dashed ${color}` }}>
+        <span className="box-icon" style={{ background: color }}>{icon}</span>
+        <span className="box-label">{label}</span>
+        <span className="box-tag">{tag}</span>
+        <span className="box-size">{size.w}×{size.h}</span>
       </div>
 
       {/* 内容区 */}
-      <div className="container-body">
-        <span>📦 子流程 — 拖入节点</span>
+      <div className="box-body">
+        <span>📦 子流程</span>
       </div>
 
-      <Handle type="target" position={Position.Left} className="handle handle-in" style={{ top: 40 }} />
-      <Handle type="source" position={Position.Right} className="handle handle-out" style={{ top: 40 }} />
+      {/* 右下角 resize 拖拽 */}
+      <div
+        className="box-resize-handle"
+        onMouseDown={handleResizeMouseDown}
+        title="拖动调整大小"
+      >
+        ↘
+      </div>
+
+      {/* === 端口 === */}
+      {/* 输入（左侧中间） */}
+      <Handle type="target" position={Position.Left} id="input" className="handle handle-in" style={{ top: '50%' }} />
+      {/* 迭代体输入（左侧下方，仅迭代节点） */}
+      {nodeType === 'iteration' && (
+        <Handle type="target" position={Position.Left} id="iter-input" className="handle handle-in" style={{ top: '75%' }} />
+      )}
+      {/* 循环体端口（底部中间） */}
+      <Handle type="source" position={Position.Bottom} id="loop-body" className="handle handle-out" style={{ left: '50%' }} />
+      {/* 输出（右侧中间） */}
+      <Handle type="source" position={Position.Right} id="output" className="handle handle-out" style={{ top: '50%' }} />
     </div>
   );
 }
@@ -168,7 +212,7 @@ function NodeBodyPreview({ nodeType, config }: { nodeType: NodeType; config: Rec
         {config.model && <span className="preview-tag">{config.model.split('/').pop()}</span>}
         {config.system_prompt && <span className="preview-tag prompt">✓ 提示词</span>}
         {config.user_prompt && <span className="preview-tag prompt">✓ 用户词</span>}
-        {config.tools && <span className="preview-tag tools">⚙ {config.tools.split(',').length}个工具</span>}
+        {config.tools && <span className="preview-tag tools">⚙ {config.tools.split(',').length}个</span>}
       </div>
     );
   }
@@ -189,13 +233,8 @@ function NodeBodyPreview({ nodeType, config }: { nodeType: NodeType; config: Rec
       </div>
     );
   }
-  if (nodeType === 'container') return <div className="body-preview" />;
   const count = Object.keys(config).filter((k) => k !== 'title' && config[k]).length;
-  return (
-    <div className="body-preview">
-      {count > 0 && <span className="preview-tag">{count} 个参数</span>}
-    </div>
-  );
+  return <div className="body-preview">{count > 0 && <span className="preview-tag">{count} 个参数</span>}</div>;
 }
 
 export default CustomNode;
