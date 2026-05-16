@@ -12,6 +12,7 @@ export type NodeType =
   | 'classifier'
   | 'code'
   | 'container'
+  | 'iteration'
   | 'doc-extractor'
   | 'param-extractor';
 

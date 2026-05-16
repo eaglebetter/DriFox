@@ -42,7 +42,8 @@ const PALETTE_GROUPS: PaletteGroup[] = [
     title: '控制流',
     items: [
       { type: 'condition', label: '条件分支' },
-      { type: 'container', label: '循环/迭代' },
+      { type: 'container', label: '循环' },
+      { type: 'iteration', label: '迭代' },
       { type: 'code', label: '代码执行' },
     ],
   },

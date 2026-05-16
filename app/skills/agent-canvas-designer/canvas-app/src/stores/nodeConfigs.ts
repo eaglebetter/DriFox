@@ -219,16 +219,33 @@ const NODE_CONFIGS: Record<NodeType, NodeConfigMeta> = {
         key: 'title', label: '容器名称', type: 'text', default: '循环',
       },
       {
-        key: 'container_type', label: '容器类型', type: 'select',
-        opts: ['循环', '迭代', '对话'], default: '循环',
-      },
-      {
-        key: 'loop_var', label: '循环变量/列表', type: 'text', default: '{{node_5.output}}',
+        key: 'loop_var', label: '循环变量/列表', type: 'text', default: '{{items}}',
       },
       {
         key: 'loop_desc', label: '循环说明', type: 'textarea',
-        default: '对每个元素执行的逻辑',
-        hint: '循环：列表每个元素\n迭代：反复优化至收敛',
+        default: '对列表中的每个元素执行子流程',
+        hint: '循环：遍历列表中的每个元素',
+      },
+    ],
+  },
+  iteration: {
+    fields: [
+      {
+        key: 'title', label: '迭代名称', type: 'text', default: '迭代',
+      },
+      {
+        key: 'max_iterations', label: '最大迭代次数', type: 'text', default: '5',
+      },
+      {
+        key: 'convergence_var', label: '收敛判断变量', type: 'text', default: '{{score}}',
+      },
+      {
+        key: 'convergence_threshold', label: '收敛阈值', type: 'text', default: '0.01',
+      },
+      {
+        key: 'loop_desc', label: '迭代说明', type: 'textarea',
+        default: '反复执行子流程直到指标收敛',
+        hint: '迭代：反复优化直到收敛条件满足',
       },
     ],
   },
@@ -294,6 +311,7 @@ export const NODE_ICONS: Record<NodeType, string> = {
   classifier: '🏷',
   code: '⟨⟩',
   container: '⊞',
+  iteration: '⟳',
   'doc-extractor': '📄',
   'param-extractor': '📋',
 };
@@ -312,6 +330,7 @@ export const NODE_COLORS: Record<NodeType, string> = {
   classifier: '#ec4899',
   code: '#334155',
   container: '#14b8a6',
+  iteration: '#f59e0b',
   'doc-extractor': '#6b7280',
   'param-extractor': '#a855f7',
 };
