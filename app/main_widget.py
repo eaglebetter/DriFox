@@ -567,11 +567,11 @@ class OpenAIChatToolWindow(ToolWindow):
         selected_name = self._current_provider_name if self._current_provider_name else (
             list(self._valid_configs.keys())[0] if self._valid_configs else "")
 
-        saved_providers = self.cfg.llm_saved_providers.value or {}
-        if selected_name in saved_providers:
-            return saved_providers[selected_name].copy()
+        # 优先从 _valid_configs 获取（已合并默认配置）
+        if selected_name in self._valid_configs:
+            return self._valid_configs[selected_name].copy()
 
-        return self._valid_configs.get(selected_name, {})
+        return {}
 
     def _get_current_session_messages_for_tools(self) -> List[Dict[str, Any]]:
         session = self.session_manager.get_current_session()
@@ -1411,6 +1411,11 @@ class OpenAIChatToolWindow(ToolWindow):
         saved_providers = self.cfg.llm_saved_providers.value or {}
         provider_config = saved_providers.get(current_name, {})
         config = provider_config.copy()
+        # 合并默认配置，确保新增字段（如思考模式）在已保存的配置中也存在
+        default_config = FREE_PROVIDERS.get(current_name, {})
+        for default_key, default_value in default_config.items():
+            if default_key not in config:
+                config[default_key] = default_value
         config.pop("备注", None)
         config.pop("获取地址", None)
         # 只保留参数配置，移除连接信息
@@ -1765,6 +1770,11 @@ class OpenAIChatToolWindow(ToolWindow):
             config = saved_providers[provider_name].copy()
             config.pop("备注", None)
             config.pop("获取地址", None)
+            # 合并默认配置，确保新增字段（如思考模式）在已保存的配置中也存在
+            default_config = FREE_PROVIDERS.get(provider_name, {})
+            for default_key, default_value in default_config.items():
+                if default_key not in config:
+                    config[default_key] = default_value
             self._valid_configs[provider_name] = config
 
         # 恢复或设置当前选中的服务商和模型

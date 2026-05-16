@@ -12,6 +12,8 @@ PARAM_UI_MAP = {
     "presence_penalty": "slider",
     "选择模型": "model_selector",
     "启用技能": "checkbox",
+    "思考模式": "checkbox",
+    "思考等级": "combobox",
 }
 
 
@@ -24,6 +26,11 @@ PARAM_RANGE_MAP = {
     "top_p": {"min": 0.0, "max": 1.0, "step": 0.01, "type": "float"},
     "frequency_penalty": {"min": -2.0, "max": 2.0, "step": 0.01, "type": "float"},
     "presence_penalty": {"min": -2.0, "max": 2.0, "step": 0.01, "type": "float"},
+}
+
+
+PARAM_OPTIONS_MAP = {
+    "思考等级": ["low", "medium", "high", "max"],
 }
 
 
@@ -167,6 +174,8 @@ FREE_PROVIDERS = {
     "DeepSeek": {
         "API_URL": "https://api.deepseek.com",
         "API_KEY": "",
+        "思考模式": False,
+        "思考等级": "high",
         "模型名称": "deepseek-chat",
         "温度": 0.7,
         "最大Token": 40960,

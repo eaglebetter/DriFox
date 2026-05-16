@@ -18,6 +18,7 @@ from qfluentwidgets import (
 from app.constants import (
     PARAM_UI_MAP,
     PARAM_RANGE_MAP,
+    PARAM_OPTIONS_MAP,
 )
 from app.widgets.searchable_editable_combobox import SearchableEditableComboBox
 
@@ -166,14 +167,26 @@ class ModelConfigCard(QWidget):
             widget.setChecked(checked)
             widget.checkedChanged.connect(lambda: self._on_field_changed())
             return widget
+        elif ui_type == "combobox":
+            widget = ComboBox(self)
+            options = PARAM_OPTIONS_MAP.get(key, [])
+            widget.addItems(options)
+            # 设置当前值
+            current = str(value) if value else ""
+            if current in options:
+                widget.setCurrentText(current)
+            elif options:
+                widget.setCurrentText(options[0])
+            widget.setMinimumWidth(280)
+            widget.currentTextChanged.connect(lambda: self._on_field_changed())
+            return widget
         elif ui_type == "spinbox":
             widget = SpinBox()
             val = int(value) if value else 2048
-            # 从 PARAM_RANGE_MAP 获取范围配置，默认为无限范围
             range_info = PARAM_RANGE_MAP.get(key, {"min": 1, "max": 99999999})
             widget.setRange(range_info["min"], range_info["max"])
             widget.setValue(val)
-            widget.setMinimumWidth(280)  # 统一宽度
+            widget.setMinimumWidth(280)
             widget.valueChanged.connect(lambda: self._on_field_changed())
             return widget
         else:

@@ -396,7 +396,7 @@ class OpenAIChatWorker(QThread):
             "思考等级": "reasoning_effort",
         }
 
-        skip_params = {"temperature", "top_p", "presence_penalty", "frequency_penalty", "reasoning_effort"}
+        skip_params = {"temperature", "top_p", "presence_penalty", "frequency_penalty"}
         if model and (model.startswith("o1") or model.startswith("o3")):
             skip_params.update({"temperature", "top_p"})
 
@@ -416,6 +416,18 @@ class OpenAIChatWorker(QThread):
         max_tokens = self.llm_config.get("最大Token")
         if max_tokens is not None:
             extra_body["max_tokens"] = self._cap_max_output_tokens(model, max_tokens)
+
+        # 处理 DeepSeek 思考模式与 reasoning_effort 的联动
+        provider_family = get_provider_profile(self.llm_config)["family"]
+        if provider_family == "deepseek":
+            thinking_mode = self.llm_config.get("思考模式")
+            if thinking_mode is True:
+                extra_body["thinking"] = {"type": "enabled"}
+                # reasoning_effort 已通过映射自然流入 extra_body
+            elif thinking_mode is False:
+                # 关思考模式：主动传 disabled，但不能传 reasoning_effort（API 要求）
+                extra_body["thinking"] = {"type": "disabled"}
+                extra_body.pop("reasoning_effort", None)
 
         # 处理认证
         auth_headers = None
