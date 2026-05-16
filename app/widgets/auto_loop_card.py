@@ -169,7 +169,6 @@ class AutoLoopConfigCard(QFrame):
         self._prompt_edit = QTextEdit()
         self._prompt_edit.setPlaceholderText("📝 描述 AutoLoop 要完成的任务...")
         self._prompt_edit.setMinimumHeight(40)
-        self._prompt_edit.setMaximumHeight(120)
         self._prompt_edit.setStyleSheet(f"""
             QTextEdit {{
                 background: rgba(255, 255, 255, 0.05);
