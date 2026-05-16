@@ -60,7 +60,7 @@ MAX_TAIL_OVERFLOW_MULTIPLIER = 2.5
 
 # ========== 工具保护配置 ==========
 # 不应被压缩的工具列表（这些工具的内容需要完整保留）
-PROTECTED_TOOLS = {"skill"}  # 可以添加更多工具
+PROTECTED_TOOLS = {"skill", "todowrite"}  # 可以添加更多工具
 
 
 class HistoryCompactor:
