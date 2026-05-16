@@ -24,6 +24,9 @@ interface CanvasState {
   // 是否已从配置加载（防止覆盖用户编辑）
   isConfigLoaded: boolean;
 
+  // 节点折叠状态
+  collapsedNodes: Set<string>;
+
   // 操作
   setNodes: (nodes: CanvasNodeData[]) => void;
   setConnections: (connections: CanvasConnectionData[]) => void;
@@ -38,6 +41,7 @@ interface CanvasState {
   clearCanvas: () => void;
   setSyncStatus: (status: SyncStatus) => void;
   setLastEditSource: (source: EditSource) => void;
+  toggleNodeCollapse: (id: string) => void;
 }
 
 let _nodeSeq = 0;
@@ -50,6 +54,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   lastEditSource: 'unknown',
   selectedNodeId: null,
   isConfigLoaded: false,
+  collapsedNodes: new Set<string>(),
 
   setNodes: (nodes) => set({ nodes }),
   setConnections: (connections) => set({ connections }),
@@ -126,8 +131,17 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       meta: { title: '未命名流程' },
       selectedNodeId: null,
       isConfigLoaded: false,
+      collapsedNodes: new Set(),
     }),
 
   setSyncStatus: (status) => set({ syncStatus: status }),
   setLastEditSource: (source) => set({ lastEditSource: source }),
+
+  toggleNodeCollapse: (id) =>
+    set((s) => {
+      const next = new Set(s.collapsedNodes);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return { collapsedNodes: next };
+    }),
 }));

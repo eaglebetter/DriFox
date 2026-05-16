@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef } from 'react';
+import React, { useCallback } from 'react';
 import { useCanvasStore } from '../stores/useCanvasStore';
 import NODE_CONFIGS from '../stores/nodeConfigs';
 import { NodeConfigField } from '../types/canvas';
@@ -9,23 +9,20 @@ const PropertyPanel: React.FC = () => {
   const updateNode = useCanvasStore((s) => s.updateNode);
   const deleteNode = useCanvasStore((s) => s.deleteNode);
   const selectNode = useCanvasStore((s) => s.selectNode);
-  const setSyncStatus = useCanvasStore((s) => s.setSyncStatus);
 
   const node = nodes.find((n) => n.id === selectedNodeId);
 
   const handleChange = useCallback(
     (key: string, value: string) => {
-      if (!selectedNodeId) return;
+      if (!selectedNodeId || !node) return;
       updateNode(selectedNodeId, {
-        config: { ...(node?.config ?? {}), [key]: value },
+        config: { ...(node.config ?? {}), [key]: value },
       });
-      // 如果改的是 title 字段，同步更新 label
       if (key === 'title') {
         updateNode(selectedNodeId, { label: value });
       }
-      setSyncStatus('saving');
     },
-    [selectedNodeId, node, updateNode, setSyncStatus]
+    [selectedNodeId, node, updateNode]
   );
 
   const handleDelete = useCallback(() => {
@@ -34,24 +31,24 @@ const PropertyPanel: React.FC = () => {
     selectNode(null);
   }, [selectedNodeId, node, deleteNode, selectNode]);
 
+  const handleClose = useCallback(() => {
+    selectNode(null);
+  }, [selectNode]);
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        selectNode(null);
-      }
-      if (e.key === 'Delete' && e.ctrlKey) {
-        handleDelete();
-      }
+      if (e.key === 'Escape') handleClose();
+      if (e.key === 'Delete' && e.ctrlKey) handleDelete();
     },
-    [selectNode, handleDelete]
+    [handleClose, handleDelete]
   );
 
   if (!node) {
     return (
       <aside className="detail-panel hidden">
         <div className="detail-empty">
-          <span style={{ fontSize: 40, opacity: 0.3 }}>📋</span>
-          <p>选择一个节点查看配置</p>
+          <span>📋</span>
+          <p>双击节点查看配置</p>
         </div>
       </aside>
     );
@@ -64,11 +61,8 @@ const PropertyPanel: React.FC = () => {
   return (
     <aside className="detail-panel" onKeyDown={handleKeyDown}>
       <div className="detail-header">
-        <h3>
-          <span style={{ marginRight: 8 }}>{node.type}</span>
-          {node.label}
-        </h3>
-        <button className="detail-close" onClick={() => selectNode(null)}>
+        <h3>{node.label}</h3>
+        <button className="detail-close" onClick={handleClose}>
           ✕
         </button>
       </div>
@@ -107,28 +101,26 @@ const PropertyPanel: React.FC = () => {
           );
         })}
 
-        {node.type === 'llm' || node.type === 'agent' ? (
+        {(node.type === 'llm' || node.type === 'agent') && (
           <div className="detail-field">
             <label>💡 提示词预览</label>
             <div className="prompt-preview">
-              {(saved.system_prompt?.length ?? 0) > 0 && (
+              {saved.system_prompt && (
                 <span className="tag blue">
-                  系统提示词 ({saved.system_prompt!.length}字)
+                  系统提示词 {saved.system_prompt.length}字
                 </span>
               )}
-              {(saved.user_prompt?.length ?? 0) > 0 && (
+              {saved.user_prompt && (
                 <span className="tag orange">
-                  用户提示词 ({saved.user_prompt!.length}字)
+                  用户提示词 {saved.user_prompt.length}字
                 </span>
               )}
-              {(saved.tools?.length ?? 0) > 0 && (
-                <span className="tag purple">工具已配置</span>
-              )}
+              {saved.tools && <span className="tag purple">工具已配置</span>}
             </div>
           </div>
-        ) : null}
+        )}
 
-        {node.type === 'code' && (saved.code?.length ?? 0) > 0 && (
+        {node.type === 'code' && saved.code && (
           <div className="detail-field">
             <label>代码预览</label>
             <pre className="code-preview">{saved.code}</pre>

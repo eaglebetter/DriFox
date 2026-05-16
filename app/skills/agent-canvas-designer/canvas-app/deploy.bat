@@ -21,21 +21,23 @@ echo ✅ 构建完成
 echo.
 echo [2/3] 部署到 %DEPLOY_DIR%...
 if not exist "%DEPLOY_DIR%" mkdir "%DEPLOY_DIR%"
-if exist "%DEPLOY_DIR%\dist" rmdir /s /q "%DEPLOY_DIR%\dist"
-xcopy /e /y "%CANVAS_DIR%\dist" "%DEPLOY_DIR%\dist\"
-copy /y "%CANVAS_DIR%\server.py" "%DEPLOY_DIR%\server.py"
+:: 复制静态文件
+copy /Y "%CANVAS_DIR%\dist\index.html" "%DEPLOY_DIR%\index.html" >nul
+if exist "%CANVAS_DIR%\dist\assets" (
+    for %%f in ("%CANVAS_DIR%\dist\assets\*") do (
+        copy /Y "%%f" "%DEPLOY_DIR%\assets\" >nul 2>&1
+    )
+)
+:: 复制服务器
+copy /Y "%CANVAS_DIR%\server.py" "%DEPLOY_DIR%\server.py" >nul
 echo ✅ 部署完成
 
 echo.
-echo [3/3] 文件清单:
-dir /b "%DEPLOY_DIR%"
-dir /b "%DEPLOY_DIR%\dist"
+echo [3/3] 启动服务器...
+start cmd /k "cd /d %DEPLOY_DIR% && python server.py"
 
 echo.
 echo ========================================
-echo   🚀 启动画布:
-echo      cd /d C:\tmp\canvas
-echo      python server.py
-echo   🌐 访问: http://localhost:8081
+echo   🚀 画布已启动: http://localhost:8081
 echo ========================================
 pause

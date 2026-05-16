@@ -62,16 +62,32 @@ Phase 4: 输出交付
 → 提供预览建议
 → **⚠️ 必须输出 md 链接**：
   ```
-  [👉 点击打开画布](替换为 agent_canvas.html 的实际路径)
+  [👉 点击打开画布](http://localhost:8081)
   ```
-  示例（相对路径）：`[👉 点击打开画布](./skills/agent-canvas-designer/assets/agent_canvas.html)`
-  
-  用户点击链接后可在画布中导入 JSON 配置预览效果
 
-**重要**：完成技能后必须自动打开画布文件供用户预览。技能完成后执行：
+用户点击链接后即可在画布中预览效果。
 
-```bash
-explorer "{skill_path}\assets\agent_canvas.html"
+**重要**：技能完成后执行：
+
+```xml
+<!-- 1. 启动画布服务器（如果未启动） -->
+<bg_start command="cmd.exe /c \"cd /d C:\tmp\canvas && python server.py\"" />
+
+<!-- 2. 打开浏览器 -->
+<bash command="start http://localhost:8081" />
+```
+
+**热更新流程**：
+```
+1. write config.json（大模型写入配置）
+     ↓
+2. 画布通过 SSE 实时接收（毫秒级）
+     ↓
+3. 用户审阅、编辑（拖拽、删除、修改配置）
+     ↓
+4. 自动 POST /save-config（300ms 防抖）
+     ↓
+5. GET /get-state（大模型读取最新状态）
 ```
 
 ---
