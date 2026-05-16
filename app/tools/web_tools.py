@@ -216,9 +216,13 @@ class WebSearchTask(QRunnable):
 
 
 class WebTools:
-    def __init__(self, workdir: Path):
-        self.workdir = workdir
+    def __init__(self, owner):
+        self._owner = owner
         self._thread_pool: Optional[QThreadPool] = None
+
+    @property
+    def workdir(self) -> Path:
+        return self._owner.workdir
         self._current_fetch_task: Optional[WebFetchTask] = None
         self._current_search_task: Optional[WebSearchTask] = None
 

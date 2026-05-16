@@ -20,6 +20,7 @@ from openai import (
     OpenAI, BadRequestError, RateLimitError, APIError, APIConnectionError,
 )
 
+from app.constants import PARAM_SCHEMA
 from app.core.message_content import consolidate_messages, append_text_block, messages_to_api, to_api_message
 from app.core.permission_cache import PermissionCache
 from app.core.provider_profile import get_provider_profile
@@ -110,6 +111,8 @@ class OpenAIChatWorker(QThread):
             "note": "",
         }
         self._current_session_messages = list(self.session_messages)
+        self._last_usage = None  # 保存最后一次 API 调用的 token usage
+        self._accumulated_tokens = 0  # 累加本轮所有 API 调用（含多轮工具迭代）的总 token 使用量
 
         # ========== 工具迭代中压缩支持 ==========
         self._compactor = compactor
@@ -385,23 +388,17 @@ class OpenAIChatWorker(QThread):
         model = str(self.llm_config.get("模型名称", "gpt-4o"))
 
         extra_body = {}
-        mapping = {
-            "温度": "temperature",
-            "最大Token": "max_tokens",
-            "核采样": "top_p",
-            "频率惩罚": "presence_penalty",
-            "重复惩罚": "frequency_penalty",
-            "思考等级": "reasoning_effort",
-        }
 
-        skip_params = {"temperature", "top_p", "presence_penalty", "frequency_penalty", "reasoning_effort"}
+        skip_params = {"temperature", "top_p", "presence_penalty", "frequency_penalty"}
         if model and (model.startswith("o1") or model.startswith("o3")):
             skip_params.update({"temperature", "top_p"})
 
         for cn_key, value in self.llm_config.items():
             if cn_key in ["API_KEY", "API_URL", "模型名称", "系统提示", "启用技能"]:
                 continue
-            en_key = mapping.get(cn_key)
+            # 从 PARAM_SCHEMA 查找 API 参数名
+            meta = PARAM_SCHEMA.get(cn_key, {})
+            en_key = meta.get("api_param")
             if not en_key and _VALID_IDENTIFIER_PATTERN.match(cn_key):
                 en_key = cn_key
             if not en_key or en_key in skip_params:
@@ -414,6 +411,28 @@ class OpenAIChatWorker(QThread):
         max_tokens = self.llm_config.get("最大Token")
         if max_tokens is not None:
             extra_body["max_tokens"] = self._cap_max_output_tokens(model, max_tokens)
+
+        # 处理服务商特有的思考模式参数
+        profile = get_provider_profile(self.llm_config)
+        provider_family = profile["family"]
+
+        if provider_family == "deepseek":
+            thinking_mode = self.llm_config.get("思考模式")
+            if thinking_mode is True:
+                extra_body["thinking"] = {"type": "enabled"}
+                # reasoning_effort 由映射自动流入，无需额外处理
+            elif thinking_mode is False:
+                extra_body["thinking"] = {"type": "disabled"}
+                # API 要求：关闭思考时不能传 reasoning_effort
+                extra_body.pop("reasoning_effort", None)
+
+        elif provider_family == "zhipu":
+            thinking_mode = self.llm_config.get("思考模式")
+            if thinking_mode is True:
+                extra_body["thinking"] = {"type": "enabled"}
+            elif thinking_mode is False:
+                extra_body["thinking"] = {"type": "disabled"}
+            # 智谱AI 不支持 reasoning_effort，已有映射不会注入
 
         # 处理认证
         auth_headers = None
@@ -487,6 +506,7 @@ class OpenAIChatWorker(QThread):
             self._clear_pending_response_state()
             self._api_messages_cache = None  # 重置缓存，下次 API 调用时重建
             self._api_messages_built = False
+            self._accumulated_tokens = 0  # 重置 token 累加，每个新的对话从零开始
 
             # 开始新对话时，清理 round 缓存，但保留 session 缓存
             self._permission_cache.clear_round()
@@ -563,23 +583,26 @@ class OpenAIChatWorker(QThread):
                     compacted, state, cache = self._compactor.compact(
                         current_messages,
                         budget,
-                        existing_cache=self._compaction_cache,
+                        existing_cache=None,
                         allow_llm_summary=False,  # 工具迭代中只用启发式，避免嵌套 LLM 调用
                     )
                     if compacted != current_messages:
                         current_messages = compacted
                         self._last_compaction_state = state
                         self._compaction_cache = cache
-                        # 重建 API 消息缓存（转换格式）
-                        self._api_messages_cache = current_messages
                         self._emit_compaction_status(state)
-                    current_session_messages = [system_message] + current_session_messages
+                    # 修复：重新插入 system_message，否则下一轮 API 调用会丢失系统提示
+                    current_messages.insert(0, system_message)
+                    # 修复：始终更新 API 缓存以匹配 current_messages（含 system）
+                    self._api_messages_cache = current_messages
+                    # 注意：current_session_messages 故意不做同步压缩。
+                    # 它的增长会在 worker 结束时由 _on_messages_updated 的
+                    # preserve_compaction=False 清空缓存，下轮发送时由 ContextBuilder 统一压缩。
                 else:
                     # 更新 API 消息缓存
                     self._append_to_api_cache(response_sequence)
                 self._emit_with_callback("finished_with_messages", self.finished_with_messages,
                                          current_session_messages)
-                self._check_and_notify_stage_change()
 
                 QCoreApplication.processEvents()
                 time.sleep(0.01)
@@ -1267,11 +1290,35 @@ class OpenAIChatWorker(QThread):
                 )
                 self._emit_with_callback("content_received", self.content_received, content)
 
+            # 保存 token usage（如果这个 chunk 包含 usage 信息，OpenAI/Groq 流式最后一个chunk会带）
+            usage = getattr(chunk, "usage", None)
+            if usage:
+                self._last_usage = {
+                    "prompt_tokens": getattr(usage, "prompt_tokens", 0),
+                    "completion_tokens": getattr(usage, "completion_tokens", 0),
+                    "total_tokens": getattr(usage, "total_tokens", 0),
+                }
+            
             # 每处理 5 个 chunk 就让渡一次 CPU，确保主线程能及时处理排队的 Qt 信号
             # 避免 content_received 等信号堆积到工具执行完毕后一次性处理
             chunk_count += 1
             if chunk_count % 5 == 0:
                 QCoreApplication.processEvents()
+
+        # 非流式响应：usage 在 response 对象本身（而非 chunk）
+        if not self.stream:
+            usage = getattr(response, "usage", None)
+            if usage:
+                self._last_usage = {
+                    "prompt_tokens": getattr(usage, "prompt_tokens", 0),
+                    "completion_tokens": getattr(usage, "completion_tokens", 0),
+                    "total_tokens": getattr(usage, "total_tokens", 0),
+                }
+                total = getattr(usage, "total_tokens", 0) or 0
+                self._accumulated_tokens += total
+                # 实时通知外部（如 AutoLoop）更新 token 计数
+                if self._token_update_callback and total > 0:
+                    self._token_update_callback(total)
 
         # 冲刷剩余的 reasoning batch
         if _reasoning_batch:
@@ -1738,19 +1785,6 @@ class OpenAIChatWorker(QThread):
             )
 
         return results
-
-    def _check_and_notify_stage_change(self):
-        if not self.stage_changed_callback:
-            return
-
-        import re
-
-        pattern = re.compile(r"\[STAGE:\s*(\w+)\]", re.IGNORECASE)
-        matches = pattern.findall(self.full_response)
-
-        if matches:
-            new_stage = matches[-1].lower()
-            self.stage_changed_callback(new_stage)
 
     def _handle_error(self, error):
         from openai import (

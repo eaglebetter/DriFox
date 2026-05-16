@@ -1329,37 +1329,35 @@ class CodeWebViewer(QWebEngineView):
         scrollbar_css = """
             /* 统一滚动条样式 - 深色模式适配 */
             ::-webkit-scrollbar {
-                width: 12px;
-                height: 12px;
+                width: 6px;
+                height: 6px;
             }
             ::-webkit-scrollbar-track {
-                background: transparent;
-                border-radius: 6px;
-                margin: 4px 0;
+                background: #1a1f2e;
+                border-radius: 3px;
+                margin: 2px 0;
             }
             ::-webkit-scrollbar-track:hover {
-                background: rgba(255, 255, 255, 0.03);
+                background: #1e2435;
             }
             ::-webkit-scrollbar-thumb {
-                background: linear-gradient(180deg, #4a4a5a 0%, #3a3a48 100%);
-                border-radius: 6px;
-                border: 2px solid transparent;
-                background-clip: padding-box;
-                min-height: 30px;
+                background: #3a3f50;
+                border-radius: 3px;
+                min-height: 24px;
             }
             ::-webkit-scrollbar-thumb:hover {
-                background: linear-gradient(180deg, #5a5a6a 0%, #4a4a58 100%);
+                background: #4a4f62;
             }
             ::-webkit-scrollbar-thumb:active {
-                background: linear-gradient(180deg, #6a6a7a 0%, #5a5a68 100%);
+                background: #5a5f72;
             }
             ::-webkit-scrollbar-corner {
-                background: transparent;
+                background: #1a1f2e;
             }
             /* Firefox 滚动条 */
             * {
                 scrollbar-width: thin;
-                scrollbar-color: #4a4a5a transparent;
+                scrollbar-color: #3a3f50 #1a1f2e;
             }
         """
 
@@ -2444,7 +2442,7 @@ class MessageCard(SimpleCardWidget):
     interventionRequested = pyqtSignal(dict)
     toolDiffRequested = pyqtSignal(str)  # tool_call_id
     subAgentLogRequested = pyqtSignal(str)  # task_ids (comma-separated)
-    cardDiffRequested = pyqtSignal(int)  # message_index（消息在 session.messages 中的索引）
+    cardDiffRequested = pyqtSignal(int, int)  # round_index, message_index（消息在 _message_batch 中的索引）
     saveFileRequested = pyqtSignal(str, str)  # code, lang
     lazyRenderCompleted = pyqtSignal()  # 懒渲染完成信号，用于通知滚动保持
 
@@ -3000,8 +2998,9 @@ class MessageCard(SimpleCardWidget):
 
     def _emit_card_diff_requested(self):
         """发射卡片差异请求信号"""
-        if self._round_index is not None:
-            self.cardDiffRequested.emit(self._round_index)
+        round_idx = self._round_index if self._round_index is not None else -1
+        msg_idx = self._message_index if self._message_index is not None else -1
+        self.cardDiffRequested.emit(round_idx, msg_idx)
 
     def _update_height(self, h):
         target_height = max(40, h)
@@ -3221,7 +3220,7 @@ class MessageCard(SimpleCardWidget):
         if self.role == "assistant":
             self._content_data = append_text_block(self._content_data, text)
             # 优化：懒渲染模式下直接跳过 markdown 渲染，避免不必要的计算
-            if not self._lazy_rendered:
+            if not self._lazy_rendered or not self.viewer:
                 self._pending_content = self._content_data
                 return
             # 性能优化：不立即执行 content_to_markdown，设懒回调让 _perform_update
@@ -3257,7 +3256,7 @@ class MessageCard(SimpleCardWidget):
             )
         )
         # 优化：懒渲染模式下直接跳过 markdown 渲染，避免不必要的计算
-        if not self._lazy_rendered:
+        if not self._lazy_rendered or not self.viewer:
             self._pending_content = self._content_data
             return
         # 性能优化：通过 _lazy_markdown_cb 延迟到 _perform_update 执行
@@ -3327,7 +3326,7 @@ class MessageCard(SimpleCardWidget):
 
         LARGE_THINKING_THRESHOLD = 50 * 1024  # 50KB
 
-        if not self._lazy_rendered:
+        if not self._lazy_rendered or not self.viewer:
             self._pending_content = self._content_data
             return
 
@@ -3336,17 +3335,13 @@ class MessageCard(SimpleCardWidget):
 
         if self._reasoning_total_len > LARGE_THINKING_THRESHOLD:
             # 超长思考：增量更新提供即时文字，同时定期全量渲染保持 DOM 结构正确
-            # （多轮推理时新思考块在 DOM 中不存在，增量会错误追加到旧块）
             self._update_thinking_incremental(text)
-            self.viewer._lazy_markdown_cb = lambda: content_to_markdown(self._content_data)
-            self.viewer._schedule_render(immediate=False)
-        else:
-            # 性能优化：通过 _lazy_markdown_cb 将 content_to_markdown 延迟到
-            # _perform_update 执行（渲染定时器自带防抖，多 chunk 合并转换一次）
-            # 这同时修复了旧代码的 bug：渲染定时器激活时跳过 markdown 更新，
-            # 导致最后几个 chunk 内容丢失
-            self.viewer._lazy_markdown_cb = lambda: content_to_markdown(self._content_data)
-            self.viewer._schedule_render(immediate=False)
+        # 性能优化：通过 _lazy_markdown_cb 将 content_to_markdown 延迟到
+        # _perform_update 执行（渲染定时器自带防抖，多 chunk 合并转换一次）
+        # 这同时修复了旧代码的 bug：渲染定时器激活时跳过 markdown 更新，
+        # 导致最后几个 chunk 内容丢失
+        self.viewer._lazy_markdown_cb = lambda: content_to_markdown(self._content_data)
+        self.viewer._schedule_render(immediate=False)
 
     def _update_thinking_incremental(self, new_text: str):
         """增量更新思考内容（用于超长思考）

@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+import time
+
 import orjson as json
 from PyQt5.QtCore import Qt, pyqtSignal, QTimer, QRectF
 from PyQt5.QtGui import QPixmap, QPainter
@@ -8,7 +10,7 @@ from PyQt5.QtWidgets import (
     QLabel,
     QPushButton,
     QHBoxLayout,
-    QWidget,
+    QWidget, QApplication,
 )
 from qfluentwidgets import SimpleCardWidget
 
@@ -65,6 +67,7 @@ class ToolFloatingWidget(SimpleCardWidget):
         self._is_running = False
         self._current_tool = None
         self._current_process = None
+        self._suppress_visible = False  # 被系统卡片压制，工具调用期间不自行显示
         self._rotation_angle = 0
         self._rotation_timer = QTimer(self)
         self._rotation_timer.timeout.connect(self._update_rotation)
@@ -176,9 +179,6 @@ class ToolFloatingWidget(SimpleCardWidget):
 
     def start_tool(self, tool_name: str, args: dict = None):
         """开始执行工具"""
-        import time
-        from PyQt5.QtWidgets import QApplication
-
         self._task_start_time = time.time()
         self._is_running = True
         self._current_tool = tool_name
@@ -195,53 +195,39 @@ class ToolFloatingWidget(SimpleCardWidget):
         if args:
             args_str = json.dumps(args).decode('utf-8')
             if len(args_str) > 60:
-                args_preview = f" | {args_str[:60]}..."
+                args_preview = f"{args_str[:60]}..."
             else:
-                args_preview = f" | {args_str}"
+                args_preview = f"{args_str}"
 
-        self.task_label.setText(f"⏳ 正在运行{args_preview}")
+        self.task_label.setText(f"⏳ {args_preview}")
 
         self.cancel_btn.setEnabled(True)
         self.cancel_btn.setText("中止")
 
-        self.setVisible(True)
+        self.setVisible(True)  # 正常流程直接显示，压制逻辑在 start_tool 之前处理
         self.raise_()
-        QApplication.processEvents()
         QApplication.processEvents()
 
     def _append_progress(self, text: str):
         self.task_label.setText(text)
 
+    def show_when_ready(self):
+        """根据经过时间决定是否显示（供外部在适当时机调用）"""
+        if self._suppress_visible:
+            return
+        self.setVisible(True)
+
     def update_progress(self, message: str):
         """更新进度"""
-        import time
-
-        elapsed = time.time() - self._task_start_time if self._task_start_time else 0
-
-        if elapsed > 3:
-            self.setVisible(True)
-
         self.task_label.setText(f"⏳ {message}")
 
     def add_tool_call(self, tool_name: str, args: dict = None):
         """添加工具调用"""
-        import time
-
-        elapsed = time.time() - self._task_start_time if self._task_start_time else 0
-
-        if elapsed > 3:
-            self.setVisible(True)
-
         self.tool_name_label.setText(f" {tool_name} ")
 
     def add_tool_result(self, result: str, success: bool = True):
         """添加工具结果"""
-        import time
-
-        elapsed = time.time() - self._task_start_time if self._task_start_time else 0
-
-        if elapsed > 3:
-            self.setVisible(True)
+        pass
 
     def finish_tool(self, result: str = None, success: bool = True):
         """完成工具执行"""
@@ -268,7 +254,7 @@ class ToolFloatingWidget(SimpleCardWidget):
 
         self.cancel_btn.setVisible(False)
 
-        self.setVisible(True)
+        self.show_when_ready()  # 统一由 show_when_ready 控制显示时机
         self.raise_()
 
         QTimer.singleShot(2000, self.hide)
@@ -297,9 +283,24 @@ class ToolFloatingWidget(SimpleCardWidget):
         self.title_label.setStyleSheet("color: #f59e0b;")
 
     def show_if_needed(self, elapsed: float):
-        """根据耗时决定是否显示"""
+        """根据耗时决定是否显示（不考虑压制状态）"""
         if elapsed > 3:
             self.setVisible(True)
+
+    def show_when_ready(self):
+        """统一控制显示时机（考虑压制状态）"""
+        if not self._suppress_visible:
+            self.setVisible(True)
+
+    def set_suppress_visible(self, suppress: bool):
+        """设置是否压制显示（系统卡片打开时调用）"""
+        self._suppress_visible = suppress
+        if suppress:
+            self.setVisible(False)
+        else:
+            # 解除压制，若工具仍在运行则重新显示
+            if self._is_running:
+                self.setVisible(True)
 
     def set_opacity(self, opacity: float):
         """设置透明度，用于响应全局透明度变化"""

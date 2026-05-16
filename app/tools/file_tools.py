@@ -105,13 +105,22 @@ class GrepTask(QRunnable):
 
 
 class FileTools:
-    def __init__(self, workdir: Path):
-        self.workdir = workdir
+    def __init__(self, owner):
+        self._owner = owner
         self._thread_pool: Optional[QThreadPool] = None
         self._current_grep_task: Optional[GrepTask] = None
         self._grep_cancelled = [False]  # 使用列表引用，可以在子线程中被检查
         # 文件修改时间追踪：{绝对路径: 修改时间戳}
         self._file_mtimes: Dict[str, float] = {}
+
+    @property
+    def workdir(self) -> Path:
+        return self._owner.workdir
+
+    @workdir.setter
+    def workdir(self, value: Path):
+        """保留向后兼容：外部设置 workdir 时同步更新 owner"""
+        self._owner.workdir = value
     
     def _get_thread_pool(self) -> QThreadPool:
         """获取或创建线程池"""

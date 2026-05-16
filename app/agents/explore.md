@@ -15,10 +15,9 @@ permission:
   patch: deny
   todowrite: deny
   todoread: deny
-  skill: deny
   task: deny
-  webfetch: deny
-  websearch: deny
+  webfetch: allow
+  websearch: allow
 ---
 
 # Role

@@ -16,81 +16,118 @@ from typing import Any, Dict
 PROVIDER_CAPABILITIES = {
     "anthropic": {
         "context_limit": 200000,
-        "max_output_tokens": 8192,   # Claude-3.5 官方上限
+        "max_output_tokens": 8192,
         "absolute_limit": 65536,
         "supports_vision": True,
+        "supports_thinking": False,
+        "thinking_param": None,
     },
     "openai": {
         "context_limit": 128000,
-        "max_output_tokens": 16384,  # GPT-4o 官方上限
+        "max_output_tokens": 16384,
         "absolute_limit": 65536,
         "supports_vision": True,
+        "supports_thinking": False,
+        "thinking_param": None,
     },
     "gemini": {
         "context_limit": 1000000,
         "max_output_tokens": 8192,
         "absolute_limit": 65536,
         "supports_vision": True,
+        "supports_thinking": False,
+        "thinking_param": None,
     },
     "dashscope": {
         "context_limit": 1000000,
         "max_output_tokens": 8192,
         "absolute_limit": 65536,
         "supports_vision": True,
+        "supports_thinking": False,
+        "thinking_param": None,
     },
     "zhipu": {
         "context_limit": 128000,
         "max_output_tokens": 8192,
         "absolute_limit": 65536,
         "supports_vision": True,
+        "supports_thinking": True,
+        "thinking_param": "thinking",         # extra_body.thinking = {type}
+        "reasoning_effort_param": None,
     },
     "deepseek": {
         "context_limit": 320000,
         "max_output_tokens": 8192,
         "absolute_limit": 65536,
         "supports_vision": False,
+        "supports_thinking": True,
+        "thinking_param": "thinking",         # extra_body.thinking = {type}
+        "reasoning_effort_param": "reasoning_effort",
     },
     "groq": {
         "context_limit": 128000,
         "max_output_tokens": 8192,
         "absolute_limit": 65536,
         "supports_vision": False,
+        "supports_thinking": False,
+        "thinking_param": None,
     },
     "minimax": {
         "context_limit": 1000000,
         "max_output_tokens": 8192,
         "absolute_limit": 65536,
         "supports_vision": False,
+        "supports_thinking": False,
+        "thinking_param": None,
+    },
+    "siliconflow": {
+        "context_limit": 131072,
+        "max_output_tokens": 16384,
+        "absolute_limit": 65536,
+        "supports_vision": False,
+        "supports_thinking": True,
+        "thinking_param": "thinking_budget",  # 硅基流动用 thinking_budget 控制推理长度
+        "reasoning_effort_param": None,
     },
     "baidu_qianfan": {
         "context_limit": 128000,
         "max_output_tokens": 8192,
         "absolute_limit": 65536,
         "supports_vision": False,
+        "supports_thinking": False,
+        "thinking_param": None,
     },
     "ollama": {
         "context_limit": 128000,
         "max_output_tokens": 8192,
         "absolute_limit": 65536,
         "supports_vision": True,
+        "supports_thinking": False,
+        "thinking_param": None,
     },
     "volcengine": {
         "context_limit": 1000000,
         "max_output_tokens": 8192,
         "absolute_limit": 65536,
         "supports_vision": False,
+        "supports_thinking": False,
+        "thinking_param": None,
     },
     "lmstudio": {
         "context_limit": 128000,
         "max_output_tokens": 8192,
         "absolute_limit": 65536,
         "supports_vision": True,
+        "supports_thinking": False,
+        "thinking_param": None,
     },
     "custom": {
         "context_limit": 128000,
         "max_output_tokens": 8192,
         "absolute_limit": 65536,
         "supports_vision": False,
+        "supports_thinking": False,
+        "thinking_param": None,
     },
 }
 
@@ -112,6 +149,8 @@ def detect_provider_family(llm_config: Dict[str, Any]) -> str:
         return "deepseek"
     if "api.groq.com" in api_url or "groq/" in model:
         return "groq"
+    if "siliconflow.cn" in api_url:
+        return "siliconflow"
     if "minimax" in api_url or model.startswith("minimax"):
         return "minimax"
     if "volces.com" in api_url or "ark.cn-beijing" in api_url or model.startswith("doubao"):

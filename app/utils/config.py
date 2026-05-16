@@ -121,7 +121,7 @@ class Settings(QConfig):
             f.write(json.dumps(self.toDict(), option=json.OPT_INDENT_2))
 
     # 版本信息
-    current_version = "v0.1.5"
+    current_version = "v0.1.6"
     user_name = ConfigItem("General", "UserName", str(uuid4().hex))
     # 通用设置
     auto_check_update = ConfigItem("General", "AutoCheckUpdate", True, BoolValidator())
