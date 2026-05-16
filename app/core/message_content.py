@@ -1,23 +1,8 @@
 # -*- coding: utf-8 -*-
-"""
-消息内容处理模块 - 负责消息规范化、格式转换、工具块处理
-
-职责：
-1. 消息规范化：normalize_message, consolidate_messages
-2. 格式转换：to_api_message, messages_to_api, content_to_markdown
-3. 工具块处理：extract_tool_result_blocks, make_tool_result_block
-4. 工具调用处理：normalize_tool_call
-
-性能优化：
-- 预编译正则表达式（_SANITIZE_PATTERN 等）
-- normalize_message 快速路径检测已规范化消息
-- to_api_message 快速路径避免重复规范化
-"""
 import orjson as json
 import re
 from functools import lru_cache
 from typing import Any, Dict, List, Optional
-
 
 VALID_MESSAGE_ROLES = {"system", "user", "assistant", "tool"}
 
@@ -38,9 +23,9 @@ def _sanitize_rendering_string(text: str) -> str:
     """
     清理字符串中的渲染敏感标记。
     在字符串进入渲染流程前调用，防止标记被错误解析。
-    
+
     注意：只清理完整的工具块标记，不要清理参数中的子串！
-    
+
     性能优化：使用预编译的正则表达式一次性替换所有标记。
     """
     if not text or not isinstance(text, str):
@@ -87,15 +72,15 @@ def make_text_block(text: Any) -> Dict[str, Any]:
 
 
 def make_tool_result_block(
-    tool_name: str,
-    arguments: Optional[Dict[str, Any]] = None,
-    result: Any = None,
-    success: bool = True,
-    tool_call_id: Optional[str] = None,
+        tool_name: str,
+        arguments: Optional[Dict[str, Any]] = None,
+        result: Any = None,
+        success: bool = True,
+        tool_call_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     # 检测是否为子智能体任务（task tool）
     is_subagent = str(tool_name).lower() == "task"
-    
+
     block = {
         "type": "tool_result",
         "name": str(tool_name or "tool"),
@@ -112,7 +97,7 @@ def make_tool_result_block(
 def ensure_content_blocks(content: Any) -> List[Dict[str, Any]]:
     """
     将任意格式的内容转换为标准 blocks 列表。
-    
+
     性能优化：简化类型检查逻辑，减少重复代码。
     """
     if content is None:
@@ -156,8 +141,8 @@ def ensure_content_blocks(content: Any) -> List[Dict[str, Any]]:
 
 
 def build_assistant_content(
-    text: Any = "",
-    tool_results: Optional[List[Dict[str, Any]]] = None,
+        text: Any = "",
+        tool_results: Optional[List[Dict[str, Any]]] = None,
 ) -> List[Dict[str, Any]]:
     blocks: List[Dict[str, Any]] = []
     text_value = str(text or "")
@@ -231,7 +216,7 @@ def content_to_markdown(content: Any) -> str:
         elif block_type == "tool_result":
             # 直接从 block 中提取关键参数，避免 JSON 序列化问题
             args = block.get("arguments", {}) or {}
-            
+
             # 生成安全的参数字符串表示
             if isinstance(args, dict) and args:
                 args_parts = []
@@ -251,14 +236,14 @@ def content_to_markdown(content: Any) -> str:
                 args_json = "{" + ", ".join(args_parts) + "}"
             else:
                 args_json = "{}"
-            
+
             # 处理 result：清理可能影响渲染的标签
             result_raw = str(block.get("result", ""))
             result_escaped = _sanitize_result(result_raw)[:300]
-            
+
             success = bool(block.get("success", True))
             tool_call_id = block.get("tool_call_id", "")
-            
+
             tool_lines = [
                 "<tool>",
                 f"name: {block.get('name', 'tool')}",
@@ -344,29 +329,8 @@ def normalize_tool_call(tool_call: Any) -> Optional[Dict[str, Any]]:
 
 
 def normalize_message(message: Any) -> Optional[Dict[str, Any]]:
-    """规范化消息格式。性能优化：快速路径检测已规范化消息"""
     if not isinstance(message, dict):
         return None
-
-    # ========== 性能优化：快速路径 ==========
-    # 如果消息已经是规范化格式（有 role 且格式正确），直接返回
-    # 这避免了重复的 content_to_text 调用和工具调用规范化
-    role = message.get("role", "")
-    if role in VALID_MESSAGE_ROLES:
-        # 检查是否有必需字段（已规范化消息的标志）
-        if role == "assistant":
-            # assistant 消息至少有 content 或 tool_calls 或 reasoning_content
-            if message.get("content") is not None or message.get("tool_calls") or message.get("reasoning_content"):
-                # 已经是规范化格式，快速返回（避免重复处理）
-                return dict(message)  # 返回副本避免修改原始数据
-        elif role == "tool":
-            # tool 消息有 tool_call_id
-            if message.get("tool_call_id"):
-                return dict(message)
-        else:
-            # system/user 消息通常是字符串 content
-            return dict(message)
-    # ======================================
 
     role = str(message.get("role", "") or "").strip()
     if role not in VALID_MESSAGE_ROLES:
@@ -397,7 +361,8 @@ def normalize_message(message: Any) -> Optional[Dict[str, Any]]:
             normalized["reasoning_content"] = str(reasoning)
         if message.get("round_id"):
             normalized["round_id"] = str(message.get("round_id"))
-        if not normalized.get("content") and not normalized.get("tool_calls") and not normalized.get("reasoning_content"):
+        if not normalized.get("content") and not normalized.get("tool_calls") and not normalized.get(
+                "reasoning_content"):
             return None
         return normalized
 
@@ -450,7 +415,7 @@ def get_user_round_ranges(messages: List[Dict[str, Any]]) -> List[tuple[int, int
 
 
 def group_messages_for_display(
-    messages: List[Dict[str, Any]],
+        messages: List[Dict[str, Any]],
 ) -> List[List[Dict[str, Any]]]:
     canonical_messages = consolidate_messages(messages or [])
     batches: List[List[Dict[str, Any]]] = []
@@ -477,38 +442,7 @@ def to_api_message(message: Dict[str, Any]) -> Dict[str, Any]:
     """
     将内部消息格式转换为标准API请求格式。
     用于发送给API的消息构建。
-    
-    性能优化：快速路径检测已规范化消息，避免重复规范化。
     """
-    if not isinstance(message, dict):
-        return {}
-
-    # ========== 性能优化：快速路径 ==========
-    # 如果消息已经是 API 格式（有 role 且符合 API 规范），直接转换
-    role = message.get("role", "")
-    if role in VALID_MESSAGE_ROLES:
-        # system/user/tool 消息通常是已格式化的
-        if role in ("system", "tool"):
-            return {
-                "role": role,
-                "content": _extract_text_content(message.get("content", "")),
-            }
-        elif role == "assistant":
-            # assistant 消息可能有 tool_calls
-            api_msg: Dict[str, Any] = {"role": "assistant"}
-            text = _extract_text_content(message.get("content", ""))
-            if text:
-                api_msg["content"] = text
-            tool_calls = message.get("tool_calls")
-            if tool_calls:
-                api_msg["tool_calls"] = tool_calls
-            reasoning = message.get("reasoning_content")
-            if reasoning:
-                api_msg["reasoning_content"] = reasoning
-            return api_msg
-    # ======================================
-
-    # 慢路径：需要规范化
     normalized_message = normalize_message(message)
     if not normalized_message:
         return {}
