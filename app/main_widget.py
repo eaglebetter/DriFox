@@ -147,6 +147,7 @@ class OpenAIChatToolWindow(ToolWindow):
     _question_floating_widget = None
     _question_tool_call_id = None
     _todo_was_visible_before_system: bool = False  # 打开系统卡片前todo的可见状态
+    _is_system_card_visible: bool = False  # 当前是否有系统卡片显示
     _window_active: bool = True
     # AutoLoop 状态
     _is_auto_loop_running: bool = False
@@ -1386,6 +1387,8 @@ class OpenAIChatToolWindow(ToolWindow):
         包括：系统设置、模型配置、历史会话、记忆管理、AutoLoop
         现在也保存并隐藏 todo/tool/sub_agent 实时卡片
         """
+        # 标记系统卡片打开状态，阻止实时卡片自行显示
+        self._is_system_card_visible = True
         # 保存 todo 可见状态，用于系统卡片关闭后恢复
         self._todo_was_visible_before_system = self._todo_floating_widget.isVisible()
         # 隐藏实时卡片
@@ -1426,6 +1429,8 @@ class OpenAIChatToolWindow(ToolWindow):
 
     def _restore_after_system_close(self):
         """系统卡片关闭后，恢复 todo/tool/sub_agent 实时卡片"""
+        # 标记系统卡片全部关闭
+        self._is_system_card_visible = False
         if self._is_any_system_card_visible():
             return  # 还有其他系统卡片开着，不恢复
         # 恢复 todo（如果之前是显示的且还有内容）
@@ -4454,7 +4459,13 @@ class OpenAIChatToolWindow(ToolWindow):
             return
 
         if tool_name in ("todowrite", "todoread"):
-            self._todo_floating_widget.setVisible(True)
+            # 只有在系统卡片未打开时才能显示 todo
+            if not self._is_system_card_visible:
+                self._todo_floating_widget.setVisible(True)
+            return
+
+        # 如果系统卡片打开，阻止工具卡片自行显示（但仍记录任务）
+        if self._is_system_card_visible:
             return
 
         self._tool_floating_widget.start_tool(tool_name, arguments)
@@ -4462,6 +4473,10 @@ class OpenAIChatToolWindow(ToolWindow):
     def _on_sub_agent_task_started(self, task_id: str, agent_name: str, task_description: str):
         """子智能体任务启动（通过 SubAgentManager 信号触发）"""
         widget = self._sub_agent_floating_widget
+
+        # 系统卡片打开时，阻止子智能体卡片显示
+        if self._is_system_card_visible:
+            return
 
         # 新批次开始时清空面板（_batch_started 为 False 表示新批次）
         if not widget._batch_started:
@@ -4599,11 +4614,18 @@ class OpenAIChatToolWindow(ToolWindow):
             error_msg = str(getattr(result, "error", "") or "")
             content = str(result) if result else ""
 
-        if tool_name not in ("question", "task", "todowrite", "todoread"):
+        # 如果系统卡片打开，阻止工具卡片显示（但仍记录结果到消息卡片）
+        if self._is_system_card_visible:
+            if tool_name not in ("question", "task", "todowrite", "todoread"):
+                pass  # 不显示 tool_floating_widget，只更新消息卡片
+            if tool_name in ("todowrite", "todoread"):
+                todos = self.backend.get_todos()
+                self._todo_floating_widget.update_todos(todos)
+                # 不显示，等系统卡片关闭后由 _restore_after_system_close 统一恢复
+        elif tool_name not in ("question", "task", "todowrite", "todoread"):
             self._tool_floating_widget.show_if_needed(elapsed)
             self._tool_floating_widget.finish_tool(content[:200], success)
-
-        if tool_name in ("todowrite", "todoread"):
+        elif tool_name in ("todowrite", "todoread"):
             todos = self.backend.get_todos()
             self._todo_floating_widget.update_todos(todos)
             self._todo_floating_widget.setVisible(True)
