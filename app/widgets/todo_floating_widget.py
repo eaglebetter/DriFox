@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtWidgets import QVBoxLayout, QLabel, QPushButton, QHBoxLayout
-from qfluentwidgets import SimpleCardWidget
+from PyQt5.QtWidgets import QVBoxLayout, QLabel, QHBoxLayout
+from qfluentwidgets import SimpleCardWidget, FluentIcon, TransparentToolButton
 
 from app.utils.utils import get_unified_font
 
@@ -49,24 +49,10 @@ class TodoFloatingWidget(SimpleCardWidget):
         header.addWidget(self.progress_label)
         header.addStretch()
 
-        close_btn = QPushButton("✕", self)
-        close_btn.setFixedSize(22, 22)
-        close_btn.setCursor(Qt.PointingHandCursor)
-        close_btn.setStyleSheet("""
-            QPushButton {
-                background-color: rgba(255, 255, 255, 0.1);
-                color: #a0a0a0;
-                border: none;
-                border-radius: 4px;
-                font-size: 11px;
-            }
-            QPushButton:hover {
-                background-color: rgba(255, 255, 255, 0.2);
-                color: #ffffff;
-            }
-        """)
-        close_btn.clicked.connect(self._on_close)
-        header.addWidget(close_btn)
+        self.close_btn = TransparentToolButton(FluentIcon.CLOSE)
+        self.close_btn.setFixedSize(24, 24)
+        self.close_btn.clicked.connect(self._on_close)
+        header.addWidget(self.close_btn)
 
         self.content_label = QLabel("暂无待办", self)
         self.content_label.setFont(get_unified_font(10))

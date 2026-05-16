@@ -42,6 +42,7 @@ class AutoLoopEngine:
         self._planning_count = 0        # 规划尝试次数
         self._current_step = 0          # 当前步骤编号（1-based）
         self._total_steps = 0           # 总步骤数
+        self._verified_steps: set[int] = set()  # 已验证通过的步骤集合
         self._step_verified = False      # 当前步骤是否已验证
         self._verification_failures = 0  # 连续验证失败次数
 
@@ -58,6 +59,7 @@ class AutoLoopEngine:
         self._planning_count = 0
         self._current_step = 0
         self._total_steps = 0
+        self._verified_steps = set()
         self._step_verified = False
         self._verification_failures = 0
 
@@ -103,6 +105,112 @@ class AutoLoopEngine:
             return max(nums), len(nums)  # current_step, total_steps
         return 0, 0
 
+    def parse_checked_steps_from_notes(self, notes: str) -> set[int]:
+        """从笔记中解析已勾选完成的步骤 [x]"""
+        import re
+        # 匹配 "- [x] 步骤 N" 或 "- [x] [步骤 N]" 格式
+        checked = set()
+        patterns = [
+            r'- \[x\].*\[步骤\s*(\d+)\]',
+            r'- \[x\]\s*\[步骤\s*(\d+)\]',
+            r'- \[x\].*步骤\s*(\d+)',
+        ]
+        for pattern in patterns:
+            for match in re.finditer(pattern, notes, re.IGNORECASE):
+                checked.add(int(match.group(1)))
+        return checked
+
+    def get_verified_steps(self) -> set[int]:
+        """获取已验证通过的步骤集合"""
+        return self._verified_steps
+
+    def sync_verified_steps_from_notes(self, notes: str):
+        """从笔记同步已勾选步骤到缓存"""
+        self._verified_steps = self.parse_checked_steps_from_notes(notes)
+        logger.info(f"[AutoLoop] Synced {len(self._verified_steps)} verified steps from notes")
+
+    def is_current_step_verified(self) -> bool:
+        """检查当前步骤是否已验证通过"""
+        return self._current_step in self._verified_steps
+
+    def get_incremental_summary(self) -> str:
+        """生成增量执行进度总结，告诉模型哪些已完成，只需要处理当前步骤"""
+        if self._is_planning_phase:
+            return ""
+        
+        verified = sorted(self._verified_steps)
+        total = self._total_steps
+        current = self._current_step
+        remaining = [s for s in range(1, total + 1) if s not in self._verified_steps]
+        
+        summary = [
+            "\n\n📊 **增量执行进度总结**",
+            f"- ✅ 已验证完成：{verified if verified else '无'}",
+            f"- 🔄 当前需要处理：步骤 {current}",
+            f"- ⏭️ 未开始：{remaining if remaining else '无'}",
+            "",
+            "⚠️ 强制要求：",
+            f"- 你只需要处理**当前步骤 {current}**",
+            "- 已完成步骤不需要重复验证或修改",
+            "- **每轮结束必须追加**本轮操作记录到 SHARED_TASK_NOTES.md",
+            "- 禁止覆盖原始执行计划，只能在文档末尾追加结果记录",
+            "",
+        ]
+        return "\n".join(summary)
+
+    def get_current_system_time(self) -> str:
+        """获取当前系统时间字符串，用于注入prompt"""
+        import time
+        return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+
+    def get_stage_constraint(self) -> str:
+        """获取当前阶段的强制约束提示（注入到prompt最开头）"""
+        current_time = self.get_current_system_time()
+        
+        if self._is_planning_phase:
+            return f"""
+🕒 当前系统时间：{current_time}
+
+🔒 【当前阶段强制约束 - 规划阶段】
+你现在 **ONLY 只允许** 做任务拆解和方案设计。
+**ABSOLUTELY 禁止** 写任何实现代码，禁止使用 edit/bash/delete 工具修改代码文件！
+
+你的任务：
+1. 扫描项目理解现状
+2. 将任务拆解为步骤，每个步骤格式：
+   - [ ] [步骤 N] <描述> | <文件> | <验证方式>
+     ✅ 需求验证：<这个步骤必须满足什么需求？输出什么结果？>
+3. 将完整计划写入 SHARED_TASK_NOTES.md
+4. 输出 PLANNING_COMPLETE
+5. STOP！到此为止
+
+记住：你现在只规划，不实现。代码一根都不能写！
+""".strip()
+        else:
+            # 执行阶段
+            current = self._current_step
+            total = self._total_steps
+            return f"""
+🕒 当前系统时间：{current_time}
+
+🔒 【当前阶段强制约束 - 执行阶段】
+你现在 **ONLY 只允许** 处理 **当前步骤 {current}/{total}**。
+**ABSOLUTELY 禁止** 提前执行后续步骤，禁止一次性做完多个步骤！
+
+你必须严格遵循：
+1. 读取 SHARED_TASK_NOTES.md 确认当前步骤要求和需求验证点
+2. 只完成当前这一个步骤，不要碰后续步骤
+3. 按照步骤要求运行验证（必须真的运行验证命令，不能假设成功）
+4. 验证必须通过两层检查：
+   ① 基础验证：代码能跑通吗？语法/编译/测试通过吗？
+   ② 需求验证：功能真的满足原始需求吗？每个验证点都通过吗？
+5. 两层验证都通过后，在 SHARED_TASK_NOTES.md 中将当前步骤改为 `[x]`
+6. 在文档末尾**追加**本轮操作记录（包括改动文件、验证命令、验证结果）
+7. STOP！到此为止，等待下一轮
+
+记住：一次只做一个步骤，做完就停。已完成步骤不需要重复处理。
+""".strip()
+
     # ========== 执行阶段管理 ==========
 
     def advance_to_step(self, step_num: int):
@@ -114,20 +222,24 @@ class AutoLoopEngine:
     def verify_current_step(self, success: bool):
         """验证当前步骤结果"""
         if success:
+            self._verified_steps.add(self._current_step)
             self._step_verified = True
             self._verification_failures = 0
         else:
             self._verification_failures += 1
             if self._verification_failures >= 3:
                 logger.warning(f"[AutoLoop] Step {self._current_step} failed 3 times, skipping")
-                self._step_verified = True  # 标记为已处理，避免卡住
+                # 跳过仍标记为已处理，避免卡住
+                self._verified_steps.add(self._current_step)
                 self._verification_failures = 0
 
     def is_task_completed(self) -> bool:
         """检查任务是否完成（所有步骤都已验证）"""
         if self._total_steps == 0:
             return False
-        return self._step_verified and self._current_step > self._total_steps
+        # 所有步骤都在已验证集合中才算完成
+        all_steps = set(range(1, self._total_steps + 1))
+        return self._verified_steps == all_steps
 
     # ========== 完成检测 ==========
 
@@ -200,6 +312,29 @@ class AutoLoopEngine:
         except Exception as e:
             logger.warning(f"[AutoLoop] Failed to read notes: {e}")
             return ""
+
+    def get_round_log_path(self, iteration: int) -> Optional[Path]:
+        """获取当前轮次的独立日志文件路径（round_001.md 格式）"""
+        if not self.config.project_path:
+            return None
+        project_dir = Path(self.config.project_path)
+        logs_dir = project_dir / self.config.logs_dir
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        # 格式: round_001.md → 自然排序
+        return logs_dir / f"round_{iteration:03d}.md"
+
+    def write_round_log(self, iteration: int, content: str) -> bool:
+        """写入当前轮次的完整日志到独立文件"""
+        path = self.get_round_log_path(iteration)
+        if not path:
+            return False
+        try:
+            path.write_text(content, encoding="utf-8")
+            logger.info(f"[AutoLoop] Wrote round {iteration} log to {path}")
+            return True
+        except Exception as e:
+            logger.warning(f"[AutoLoop] Failed to write round log: {e}")
+            return False
 
     # ========== 获取进度信息 ==========
 

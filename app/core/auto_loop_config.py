@@ -16,6 +16,7 @@ class AutoLoopConfig:
     completion_threshold: int = 3
     project_path: str = ""
     notes_file: str = "SHARED_TASK_NOTES.md"
+    logs_dir: str = ".autoloop/logs"  # 每轮日志单独存放目录（按轮次命名）
     task_prompt: str = ""
 
     def to_dict(self) -> dict:
@@ -27,6 +28,7 @@ class AutoLoopConfig:
             "completion_threshold": self.completion_threshold,
             "project_path": self.project_path,
             "notes_file": self.notes_file,
+            "logs_dir": self.logs_dir,
             "task_prompt": self.task_prompt,
         }
 
@@ -40,5 +42,6 @@ class AutoLoopConfig:
             completion_threshold=d.get("completion_threshold", 3),
             project_path=d.get("project_path", ""),
             notes_file=d.get("notes_file", "SHARED_TASK_NOTES.md"),
+            logs_dir=d.get("logs_dir", ".autoloop/logs"),
             task_prompt=d.get("task_prompt", ""),
         )

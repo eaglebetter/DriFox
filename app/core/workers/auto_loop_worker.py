@@ -244,6 +244,20 @@ class AutoLoopWorker(QThread):
             summary = self._extract_summary(response, iteration)
             self.iteration_completed.emit(iteration, summary)
 
+            # 写入本轮完整日志到独立文件
+            timestamp_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+            log_content = f"""# AutoLoop 轮次 {iteration} 日志
+
+- 时间: {timestamp_str}
+- 阶段: {'PLANNING' if self._engine.is_planning_phase() else 'EXECUTING'}
+- 当前步骤: {self._engine._current_step} / {self._engine._total_steps}
+
+## 完整响应
+
+{response}
+"""
+            self._engine.write_round_log(iteration, log_content)
+
             # ===== 阶段处理 =====
             
             if self._engine.is_planning_phase():
@@ -257,7 +271,10 @@ class AutoLoopWorker(QThread):
                     self._first_planning_done = True
                     self._engine.enter_execution_phase()
                     current, total = self._engine.parse_steps_from_notes(notes)
-                    self.log_signal.emit(f"✅ 规划完成！共 {total} 个步骤")
+                    # 从笔记同步已勾选完成的步骤到缓存
+                    self._engine.sync_verified_steps_from_notes(notes)
+                    self._engine._total_steps = total
+                    self.log_signal.emit(f"✅ 规划完成！共 {total} 个步骤，{len(self._engine.get_verified_steps())} 已完成")
                     self.log_signal.emit(f"📋 开始执行阶段: {self._get_next_step_preview(notes, 1)}")
                     
                     # 发送阶段信号：执行中
@@ -280,6 +297,9 @@ class AutoLoopWorker(QThread):
             else:
                 # --- 执行阶段 ---
                 notes = self._engine.read_shared_notes()
+                
+                # 每次执行前从笔记同步已验证步骤
+                self._engine.sync_verified_steps_from_notes(notes)
                 
                 # 解析当前步骤
                 current_step, total_steps = self._engine.parse_steps_from_notes(notes)
@@ -492,6 +512,19 @@ class AutoLoopWorker(QThread):
 
         # 根据阶段注入不同上下文
         workflow_context = self._build_workflow_context(iteration, force_update)
+        
+        # 【核心改进】在最开头注入当前阶段强约束（大模型对开头权重更高）
+        if self._engine:
+            stage_constraint = self._engine.get_stage_constraint()
+            if stage_constraint:
+                workflow_context = stage_constraint + "\n\n" + workflow_context
+        
+        # 增量执行进度总结（放在末尾，提醒模型只处理当前步骤）
+        if self._engine:
+            incremental_summary = self._engine.get_incremental_summary()
+            if incremental_summary:
+                workflow_context = workflow_context + incremental_summary
+
         system_content = system_prompt
 
         messages = [{"role": "system", "content": system_content}]

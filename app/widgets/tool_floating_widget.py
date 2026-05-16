@@ -78,17 +78,11 @@ class ToolFloatingWidget(SimpleCardWidget):
     def _setup_ui(self):
         self.setSizePolicy(1, 0)
         self.setFixedHeight(80)
-        self.setStyleSheet("""
-            CardWidget {
-                background-color: rgba(33, 33, 38, 250);
-                border: 1px solid #f59e0b;
-                border-radius: 8px;
-            }
-        """)
+        self._update_style(False)
 
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(16, 10, 16, 10)
-        main_layout.setSpacing(6)
+        main_layout.setContentsMargins(16, 12, 16, 12)
+        main_layout.setSpacing(8)
 
         header = QHBoxLayout()
         header.setSpacing(10)
@@ -102,12 +96,12 @@ class ToolFloatingWidget(SimpleCardWidget):
         self.tool_name_label = QLabel("", self)
         self.tool_name_label.setFont(get_unified_font(10))
         self.tool_name_label.setStyleSheet(
-            "color: #64b5f6; background-color: rgba(100, 181, 246, 0.1); padding: 2px 8px; border-radius: 4px;"
+            "color: #90caf9; background-color: rgba(144, 202, 249, 0.15); padding: 2px 8px; border-radius: 6px;"
         )
 
         self.title_label = QLabel("正在执行工具", self)
         self.title_label.setFont(get_unified_font(11, True))
-        self.title_label.setStyleSheet("color: #f59e0b;")
+        self.title_label.setStyleSheet("color: #ffb74d;")
 
         header.addWidget(self.icon_label)
         header.addWidget(self.tool_name_label)
@@ -115,21 +109,23 @@ class ToolFloatingWidget(SimpleCardWidget):
         header.addStretch()
 
         self.cancel_btn = QPushButton("中止", self)
-        self.cancel_btn.setFixedSize(50, 24)
+        self.cancel_btn.setFixedSize(52, 26)
         self.cancel_btn.setCursor(Qt.PointingHandCursor)
+        self.cancel_btn.setFont(get_unified_font(9, True))
         self.cancel_btn.setStyleSheet("""
             QPushButton {
-                background-color: #e53935;
+                background-color: rgba(239, 83, 80, 0.9);
                 color: white;
-                border: none;
-                border-radius: 4px;
-                font-weight: bold;
+                border: 1px solid rgba(239, 83, 80, 0.3);
+                border-radius: 6px;
             }
             QPushButton:hover {
-                background-color: #c62828;
+                background-color: rgba(239, 83, 80, 1);
+                border: 1px solid rgba(239, 83, 80, 0.6);
             }
             QPushButton:disabled {
-                background-color: #757575;
+                background-color: rgba(117, 117, 117, 0.6);
+                border: 1px solid rgba(117, 117, 117, 0.3);
             }
         """)
         self.cancel_btn.clicked.connect(self._on_cancel)
@@ -139,7 +135,7 @@ class ToolFloatingWidget(SimpleCardWidget):
 
         self.task_label = QLabel("等待执行...", self)
         self.task_label.setFont(get_unified_font(10))
-        self.task_label.setStyleSheet("color: #9e9e9e;")
+        self.task_label.setStyleSheet("color: rgba(255, 255, 255, 0.7);")
         self.task_label.setWordWrap(True)
         self.task_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         main_layout.addWidget(self.task_label)
@@ -171,6 +167,7 @@ class ToolFloatingWidget(SimpleCardWidget):
         self.cancel_btn.setText("已中止")
         self.title_label.setText("执行已中止")
         self.title_label.setStyleSheet("color: #ef5350;")
+        self._update_style(False)
         self.cancelled.emit()
 
     def set_process(self, process):
@@ -185,7 +182,8 @@ class ToolFloatingWidget(SimpleCardWidget):
         self._current_process = None
 
         self.title_label.setText("正在执行工具")
-        self.title_label.setStyleSheet("color: #f59e0b;")
+        self.title_label.setStyleSheet("color: #ffb74d;")
+        self._update_style(None)
 
         self._start_rotation()
 
@@ -203,6 +201,7 @@ class ToolFloatingWidget(SimpleCardWidget):
 
         self.cancel_btn.setEnabled(True)
         self.cancel_btn.setText("中止")
+        self.cancel_btn.setVisible(True)
 
         self.setVisible(True)  # 正常流程直接显示，压制逻辑在 start_tool 之前处理
         self.raise_()
@@ -242,9 +241,11 @@ class ToolFloatingWidget(SimpleCardWidget):
         self.icon_label.setStyleSheet("background: transparent; border: none;")
         self.icon_label.setText("✅" if success else "❌")
 
+        self._update_style(success)
+
         if success:
             self.title_label.setText("执行完成")
-            self.title_label.setStyleSheet("color: #66bb6a;")
+            self.title_label.setStyleSheet("color: #81c784;")
             self.task_label.setText("✓ 工具执行成功")
         else:
             self.title_label.setText("执行失败")
@@ -280,7 +281,8 @@ class ToolFloatingWidget(SimpleCardWidget):
         self.icon_label.setFixedSize(22, 22)
         self.icon_label.setStyleSheet("background: transparent; border: none;")
         self.title_label.setText("正在执行工具")
-        self.title_label.setStyleSheet("color: #f59e0b;")
+        self.title_label.setStyleSheet("color: #ffb74d;")
+        self._update_style(None)
 
     def show_if_needed(self, elapsed: float):
         """根据耗时决定是否显示（不考虑压制状态）"""
@@ -302,13 +304,40 @@ class ToolFloatingWidget(SimpleCardWidget):
             if self._is_running:
                 self.setVisible(True)
 
-    def set_opacity(self, opacity: float):
-        """设置透明度，用于响应全局透明度变化"""
-        alpha = int(250 * opacity)
+    def _update_style(self, success: bool = None):
+        """更新卡片样式，根据状态改变边框颜色"""
+        if success is None:
+            # 运行中
+            border_color = "#ffb74d"
+        elif success:
+            # 成功
+            border_color = "#81c784"
+        else:
+            # 失败
+            border_color = "#ef5350"
+
         self.setStyleSheet(f"""
             CardWidget {{
-                background-color: rgba(33, 33, 38, {alpha});
-                border: 1px solid #f59e0b;
-                border-radius: 8px;
+                background-color: rgba(22, 30, 45, 240);
+                border: 1px solid {border_color};
+                border-radius: 10px;
+            }}
+        """)
+
+    def set_opacity(self, opacity: float):
+        """设置透明度，用于响应全局透明度变化"""
+        alpha = int(240 * opacity)
+        # 根据当前状态保持边框颜色
+        if self._is_running:
+            border_color = "#ffb74d"
+        elif self.title_label.text() == "执行完成":
+            border_color = "#81c784"
+        else:
+            border_color = "#ef5350"
+        self.setStyleSheet(f"""
+            CardWidget {{
+                background-color: rgba(22, 30, 45, {alpha});
+                border: 1px solid {border_color};
+                border-radius: 10px;
             }}
         """)

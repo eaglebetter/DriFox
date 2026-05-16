@@ -3495,7 +3495,17 @@ class OpenAIChatToolWindow(ToolWindow):
         if target_batch_index < 0:
             return
 
-        # 直接在布局中查找 _message_index 匹配目标 batch 的 user card
+        # 优先从 _batch_cards 查找（更可靠）
+        if 0 <= target_batch_index < len(self._batch_cards):
+            cards = self._batch_cards[target_batch_index]
+            if cards:
+                for card in cards:
+                    if self._is_widget_alive(card) and isinstance(card, MessageCard):
+                        if card.role == "user":
+                            self.chat_scroll_area.verticalScrollBar().setValue(card.y())
+                            return
+
+        # 回退：遍历布局查找
         for i in range(self.chat_layout.count()):
             item = self.chat_layout.itemAt(i)
             if not item or not item.widget():
@@ -3541,11 +3551,24 @@ class OpenAIChatToolWindow(ToolWindow):
 
     def _scroll_to_batch_index(self, batch_index: int, node_index: int = -1):
         """
-        滚动到指定 batch 索引的位置（直接在布局中按 _message_index 查找）
+        滚动到指定 batch 索引的位置。
+        优先使用 _batch_cards 查找，如果找不到再遍历布局作为回退。
         """
         if node_index >= 0:
             self._pending_scroll_to_update = node_index
 
+        # 优先从 _batch_cards 查找（更可靠，避免虚拟回收后布局遍历失效）
+        if 0 <= batch_index < len(self._batch_cards):
+            cards = self._batch_cards[batch_index]
+            if cards:
+                for card in cards:
+                    if self._is_widget_alive(card) and isinstance(card, MessageCard):
+                        # 确保是 user card
+                        if card.role == "user":
+                            self.chat_scroll_area.verticalScrollBar().setValue(card.y())
+                            return
+
+        # 回退：遍历布局查找（处理边界情况，如刚创建但尚未加入 _batch_cards）
         for i in range(self.chat_layout.count()):
             item = self.chat_layout.itemAt(i)
             if not item or not item.widget():
@@ -3577,7 +3600,18 @@ class OpenAIChatToolWindow(ToolWindow):
         if target_batch_index < 0:
             return
 
-        # 直接在布局中查找 _message_index 匹配目标 batch 的 user card
+        # 优先从 _batch_cards 查找（更可靠，避免虚拟回收后布局遍历失效）
+        if 0 <= target_batch_index < len(self._batch_cards):
+            cards = self._batch_cards[target_batch_index]
+            if cards:
+                for card in cards:
+                    if self._is_widget_alive(card) and isinstance(card, MessageCard):
+                        if card.role == "user":
+                            self._pending_scroll_to_update = index
+                            self.chat_scroll_area.verticalScrollBar().setValue(card.y())
+                            return
+
+        # 回退：遍历布局查找（处理边界情况）
         for i in range(self.chat_layout.count()):
             item = self.chat_layout.itemAt(i)
             if not item or not item.widget():
