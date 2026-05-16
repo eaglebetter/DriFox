@@ -83,14 +83,14 @@ class TodoFloatingWidget(SimpleCardWidget):
         self.closed.emit()
 
     def update_todos(self, todos):
-        """更新 TODO 列表显示"""
+        """更新 TODO 列表显示（不自行控制可见性，由调用方决定）"""
         self._todo_list = todos or []
 
         if not self._todo_list:
             self.setVisible(False)
             return
 
-        self.setVisible(True)
+        # 不在这里 setVisible，由 main_widget 根据系统卡片状态决定是否显示
 
         lines = []
         completed = 0

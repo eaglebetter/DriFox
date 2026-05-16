@@ -4461,7 +4461,7 @@ class OpenAIChatToolWindow(ToolWindow):
             return
 
         if tool_name in ("todowrite", "todoread"):
-            # 只有在系统卡片未打开时才能显示 todo
+            # 更新数据，但只有在系统卡片未打开时才能显示
             if not self._is_system_card_visible:
                 self._todo_floating_widget.setVisible(True)
             return
@@ -4618,12 +4618,10 @@ class OpenAIChatToolWindow(ToolWindow):
 
         # 如果系统卡片打开，阻止工具卡片显示（但仍记录结果到消息卡片）
         if self._is_system_card_visible:
-            if tool_name not in ("question", "task", "todowrite", "todoread"):
-                pass  # 不显示 tool_floating_widget，只更新消息卡片
             if tool_name in ("todowrite", "todoread"):
                 todos = self.backend.get_todos()
                 self._todo_floating_widget.update_todos(todos)
-                # 不显示，等系统卡片关闭后由 _restore_after_system_close 统一恢复
+                # 不显示 todo，等系统卡片关闭后由 _restore_after_system_close 统一恢复
         elif tool_name not in ("question", "task", "todowrite", "todoread"):
             self._tool_floating_widget.show_if_needed(elapsed)
             self._tool_floating_widget.finish_tool(content[:200], success)
@@ -4631,7 +4629,7 @@ class OpenAIChatToolWindow(ToolWindow):
         elif tool_name in ("todowrite", "todoread"):
             todos = self.backend.get_todos()
             self._todo_floating_widget.update_todos(todos)
-            self._todo_floating_widget.setVisible(True)
+            self._todo_floating_widget.setVisible(True)  # 只有 _is_system_card_visible=False 时才到这
 
         if self._current_assistant_card:
             self._current_assistant_card.append_tool_result(
