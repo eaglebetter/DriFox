@@ -4627,6 +4627,7 @@ class OpenAIChatToolWindow(ToolWindow):
         elif tool_name not in ("question", "task", "todowrite", "todoread"):
             self._tool_floating_widget.show_if_needed(elapsed)
             self._tool_floating_widget.finish_tool(content[:200], success)
+            self._tool_floating_widget.show_when_ready()  # 系统卡片已关闭，尝试显示
         elif tool_name in ("todowrite", "todoread"):
             todos = self.backend.get_todos()
             self._todo_floating_widget.update_todos(todos)
