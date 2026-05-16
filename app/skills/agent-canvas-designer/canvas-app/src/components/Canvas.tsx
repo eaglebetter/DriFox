@@ -66,8 +66,7 @@ function storeNodeToFlowNode(
 /* ---------- 画布组件 ---------- */
 const CanvasInner: React.FC = () => {
   const { showToast } = useToast();
-  const { fitView } = useReactFlow();
-  const viewport = useViewport();
+  const { fitView, screenToFlowPosition, getZoom } = useReactFlow();
 
   const storeNodes = useCanvasStore((s) => s.nodes);
   const storeConnections = useCanvasStore((s) => s.connections);
@@ -223,18 +222,12 @@ const CanvasInner: React.FC = () => {
       const label = e.dataTransfer.getData('application/node-label');
       if (!type || !label) return;
 
-      // 每次 drop 时重新获取容器位置（支持视口滚动/缩放）
-      const wrapper = document.querySelector('.canvas-wrap .react-flow') as HTMLElement;
-      if (!wrapper) return;
-      const rect = wrapper.getBoundingClientRect();
-      const x = Math.round((e.clientX - rect.left) / viewport.zoom);
-      const y = Math.round((e.clientY - rect.top) / viewport.zoom);
-
-      const id = addNode(type, label, x, y);
+      const pos = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+      const id = addNode(type, label, Math.round(pos.x), Math.round(pos.y));
       selectNode(id);
       scheduleAutoSave();
     },
-    [addNode, selectNode, scheduleAutoSave, viewport]
+    [addNode, selectNode, scheduleAutoSave, screenToFlowPosition]
   );
 
   const onDragOver = useCallback((e: React.DragEvent) => {
@@ -252,7 +245,7 @@ const CanvasInner: React.FC = () => {
 
   const zoomLabel = document.getElementById('zoomLabel');
   if (zoomLabel) {
-    zoomLabel.textContent = Math.round(viewport.zoom * 100) + '%';
+    zoomLabel.textContent = Math.round(getZoom() * 100) + '%';
   }
 
   return (
@@ -282,7 +275,7 @@ const CanvasInner: React.FC = () => {
 
       <div className="zoom-panel">
         <button className="zoom-btn" onClick={() => fitView({ padding: 0.1, duration: 200 })}>−</button>
-        <span className="zoom-label" id="zoomLabel">{Math.round(viewport.zoom * 100)}%</span>
+        <span className="zoom-label" id="zoomLabel">{Math.round(getZoom() * 100)}%</span>
         <button className="zoom-btn" onClick={() => fitView({ padding: 0.1, duration: 200 })}>+</button>
         <button className="zoom-btn fit" onClick={() => fitView({ padding: 0.1, duration: 300 })}>⊡</button>
       </div>

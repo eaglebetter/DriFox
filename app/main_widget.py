@@ -19,7 +19,6 @@ from PyQt5.QtGui import QPixmap
 from PyQt5.QtWidgets import (
     QVBoxLayout,
     QHBoxLayout,
-    QGridLayout,
     QApplication,
     QWidget,
     QFileDialog, QGraphicsOpacityEffect,
@@ -390,20 +389,6 @@ class OpenAIChatToolWindow(ToolWindow):
 
                 stop_llm_api_service()
 
-    def _sync_overlay_visibility(self):
-        """同步浮动卡片的可见性：当任一卡片显示时显示 overlay，全部隐藏时隐藏 overlay"""
-        if not hasattr(self, '_card_overlay') or not self._card_overlay:
-            return
-        has_visible = False
-        layout = self._card_overlay.layout()
-        if layout:
-            for i in range(layout.count()):
-                item = layout.itemAt(i)
-                if item and item.widget() and item.widget().isVisible():
-                    has_visible = True
-                    break
-        self._card_overlay.setVisible(has_visible)
-
     def _setup_title_bar(self):
         """设置标题栏按钮"""
         title_bar = self.get_title_bar()
@@ -433,7 +418,7 @@ class OpenAIChatToolWindow(ToolWindow):
             self._settings_popup.hide()
         else:
             self._hide_main_popups()  # 隐藏其他主面板
-            self._show_overlay_card(self._settings_popup)
+            self._settings_popup.show()
 
     def _open_api_docs(self):
         """打开 API 文档页面"""
@@ -785,15 +770,45 @@ class OpenAIChatToolWindow(ToolWindow):
         session_bar_layout.addLayout(right_layout)
         layout.addLayout(session_bar_layout)
 
-        # _settings_popup / _hook_edit_card / _provider_edit_card 在 overlay 中初始化
-        self._settings_popup = None
-        self._hook_edit_card = None
-        self._hook_edit_popup = None
-        self._provider_edit_card = None
-        self._provider_edit_popup = None
+        self._settings_popup = LLMSettingsCard(self)
+        self._settings_popup.setVisible(False)
+        self._settings_popup.configChanged.connect(self._load_model_configs)
+
+        # 连接服务商添加/编辑信号
+        self._settings_popup.llmProviderCard.showAddProviderCard.connect(self._show_provider_add_card)
+        self._settings_popup.llmProviderCard.showEditProviderCard.connect(self._show_provider_edit_card)
+
+        # 连接 Hook 添加/编辑信号
+        self._settings_popup.hookListCard.showAddHookCard.connect(self._show_hook_add_card)
+
+        # Hook 编辑卡片
+        self._hook_edit_card = BaseSettingsCard("Hook 配置", "⚙️", parent=self)
+        self._hook_edit_card.setFixedHeight(380)
+        self._hook_edit_popup = HookEditCard(parent=self)
+        self._hook_edit_popup.saved.connect(self._on_hook_edit_saved)
+        self._hook_edit_popup.closed.connect(self._on_hook_edit_closed)
+        self._hook_edit_card.content_layout.addWidget(self._hook_edit_popup)
+        self._hook_edit_card.set_save_button_handler(self._hook_edit_popup._on_save)
+        self._hook_edit_card.setVisible(False)
+        layout.addWidget(self._hook_edit_card)
+
+        # 服务商编辑卡片
+        self._provider_edit_card = BaseSettingsCard("服务商配置", "⚙️", parent=self)
+        self._provider_edit_card.setFixedHeight(380)
+        self._provider_edit_popup = ProviderEditCard(parent=self)
+        self._provider_edit_popup.saved.connect(self._on_provider_edit_saved)
+        self._provider_edit_popup.closed.connect(self._on_provider_edit_closed)
+        self._provider_edit_card.content_layout.addWidget(self._provider_edit_popup)
+        # 照抄历史卡片的导入按钮模式：在标题栏加保存按钮，信号连到内容组件
+        # 获取 ProviderEditCard 实例的保存方法
+        save_handler = self._provider_edit_popup._on_save
+        self._provider_edit_card.set_save_button_handler(save_handler)
+        self._provider_edit_card.setVisible(False)
+        layout.addWidget(self._provider_edit_card)
 
         self._todo_floating_widget = TodoFloatingWidget(self)
         self._todo_floating_widget.setVisible(False)
+        layout.addWidget(self._todo_floating_widget)
 
         self._sub_agent_floating_widget = SubAgentFloatingWidget(self)
         self._sub_agent_floating_widget.setVisible(False)
@@ -801,10 +816,7 @@ class OpenAIChatToolWindow(ToolWindow):
         self._tool_floating_widget = ToolFloatingWidget(self)
         self._tool_floating_widget.setVisible(False)
 
-        self._question_floating_widget = QuestionFloatingWidget(self)
-        self._question_floating_widget.setVisible(False)
-        self._question_floating_widget.answered.connect(self._on_question_answered)
-        self._question_floating_widget.cancelled.connect(self._on_question_cancelled)
+        layout.addWidget(self._settings_popup)
 
         self.chat_scroll_area = SingleDirectionScrollArea(self)
         self.chat_scroll_area.setMinimumHeight(10)
@@ -840,137 +852,84 @@ class OpenAIChatToolWindow(ToolWindow):
         scroll_bar = self.chat_scroll_area.verticalScrollBar()
         scroll_bar.valueChanged.connect(lambda: self._virtual_scroll_timer.start())
 
-        # ── 聊天区域 ──
         layout.addWidget(self.chat_scroll_area, 1)
 
-        # ── 对话实时卡片（在主布局中，固定高度，不撑大）──
         layout.addWidget(self._sub_agent_floating_widget)
         layout.addWidget(self._tool_floating_widget)
-        layout.addWidget(self._todo_floating_widget)
 
-        # ── 浮动卡片覆盖层（系统设置卡片，不参与主布局）──
-        # 作为 main_widget 的子组件（不参与主布局），通过绝对定位覆盖在 chat_scroll_area 上方
-        # 确保 z-order 高于 WebEngineView 等 HWND 渲染层
-        self._card_overlay = QWidget(self)
-        self._card_overlay.setStyleSheet("background: transparent;")
-        self._card_overlay.setAttribute(Qt.WA_NativeWindow, True)  # HWN 层，与 WebEngineView 同级
-        self._card_overlay.setVisible(False)
-        overlay_layout = QVBoxLayout(self._card_overlay)
-        overlay_layout.setContentsMargins(8, 4, 8, 8)
-        overlay_layout.setSpacing(4)
-        overlay_layout.setAlignment(Qt.AlignTop)
-
-        # 系统卡片放入 overlay（配置、历史、记忆、编辑卡片等）
-        # — 设置弹出卡片 (LLMSettingsCard)
-        self._settings_popup = LLMSettingsCard(self._card_overlay)
-        self._settings_popup.setVisible(False)
-        self._settings_popup.configChanged.connect(self._load_model_configs)
-        self._settings_popup.llmProviderCard.showAddProviderCard.connect(self._show_provider_add_card)
-        self._settings_popup.llmProviderCard.showEditProviderCard.connect(self._show_provider_edit_card)
-        self._settings_popup.hookListCard.showAddHookCard.connect(self._show_hook_add_card)
-        overlay_layout.addWidget(self._settings_popup)
-
-        # — Hook 编辑卡片
-        self._hook_edit_card = BaseSettingsCard("Hook 配置", "⚙️", parent=self._card_overlay)
-        self._hook_edit_card.setFixedHeight(380)
-        self._hook_edit_popup = HookEditCard(parent=self._card_overlay)
-        self._hook_edit_popup.saved.connect(self._on_hook_edit_saved)
-        self._hook_edit_popup.closed.connect(self._on_hook_edit_closed)
-        self._hook_edit_card.content_layout.addWidget(self._hook_edit_popup)
-        self._hook_edit_card.set_save_button_handler(self._hook_edit_popup._on_save)
-        self._hook_edit_card.setVisible(False)
-        overlay_layout.addWidget(self._hook_edit_card)
-
-        # — 服务商编辑卡片
-        self._provider_edit_card = BaseSettingsCard("服务商配置", "⚙️", parent=self._card_overlay)
-        self._provider_edit_card.setFixedHeight(380)
-        self._provider_edit_popup = ProviderEditCard(parent=self._card_overlay)
-        self._provider_edit_popup.saved.connect(self._on_provider_edit_saved)
-        self._provider_edit_popup.closed.connect(self._on_provider_edit_closed)
-        self._provider_edit_card.content_layout.addWidget(self._provider_edit_popup)
-        save_handler = self._provider_edit_popup._on_save
-        self._provider_edit_card.set_save_button_handler(save_handler)
-        self._provider_edit_card.setVisible(False)
-        overlay_layout.addWidget(self._provider_edit_card)
-
-        # — 模型配置卡片
-        self._model_config_card = BaseSettingsCard("模型配置", "🔧", parent=self._card_overlay)
+        # 模型配置卡片 - 在消息列表下方，和工具卡片同位置
+        self._model_config_card = BaseSettingsCard("模型配置", "🔧", self)
         self._model_config_popup = ModelConfigCard()
         self._model_config_popup.configApplied.connect(self._on_config_applied)
         self._model_config_card.content_layout.addWidget(self._model_config_popup)
         self._model_config_card.setVisible(False)
-        overlay_layout.addWidget(self._model_config_card)
+        layout.addWidget(self._model_config_card)
 
-        # — 历史会话卡片
-        self._history_card = BaseSettingsCard("历史会话", "📜", parent=self._card_overlay)
+        # 历史会话卡片 - 在消息列表下方，和工具卡片同位置
+        self._history_card = BaseSettingsCard("历史会话", "📜", self)
         self._history_card.setFixedHeight(350)
+        # 设置历史/归档标签
         self._history_card.setup_tabs([
             ("history", "历史会话"),
             ("archived", "归档"),
         ], "history")
         self._history_card.tabChanged.connect(self._on_history_tab_changed)
+
         self._history_popup_card = HistoryCard()
         self._history_popup_card.sessionSelected.connect(self._on_history_session_selected)
         self._history_popup_card.sessionArchived.connect(self._archive_history_session)
         self._history_popup_card.sessionRenamed.connect(self._rename_history_session)
         self._history_popup_card.refreshRequested.connect(self._refresh_history_toggle_panel)
         self._history_popup_card.sessionImported.connect(self._on_session_imported)
+        # 归档会话相关信号
         self._history_popup_card.sessionRestored.connect(self._on_archived_session_restored)
         self._history_popup_card.sessionPermanentlyDeleted.connect(self._on_archived_session_deleted)
         self._history_popup_card.archivedSessionRenamed.connect(self._on_archived_session_renamed)
-        self._history_card.set_extra_button_handler(self._history_popup_card.get_import_button_handler())
+        # 设置导入按钮的处理器
+        self._history_card.set_extra_button_handler(
+            self._history_popup_card.get_import_button_handler()
+        )
+
+        # 历史会话卡片
         self._history_card.content_layout.addWidget(self._history_popup_card)
         self._history_card.setVisible(False)
-        overlay_layout.addWidget(self._history_card)
+        layout.addWidget(self._history_card)
 
-        # — 记忆管理卡片
-        self._memory_card = BaseSettingsCard("记忆管理", "🧠", parent=self._card_overlay)
+        # 记忆管理卡片 - 和历史会话卡片同位置
+        self._memory_card = BaseSettingsCard("记忆管理", "🧠", self)
         self._memory_card.setFixedHeight(400)
-        self._memory_card_popup = MemoryCardContent(self.backend.memory_manager, self._card_overlay)
+        self._memory_card_popup = MemoryCardContent(self.backend.memory_manager, self)
         self._memory_card_popup.memorySaved.connect(self._on_memory_card_saved)
-        self._memory_card_popup.set_project(self._current_project)
+        self._memory_card_popup.set_project(self._current_project)  # 初始化时设置当前项目
         self._memory_card.content_layout.addWidget(self._memory_card_popup)
         self._memory_card.setVisible(False)
-        overlay_layout.addWidget(self._memory_card)
+        layout.addWidget(self._memory_card)
 
-        # — AutoLoop 配置卡片
+        # AutoLoop 配置卡片 - 和历史会话/记忆卡片同位置
         self._auto_loop_config_card = AutoLoopConfigCard()
         self._auto_loop_config_card.startRequested.connect(self._on_auto_loop_start)
         self._auto_loop_config_card.setVisible(False)
-        overlay_layout.addWidget(self._auto_loop_config_card)
+        layout.addWidget(self._auto_loop_config_card)
 
-        # — AutoLoop 运行卡片
+        # AutoLoop 运行卡片 - 同上位置
         self._auto_loop_running_card = AutoLoopRunningCard()
         self._auto_loop_running_card.stopRequested.connect(self._on_auto_loop_stop)
         self._auto_loop_running_card.setVisible(False)
-        overlay_layout.addWidget(self._auto_loop_running_card)
-
-        # — 问题提问卡片
-        self._question_floating_widget = QuestionFloatingWidget(self._card_overlay)
-        self._question_floating_widget.setVisible(False)
-        self._question_floating_widget.answered.connect(self._on_question_answered)
-        self._question_floating_widget.cancelled.connect(self._on_question_cancelled)
-        overlay_layout.addWidget(self._question_floating_widget)
-
-        # overlay 大小跟随 chat_scroll_area
-        self._card_overlay.setGeometry(self.chat_scroll_area.rect())
-        self.chat_scroll_area.installEventFilter(self)
-
-        # overlay 可见性管理定时器
-        self._overlay_vis_timer = QTimer(self)
-        self._overlay_vis_timer.setInterval(200)
-        self._overlay_vis_timer.timeout.connect(self._sync_overlay_visibility)
-        self._overlay_vis_timer.start()
+        layout.addWidget(self._auto_loop_running_card)
 
         self.node_preview = ConversationNodePreview(self)
+        self.node_preview.nodeClicked.connect(self._on_node_preview_clicked)
         layout.addWidget(self.node_preview)
-
-        # 问题提问卡片（在工具栏上方，底部对齐输入框区域）
-        layout.addWidget(self._question_floating_widget)
 
         self.chat_scroll_area.verticalScrollBar().valueChanged.connect(
             self._on_scroll_changed
         )
+
+        self._question_floating_widget = QuestionFloatingWidget(self)
+        self._question_floating_widget.setVisible(False)
+        self._question_floating_widget.answered.connect(self._on_question_answered)
+        self._question_floating_widget.cancelled.connect(self._on_question_cancelled)
+        layout.addWidget(self._question_floating_widget)
 
         hlayout = QHBoxLayout()
         hlayout.setContentsMargins(0, 0, 0, 0)
@@ -1144,7 +1103,7 @@ class OpenAIChatToolWindow(ToolWindow):
         """从模型选择弹窗点击「配置」按钮 - 显示设置卡片并展开服务商下拉"""
         self._model_selector_popup.close()
         # 显示设置卡片
-        self._show_overlay_card(self._settings_popup)
+        self._settings_popup.show()
         self._settings_popup.raise_()
         # 滚动设置卡片内容到顶部
         QTimer.singleShot(100, self._scroll_settings_to_top)
@@ -1261,7 +1220,7 @@ class OpenAIChatToolWindow(ToolWindow):
     def _open_settings_popup(self):
         """打开设置卡片"""
         self._hide_main_popups()
-        self._show_overlay_card(self._settings_popup)
+        self._settings_popup.show()
         self._settings_popup.raise_()
         self._settings_popup.activateWindow()
 
@@ -1273,7 +1232,7 @@ class OpenAIChatToolWindow(ToolWindow):
 
         # 隐藏服务商编辑卡片，显示设置卡片
         self._provider_edit_card.hide()
-        self._show_overlay_card(self._settings_popup)
+        self._settings_popup.show()
 
         # 关闭模型选择器popup，下次打开会重新加载数据
         if hasattr(self, '_model_selector_popup') and self._model_selector_popup:
@@ -1288,7 +1247,7 @@ class OpenAIChatToolWindow(ToolWindow):
         """服务商编辑关闭后的回调"""
         # 隐藏服务商编辑卡片，显示设置卡片
         self._provider_edit_card.hide()
-        self._show_overlay_card(self._settings_popup)
+        self._settings_popup.show()
         # 关闭模型选择器popup，确保下次打开重新加载数据
         if hasattr(self, '_model_selector_popup') and self._model_selector_popup:
             self._model_selector_popup.close()
@@ -1300,7 +1259,7 @@ class OpenAIChatToolWindow(ToolWindow):
         # 设置卡片标题
         self._provider_edit_card.set_title("⚙️ 添加服务商")
         # 重新创建 ProviderEditCard 用于添加
-        self._provider_edit_popup = ProviderEditCard(provider_name="", provider_info={}, is_new=True, parent=self._card_overlay)
+        self._provider_edit_popup = ProviderEditCard(provider_name="", provider_info={}, is_new=True, parent=self)
         self._provider_edit_popup.saved.connect(self._on_provider_edit_saved)
         self._provider_edit_popup.closed.connect(self._on_provider_edit_closed)
         # 替换卡片内容
@@ -1313,7 +1272,7 @@ class OpenAIChatToolWindow(ToolWindow):
         self._provider_edit_card.set_save_button_handler(
             lambda: self._provider_edit_popup._on_save()
         )
-        self._show_overlay_card(self._provider_edit_card)
+        self._provider_edit_card.show()
 
     # ========== Hook 编辑卡片 ==========
 
@@ -1323,7 +1282,7 @@ class OpenAIChatToolWindow(ToolWindow):
         self._settings_popup.hide()
         self._hook_edit_card.set_title("➕ 添加 Hook")
         # 重新创建 HookEditCard
-        self._hook_edit_popup = HookEditCard(parent=self._card_overlay)
+        self._hook_edit_popup = HookEditCard(parent=self)
         self._hook_edit_popup.saved.connect(self._on_hook_edit_saved)
         self._hook_edit_popup.closed.connect(self._on_hook_edit_closed)
         while self._hook_edit_card.content_layout.count():
@@ -1334,12 +1293,12 @@ class OpenAIChatToolWindow(ToolWindow):
         self._hook_edit_card.set_save_button_handler(
             lambda: self._hook_edit_popup._on_save()
         )
-        self._show_overlay_card(self._hook_edit_card)
+        self._hook_edit_card.show()
 
     def _on_hook_edit_saved(self, values: dict):
         """Hook 保存回调"""
         self._hook_edit_card.hide()
-        self._show_overlay_card(self._settings_popup)
+        self._settings_popup.show()
         # 通过 HookListSettingCard 添加 hook
         if hasattr(self._settings_popup, 'hookListCard'):
             self._settings_popup.hookListCard._add_hook(
@@ -1353,7 +1312,7 @@ class OpenAIChatToolWindow(ToolWindow):
     def _on_hook_edit_closed(self):
         """Hook 编辑关闭回调"""
         self._hook_edit_card.hide()
-        self._show_overlay_card(self._settings_popup)
+        self._settings_popup.show()
 
     def _show_provider_edit_card(self, provider_name: str, provider_info: dict):
         """显示编辑服务商卡片"""
@@ -1377,7 +1336,7 @@ class OpenAIChatToolWindow(ToolWindow):
         self._provider_edit_card.set_save_button_handler(
             lambda: self._provider_edit_popup._on_save()
         )
-        self._show_overlay_card(self._provider_edit_card)
+        self._provider_edit_card.show()
 
     # ========== Hook 编辑卡片 ==========
 
@@ -1387,7 +1346,7 @@ class OpenAIChatToolWindow(ToolWindow):
         self._settings_popup.hide()
         self._hook_edit_card.set_title("➕ 添加 Hook")
         # 重新创建 HookEditCard
-        self._hook_edit_popup = HookEditCard(parent=self._card_overlay)
+        self._hook_edit_popup = HookEditCard(parent=self)
         self._hook_edit_popup.saved.connect(self._on_hook_edit_saved)
         self._hook_edit_popup.closed.connect(self._on_hook_edit_closed)
         while self._hook_edit_card.content_layout.count():
@@ -1398,12 +1357,12 @@ class OpenAIChatToolWindow(ToolWindow):
         self._hook_edit_card.set_save_button_handler(
             lambda: self._hook_edit_popup._on_save()
         )
-        self._show_overlay_card(self._hook_edit_card)
+        self._hook_edit_card.show()
 
     def _on_hook_edit_saved(self, values: dict):
         """Hook 保存回调"""
         self._hook_edit_card.hide()
-        self._show_overlay_card(self._settings_popup)
+        self._settings_popup.show()
         # 通过 HookListSettingCard 添加 hook
         if hasattr(self._settings_popup, 'hookListCard'):
             self._settings_popup.hookListCard._add_hook(
@@ -1417,24 +1376,7 @@ class OpenAIChatToolWindow(ToolWindow):
     def _on_hook_edit_closed(self):
         """Hook 编辑关闭回调"""
         self._hook_edit_card.hide()
-        self._show_overlay_card(self._settings_popup)
-
-    def _sync_overlay_geometry(self):
-        """同步 overlay 的位置和大小以覆盖 chat_scroll_area"""
-        if hasattr(self, "_card_overlay") and self._card_overlay and hasattr(self, "chat_scroll_area"):
-            self._card_overlay.setGeometry(self.chat_scroll_area.geometry())
-
-    def _ensure_overlay_visible(self):
-        """确保 overlay 可见（在显示任何卡片前调用）"""
-        if not self._card_overlay.isVisible():
-            self._sync_overlay_geometry()
-            self._card_overlay.raise_()
-            self._card_overlay.show()
-
-    def _show_overlay_card(self, card):
-        """显示 overlay 中的卡片（确保 overlay 可见）"""
-        self._ensure_overlay_visible()
-        card.show()
+        self._settings_popup.show()
 
     def _hide_main_popups(self):
         """隐藏主要的悬浮面板（互斥显示）
@@ -1460,7 +1402,7 @@ class OpenAIChatToolWindow(ToolWindow):
             self._hide_main_popups()  # 隐藏其他主面板
             # 每次打开都重新加载配置
             self._load_model_config_to_card()
-            self._show_overlay_card(self._model_config_card)
+            self._model_config_card.show()
 
     def _load_model_config_to_card(self):
         """加载当前模型配置到卡片（仅参数配置，不显示连接信息）"""
@@ -1620,7 +1562,7 @@ class OpenAIChatToolWindow(ToolWindow):
             self._history_card.hide()
         else:
             self._hide_main_popups()  # 隐藏其他主面板
-            self._show_overlay_card(self._history_card)
+            self._history_card.show()
             # 刷新数据
             self._refresh_history_toggle_panel()
 
@@ -1719,10 +1661,6 @@ class OpenAIChatToolWindow(ToolWindow):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        # 同步 overlay 位置和大小（作为 main_widget 的子组件，需要覆盖在 chat_scroll_area 上）
-        if hasattr(self, "_card_overlay") and self._card_overlay and hasattr(self, "chat_scroll_area"):
-            self._card_overlay.setGeometry(self.chat_scroll_area.geometry())
-            self._card_overlay.raise_()
         self._set_cards_resize_preview_mode(True)
         # resize 期间持续重置防抖，避免在拖拽过程中提前批量重排
         self._pending_resize_sync = True
@@ -5204,7 +5142,7 @@ class OpenAIChatToolWindow(ToolWindow):
             self._memory_card.hide()
         else:
             self._hide_main_popups()  # 隐藏其他主面板
-            self._show_overlay_card(self._memory_card)
+            self._memory_card.show()
             # 从数据库刷新记忆
             self._memory_card_popup.refresh_from_db()
 
@@ -5399,7 +5337,7 @@ class OpenAIChatToolWindow(ToolWindow):
             self._auto_loop_config_card.hide()
         else:
             self._hide_main_popups()
-            self._show_overlay_card(self._auto_loop_config_card)
+            self._auto_loop_config_card.show()
 
     def _on_auto_loop_start(self, config: AutoLoopConfig):
         """开始 AutoLoop"""
@@ -5425,7 +5363,7 @@ class OpenAIChatToolWindow(ToolWindow):
 
         # 隐藏配置卡，显示运行卡
         self._auto_loop_config_card.hide()
-        self._show_overlay_card(self._auto_loop_running_card)
+        self._auto_loop_running_card.show()
         # 确保停止按钮可见（彻底修复完成后重新运行时停止按钮消失的问题）
         if hasattr(self._auto_loop_running_card, '_stop_btn'):
             self._auto_loop_running_card._stop_btn.show()
