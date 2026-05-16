@@ -1,0 +1,601 @@
+/* ===== CSS 变量 ===== */
+:root {
+  --bg: #f0f2f5;
+  --panel-bg: #fff;
+  --sidebar-bg: #fff;
+  --sidebar-text: #334155;
+  --sidebar-active: #3b82f6;
+  --canvas-bg: #f5f6f8;
+  --border: #e5e7eb;
+  --text: #1e293b;
+  --text-secondary: #64748b;
+  --node-blue: #3b82f6;
+  --node-green: #22c55e;
+  --node-orange: #f59e0b;
+  --node-purple: #8b5cf6;
+  --node-red: #ef4444;
+  --node-gray: #6b7280;
+}
+
+/* ===== 全局重置 ===== */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* ===== 应用布局 ===== */
+.app {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.main-layout {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* ===== 左侧面板 NodePalette ===== */
+.sidebar {
+  width: 260px;
+  background: var(--panel-bg);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  z-index: 10;
+}
+
+.sidebar-search {
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.sidebar-search input {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 13px;
+  outline: none;
+  background: #f8fafc;
+  transition: border-color 0.15s;
+}
+
+.sidebar-search input:focus {
+  border-color: var(--node-blue);
+  background: #fff;
+}
+
+.sidebar-section {
+  padding: 4px 0;
+}
+
+.sidebar-section-title {
+  padding: 8px 16px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.sidebar-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 16px;
+  cursor: grab;
+  font-size: 13px;
+  transition: background 0.12s;
+  border-left: 3px solid transparent;
+  user-select: none;
+}
+
+.sidebar-item:hover {
+  background: #f8fafc;
+  border-left-color: var(--node-blue);
+}
+
+.sidebar-item:active {
+  cursor: grabbing;
+  opacity: 0.7;
+}
+
+.sidebar-item-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.sidebar-item-text {
+  color: var(--sidebar-text);
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ===== 画布区 ===== */
+.canvas-wrap {
+  flex: 1;
+  position: relative;
+  background: var(--canvas-bg);
+  outline: none;
+}
+
+.canvas-wrap .react-flow {
+  background: var(--canvas-bg);
+}
+
+.canvas-toolbar-embedded {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 6px;
+  background: #fff;
+  border-radius: 10px;
+  padding: 8px 12px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
+  z-index: 50;
+}
+
+/* ===== 自定义节点 ===== */
+.custom-node {
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.04);
+  font-size: 13px;
+  transition: box-shadow 0.15s;
+}
+
+.custom-node:hover {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12), 0 0 0 2px rgba(59, 130, 246, 0.15);
+}
+
+.custom-node.selected {
+  box-shadow: 0 0 0 3px var(--node-blue), 0 4px 16px rgba(59, 130, 246, 0.2);
+}
+
+.custom-node .node-header {
+  padding: 10px 14px;
+  border-radius: 12px 12px 0 0;
+  background: var(--node-color, #6b7280);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  color: #fff;
+  font-size: 13px;
+}
+
+.custom-node .node-icon {
+  font-size: 15px;
+}
+
+.custom-node .node-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+}
+
+.custom-node .node-container-body {
+  min-height: 80px;
+  padding: 8px 14px;
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+/* 圆形节点 (start/end) */
+.round-node {
+  border-radius: 50% !important;
+  width: 72px !important;
+  height: 72px !important;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--node-color, #6b7280) !important;
+}
+
+.round-node-inner {
+  color: #fff;
+  font-size: 24px;
+  font-weight: 700;
+}
+
+/* ReactFlow 手柄样式覆盖 */
+.react-flow__handle {
+  width: 12px !important;
+  height: 12px !important;
+  border: 2px solid #fff !important;
+  background: var(--node-blue) !important;
+}
+
+.react-flow__handle:hover {
+  transform: scale(1.3);
+}
+
+/* MiniMap 位置 */
+.react-flow__minimap {
+  right: 390px !important;
+}
+
+/* ===== 右侧属性面板 ===== */
+.detail-panel {
+  width: 380px;
+  background: var(--panel-bg);
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  flex-shrink: 0;
+  z-index: 10;
+  transition: width 0.2s;
+}
+
+.detail-panel.hidden {
+  width: 0;
+  overflow: hidden;
+  border: none;
+}
+
+.detail-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #94a3b8;
+  gap: 12px;
+  padding: 20px;
+}
+
+.detail-empty p {
+  font-size: 13px;
+}
+
+.detail-header {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: sticky;
+  top: 0;
+  background: #fff;
+  z-index: 5;
+}
+
+.detail-header h3 {
+  font-size: 15px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.detail-close {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: #fff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+}
+
+.detail-close:hover {
+  background: #f1f5f9;
+}
+
+.detail-content {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.detail-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.detail-field label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.detail-field input,
+.detail-field textarea,
+.detail-field select {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 13px;
+  outline: none;
+  width: 100%;
+  font-family: inherit;
+}
+
+.detail-field textarea {
+  resize: vertical;
+  font-family: 'SF Mono', 'Cascadia Code', monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.detail-field input:focus,
+.detail-field textarea:focus,
+.detail-field select:focus {
+  border-color: var(--node-blue);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.field-hint {
+  font-size: 11px;
+  color: #94a3b8;
+  margin-top: 2px;
+}
+
+.code-preview {
+  background: #1e293b;
+  color: #e2e8f0;
+  padding: 12px;
+  border-radius: 8px;
+  font-family: 'SF Mono', 'Cascadia Code', monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-x: auto;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.prompt-preview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.tag.blue {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.tag.orange {
+  background: #fff7ed;
+  color: #ea580c;
+}
+
+.tag.purple {
+  background: #f3e8ff;
+  color: #7c3aed;
+}
+
+.detail-actions {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+  display: flex;
+  gap: 8px;
+}
+
+/* ===== 按钮 ===== */
+.btn {
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: #fff;
+  cursor: pointer;
+  font-size: 13px;
+  transition: all 0.15s;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: inherit;
+  white-space: nowrap;
+}
+
+.btn:hover {
+  background: #f8fafc;
+}
+
+.btn-primary {
+  background: var(--node-blue);
+  color: #fff;
+  border-color: var(--node-blue);
+}
+
+.btn-primary:hover {
+  background: #2563eb;
+}
+
+.btn-outline {
+  border-color: var(--node-blue);
+  color: var(--node-blue);
+}
+
+.btn-outline:hover {
+  background: #eff6ff;
+}
+
+.btn-danger {
+  color: #ef4444;
+  border-color: #fecaca;
+  flex: 1;
+}
+
+.btn-danger:hover {
+  background: #fef2f2;
+}
+
+/* ===== Toast 通知 ===== */
+.toast-container {
+  position: fixed;
+  bottom: 80px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.toast {
+  padding: 10px 20px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  animation: toastIn 0.25s ease-out;
+  pointer-events: auto;
+}
+
+.toast.success {
+  background: #22c55e;
+  color: #fff;
+}
+
+.toast.info {
+  background: #3b82f6;
+  color: #fff;
+}
+
+.toast.warning {
+  background: #f59e0b;
+  color: #fff;
+}
+
+.toast.error {
+  background: #ef4444;
+  color: #fff;
+}
+
+@keyframes toastIn {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ===== 同步状态指示器 ===== */
+.sync-indicator {
+  font-size: 12px;
+  padding: 2px 10px;
+  border-radius: 12px;
+  font-weight: 500;
+}
+
+.status-idle {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.status-saving {
+  background: #fef3c7;
+  color: #d97706;
+  animation: pulse 0.8s infinite;
+}
+
+.status-saved {
+  background: #dcfce7;
+  color: #16a34a;
+}
+
+.status-error {
+  background: #fef2f2;
+  color: #dc2626;
+}
+
+.status-loading {
+  background: #dbeafe;
+  color: #2563eb;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.sync-source-tag {
+  font-size: 11px;
+  padding: 1px 8px;
+  border-radius: 10px;
+  margin-left: 6px;
+}
+
+.sync-source-tag.llm {
+  background: #ede9fe;
+  color: #7c3aed;
+}
+
+.sync-source-tag.user {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+/* ===== 滚动条美化 ===== */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
