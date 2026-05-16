@@ -1,21 +1,17 @@
 # -*- coding: utf-8 -*-
 """
 大模型设置卡片 - 垂直列表布局，高度不够滚动
+现已迁移到 AnimatedCardFrame 基类，获得彩虹边框动画
 """
 
 from PyQt5.QtCore import Qt, pyqtSignal, QTimer
 from PyQt5.QtGui import QFont, QColor
 from PyQt5.QtWidgets import (
-    QWidget,
     QVBoxLayout,
-    QHBoxLayout,
-    QLabel,
-    QScrollArea,
-    QFontComboBox,
 )
 from loguru import logger
 
-from app.utils.design_tokens import CardStyles
+from app.widgets.animated_card_frame import AnimatedCardFrame
 from app.widgets.provider_setting_card import ProviderListSettingCard
 
 
@@ -23,14 +19,13 @@ class NoWheelFontComboBox(QFontComboBox):
     """禁用滚轮切换的字体下拉框"""
 
     def wheelEvent(self, event):
-        # 忽略滚轮事件，防止悬浮时滚轮切换字体
         event.ignore()
 
 from qfluentwidgets import (
     StrongBodyLabel,
     SwitchSettingCard,
     OptionsSettingCard,
-    FluentIcon, SimpleCardWidget, SettingCard, PrimaryPushButton,
+    FluentIcon, SettingCard, PrimaryPushButton,
 )
 
 from app.utils.config import Settings
@@ -60,7 +55,7 @@ class ManualUpdateCard(SettingCard):
         checker.check_update()
 
     def _on_check_finished(self, latest_release):
-        pass  # UpdateChecker 内部已处理
+        pass
 
     def _on_check_finished_final(self, latest_release):
         self.updateBtn.setText("检查更新")
@@ -75,9 +70,8 @@ class ManualUpdateCard(SettingCard):
         try:
             self.updateBtn.setText("检查更新")
             self.updateBtn.setEnabled(True)
-            from qfluentwidgets import InfoBar, InfoBarPosition, InfoBarIcon
+            from qfluentwidgets import InfoBar, InfoBarPosition
             InfoBar.error(
-                icon=InfoBarIcon.WARNING,
                 title="检查更新失败",
                 content=msg,
                 position=InfoBarPosition.BOTTOM,
@@ -88,89 +82,28 @@ class ManualUpdateCard(SettingCard):
             print(f"_on_error error: {e}")
 
 
-class LLMSettingsCard(SimpleCardWidget):
-    """大模型设置卡片 - 垂直列表布局"""
+class LLMSettingsCard(AnimatedCardFrame):
+    """大模型设置卡片 - 彩虹边框 + 垂直列表布局"""
 
     closed = pyqtSignal()
     configChanged = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.set_icon("⚙️")
+        self.set_title_text("系统设置")
+        self.setFixedHeight(350)
+
         self.cfg = Settings.get_instance()
         self._save_timer = QTimer(self)
         self._save_timer.setSingleShot(True)
         self._save_timer.setInterval(500)
         self._save_timer.timeout.connect(self._perform_save)
 
-        self._setup_ui()
+        self._setup_content()
 
-    def _setup_ui(self):
-        self.setSizePolicy(1, 0)  # 水平方向可扩展
-        self.setFixedHeight(350)  # 固定高度，超出滚动
-        self.setStyleSheet(CardStyles.card())
-
-        main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(12, 8, 12, 8)
-        main_layout.setSpacing(4)
-
-        # 头部
-        header = QHBoxLayout()
-        header.setSpacing(8)
-
-        icon_label = QLabel("⚙️", self)
-        icon_label.setFont(get_unified_font(12))
-
-        title_label = StrongBodyLabel("系统设置", self)
-        title_label.setFont(get_unified_font(11, True))
-        title_label.setStyleSheet(CardStyles.title_label())
-
-        header.addWidget(icon_label)
-        header.addWidget(title_label)
-        header.addStretch()
-
-        # 关闭按钮
-        self.close_btn = QLabel("✕", self)
-        self.close_btn.setFont(get_unified_font(11))
-        self.close_btn.setStyleSheet(CardStyles.close_button())
-        self.close_btn.mousePressEvent = lambda e: self._on_close()
-        header.addWidget(self.close_btn)
-
-        main_layout.addLayout(header)
-
-        # 内容区域 - 使用 ScrollArea
-        scroll = QScrollArea(self)
-        scroll.setWidgetResizable(True)
-        scroll.setStyleSheet("""
-            QScrollArea {
-                border: none;
-                background: transparent;
-            }
-            QScrollArea > QWidget > QWidget {
-                background: transparent;
-            }
-            QScrollBar:vertical {
-                border: none;
-                background: transparent;
-                width: 12px;
-                margin: 4px 4px 4px 4px;
-            }
-            QScrollBar::handle:vertical {
-                background: #555555;
-                border-radius: 6px;
-                min-height: 30px;
-            }
-            QScrollBar::handle:vertical:hover {
-                background: #888888;
-            }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
-                height: 0px;
-            }
-        """)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-
-        content_widget = QWidget()
-        content_widget.setStyleSheet("background: transparent;")
-        content_layout = QVBoxLayout(content_widget)
+    def _setup_content(self):
+        content_layout = self.content_layout
         content_layout.setContentsMargins(0, 4, 0, 4)
         content_layout.setSpacing(6)
 
@@ -200,7 +133,7 @@ class LLMSettingsCard(SimpleCardWidget):
 
         # Hooks 管理
         from app.widgets.hook_setting_card import HookListSettingCard
-        
+
         hook_manager = getattr(self.parent(), 'backend', None)
         if hook_manager:
             hook_manager = hook_manager.hook_manager
@@ -265,8 +198,6 @@ class LLMSettingsCard(SimpleCardWidget):
         content_layout.addWidget(self.manualUpdateCard)
 
         content_layout.addStretch(1)
-        scroll.setWidget(content_widget)
-        main_layout.addWidget(scroll, 1)
 
         # 连接信号
         self.llmProviderCard.providerChanged.connect(self._on_config_changed)
@@ -288,10 +219,8 @@ class LLMSettingsCard(SimpleCardWidget):
                 self._parent = parent
 
                 self.fontCombo = NoWheelFontComboBox()
-                # 设置下拉框向左延伸，框右边对齐
                 self.fontCombo.setSizeAdjustPolicy(QFontComboBox.SizeAdjustPolicy.AdjustToContents)
                 self._apply_font_combo_style()
-                # 设置当前字体
                 current_font = cfg.llm_font_family.value
                 self.fontCombo.setCurrentFont(QFont(current_font))
                 self.fontCombo.currentFontChanged.connect(self._on_font_changed)
@@ -300,7 +229,6 @@ class LLMSettingsCard(SimpleCardWidget):
                 self.hBoxLayout.addSpacing(16)
 
             def _apply_font_combo_style(self):
-                """应用字体下拉框样式"""
                 view = self.fontCombo.view()
 
                 self.fontCombo.setStyleSheet("""
@@ -338,8 +266,7 @@ class LLMSettingsCard(SimpleCardWidget):
                         border-top-color: #0078d4;
                     }
                 """)
-                
-                # 设置下拉视图样式（包含滚动条）
+
                 view.setStyleSheet("""
                     QAbstractItemView {
                         color: #e8e8e8;
@@ -376,19 +303,15 @@ class LLMSettingsCard(SimpleCardWidget):
                     }
                 """)
 
-                # 通过 palette 强制设置背景色
                 palette = view.palette()
                 palette.setColor(view.backgroundRole(), QColor(42, 42, 46))
                 view.setPalette(palette)
                 view.setAutoFillBackground(True)
-
-                # 下拉框右边与点击框右边对齐，向左延伸
                 self.fontCombo.view().setTextElideMode(Qt.ElideRight)
 
             def _on_font_changed(self, font):
                 self.cfg.set(self.cfg.llm_font_family, font.family(), save=True)
                 self.cfg.save()
-                # 通知父级配置变化
                 if self._parent and hasattr(self._parent, "_on_config_changed"):
                     self._parent._on_config_changed()
 
@@ -420,7 +343,6 @@ class LLMSettingsCard(SimpleCardWidget):
 
             def _on_value_changed(self, value):
                 self.cfg.set(self.cfg.llm_api_port, value, save=True)
-                # 更新 API 服务开关卡片的描述
                 parent = self.parent()
                 while parent and not hasattr(parent, "llmApiEnabledCard"):
                     parent = parent.parent()
@@ -451,7 +373,6 @@ class LLMSettingsCard(SimpleCardWidget):
             print(f"保存配置失败: {e}")
 
     def _on_llm_api_enabled_changed(self, enabled):
-        """API 服务开关变化时启动/停止服务"""
         from app.api import (
             stop_llm_api_service,
             is_service_running,
@@ -469,7 +390,6 @@ class LLMSettingsCard(SimpleCardWidget):
         self._on_config_changed()
 
     def _on_llm_api_port_changed(self, port):
-        """端口变化时，如果服务正在运行则重启服务"""
         from app.api import (
             stop_llm_api_service,
             is_service_running,
@@ -477,27 +397,18 @@ class LLMSettingsCard(SimpleCardWidget):
         )
 
         if self.cfg.llm_api_enabled.value and is_service_running():
-            # 停止旧服务
             stop_llm_api_service()
-            # 用新端口启动服务
             service = get_llm_api_service()
             service.port = port
             service.start(background=True)
-        # 更新 API 服务开关卡片的描述
         if hasattr(self, "llmApiEnabledCard"):
             self.llmApiEnabledCard.setContent(f"http://localhost:{port}/docs")
 
     def show(self):
-        # 刷新服务商列表
         if hasattr(self, 'llmProviderCard'):
             self.llmProviderCard._refresh_items()
-        self.setVisible(True)
-        self.raise_()
-
-    def hide(self):
-        self.setVisible(False)
+        super().show()
 
     def set_opacity(self, opacity: float):
-        """设置透明度，用于响应全局透明度变化"""
-        alpha = int(250 * opacity)
-        self.setStyleSheet(CardStyles.card(alpha))
+        """设置透明度（保留接口，暂不实现动态透明度）"""
+        pass

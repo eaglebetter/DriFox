@@ -13,7 +13,7 @@ from PyQt5.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from qfluentwidgets import PrimaryPushButton, SimpleCardWidget
+from qfluentwidgets import PrimaryPushButton, SimpleCardWidget, TransparentToolButton, FluentIcon
 
 from app.utils.utils import get_unified_font, get_font_family_css
 
@@ -251,26 +251,8 @@ class QuestionFloatingWidget(SimpleCardWidget):
         header.addWidget(self.title_label)
         header.addWidget(self.mode_hint_label)
         header.addStretch()
-
-        self.close_btn = QPushButton("x", self)
+        self.close_btn = TransparentToolButton(FluentIcon.CLOSE)
         self.close_btn.setFixedSize(24, 24)
-        self.close_btn.setCursor(Qt.PointingHandCursor)
-        self.close_btn.setStyleSheet(
-            f"""
-            QPushButton {{
-                background-color: transparent;
-                color: #8b95a7;
-                border: none;
-                border-radius: 6px;
-                {get_font_family_css()} font-size: 12px;
-                font-weight: bold;
-            }}
-            QPushButton:hover {{
-                color: #f4f7fb;
-                background-color: rgba(255, 255, 255, 0.08);
-            }}
-            """
-        )
         self.close_btn.clicked.connect(self._on_cancel)
         header.addWidget(self.close_btn)
 
