@@ -412,17 +412,27 @@ class OpenAIChatWorker(QThread):
         if max_tokens is not None:
             extra_body["max_tokens"] = self._cap_max_output_tokens(model, max_tokens)
 
-        # 处理 DeepSeek 思考模式与 reasoning_effort 的联动
-        provider_family = get_provider_profile(self.llm_config)["family"]
+        # 处理服务商特有的思考模式参数
+        profile = get_provider_profile(self.llm_config)
+        provider_family = profile["family"]
+
         if provider_family == "deepseek":
             thinking_mode = self.llm_config.get("思考模式")
             if thinking_mode is True:
                 extra_body["thinking"] = {"type": "enabled"}
-                # reasoning_effort 已通过映射自然流入 extra_body
+                # reasoning_effort 由映射自动流入，无需额外处理
             elif thinking_mode is False:
-                # 关思考模式：主动传 disabled，但不能传 reasoning_effort（API 要求）
                 extra_body["thinking"] = {"type": "disabled"}
+                # API 要求：关闭思考时不能传 reasoning_effort
                 extra_body.pop("reasoning_effort", None)
+
+        elif provider_family == "zhipu":
+            thinking_mode = self.llm_config.get("思考模式")
+            if thinking_mode is True:
+                extra_body["thinking"] = {"type": "enabled"}
+            elif thinking_mode is False:
+                extra_body["thinking"] = {"type": "disabled"}
+            # 智谱AI 不支持 reasoning_effort，已有映射不会注入
 
         # 处理认证
         auth_headers = None

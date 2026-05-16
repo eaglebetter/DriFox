@@ -62,6 +62,12 @@ PARAM_SCHEMA = {
         "ui_type": "checkbox",
         # 无 api_param，由 chat_worker 特殊处理
     },
+    "思考预算": {
+        "display_name": "思考预算",
+        "ui_type": "spinbox",
+        "range": {"min": 256, "max": 65536, "step": 256, "type": "int"},
+        "api_param": "thinking_budget",
+    },
     "思考等级": {
         "display_name": "思考等级",
         "ui_type": "combobox",
@@ -194,8 +200,9 @@ FREE_PROVIDERS = {
     "SiliconFlow (硅基流动)": {
         "API_URL": "https://api.siliconflow.cn/v1",
         "API_KEY": "",
-        "模型名称": "Qwen/Qwen2.5-7B-Instruct",
-        "温度": 0.7,
+        "思考预算": "medium",
+        "模型名称": "deepseek-ai/DeepSeek-R1",
+        "温度": 0.6,
         "最大Token": 200000,
         "认证方式": "bearer",
         "获取地址": "https://cloud.siliconflow.cn/account/ak",
@@ -212,6 +219,7 @@ FREE_PROVIDERS = {
     "智谱AI": {
         "API_URL": "https://open.bigmodel.cn/api/paas/v4",
         "API_KEY": "",
+        "思考模式": True,
         "模型名称": "glm-4-flash",
         "温度": 0.7,
         "最大Token": 40960,
