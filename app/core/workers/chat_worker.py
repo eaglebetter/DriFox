@@ -61,10 +61,8 @@ class OpenAIChatWorker(QThread):
             permission_cache: PermissionCache = None,
             compactor=None,
             initial_compaction_cache: Dict = None,
-            token_update_callback: Callable[[int], None] = None,
     ):
         super().__init__()
-        self._token_update_callback = token_update_callback
         self.messages = messages
         self.session_messages = consolidate_messages(session_messages or [])
         self.llm_config = llm_config
@@ -1279,14 +1277,6 @@ class OpenAIChatWorker(QThread):
                     "completion_tokens": getattr(usage, "completion_tokens", 0),
                     "total_tokens": getattr(usage, "total_tokens", 0),
                 }
-                # 累加到总 token 计数，这样多轮工具迭代的所有 token 都会被统计
-                total = getattr(usage, "total_tokens", 0) or 0
-                self._accumulated_tokens += total
-                logger.debug(f"[ChatWorker] usage total={total}, callback={self._token_update_callback}")
-                # 实时通知外部（如 AutoLoop）更新 token 计数
-                if self._token_update_callback and total > 0:
-                    logger.debug(f"[ChatWorker] calling _token_update_callback with {total}")
-                    self._token_update_callback(total)
             
             # 每处理 5 个 chunk 就让渡一次 CPU，确保主线程能及时处理排队的 Qt 信号
             # 避免 content_received 等信号堆积到工具执行完毕后一次性处理

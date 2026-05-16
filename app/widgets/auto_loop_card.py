@@ -18,11 +18,12 @@ from PyQt5.QtWidgets import (
     QTextEdit, QFrame, QProgressBar, )
 from qfluentwidgets import (
     PrimaryPushButton, PushButton, BodyLabel, StrongBodyLabel, LineEdit,
-    SpinBox, )
+    SpinBox, FluentIcon, ToolButton, )
 from qfluentwidgets.components.widgets.card_widget import CardSeparator
+from qfluentwidgets.components.widgets.flyout import IconWidget
 
 from app.core.auto_loop_config import AutoLoopConfig
-from app.utils.utils import get_font_family_css
+from app.utils.utils import get_font_family_css, get_icon
 
 FONT_CSS = get_font_family_css()
 
@@ -51,14 +52,15 @@ class AutoLoopConfigCard(QFrame):
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 10, 16, 10)
-        layout.setSpacing(6)
+        layout.setContentsMargins(6, 5, 6, 5)
+        layout.setSpacing(3)
 
         # ---- 标题栏（含开始按钮） ----
         title_layout = QHBoxLayout()
-        icon_label = QLabel("🤖")
-        icon_label.setStyleSheet("font-size: 18px;")
+        icon_label = IconWidget(get_icon("无限"))
+        icon_label.setFixedSize(28, 28)
         title_layout.addWidget(icon_label)
+        title_layout.addSpacing(6)
         title = StrongBodyLabel("AutoLoop 自动循环")
         title.setStyleSheet(f"color: #EAF2FF; font-size: 14px; {FONT_CSS}")
         title_layout.addWidget(title)
@@ -152,22 +154,8 @@ class AutoLoopConfigCard(QFrame):
         self._path_edit.setFixedHeight(26)
         self._path_edit.setStyleSheet(self._line_style())
         path_row.addWidget(self._path_edit, 1)
-        self._path_browse_btn = PushButton("📂 浏览")
-        self._path_browse_btn.setFixedSize(52, 26)
-        self._path_browse_btn.setStyleSheet(f"""
-            PushButton {{
-                background: rgba(255, 255, 255, 0.08);
-                color: #EAF2FF;
-                border: 1px solid rgba(255, 255, 255, 0.12);
-                border-radius: 6px;
-                padding: 2px 6px;
-                {FONT_CSS} font-size: 11px;
-            }}
-            PushButton:hover {{
-                background: rgba(255, 255, 255, 0.15);
-                border-color: #C9A85C;
-            }}
-        """)
+        self._path_browse_btn = ToolButton(FluentIcon.FOLDER)
+        self._path_browse_btn.setFixedSize(26, 26)
         self._path_browse_btn.clicked.connect(self._browse_folder)
         path_row.addWidget(self._path_browse_btn)
         right_col.addLayout(path_row)
@@ -180,7 +168,7 @@ class AutoLoopConfigCard(QFrame):
         # ---- 任务描述 ----
         self._prompt_edit = QTextEdit()
         self._prompt_edit.setPlaceholderText("📝 描述 AutoLoop 要完成的任务...")
-        self._prompt_edit.setMinimumHeight(60)
+        self._prompt_edit.setMinimumHeight(40)
         self._prompt_edit.setMaximumHeight(120)
         self._prompt_edit.setStyleSheet(f"""
             QTextEdit {{

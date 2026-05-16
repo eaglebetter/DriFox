@@ -114,9 +114,8 @@ class BaseSettingsCard(SimpleCardWidget):
         header.addLayout(self._extra_buttons_container)
 
         # 关闭按钮
-        self.close_btn = QLabel("✕", self)
-        self.close_btn.setFont(get_unified_font(11))
-        self.close_btn.setStyleSheet(CardStyles.close_button())
+        self.close_btn = TransparentToolButton(FluentIcon.CLOSE)
+        self.close_btn.setFixedSize(24, 24)
         self.close_btn.mousePressEvent = lambda e: self._on_close()
         header.addWidget(self.close_btn)
 
