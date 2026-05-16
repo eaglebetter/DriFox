@@ -29,6 +29,21 @@ _TITLE_PATTERN = re.compile(r'class="result__title"[^>]*>.*?<a[^>]*href="([^"]+)
 _SNIPPET_PATTERN = re.compile(r'class="result__snippet"[^>]*>(.*?)</div>', re.DOTALL)
 _HTML_TAG_PATTERN = re.compile(r"<[^>]+>")
 
+# 共享的 HTTP headers 配置
+_DEFAULT_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+}
+
+
+def _fetch_html_content(url: str) -> tuple[httpx.Response, str]:
+    """获取网页内容的共享函数"""
+    with httpx.Client(timeout=30, follow_redirects=True, headers=_DEFAULT_HEADERS) as client:
+        response = client.get(url)
+        response.raise_for_status()
+        return response, response.text
+
 
 class WebFetchTask(QRunnable):
     """异步网页抓取任务"""
@@ -54,19 +69,9 @@ class WebFetchTask(QRunnable):
             )
 
     def _do_fetch(self) -> ToolResult:
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-        }
-
+        """异步获取网页内容（使用共享函数）"""
         try:
-            with httpx.Client(
-                timeout=30, follow_redirects=True, headers=headers
-            ) as client:
-                response = client.get(self.url)
-                response.raise_for_status()
-                html_content = response.text
+            response, html_content = _fetch_html_content(self.url)
 
             if self.format == "html":
                 return ToolResult(True, content=html_content[: self.max_chars])
@@ -262,20 +267,9 @@ class WebTools:
             return self._fetch_sync(url, format, max_chars)
 
     def _fetch_sync(self, url: str, format: str, max_chars: int) -> ToolResult:
-        """同步获取网页"""
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-        }
-
+        """同步获取网页（使用共享函数）"""
         try:
-            with httpx.Client(
-                timeout=30, follow_redirects=True, headers=headers
-            ) as client:
-                response = client.get(url)
-                response.raise_for_status()
-                html_content = response.text
+            response, html_content = _fetch_html_content(url)
 
             if format == "html":
                 return ToolResult(True, content=html_content[:max_chars])
