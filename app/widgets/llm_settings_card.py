@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 大模型设置卡片 - 垂直列表布局，高度不够滚动
-现已迁移到 AnimatedCardFrame 基类，获得彩虹边框动画
+现已迁移到 SystemCardFrame 基类，获得统一头部布局和固定边框
 """
 
 from PyQt5.QtCore import Qt, pyqtSignal, QTimer
@@ -11,7 +11,7 @@ from PyQt5.QtWidgets import (
 )
 from loguru import logger
 
-from app.widgets.animated_card_frame import AnimatedCardFrame
+from app.widgets.system_card_frame import SystemCardFrame
 from app.widgets.provider_setting_card import ProviderListSettingCard
 
 
@@ -82,8 +82,8 @@ class ManualUpdateCard(SettingCard):
             print(f"_on_error error: {e}")
 
 
-class LLMSettingsCard(AnimatedCardFrame):
-    """大模型设置卡片 - 彩虹边框 + 垂直列表布局"""
+class LLMSettingsCard(SystemCardFrame):
+    """大模型设置卡片 - 固定边框 + 垂直列表布局"""
 
     closed = pyqtSignal()
     configChanged = pyqtSignal()

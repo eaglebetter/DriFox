@@ -1,14 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-通用设置卡片基类 — 现在继承自 AnimatedCardFrame，获得彩虹边框动画
-
-保留原有 API 兼容，继承动画和标准头部布局
+通用设置卡片基类 — 继承自 SystemCardFrame，获得统一的头部布局和固定边框
 """
 
-from app.widgets.animated_card_frame import AnimatedCardFrame
+from app.widgets.system_card_frame import SystemCardFrame
 
 
-class BaseSettingsCard(AnimatedCardFrame):
+class BaseSettingsCard(SystemCardFrame):
     """通用设置卡片基类（向后兼容）"""
 
     def __init__(self, title: str, icon: str = "⚙️", parent=None):

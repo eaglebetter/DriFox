@@ -1,18 +1,16 @@
 # -*- coding: utf-8 -*-
 """
-AnimatedCardFrame — QFrame 基类 + paintEvent 彩虹渐变边框 + 头部标准布局
+SystemCardFrame — QFrame 基类 + 标准头部布局 + 固定边框
 
-所有系统设置卡片都应继承此类，以获得统一的视觉语言：
-- 彩虹渐变边框（动画旋转）
+用于所有系统设置卡片（settings/history/memory/model_config/provider_edit/hook_edit 等）
+- 固定边框（无动画）
 - 标准头部（图标 + 标题 + 标签/统计 + 关闭按钮）
 - ScrollArea 内容区
 """
 
-import time
-from PyQt5.QtCore import Qt, QVariantAnimation, pyqtSignal
-from PyQt5.QtGui import QPainter, QPen, QBrush, QLinearGradient, QColor
+from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea,
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea, QFrame,
 )
 from qfluentwidgets import (
     StrongBodyLabel, TransparentToolButton, FluentIcon, PrimaryToolButton)
@@ -21,25 +19,14 @@ from app.utils.design_tokens import TabStyles
 from app.utils.utils import get_unified_font, get_icon
 
 
-class AnimatedCardFrame(QFrame):
-    """带彩虹边框动画的系统卡片基类"""
+class SystemCardFrame(QFrame):
+    """系统卡片基类 — 固定边框样式，无动画"""
 
     closed = pyqtSignal()
     tabChanged = pyqtSignal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._hue_offset = 0.0
-        self._anim_started = False
-
-        # 彩虹边框动画（3秒一圈）
-        self._anim = QVariantAnimation(self)
-        self._anim.setDuration(3000)
-        self._anim.setStartValue(0)
-        self._anim.setEndValue(360)
-        self._anim.setLoopCount(-1)
-        self._anim.valueChanged.connect(self._on_hue_changed)
-
         self._build_base_ui()
 
     # ── UI 构建 ──────────────────────────────────────────
@@ -117,9 +104,10 @@ class AnimatedCardFrame(QFrame):
 
     def _apply_base_style(self):
         self.setStyleSheet("""
-            AnimatedCardFrame {
+            SystemCardFrame {
                 background: rgba(22, 30, 45, 230);
-                border-radius: 12px;
+                border: 1px solid #3d4a60;
+                border-radius: 10px;
             }
         """)
 
@@ -155,58 +143,15 @@ class AnimatedCardFrame(QFrame):
             }
         """
 
-    # ── 彩虹边框动画 ────────────────────────────────────
-
-    def _on_hue_changed(self, value: float):
-        self._hue_offset = value
-        self.update()
-
-    def paintEvent(self, event):
-        """绘制彩虹渐变边框"""
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
-
-        rect = self.rect()
-        gradient = QLinearGradient(0, 0, rect.width(), rect.height())
-        hue = int(self._hue_offset) % 360
-        colors = [
-            (0.00, QColor.fromHsv(hue, 200, 200, 140)),
-            (0.25, QColor.fromHsv((hue + 72) % 360, 200, 200, 140)),
-            (0.50, QColor.fromHsv((hue + 144) % 360, 200, 200, 140)),
-            (0.75, QColor.fromHsv((hue + 216) % 360, 200, 200, 140)),
-            (1.00, QColor.fromHsv((hue + 288) % 360, 200, 200, 140)),
-        ]
-        for pos, color in colors:
-            gradient.setColorAt(pos, color)
-
-        painter.setPen(QPen(QBrush(gradient), 2))
-        painter.drawRoundedRect(rect.adjusted(1, 1, -1, -1), 11, 11)
-        painter.end()
-
     # ── 公开控制 ───────────────────────────────────────
 
-    def start_animation(self):
-        if not self._anim_started:
-            self._anim_started = True
-            self._anim.start()
-
-    def stop_animation(self):
-        if self._anim_started:
-            self._anim_started = False
-            self._anim.stop()
-            self._hue_offset = 0
-            self.update()
-
     def set_icon(self, icon: str):
-        """设置头部图标（emoji 或 FluentIcon）"""
         self.icon_label.setText(icon)
 
     def set_title_text(self, text: str):
-        """设置头部标题文字"""
         self.title_label.setText(text)
 
     def set_count(self, count: int, limit: int = None):
-        """设置标题右侧统计"""
         if limit and limit > 0:
             self._count_label.setText(f"({count}/{limit})")
         elif count > 0:
@@ -216,12 +161,10 @@ class AnimatedCardFrame(QFrame):
         self._count_label.setVisible(count > 0 or (limit and limit > 0))
 
     def set_count_label(self, text: str):
-        """设置标题右侧统计文本（自定义格式）"""
         self._count_label.setText(f"({text})" if text else "")
         self._count_label.setVisible(bool(text))
 
     def setup_tabs(self, tabs: list, default_tab: str = None):
-        """设置标签切换按钮"""
         while self._tab_buttons_container.count():
             item = self._tab_buttons_container.takeAt(0)
             if item.widget():
@@ -255,7 +198,6 @@ class AnimatedCardFrame(QFrame):
             btn.setFont(get_unified_font(11))
 
     def set_extra_button_handler(self, handler):
-        """添加额外按钮到标题栏（默认：导入按钮）"""
         while self._extra_buttons_container.count():
             item = self._extra_buttons_container.takeAt(0)
             if item.widget():
@@ -267,7 +209,6 @@ class AnimatedCardFrame(QFrame):
         self._extra_buttons_container.addWidget(btn)
 
     def set_save_button_handler(self, handler):
-        """在标题栏添加保存按钮"""
         while self._extra_buttons_container.count():
             item = self._extra_buttons_container.takeAt(0)
             if item.widget():
@@ -287,13 +228,9 @@ class AnimatedCardFrame(QFrame):
     def show(self):
         self.setVisible(True)
         self.raise_()
-        if not self._anim_started:
-            self.start_animation()
 
     def hide(self):
         self.setVisible(False)
 
     def set_opacity(self, opacity: float):
-        """设置透明度（保留，用于全局透明度变化）"""
-        # 暂不支持透明度动态调整边框颜色，按需扩展
         pass
