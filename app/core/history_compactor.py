@@ -38,19 +38,25 @@ from app.core.provider_profile import get_provider_profile
 MAX_HISTORY_SNIPPET_CHARS = 1200
 RECENT_HISTORY_MIN_MESSAGES = 6
 SOFT_LIMIT_RATIO = 0.7  # 触发压缩检查
-TARGET_LIMIT_RATIO = 0.5  # 压缩目标
-MIN_RECENT_TOKEN_RATIO = 0.85  # 最小保留 token 比例
+TARGET_LIMIT_RATIO = 0.6  # 压缩目标（tail保留60% budget，留更多实际消息）
+MIN_RECENT_TOKEN_RATIO = 0.5  # 最小保留比例（tail最少30% budget）
 SUMMARY_OVERHEAD = 500  # 摘要基础开销
 
 # ========== 安全保护常量 ==========
 # 单条消息最大比例：超过此比例的消息内容会被截断
 MAX_SINGLE_MESSAGE_RATIO = 0.15
 # 紧急压缩目标：压缩结果必须控制在 budget * EMERGENCY_TARGET_RATIO 以内
-EMERGENCY_TARGET_RATIO = 0.5
-# 启发式摘要字符硬上限（压缩后超出此字符数的摘要会被强制截断）
+EMERGENCY_TARGET_RATIO = 0.7
+# 启发式摘要字符硬上限（无论budget是否有效，都应用此上限）
+# 当压缩消息数较多时动态扩大
+# 每条被压缩消息分配更多字符，保证摘要可读性
 MAX_HEURISTIC_SUMMARY_CHARS = 5000
-# 工具结果内容最大保留字符数（紧急截断时，超大工具只保留首尾）
+MAX_HEURISTIC_SUMMARY_CHARS_PER_MSG = 40  # 每条压缩消息额外允许的摘要字符
+MAX_HEURISTIC_SUMMARY_CHARS_ABS = 25000  # 摘要绝对硬上限
+# 工具结果内容最大保留字符数
 MAX_TOOL_CONTENT_CHARS = 3000
+# 工具配对保护导致tail跑飞时的硬限制倍数
+MAX_TAIL_OVERFLOW_MULTIPLIER = 2.5
 
 # ========== 工具保护配置 ==========
 # 不应被压缩的工具列表（这些工具的内容需要完整保留）
@@ -404,6 +410,17 @@ class HistoryCompactor:
             ):
                 break
 
+            # ========== tail 跑飞保护 ==========
+            # 工具配对保护可能导致 tail 远超 target_limit。
+            # 设置硬上限，超过时即使有 pending 配对也强制截断。
+            hard_tail_cap = int(target_limit * MAX_TAIL_OVERFLOW_MULTIPLIER)
+            if recent_tokens > hard_tail_cap and len(recent_messages) >= RECENT_HISTORY_MIN_MESSAGES * 2:
+                logger.warning(
+                    f"[Compactor] tail 达到硬上限: {recent_tokens} > {hard_tail_cap}，"
+                    f"强制截断 (pending_tool_results={len(pending_tool_results)})"
+                )
+                break
+
             i -= 1
 
         # 没有需要压缩的内容
@@ -418,11 +435,15 @@ class HistoryCompactor:
         compacted = normalized[: len(normalized) - len(recent_messages)]
 
         # ========== 生成摘要 ==========
+        # 即使 summary_budget 为负，也传一个最小正预算给 _summarize
+        # 确保启发式摘要始终有字符硬上限控制（避免 budget=None 跳过截断）
         summary_budget = budget - recent_tokens - SUMMARY_OVERHEAD
+        summary_budget_for_heuristic = max(1, summary_budget) if summary_budget > 0 else 500
         compact_summary = self._summarize(
             compacted, 
             allow_llm=allow_llm_summary,
-            budget=summary_budget if summary_budget > 0 else None,
+            budget=summary_budget_for_heuristic,
+            compacted_count=len(compacted),
         )
         
         if not compact_summary:
@@ -506,47 +527,50 @@ class HistoryCompactor:
         kept_count = len(recent_messages)
         note = f"紧急缩减：原始 {normalized_len} 条"
         
-        # 策略1：截断超大摘要内容
+        # 摘要保留底线：至少 2000 字符（约 500 tokens），
+        # 保证压缩结果对早期对话仍有可用信息
+        MIN_SUMMARY_CHARS = 2000
+
         result_tokens = count_messages_tokens(result_messages)
+        
+        # 策略1：截断超大摘要内容（保留底线）
         if result_tokens > emergency_target:
             summary_content = summary_message.get("content", "")
-            if isinstance(summary_content, str) and len(summary_content) > MAX_HEURISTIC_SUMMARY_CHARS // 2:
-                # 截断摘要到安全大小
-                max_summary_tokens = max(200, budget - result_tokens + count_messages_tokens([summary_message]) - SUMMARY_OVERHEAD)
-                # 简单粗暴：按 token 估算截断字符
-                max_chars = max(500, int(max_summary_tokens * 3))  # 约 3 字符/token
-                if len(summary_content) > max_chars:
+            if isinstance(summary_content, str) and len(summary_content) > MIN_SUMMARY_CHARS:
+                # 仅当摘要远超底线时才截断
+                target_chars = max(MIN_SUMMARY_CHARS, min(len(summary_content), MAX_HEURISTIC_SUMMARY_CHARS))
+                if len(summary_content) > target_chars:
                     summary_message = dict(summary_message)
-                    head_len = max_chars // 2
-                    truncated = summary_content[:head_len] + "\n\n[摘要因预算限制被截断]\n\n" + summary_content[-head_len:]
-                    summary_message["content"] = truncated
+                    summary_message["content"] = (
+                        summary_content[:target_chars // 2]
+                        + "\n\n[摘要因预算限制截断]\n\n"
+                        + summary_content[-target_chars // 2:]
+                    )
                     result_messages = [summary_message] + recent_messages
                     result_tokens = count_messages_tokens(result_messages)
+                    note = "紧急缩减：截断摘要"
 
         # 策略2：从 tail 中移除最旧的消息
         while result_tokens > emergency_target and len(result_messages) > 2:
-            # 移除摘要后的第一条 tail 消息（最旧的消息）
             removed = result_messages.pop(1)  # index 0 是 summary
             if removed in recent_messages:
                 recent_messages.remove(removed)
                 kept_count -= 1
             result_tokens = count_messages_tokens(result_messages)
-            note = f"紧急缩减：移除 1 条 tail 消息"
 
         # 策略3：截断剩余 tail 中的工具消息内容
         if result_tokens > emergency_target:
             for idx, msg in enumerate(result_messages):
                 if idx == 0:
-                    continue  # 跳过 summary
+                    continue
                 if result_tokens <= emergency_target:
                     break
                 if msg.get("role") == "tool":
                     content = msg.get("content", "")
                     tool_name = msg.get("name", "")
                     if isinstance(content, str) and len(content) > MAX_TOOL_CONTENT_CHARS:
-                        truncated = content[:MAX_TOOL_CONTENT_CHARS // 2] + "\n\n...[工具结果截断]...\n\n" + content[-MAX_TOOL_CONTENT_CHARS // 2:]
                         new_msg = dict(msg)
-                        new_msg["content"] = truncated
+                        new_msg["content"] = content[:MAX_TOOL_CONTENT_CHARS // 2] + "\n\n...[工具结果截断]...\n\n" + content[-MAX_TOOL_CONTENT_CHARS // 2:]
                         result_messages[idx] = new_msg
                         result_tokens = count_messages_tokens(result_messages)
                         note = f"紧急缩减：截断工具 {tool_name} 的内容"
@@ -554,11 +578,19 @@ class HistoryCompactor:
         kept_count = len([m for m in recent_messages if m in result_messages])
         return result_messages, kept_count, note + f"，保留 {kept_count}/{compacted_len} 条"
 
+    def _calculate_dynamic_summary_chars(self, compacted_count: int) -> int:
+        """根据压缩消息数动态计算摘要字符上限"""
+        return min(
+            MAX_HEURISTIC_SUMMARY_CHARS_ABS,
+            MAX_HEURISTIC_SUMMARY_CHARS + compacted_count * MAX_HEURISTIC_SUMMARY_CHARS_PER_MSG
+        )
+
     def _summarize(
         self,
         messages: List[Dict],
         allow_llm: bool = True,
         budget: Optional[int] = None,
+        compacted_count: int = 0,
     ) -> str:
         """
         生成摘要：优先 LLM，回退启发式
@@ -575,16 +607,22 @@ class HistoryCompactor:
         # 启发式截断（遗忘曲线）
         heuristic = self._summarize_heuristic(messages, budget)
         
-        # 启发式摘要长度硬上限
-        if budget is not None and budget > 0:
-            max_summary_chars = MAX_HEURISTIC_SUMMARY_CHARS
-            if len(heuristic) > max_summary_chars:
-                logger.warning(
-                    f"[Compactor] 启发式摘要超长: {len(heuristic)} > {max_summary_chars}，强制截断"
-                )
-                head = heuristic[:max_summary_chars // 2]
-                tail = heuristic[-max_summary_chars // 2:]
-                heuristic = head + "\n\n[摘要因长度限制截断]\n\n" + tail
+        # 启发式摘要长度硬上限（无论 budget 是否有效，始终应用）
+        # 动态上限：base + 压缩消息数 * 每条额外字符
+        max_chars = MAX_HEURISTIC_SUMMARY_CHARS
+        if compacted_count > 0:
+            max_chars = min(
+                MAX_HEURISTIC_SUMMARY_CHARS_ABS,
+                MAX_HEURISTIC_SUMMARY_CHARS + compacted_count * MAX_HEURISTIC_SUMMARY_CHARS_PER_MSG
+            )
+        if len(heuristic) > max_chars:
+            logger.warning(
+                f"[Compactor] 启发式摘要超长: {len(heuristic)} > {max_chars} "
+                f"(compacted={compacted_count})，强制截断"
+            )
+            head = heuristic[:max_chars // 2]
+            tail = heuristic[-max_chars // 2:]
+            heuristic = head + "\n\n[摘要因长度限制截断]\n\n" + tail
         
         return heuristic
 
@@ -736,12 +774,42 @@ class HistoryCompactor:
         if budget is not None and budget > 0:
             target_total_length = int(budget * 0.6)
 
+        # ========== 预处理: 内容清理（在所有消息上统一执行）==========
+        cleaned_contents = []
+        for idx, msg in enumerate(messages):
+            raw_content = contents[idx] if idx < len(contents) else ""
+            # 移除 <hook> 标签
+            raw_content = re.sub(r'<hook[^>]*>.*?</hook>', '', raw_content, flags=re.DOTALL)
+            # 移除 <think> 标签
+            raw_content = re.sub(r'<think>.*?</think>', '', raw_content, flags=re.DOTALL)
+            # 移除 Tool args 内容
+            raw_content = re.sub(r'Tool args:\s*\{[^}]*\}', '', raw_content)
+            cleaned_contents.append(raw_content)
+
         for idx, msg in enumerate(messages):
             role = msg.get("role")
-            content = contents[idx] if idx < len(contents) else ""
-            # 如果工具执行失败，则直接跳过
+            content = cleaned_contents[idx] if idx < len(cleaned_contents) else ""
+            
+            # ========== 内容过滤 ==========
+            # 1. 跳过失败的工具执行
             if role == "tool" and not msg.get("success"):
                 continue
+            # 2. 跳过纯工具调用的 assistant 消息（无有用文本，只有 tool_calls）
+            if role == "assistant":
+                tool_calls = msg.get("tool_calls")
+                if tool_calls and (not content or len(content) < 20):
+                    continue
+            # 3. 跳过 tool 消息中的无价值结果
+            if role == "tool":
+                empty_results = [
+                    "(command completed with no output)",
+                    "(completed with no output)",
+                    "No results found",
+                ]
+                stripped = content.strip()
+                if any(er in stripped for er in empty_results) and len(stripped) < 100:
+                    continue
+            
             # 对于受保护的工具（如 skill），保留完整内容不截断
             is_protected_tool = False
             if role == "tool":

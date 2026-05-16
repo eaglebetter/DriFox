@@ -1329,37 +1329,35 @@ class CodeWebViewer(QWebEngineView):
         scrollbar_css = """
             /* 统一滚动条样式 - 深色模式适配 */
             ::-webkit-scrollbar {
-                width: 12px;
-                height: 12px;
+                width: 6px;
+                height: 6px;
             }
             ::-webkit-scrollbar-track {
-                background: transparent;
-                border-radius: 6px;
-                margin: 4px 0;
+                background: #1a1f2e;
+                border-radius: 3px;
+                margin: 2px 0;
             }
             ::-webkit-scrollbar-track:hover {
-                background: rgba(255, 255, 255, 0.03);
+                background: #1e2435;
             }
             ::-webkit-scrollbar-thumb {
-                background: linear-gradient(180deg, #4a4a5a 0%, #3a3a48 100%);
-                border-radius: 6px;
-                border: 2px solid transparent;
-                background-clip: padding-box;
-                min-height: 30px;
+                background: #3a3f50;
+                border-radius: 3px;
+                min-height: 24px;
             }
             ::-webkit-scrollbar-thumb:hover {
-                background: linear-gradient(180deg, #5a5a6a 0%, #4a4a58 100%);
+                background: #4a4f62;
             }
             ::-webkit-scrollbar-thumb:active {
-                background: linear-gradient(180deg, #6a6a7a 0%, #5a5a68 100%);
+                background: #5a5f72;
             }
             ::-webkit-scrollbar-corner {
-                background: transparent;
+                background: #1a1f2e;
             }
             /* Firefox 滚动条 */
             * {
                 scrollbar-width: thin;
-                scrollbar-color: #4a4a5a transparent;
+                scrollbar-color: #3a3f50 #1a1f2e;
             }
         """
 
