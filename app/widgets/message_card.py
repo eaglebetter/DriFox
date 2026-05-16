@@ -3220,7 +3220,7 @@ class MessageCard(SimpleCardWidget):
         if self.role == "assistant":
             self._content_data = append_text_block(self._content_data, text)
             # 优化：懒渲染模式下直接跳过 markdown 渲染，避免不必要的计算
-            if not self._lazy_rendered:
+            if not self._lazy_rendered or not self.viewer:
                 self._pending_content = self._content_data
                 return
             # 性能优化：不立即执行 content_to_markdown，设懒回调让 _perform_update
@@ -3256,7 +3256,7 @@ class MessageCard(SimpleCardWidget):
             )
         )
         # 优化：懒渲染模式下直接跳过 markdown 渲染，避免不必要的计算
-        if not self._lazy_rendered:
+        if not self._lazy_rendered or not self.viewer:
             self._pending_content = self._content_data
             return
         # 性能优化：通过 _lazy_markdown_cb 延迟到 _perform_update 执行
@@ -3326,7 +3326,7 @@ class MessageCard(SimpleCardWidget):
 
         LARGE_THINKING_THRESHOLD = 50 * 1024  # 50KB
 
-        if not self._lazy_rendered:
+        if not self._lazy_rendered or not self.viewer:
             self._pending_content = self._content_data
             return
 
@@ -3335,17 +3335,13 @@ class MessageCard(SimpleCardWidget):
 
         if self._reasoning_total_len > LARGE_THINKING_THRESHOLD:
             # 超长思考：增量更新提供即时文字，同时定期全量渲染保持 DOM 结构正确
-            # （多轮推理时新思考块在 DOM 中不存在，增量会错误追加到旧块）
             self._update_thinking_incremental(text)
-            self.viewer._lazy_markdown_cb = lambda: content_to_markdown(self._content_data)
-            self.viewer._schedule_render(immediate=False)
-        else:
-            # 性能优化：通过 _lazy_markdown_cb 将 content_to_markdown 延迟到
-            # _perform_update 执行（渲染定时器自带防抖，多 chunk 合并转换一次）
-            # 这同时修复了旧代码的 bug：渲染定时器激活时跳过 markdown 更新，
-            # 导致最后几个 chunk 内容丢失
-            self.viewer._lazy_markdown_cb = lambda: content_to_markdown(self._content_data)
-            self.viewer._schedule_render(immediate=False)
+        # 性能优化：通过 _lazy_markdown_cb 将 content_to_markdown 延迟到
+        # _perform_update 执行（渲染定时器自带防抖，多 chunk 合并转换一次）
+        # 这同时修复了旧代码的 bug：渲染定时器激活时跳过 markdown 更新，
+        # 导致最后几个 chunk 内容丢失
+        self.viewer._lazy_markdown_cb = lambda: content_to_markdown(self._content_data)
+        self.viewer._schedule_render(immediate=False)
 
     def _update_thinking_incremental(self, new_text: str):
         """增量更新思考内容（用于超长思考）

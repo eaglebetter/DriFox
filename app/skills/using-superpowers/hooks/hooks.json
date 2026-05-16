@@ -6,7 +6,7 @@
           {
             "type": "command",
             "command": "./run-hook.cmd session-start",
-            "enabled": true
+            "enabled": false
           }
         ]
       }

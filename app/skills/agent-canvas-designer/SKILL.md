@@ -213,34 +213,38 @@ explorer "{skill_path}\assets\agent_canvas.html"
 ### 完整流程
 
 ```
-1. bg_start 启动画布服务器 (C:/tmp/canvas)
+1. bg_start 启动画布服务器 (C:/tmp/canvas)   ← server.py
        ↓
 2. write config.json 写入画布配置
        ↓
-3. bash 打开浏览器 (start http://localhost:8080/agent_canvas.html)
+3. bash 打开浏览器 (start http://localhost:8081/agent_canvas.html)
        ↓
-4. 用户在画布上编辑（拖拽节点、修改配置）
+4. 画布自动加载 config.json（有则直接显示，无则兜底默认流程）
        ↓
-5. 用户点击「📤 导出反馈」
+5. 用户在画布上编辑（拖拽节点、修改配置、增删连线）
        ↓
-6. 画布自动保存到 C:/tmp/canvas/feedback.json
+6. 1.5 秒防抖后画布自动 POST 保存到 feedback.json，Toast 提示「💾 已自动保存」
        ↓
-7. 用户回到对话告诉大模型"改好了"
+7. 用户告诉大模型"改好了"
        ↓
 8. 大模型 read feedback.json 获取修改内容
        ↓
-9. 大模型修复后 write config.json → 画布自动刷新
+9. 大模型修复后 write config.json
+       ↓
+10. 画布每3秒轮询检测到 config.json 变化 → 自动刷新 ✅
 ```
 
-### 启动服务器（使用专用服务器）
+### 启动服务器
 
 ```xml
-<bg_start command="python server.py" cwd="C:/tmp/canvas" />
+<bg_start command="cmd.exe /c \"cd /d C:\tmp\canvas && python server.py\"" />
 ```
 
-> ⚠️ 注意：必须使用 `server.py` 而不是 `python -m http.server`，后者不支持保存文件
+> ⚠️ cwd 参数在 cmd.exe 中不生效，必须在命令里 `cd /d C:\tmp\canvas`
 
-### 写入配置
+### 写入配置（大模型用）
+
+大模型修改设计后写入 `config.json`，画布 3 秒后自动刷新：
 
 ```xml
 <write path="C:/tmp/canvas/config.json">
@@ -256,39 +260,50 @@ explorer "{skill_path}\assets\agent_canvas.html"
 </write>
 ```
 
+### 读取画布编辑结果（大模型用）
+
+用户编辑画布后自动保存到 `feedback.json`，大模型通过 GET 接口或直接读文件获取：
+
+```bash
+# 方式一：GET 接口（推荐）
+webfetch url="http://localhost:8081/get-state"
+
+# 方式二：直接读文件
+read path="C:/tmp/canvas/feedback.json"
+```
+
 ### 打开浏览器
 
 ```xml
-<bash command="start http://localhost:8080/agent_canvas.html" />
+<bash command="start http://localhost:8081/agent_canvas.html" />
 ```
 
 ### 读取用户修改
 
-用户点击「📤 导出反馈」后，文件会自动下载到浏览器默认下载目录。
+用户点击「📤 导出反馈」后，画布自动 POST 到 `/save-feedback`，直接保存到 `C:/tmp/canvas/feedback.json`。
 
-**读取并删除的流程**：
-1. 动态获取用户目录
-2. 读取反馈文件
-3. 处理完成后删除文件，防止重复
-
+**大模型读取反馈的流程**：
 ```bash
-# 1. 先获取用户目录
-bash command="echo %USERPROFILE%"
+# 每次画布编辑后自动保存，用户只需说"改好了"
+# 大模型直接读取 feedback.json 获取最新编辑结果
+read path="C:/tmp/canvas/feedback.json"
 
-# 2. 读取反馈文件（假设返回 C:\Users\mading）
-read path="C:/Users/你的用户名/Downloads/feedback.json"
-
-# 3. 处理完成后删除
-bash command="del \"%USERPROFILE%\\Downloads\\feedback.json\""
+# 处理完成后删除（可选，防止重复读取）
+bash command="del \"C:\tmp\canvas\feedback.json\""
 ```
 
-> 实际使用时，先执行 `echo %USERPROFILE%` 获取路径，再替换到上面的命令中
+> 💡 不再需要手动点导出！编辑完成后 1.5 秒自动保存，大模型可直接读取
 
 ### 停止服务器
 
+先查 bg_list 找到任务 ID，再 bg_stop：
+
 ```xml
+<bg_list />  ← 找到 server.py 的 task_id
 <bg_stop task_id="bg_xxxxxxxx" />
 ```
+
+也可用 `netstat -ano | findstr :8081` 找到 PID 后 `taskkill /F /PID xxx`
 
 ### 文件位置
 
@@ -300,10 +315,91 @@ C:/tmp/canvas/
 └── feedback.json       # 用户导出（大模型读取）
 ```
 
+### server.py 源码
+
+```python
+#!/usr/bin/env python3
+"""
+画布专用服务器 — 支持热重载
+- GET   /*          服务静态文件
+- POST  /save-feedback  保存用户反馈到 feedback.json
+- POST  /save-config    保存配置到 config.json（供大模型写回）
+"""
+
+import http.server
+import socketserver
+import json
+import os
+
+PORT = 8081
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+class CanvasHandler(http.server.SimpleHTTPRequestHandler):
+
+    def do_POST(self):
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path.rstrip('/')
+        content_length = int(self.headers.get('Content-Length', 0))
+        body = self.rfile.read(content_length)
+
+        if path == '/save-feedback':
+            self._save_file('feedback.json', body)
+        elif path == '/save-config':
+            self._save_file('config.json', body)
+        else:
+            self.send_response(404)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({'error': 'not found'}).encode())
+
+    def _save_file(self, filename, data):
+        """保存文件并返回 JSON 响应"""
+        try:
+            json.loads(data)  # 验证 JSON 合法性
+            with open(os.path.join(BASE_DIR, filename), 'wb') as f:
+                f.write(data)
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({'success': True, 'size': len(data)}).encode())
+            print(f'✅ 已保存 {filename} ({len(data)} bytes)')
+        except Exception as e:
+            self.send_response(500)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({'error': str(e)}).encode())
+
+    def do_GET(self):
+        if self.path == '' or self.path.endswith('/'):
+            self.send_response(302)
+            self.send_header('Location', '/agent_canvas.html')
+            self.end_headers()
+            return
+        return super().do_GET()
+
+    def log_message(self, format, *args):
+        print(f'[画布] {self.client_address[0]} - {format % args}')
+
+
+if __name__ == '__main__':
+    os.chdir(BASE_DIR)
+    print(f'🚀 画布服务器: http://localhost:{PORT}/agent_canvas.html')
+    print(f'   POST /save-feedback → feedback.json')
+    print(f'   POST /save-config   → config.json')
+    with socketserver.TCPServer(('0.0.0.0', PORT), CanvasHandler) as httpd:
+        httpd.serve_forever()
+```
+
+> ⚠️ 必须使用 `server.py` 而不是 `python -m http.server`，后者不支持 POST 保存文件
+
 ### 画布交互
 
-- **📂 加载配置** - 重新加载 config.json
-- **📤 导出反馈** - 导出当前画布到 `C:/tmp/canvas/feedback.json`，同时触发本地下载
+- **📂 加载配置** - 手动重新加载 config.json
+- **📤 导出反馈** - POST 到服务器保存到 `C:/tmp/canvas/feedback.json`，底部弹出 Toast 通知
+- **自动保存** - 画布每次编辑后 1.5 秒自动 POST 到 `/save-config`，无需手动导出，大模型可直接读取
+- **自动加载** - 打开画布直接加载 config.json（不存在则显示默认流程）
+- **热更新** - 每 3 秒自动检查 config.json 变化，有更新自动刷新
 
 ### 注意事项
 

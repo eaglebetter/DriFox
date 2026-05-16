@@ -492,10 +492,10 @@ class AutoLoopWorker(QThread):
 
         # 根据阶段注入不同上下文
         workflow_context = self._build_workflow_context(iteration, force_update)
-        system_content = system_prompt + "\n\n" + workflow_context
+        system_content = system_prompt
 
         messages = [{"role": "system", "content": system_content}]
-        messages.append({"role": "user", "content": task_prompt})
+        messages.append({"role": "user", "content": task_prompt + "\n\n" + workflow_context})
         return messages
 
     def _build_workflow_context(self, iteration: int, force_update: bool = False) -> str:
