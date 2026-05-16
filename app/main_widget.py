@@ -2482,6 +2482,10 @@ class OpenAIChatToolWindow(ToolWindow):
         为布局中尚未设置 _message_index 的卡片分配正确的 batch index。
         在发送新消息后调用，因为 _append_user_message / _append_assistant_message
         不设置 _message_index（渲染路径 _render_message_to_card 才设置）。
+
+        修复：当新 assistant card 找不到对应 batch slot 时（session 中尚无 assistant 消息），
+        为其在 _message_batch / _batch_cards 末尾追加新的 slot，避免与其他卡片共享 slot
+        导致批量回收时误删卡片。
         """
         # 找到 _message_batch 中最后一个 user batch 和最后一个 non-user batch
         last_user_batch = -1
@@ -2516,13 +2520,16 @@ class OpenAIChatToolWindow(ToolWindow):
                     if widget not in self._batch_cards[last_user_batch]:
                         self._batch_cards[last_user_batch].append(widget)
                 break
-            elif widget.role != "user" and last_non_user_batch >= 0:
-                widget._message_index = last_non_user_batch
-                if last_non_user_batch < len(self._batch_cards):
-                    if self._batch_cards[last_non_user_batch] is None:
-                        self._batch_cards[last_non_user_batch] = []
-                    if widget not in self._batch_cards[last_non_user_batch]:
-                        self._batch_cards[last_non_user_batch].append(widget)
+            elif widget.role != "user":
+                # 修复：新的 assistant card 在 session 中尚无对应 assistant batch，
+                # 此时 last_non_user_batch 指向已有的旧 assistant batch。
+                # 直接复用该 slot 会与旧卡片共享引用，回收时误伤旧卡片。
+                # 改为在末尾追加独占的批量槽位。
+                new_batch_idx = len(self._message_batch)
+                self._message_batch.append([])  # 追加空 batch 占位
+                self._batch_cards.append([])    # 追加空引用列表
+                widget._message_index = new_batch_idx
+                self._batch_cards[new_batch_idx].append(widget)
                 break
 
     def _render_message_to_card(
