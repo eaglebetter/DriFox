@@ -14,16 +14,16 @@ class TaskTools:
     def __init__(self, owner):
         self._owner = owner
         self._todo_list: List[Dict] = []
-
-    @property
-    def workdir(self) -> Path:
-        return self._owner.workdir
         self._loaded_skills: Dict[str, str] = {}
         self._skill_workspaces: Dict[str, str] = {}
         self._sub_agent_manager = None
         self._set_stage_callback = None
         self._key_documents_repo = None  # 关键文档仓储
         self._current_project = "默认项目"  # 当前项目
+
+    @property
+    def workdir(self) -> Path:
+        return self._owner.workdir
 
     def _normalize_todos(self, todos: List[Dict]) -> List[Dict]:
         normalized: List[Dict] = []

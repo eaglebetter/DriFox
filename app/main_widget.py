@@ -1965,6 +1965,8 @@ class OpenAIChatToolWindow(ToolWindow):
             return
 
         self._load_message_batch(initial=True)
+        # 同步 batch 结构：确保 _batch_cards 和 _message_index 与布局一致
+        self._sync_batch_structures()
 
     def _show_initial_welcome(self):
         """仅在UI上显示欢迎卡片，不改动Session数据"""
@@ -2272,6 +2274,16 @@ class OpenAIChatToolWindow(ToolWindow):
         self._message_batch = group_messages_for_display(session.messages)
         # 重建 user 前缀和缓存（用于 O(1) 的 round_index 计算）
         self._build_user_prefix_cache()
+        # 同步 _batch_cards 长度
+        self._sync_batch_structures()
+        # 从缓存卡片的 _message_index 重建 _batch_cards 引用（缓存卡片已有正确的索引）
+        for card in alive_cards:
+            mi = getattr(card, '_message_index', None)
+            if mi is not None and 0 <= mi < len(self._batch_cards):
+                if self._batch_cards[mi] is None:
+                    self._batch_cards[mi] = []
+                if card not in self._batch_cards[mi]:
+                    self._batch_cards[mi].append(card)
         self._visible_batch_start = max(
             0, int(cache_entry.get("visible_batch_start", 0))
         )
@@ -2373,6 +2385,78 @@ class OpenAIChatToolWindow(ToolWindow):
             self._user_prefix_cache.append(
                 self._user_prefix_cache[-1] + (1 if is_user else 0)
             )
+
+    # ==================== Batch 结构同步 ====================
+
+    def _sync_batch_structures(self):
+        """
+        同步 _message_batch 与 session.messages 的当前状态。
+        仅在发送新消息或流式完成后调用。
+        不改变任何卡片上的 _message_index（渲染代码已正确设置），
+        只保持 _message_batch / _batch_cards 长度与 session 一致。
+        """
+        session = self.session_manager.get_current_session()
+        if not session:
+            return
+
+        new_batch = group_messages_for_display(session.messages)
+        self._message_batch = new_batch
+        self._build_user_prefix_cache()
+
+        # 扩展/裁剪 _batch_cards 到新长度
+        new_len = len(new_batch)
+        if new_len > len(self._batch_cards):
+            self._batch_cards.extend([None] * (new_len - len(self._batch_cards)))
+        elif new_len < len(self._batch_cards):
+            self._batch_cards = self._batch_cards[:new_len]
+
+    def _fix_new_card_message_index(self, user_text: str = None):
+        """
+        为布局中尚未设置 _message_index 的卡片分配正确的 batch index。
+        在发送新消息后调用，因为 _append_user_message / _append_assistant_message
+        不设置 _message_index（渲染路径 _render_message_to_card 才设置）。
+        """
+        # 找到 _message_batch 中最后一个 user batch 和最后一个 non-user batch
+        last_user_batch = -1
+        last_non_user_batch = -1
+        for batch_idx, batch in enumerate(self._message_batch):
+            if not batch:
+                continue
+            if batch[0].get("role") == "user":
+                last_user_batch = batch_idx
+            else:
+                last_non_user_batch = batch_idx
+
+        # 从布局末尾向前扫描，给无 _message_index 的卡片分配 batch index
+        for i in range(self.chat_layout.count() - 1, -1, -1):
+            item = self.chat_layout.itemAt(i)
+            if not item or not item.widget():
+                continue
+            widget = item.widget()
+            if not isinstance(widget, MessageCard):
+                continue
+            if getattr(widget, '_is_welcome', False):
+                continue
+            if getattr(widget, '_message_index', None) is not None:
+                continue  # 已有正确索引，跳过
+
+            # 按角色匹配最后一个 batch
+            if widget.role == "user" and last_user_batch >= 0:
+                widget._message_index = last_user_batch
+                if last_user_batch < len(self._batch_cards):
+                    if self._batch_cards[last_user_batch] is None:
+                        self._batch_cards[last_user_batch] = []
+                    if widget not in self._batch_cards[last_user_batch]:
+                        self._batch_cards[last_user_batch].append(widget)
+                break
+            elif widget.role != "user" and last_non_user_batch >= 0:
+                widget._message_index = last_non_user_batch
+                if last_non_user_batch < len(self._batch_cards):
+                    if self._batch_cards[last_non_user_batch] is None:
+                        self._batch_cards[last_non_user_batch] = []
+                    if widget not in self._batch_cards[last_non_user_batch]:
+                        self._batch_cards[last_non_user_batch].append(widget)
+                break
 
     def _render_message_to_card(
             self,
@@ -3357,16 +3441,24 @@ class OpenAIChatToolWindow(ToolWindow):
 
         # 方法1：通过 _batch_cards 直接查找 user card（最可靠）
         target_widget = self._find_user_card_in_batch(target_batch_index)
+        if target_widget is not None and self._is_card_index_valid(target_widget, target_batch_index):
+            pass
+        else:
+            target_widget = None
 
         # 方法2：通过 _message_index 遍历查找
         if target_widget is None:
-            target_widget = self._find_user_card_by_message_index(
+            found = self._find_user_card_by_message_index(
                 target_batch_index if target_batch_index is not None else 0
             )
+            if found is not None and self._is_card_index_valid(found, target_batch_index):
+                target_widget = found
 
         # 方法3：通过计数查找（后备方案）
         if target_widget is None:
-            target_widget = find_user_card_at_index(self.chat_layout, target_index)
+            found = find_user_card_at_index(self.chat_layout, target_index)
+            if found is not None and self._is_card_index_valid(found, target_batch_index):
+                target_widget = found
 
         if target_widget:
             self.chat_scroll_area.verticalScrollBar().setValue(target_widget.y())
@@ -3425,16 +3517,24 @@ class OpenAIChatToolWindow(ToolWindow):
 
         # 优先通过 _batch_cards 直接查找（最可靠）
         target_widget = self._find_user_card_in_batch(batch_index)
+        if target_widget is not None and self._is_card_index_valid(target_widget, batch_index):
+            pass
+        else:
+            target_widget = None
 
         # 后备：通过 _message_index 查找
         if target_widget is None:
-            target_widget = self._find_user_card_by_message_index(batch_index)
+            found = self._find_user_card_by_message_index(batch_index)
+            if found is not None and self._is_card_index_valid(found, batch_index):
+                target_widget = found
 
         # 最后后备：通过计数查找
         if target_widget is None:
-            target_widget = find_user_card_at_index(
+            found = find_user_card_at_index(
                 self.chat_layout, node_index if node_index >= 0 else batch_index
             )
+            if found is not None and self._is_card_index_valid(found, batch_index):
+                target_widget = found
 
         if target_widget:
             self.chat_scroll_area.verticalScrollBar().setValue(target_widget.y())
@@ -3465,12 +3565,23 @@ class OpenAIChatToolWindow(ToolWindow):
         # 使用优先方法找到目标卡片
         # 方法1: 通过 _batch_cards 直接查找
         target_widget = self._find_user_card_in_batch(target_batch_index)
+        # 验证：确认卡片的 _message_index 匹配目标 batch
+        if target_widget is not None and self._is_card_index_valid(target_widget, target_batch_index):
+            pass  # 有效，直接使用
+        else:
+            target_widget = None
+
         # 方法2: 通过 _message_index 查找
         if target_widget is None:
-            target_widget = self._find_user_card_by_message_index(target_batch_index)
-        # 方法3: 通过计数查找
+            found = self._find_user_card_by_message_index(target_batch_index)
+            if found is not None and self._is_card_index_valid(found, target_batch_index):
+                target_widget = found
+
+        # 方法3: 通过计数查找（备选方案，可能因虚拟回收而计数错位）
         if target_widget is None:
-            target_widget = find_user_card_at_index(self.chat_layout, index)
+            found = find_user_card_at_index(self.chat_layout, index)
+            if found is not None and self._is_card_index_valid(found, target_batch_index):
+                target_widget = found
 
         if target_widget:
             # 标记目标索引，让 _sync_node_preview_to_scroll 自动计算正确的值
@@ -3482,6 +3593,16 @@ class OpenAIChatToolWindow(ToolWindow):
         else:
             # 目标卡片未渲染（动态加载），需要加载历史批次
             self._scroll_to_target_node_index(index)
+
+    def _is_card_index_valid(self, card, expected_batch_index: int) -> bool:
+        """
+        验证卡片是否真的对应目标 batch index。
+        用于防止虚拟回收后计数错位返回错误卡片。
+        """
+        if card is None or expected_batch_index < 0:
+            return False
+        card_index = getattr(card, '_message_index', None)
+        return card_index == expected_batch_index
 
     def _on_scroll_changed(self, value):
         self._sync_node_preview_to_scroll()
@@ -4272,6 +4393,12 @@ class OpenAIChatToolWindow(ToolWindow):
             return
 
         self._current_assistant_card = assistant_card
+
+        # 同步 batch 结构：_message_batch 已包含新 user batch
+        self._sync_batch_structures()
+        # 给新创建的用户卡片设置正确的 _message_index（_append_user_message 中未设置）
+        self._fix_new_card_message_index(user_text=user_text)
+
         self._maybe_generate_topic_summary()
 
     def _on_stream_started(self):
@@ -4590,6 +4717,8 @@ class OpenAIChatToolWindow(ToolWindow):
             self._current_assistant_card.finish_streaming()
         if self.history_manager:
             self._save_current_session_to_history()
+            # 流式完成后同步 batch 结构，确保 _message_batch 包含完整的 assistant batch
+            self._sync_batch_structures()
 
         if self.input_area:
             self.input_area.setFocus()

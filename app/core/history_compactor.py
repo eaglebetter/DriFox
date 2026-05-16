@@ -50,9 +50,9 @@ EMERGENCY_TARGET_RATIO = 0.7
 # 启发式摘要字符硬上限（无论budget是否有效，都应用此上限）
 # 当压缩消息数较多时动态扩大
 # 每条被压缩消息分配更多字符，保证摘要可读性
-MAX_HEURISTIC_SUMMARY_CHARS = 5000
+MAX_HEURISTIC_SUMMARY_CHARS = 55000
 MAX_HEURISTIC_SUMMARY_CHARS_PER_MSG = 40  # 每条压缩消息额外允许的摘要字符
-MAX_HEURISTIC_SUMMARY_CHARS_ABS = 25000  # 摘要绝对硬上限
+MAX_HEURISTIC_SUMMARY_CHARS_ABS = 105000  # 摘要绝对硬上限
 # 工具结果内容最大保留字符数
 MAX_TOOL_CONTENT_CHARS = 3000
 # 工具配对保护导致tail跑飞时的硬限制倍数
@@ -843,7 +843,7 @@ class HistoryCompactor:
                 )
                 # 标记受保护的工具
                 prefix = "[🔒] " if tool_name in PROTECTED_TOOLS else ""
-                summary_lines.append(f"{prefix}# {tool_name}\nTool Res: {content}")
+                summary_lines.append(f"{prefix}# {tool_name}\nTool Args: {arguments}\nTool Res: {content}")
 
         return "\n".join(summary_lines)
 
