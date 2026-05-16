@@ -583,11 +583,6 @@ class OpenAIChatWorker(QThread):
                     compacted, state, cache = self._compactor.compact(
                         current_messages,
                         budget,
-                        # 注意：不传 existing_cache
-                        # Worker 内的 current_messages 已经是 ContextBuilder 压缩后的结果
-                        # （摘要 + tail + 当前用户消息 + 工具迭代结果），结构完全不同于
-                        # 建立缓存时的原始消息列表。复用缓存会导致 cutoff_index 错位，
-                        # 可能丢弃当前用户消息和重要的 tail 消息。
                         existing_cache=None,
                         allow_llm_summary=False,  # 工具迭代中只用启发式，避免嵌套 LLM 调用
                     )

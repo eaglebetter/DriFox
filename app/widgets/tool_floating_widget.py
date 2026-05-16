@@ -204,7 +204,7 @@ class ToolFloatingWidget(SimpleCardWidget):
         self.cancel_btn.setEnabled(True)
         self.cancel_btn.setText("中止")
 
-        self.setVisible(True)
+        self.setVisible(True)  # 正常流程直接显示，压制逻辑在 start_tool 之前处理
         self.raise_()
         QApplication.processEvents()
 
@@ -254,7 +254,7 @@ class ToolFloatingWidget(SimpleCardWidget):
 
         self.cancel_btn.setVisible(False)
 
-        self.setVisible(True)
+        self.show_when_ready()  # 统一由 show_when_ready 控制显示时机
         self.raise_()
 
         QTimer.singleShot(2000, self.hide)
@@ -283,8 +283,13 @@ class ToolFloatingWidget(SimpleCardWidget):
         self.title_label.setStyleSheet("color: #f59e0b;")
 
     def show_if_needed(self, elapsed: float):
-        """根据耗时决定是否显示"""
+        """根据耗时决定是否显示（不考虑压制状态）"""
         if elapsed > 3:
+            self.setVisible(True)
+
+    def show_when_ready(self):
+        """统一控制显示时机（考虑压制状态）"""
+        if not self._suppress_visible:
             self.setVisible(True)
 
     def set_suppress_visible(self, suppress: bool):
@@ -292,6 +297,10 @@ class ToolFloatingWidget(SimpleCardWidget):
         self._suppress_visible = suppress
         if suppress:
             self.setVisible(False)
+        else:
+            # 解除压制，若工具仍在运行则重新显示
+            if self._is_running:
+                self.setVisible(True)
 
     def set_opacity(self, opacity: float):
         """设置透明度，用于响应全局透明度变化"""
