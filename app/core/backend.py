@@ -195,7 +195,7 @@ class ChatBackend(QObject):
         # 4. 创建初始会话（不触发 SessionStart hook，避免重复初始化）
         self.create_session(trigger_hook=False)
         
-        # 3. 使用传入的 AgentManager 或创建新的
+        # 5. 使用传入的 AgentManager 或创建新的
         self._agent_manager = AgentManager(str(Path(__file__).parent.parent / "agents"), self._hook_manager)
         logger.info(f"[ChatBackend] AgentManager 就绪，{len(self._agent_manager.list_agents())} 个 Agent")
         
@@ -212,7 +212,7 @@ class ChatBackend(QObject):
             except Exception as e:
                 logger.error(f"[ChatBackend] Failed to load global hooks from {global_hooks_file}: {e}")
         
-        # 4. 创建 ToolExecutor（不传递 homepage，解耦 Qt）
+        # 6. 创建 ToolExecutor（不传递 homepage，解耦 Qt）
         self._tool_executor = ToolExecutor(workdir=workdir, backend=self)
         self._tool_executor.set_memory_manager(self._memory_manager)
         self._tool_executor.set_llm_config_getter(get_model_config)
@@ -225,7 +225,7 @@ class ChatBackend(QObject):
             )
         logger.info("[ChatBackend] ToolExecutor 创建完成")
         
-        # 5. 创建 ChatEngine（暂时不传 get_memory_context，后面通过 setter 设置）
+        # 7. 创建 ChatEngine（暂时不传 get_memory_context，后面通过 setter 设置）
         self._chat_engine = ChatEngine(
             session_manager=self._session_manager,
             get_model_config=get_model_config,
@@ -373,16 +373,6 @@ class ChatBackend(QObject):
         """添加用户记忆"""
         if self._memory_manager:
             self._memory_manager.add_entry_memory(content, kwargs.get('source', 'assistant'))
-    
-    def touch_memories(self, contents: List[str], memory_data: Dict = None) -> bool:
-        """标记记忆被访问（兼容旧接口，新架构不需要）"""
-        # 新架构不使用 touch_memories，直接返回 True
-        return True
-    
-    def save_memory_data(self, memory_data: Dict) -> bool:
-        """保存记忆数据"""
-        # 新架构不需要这个方法，条目记忆通过 save_entry_memories 保存
-        return True
     
     def update_user_memories(self, memories: List[Dict]) -> bool:
         """更新用户记忆"""

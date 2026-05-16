@@ -1,7 +1,22 @@
 # -*- coding: utf-8 -*-
 """
-API调用重试辅助工具
+API 调用重试辅助工具
+
+提供可重试的错误检测和退避重试装饰器。
 """
+
+import time
+from functools import wraps
+from loguru import logger
+
+
+# 可重试的错误类型（内部使用）
+_RETRIABLE_ERROR_TYPES = (
+    "RateLimitError",      # 请求频率限制
+    "InternalServerError", # 服务器错误 (5xx)
+    "APIConnectionError",  # 连接错误
+    "APITimeoutError",     # 超时错误
+)
 
 import time
 from functools import wraps

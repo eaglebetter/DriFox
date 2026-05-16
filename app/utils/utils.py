@@ -1,5 +1,16 @@
 # -*- coding: utf-8 -*-
-import asyncio
+"""
+通用工具函数模块
+
+提供应用程序使用的各种工具函数：
+- 路径和资源管理
+- 字体和图标配置
+- 技能加载和管理
+- 应用更新检查
+- 异步更新检查器
+- JSON 序列化/反序列化
+"""
+import asyncio  # 用于 AsyncUpdateChecker
 
 import httpx
 import orjson as json

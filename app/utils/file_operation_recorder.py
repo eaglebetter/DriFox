@@ -216,12 +216,6 @@ class FileOperationRecorder:
         except Exception as e:
             logger.warning(f"[FileRecorder] 清理备份失败: {e}")
 
-        except Exception as e:
-            logger.error(f"[FileRecorder] 备份失败: {e}")
-            import traceback
-            
-            return None
-
     def get_operations_for_preview(self, session_id: str, call_id: str) -> List[Dict]:
         """
         获取指定 call_id 的操作记录

@@ -256,23 +256,6 @@ class LLMAPIService:
             
             return {"success": True, "message": "已停止流式请求"}
 
-        # ==================== 保留旧接口（简单测试用） ====================
-        @self.app.get("/providers")
-        async def get_providers():
-            """获取所有服务商列表（兼容旧接口）"""
-            handler = self.get_session_handler()
-            if handler and handler._main_widget:
-                try:
-                    # 从 UI 获取服务商列表
-                    config_popup = handler._main_widget._settings_popup
-                    if config_popup and hasattr(config_popup, '_providers'):
-                        providers = config_popup._providers
-                        return {"success": True, "providers": providers}
-                except Exception as e:
-                    logger.error(f"[API] get_providers 失败: {e}")
-            
-            return {"success": True, "providers": []}
-
         @self.app.get("/config")
         async def get_config():
             """获取当前 LLM 配置（自动使用 LLMChatter 选中配置）"""

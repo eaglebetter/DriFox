@@ -1,4 +1,14 @@
 # -*- coding: utf-8 -*-
+"""
+全局配置管理 - 基于 qfluentwidgets QConfig
+
+使用单例模式管理全局配置，包括：
+- LLM 模型配置（API URL、模型名称、认证方式）
+- 界面配置（主题、字体）
+- 用户偏好配置
+
+配置持久化到 JSON 文件。
+"""
 import orjson as json
 import os
 import sys

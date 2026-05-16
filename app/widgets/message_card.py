@@ -1,4 +1,20 @@
 # -*- coding: utf-8 -*-
+"""
+MessageCard - 消息卡片组件
+
+负责渲染和显示对话消息，支持：
+- Markdown 内容渲染（使用 WebEngineView）
+- 代码高亮（使用 Pygments）
+- 工具调用结果显示
+- 流式内容追加
+- 用户/助手消息区分
+
+消息结构：
+- role: "user" | "assistant" | "system" | "tool"
+- content: str | List[Dict]  # 支持多内容块
+- tool_calls: List[Dict]     # 工具调用
+- tool_call_id: str         # 工具结果关联 ID
+"""
 import base64
 import hashlib
 import math

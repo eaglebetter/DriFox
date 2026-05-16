@@ -222,35 +222,6 @@ class OpenAIChatWorker(QThread):
         }
         return mapping.get(signal_name)
 
-    def _emit_direct(self, signal_name: str, *args) -> None:
-        """直接调用回调（API 模式，已废弃）
-
-        保留以兼容旧的直接回调接口。新代码应使用事件总线。
-
-        Args:
-            signal_name: 信号名
-            *args: 传递给回调的参数
-        """
-        # 兼容旧的直接回调机制（通过事件总线）
-        event = self._signal_name_to_event(signal_name)
-        if event:
-            self._emit_via_event_bus(event, *args)
-        else:
-            logger.warning(f"[Worker] Unknown signal name: {signal_name}")
-
-    def set_direct_callbacks(self, callbacks: Dict[str, Callable]) -> None:
-        """设置直接回调（已废弃，推荐订阅事件总线）
-
-        Args:
-            callbacks: 回调字典，键为信号名，值为回调函数
-        """
-        self._legacy_direct_callbacks = callbacks
-        # 将回调注册到事件总线
-        for signal_name, callback in callbacks.items():
-            event = self._signal_name_to_event(signal_name)
-            if event:
-                self._event_bus.subscribe(event, callback)
-
     def cancel(self):
         self._is_cancelled = True
         self._tool_execution_cancelled = True
@@ -345,7 +316,7 @@ class OpenAIChatWorker(QThread):
         self._question_pending = None
 
         # 清理会话缓存
-        self._session_messages = []
+        self._current_session_messages = []
 
         # 清理 HTTP 客户端缓存
         self._http_client = None

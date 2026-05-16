@@ -15,6 +15,51 @@ from loguru import logger
 from app.core.auto_loop_config import AutoLoopConfig
 
 
+# ========== 阶段约束常量 ==========
+# 这些常量定义了 AutoLoop 两阶段的行为约束，供 get_stage_constraint() 使用
+
+PLANNING_CONSTRAINT = """
+🕒 当前系统时间：{current_time}
+
+🔒 【当前阶段强制约束 - 规划阶段】
+你现在 **ONLY 只允许** 做任务拆解和方案设计。
+**ABSOLUTELY 禁止** 写任何实现代码，禁止使用 edit/bash/delete 工具修改代码文件！
+
+你的任务：
+1. 扫描项目理解现状
+2. 将任务拆解为步骤，每个步骤格式：
+   - [ ] [步骤 N] <描述> | <文件> | <验证方式>
+     ✅ 需求验证：<这个步骤必须满足什么需求？输出什么结果？>
+3. 将完整计划写入 SHARED_TASK_NOTES.md
+4. 输出 PLANNING_COMPLETE
+5. STOP！到此为止
+
+记住：你现在只规划，不实现。代码一根都不能写！
+""".strip()
+
+EXECUTING_CONSTRAINT = """
+🕒 当前系统时间：{current_time}
+
+🔒 【当前阶段强制约束 - 执行阶段】
+你现在 **ONLY 只允许** 处理 **当前步骤 {current}/{total}**。
+**ABSOLUTELY 禁止** 提前执行后续步骤，禁止一次性做完多个步骤！
+
+你必须严格遵循：
+1. 读取 SHARED_TASK_NOTES.md 确认当前步骤要求和需求验证点
+2. 只完成当前这一个步骤，不要碰后续步骤
+3. 按照步骤要求运行验证（必须真的运行验证命令，不能假设成功）
+4. 验证必须通过两层检查：
+   ① 基础验证：代码能跑通吗？语法/编译/测试通过吗？
+   ② 需求验证：功能真的满足原始需求吗？每个验证点都通过吗？
+5. 两层验证都通过后，在 SHARED_TASK_NOTES.md 中将当前步骤改为 `[x]`
+6. 在文档末尾**追加**本轮操作记录（包括改动文件、验证命令、验证结果）
+7. STOP！到此为止，等待下一轮
+
+约束来源：两阶段强制约束设计 (2026-05-16)
+"""
+# ==================================
+
+
 class LoopState:
     IDLE = "idle"
     RUNNING = "running"
@@ -213,52 +258,21 @@ class AutoLoopEngine:
         return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
 
     def get_stage_constraint(self) -> str:
-        """获取当前阶段的强制约束提示（注入到prompt最开头）"""
+        """获取当前阶段的强制约束提示（注入到prompt最开头）
+
+        Returns:
+            阶段约束文本，从 PLANNING_CONSTRAINT 或 EXECUTING_CONSTRAINT 格式化而来
+        """
         current_time = self.get_current_system_time()
-        
+
         if self._is_planning_phase:
-            return f"""
-🕒 当前系统时间：{current_time}
-
-🔒 【当前阶段强制约束 - 规划阶段】
-你现在 **ONLY 只允许** 做任务拆解和方案设计。
-**ABSOLUTELY 禁止** 写任何实现代码，禁止使用 edit/bash/delete 工具修改代码文件！
-
-你的任务：
-1. 扫描项目理解现状
-2. 将任务拆解为步骤，每个步骤格式：
-   - [ ] [步骤 N] <描述> | <文件> | <验证方式>
-     ✅ 需求验证：<这个步骤必须满足什么需求？输出什么结果？>
-3. 将完整计划写入 SHARED_TASK_NOTES.md
-4. 输出 PLANNING_COMPLETE
-5. STOP！到此为止
-
-记住：你现在只规划，不实现。代码一根都不能写！
-""".strip()
+            return PLANNING_CONSTRAINT.format(current_time=current_time)
         else:
-            # 执行阶段
-            current = self._current_step
-            total = self._total_steps
-            return f"""
-🕒 当前系统时间：{current_time}
-
-🔒 【当前阶段强制约束 - 执行阶段】
-你现在 **ONLY 只允许** 处理 **当前步骤 {current}/{total}**。
-**ABSOLUTELY 禁止** 提前执行后续步骤，禁止一次性做完多个步骤！
-
-你必须严格遵循：
-1. 读取 SHARED_TASK_NOTES.md 确认当前步骤要求和需求验证点
-2. 只完成当前这一个步骤，不要碰后续步骤
-3. 按照步骤要求运行验证（必须真的运行验证命令，不能假设成功）
-4. 验证必须通过两层检查：
-   ① 基础验证：代码能跑通吗？语法/编译/测试通过吗？
-   ② 需求验证：功能真的满足原始需求吗？每个验证点都通过吗？
-5. 两层验证都通过后，在 SHARED_TASK_NOTES.md 中将当前步骤改为 `[x]`
-6. 在文档末尾**追加**本轮操作记录（包括改动文件、验证命令、验证结果）
-7. STOP！到此为止，等待下一轮
-
-记住：一次只做一个步骤，做完就停。已完成步骤不需要重复处理。
-""".strip()
+            return EXECUTING_CONSTRAINT.format(
+                current_time=current_time,
+                current=self._current_step,
+                total=self._total_steps,
+            )
 
     # ========== 执行阶段管理 ==========
 

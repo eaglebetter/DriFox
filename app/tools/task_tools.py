@@ -1,3 +1,12 @@
+# -*- coding: utf-8 -*-
+"""
+任务工具集 - 提供待办事项和技能管理功能
+
+支持：
+- 待办事项：add_todo, update_todo, delete_todo, todowrite, todoread
+- 技能管理：load_skill, execute_skill, list_skills
+- 批处理任务：task_execute_batch
+"""
 import os
 import time
 from pathlib import Path

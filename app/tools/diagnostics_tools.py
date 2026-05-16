@@ -1,3 +1,12 @@
+# -*- coding: utf-8 -*-
+"""
+诊断工具集 - 提供代码静态分析功能
+
+支持：
+- Python: pyright 语法检查
+- JavaScript/TypeScript: ESLint 检查
+- 通用: grep 搜索错误关键词
+"""
 import orjson as json
 import subprocess
 from pathlib import Path
@@ -5,12 +14,12 @@ from typing import Optional, Tuple
 
 from app.tools.result import ToolResult
 
-# 尝试导入 pyright Python 模块
+# pyright Python 模块可用性检测
 try:
     from pyright import cli as pyright_cli
-    HAS_PYRIGHT_MODULE = True
+    _HAS_PYRIGHT = True
 except ImportError:
-    HAS_PYRIGHT_MODULE = False
+    _HAS_PYRIGHT = False
 
 
 class DiagnosticsTools:

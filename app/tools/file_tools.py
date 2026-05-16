@@ -1,3 +1,14 @@
+# -*- coding: utf-8 -*-
+"""
+文件工具集 - 提供文件读写和编辑功能
+
+支持：
+- 读取：read, glob, grep, scan_repo
+- 写入：write, write_file
+- 编辑：edit, edit_file, multi_edit, patch, apply_patch
+- 目录：list, mkdir, delete_file
+- 搜索：grep (异步), scan_repo (异步)
+"""
 import fnmatch
 import re
 from typing import Dict, List, Optional, Callable
@@ -10,6 +21,7 @@ from app.tools.result import ToolResult
 from app.tools.patch_applier import PatchApplier
 
 MAX_GREP_CONTENT_LENGTH = 15000
+
 
 class GrepTask(QRunnable):
     """异步 Grep 任务，在子线程中执行"""

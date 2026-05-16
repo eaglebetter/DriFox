@@ -1,3 +1,13 @@
+# -*- coding: utf-8 -*-
+"""
+网页工具集 - 提供网页获取和搜索功能
+
+支持：
+- fetch_web: 获取网页内容，支持 markdown/html/text 格式
+- search_web: 搜索网页，支持 DuckDuckGo
+
+提供异步和同步两种调用方式。
+"""
 import os
 import re
 import httpx
@@ -219,12 +229,12 @@ class WebTools:
     def __init__(self, owner):
         self._owner = owner
         self._thread_pool: Optional[QThreadPool] = None
+        self._current_fetch_task: Optional[WebFetchTask] = None
+        self._current_search_task: Optional[WebSearchTask] = None
 
     @property
     def workdir(self) -> Path:
         return self._owner.workdir
-        self._current_fetch_task: Optional[WebFetchTask] = None
-        self._current_search_task: Optional[WebSearchTask] = None
 
     def _get_thread_pool(self) -> QThreadPool:
         if self._thread_pool is None:

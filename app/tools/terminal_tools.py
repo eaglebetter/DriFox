@@ -1,3 +1,13 @@
+# -*- coding: utf-8 -*-
+"""
+终端工具集 - 提供命令行执行功能
+
+支持：
+- execute_bash: 执行 shell 命令，支持超时控制和输出捕获
+- 后台任务管理：start_bg_task, stop_bg_task, get_bg_output
+
+提供同步和后台两种执行模式。
+"""
 import subprocess
 import threading
 import time
