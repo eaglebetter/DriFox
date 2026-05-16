@@ -270,12 +270,14 @@ class AutoLoopWorker(QThread):
                 if planning_done:
                     self._first_planning_done = True
                     self._engine.enter_execution_phase()
-                    current, total = self._engine.parse_steps_from_notes(notes)
+                    current, max_verified, total = self._engine.parse_current_and_next_step(notes)
                     # 从笔记同步已勾选完成的步骤到缓存
                     self._engine.sync_verified_steps_from_notes(notes)
                     self._engine._total_steps = total
-                    self.log_signal.emit(f"✅ 规划完成！共 {total} 个步骤，{len(self._engine.get_verified_steps())} 已完成")
-                    self.log_signal.emit(f"📋 开始执行阶段: {self._get_next_step_preview(notes, 1)}")
+                    # 设置当前应该执行的步骤
+                    self._engine._current_step = current
+                    self.log_signal.emit(f"✅ 规划完成！共 {total} 个步骤，{max_verified} 已完成")
+                    self.log_signal.emit(f"📋 开始执行步骤 {current}/{total}: {self._get_next_step_preview(notes, current)}")
                     
                     # 发送阶段信号：执行中
                     self.phase_changed.emit("executing")
@@ -301,12 +303,17 @@ class AutoLoopWorker(QThread):
                 # 每次执行前从笔记同步已验证步骤
                 self._engine.sync_verified_steps_from_notes(notes)
                 
-                # 解析当前步骤
-                current_step, total_steps = self._engine.parse_steps_from_notes(notes)
+                # 解析当前步骤：下一个要执行的、已完成的、总步骤数
+                current_step, max_verified, total_steps = self._engine.parse_current_and_next_step(notes)
+                
                 if total_steps > 0:
                     self._engine._total_steps = total_steps
                     
-                    # 检测步骤完成 - 必须在响应中找到步骤完成信号
+                    # 如果当前步骤还没设置（引擎的 _current_step 为 0），则设置为当前应该执行的步骤
+                    if self._engine._current_step == 0 or self._engine._current_step <= max_verified:
+                        self._engine._current_step = current_step
+                    
+                    # 检测当前步骤是否已完成
                     step_completed = self._check_step_completed(response, notes, self._engine._current_step)
                     
                     if step_completed:
@@ -409,13 +416,17 @@ class AutoLoopWorker(QThread):
     def _get_next_step_preview(self, notes: str, step_num: int) -> str:
         """获取下一步骤的预览文本"""
         import re
-        pattern = rf'- \[步骤\s*{step_num}\].*?'
-        match = re.search(pattern, notes)
+        # 匹配 - [ ] [步骤 N] 或 - [x] [步骤 N] 或 - [步骤 N]
+        pattern = rf'- \[.?\]?\s*\[步骤\s*{step_num}\].*?(?=\n-|\Z)'
+        match = re.search(pattern, notes, re.DOTALL)
         if match:
             step_text = match.group(0)
-            # 移除 "- [步骤 N]" 前缀
-            preview = re.sub(r'^-\s*\[步骤\s*\d+\]\s*', '', step_text)
-            # 只取前 50 字符
+            # 移除 "- [ ] [步骤 N]" 或 "- [x] [步骤 N]" 前缀，只保留描述
+            preview = re.sub(r'^-\s*\[.?\]?\s*\[步骤\s*\d+\]\s*', '', step_text)
+            # 去掉管道符后面的验证方式，只保留描述
+            if '|' in preview:
+                preview = preview.split('|')[0].strip()
+            # 只取前 60 字符
             return preview[:60].strip() + ('...' if len(preview) > 60 else '')
         return f"步骤 {step_num}"
 

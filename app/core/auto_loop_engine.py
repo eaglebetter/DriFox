@@ -96,25 +96,74 @@ class AutoLoopEngine:
             self.enter_execution_phase()
 
     def parse_steps_from_notes(self, notes: str) -> tuple[int, int]:
-        """从笔记中解析当前步骤和总步骤数"""
+        """从笔记中解析当前步骤和总步骤数
+        
+        支持格式：
+        - [ ] [步骤 1] xxx   (未完成)
+        - [x] [步骤 1] xxx   (已完成)
+        - [步骤 1] xxx
+        """
         import re
-        # 匹配 "- [步骤 N]" 或 "- [步骤 N]" 格式
-        steps = re.findall(r'- \[[步骤Step]+\s*(\d+)\]', notes)
+        # 匹配各种格式的步骤号：
+        patterns = [
+            r'- \[.?\]?\s*\[步骤\s*(\d+)\]',  # - [ ] [步骤 1] 或 - [x] [步骤 1] 或 - [步骤 1]
+            r'- \[.?\]?\s*步骤\s*(\d+)',        # - [ ] 步骤 1 或 - [x] 步骤 1
+            r'- \[x\]\s*\[步骤\s*(\d+)\]',     # - [x] [步骤 1]
+            r'\\[步骤\s*(\d+)\\]',              # [步骤 1]
+        ]
+        steps = []
+        for pattern in patterns:
+            matches = re.findall(pattern, notes, re.IGNORECASE)
+            if matches:
+                steps = [int(m) for m in matches]
+                break
         if steps:
-            nums = [int(s) for s in steps]
-            return max(nums), len(nums)  # current_step, total_steps
+            return max(steps), len(steps)
         return 0, 0
 
-    def parse_checked_steps_from_notes(self, notes: str) -> set[int]:
-        """从笔记中解析已勾选完成的步骤 [x]"""
+    def parse_current_and_next_step(self, notes: str) -> tuple[int, int, int]:
+        """从笔记中解析当前步骤、已勾选完成的最大步骤、总步骤数
+        
+        Returns:
+            (current_step, max_verified_step, total_steps)
+            - current_step: 下一个要执行的步骤（已完成的最后一个+1）
+            - max_verified_step: 已勾选 [x] 的最大步骤号
+            - total_steps: 总步骤数
+        """
         import re
-        # 匹配 "- [x] 步骤 N" 或 "- [x] [步骤 N]" 格式
-        checked = set()
+        # 匹配所有步骤号（包括 [ ] 和 [x]）
+        all_step_pattern = r'- \[.?\]?\s*\[步骤\s*(\d+)\]'
+        all_steps = re.findall(all_step_pattern, notes, re.IGNORECASE)
+        if not all_steps:
+            all_steps = re.findall(r'- \[.?\]?\s*步骤\s*(\d+)', notes, re.IGNORECASE)
+        
+        total_steps = len(all_steps)
+        max_step_num = max([int(s) for s in all_steps]) if all_steps else 0
+        
+        # 解析已勾选的步骤
+        verified_steps = self.parse_checked_steps_from_notes(notes)
+        max_verified = max(verified_steps) if verified_steps else 0
+        
+        # 当前应该执行的步骤 = 已完成的最后一个 + 1
+        current_step = max_verified + 1
+        
+        return current_step, max_verified, total_steps
+
+    def parse_checked_steps_from_notes(self, notes: str) -> set[int]:
+        """从笔记中解析已勾选完成的步骤 [x]
+        
+        支持格式：
+        - - [x] [步骤 1] xxx
+        - - [x] 步骤 1 xxx
+        """
+        import re
+        # 匹配已勾选完成的步骤
         patterns = [
-            r'- \[x\].*\[步骤\s*(\d+)\]',
-            r'- \[x\]\s*\[步骤\s*(\d+)\]',
-            r'- \[x\].*步骤\s*(\d+)',
+            r'- \[x\]\s*\[步骤\s*(\d+)\]',   # - [x] [步骤 1]
+            r'- \[x\]\s*步骤\s*(\d+)',        # - [x] 步骤 1
+            r'- \[x\]\s*\[Step\s*(\d+)\]',   # - [x] [Step 1]
         ]
+        checked = set()
         for pattern in patterns:
             for match in re.finditer(pattern, notes, re.IGNORECASE):
                 checked.add(int(match.group(1)))
