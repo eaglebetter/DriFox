@@ -164,7 +164,7 @@ class HookEditCard(QWidget):
     def _setup_ui(self):
         layout = QVBoxLayout(self)
         layout.setSpacing(8)
-        layout.setContentsMargins(16, 8, 16, 8)
+        layout.setContentsMargins(6, 0, 6, 0)
         
         layout.addWidget(BodyLabel("事件:"))
         self.eventCombo = ComboBox(self)
@@ -193,7 +193,6 @@ class HookEditCard(QWidget):
         self.enabledCheck = CheckBox("添加后启用", self)
         self.enabledCheck.setChecked(True)
         layout.addWidget(self.enabledCheck)
-        layout.addStretch(1)
     
     def _load_data(self):
         d = self._hook_data

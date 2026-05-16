@@ -7,7 +7,7 @@
 from PyQt5.QtCore import Qt, pyqtSignal, QTimer
 from PyQt5.QtGui import QFont, QColor
 from PyQt5.QtWidgets import (
-    QVBoxLayout,
+    QVBoxLayout, QFontComboBox,
 )
 from loguru import logger
 
