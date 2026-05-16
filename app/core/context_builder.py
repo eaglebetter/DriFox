@@ -34,6 +34,9 @@ class ContextBudgetAllocator:
     1. 计算可用预算并分配给各部分
     2. 组装完整消息上下文
     3. 委托压缩器执行实际压缩
+
+    性能优化：
+    - 系统提示 token 缓存：避免重复计算相同内容
     """
 
     def __init__(
@@ -51,6 +54,32 @@ class ContextBudgetAllocator:
         self._agent_manager = agent_manager
         self.backend = backend
         self._compactor = compactor
+
+        # ========== 性能优化：系统提示 token 缓存 ==========
+        # 避免重复计算相同系统内容的 token 数
+        self._system_tokens_cache: Dict[str, int] = {}
+
+    def _get_cached_system_tokens(self, system_content: str) -> int:
+        """
+        获取系统提示的 token 数（带缓存）。
+
+        Args:
+            system_content: 系统提示内容
+
+        Returns:
+            token 数
+        """
+        # 使用内容 hash 作为缓存键
+        cache_key = hash(system_content)
+        if cache_key not in self._system_tokens_cache:
+            self._system_tokens_cache[cache_key] = count_messages_tokens(
+                [{"role": "system", "content": system_content}]
+            )
+            # 限制缓存大小
+            if len(self._system_tokens_cache) > 64:
+                # 清除最旧的条目
+                self._system_tokens_cache.pop(next(iter(self._system_tokens_cache)))
+        return self._system_tokens_cache[cache_key]
 
     def build_messages(
         self,
@@ -172,8 +201,8 @@ class ContextBudgetAllocator:
         # 委托给 compactor 计算总预算
         total_budget = self._compactor.get_budget(llm_config)
 
-        # 估算系统提示 token
-        system_tokens = count_messages_tokens([{"role": "system", "content": system_content}])
+        # 估算系统提示 token（使用缓存）
+        system_tokens = self._get_cached_system_tokens(system_content)
 
         # 动态分配：系统提示越大，历史预算越少
         system_ratio = system_tokens / max(total_budget, 1)
@@ -217,9 +246,7 @@ class ContextBudgetAllocator:
         }
 
         if system_content:
-            system_tokens = count_messages_tokens([
-                {"role": "system", "content": system_content}
-            ])
+            system_tokens = self._get_cached_system_tokens(system_content)
             result["system"] = system_tokens
             result["history"] = max(500, total - system_tokens)
 

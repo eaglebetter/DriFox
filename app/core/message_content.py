@@ -1,4 +1,18 @@
 # -*- coding: utf-8 -*-
+"""
+消息内容处理模块 - 负责消息规范化、格式转换、工具块处理
+
+职责：
+1. 消息规范化：normalize_message, consolidate_messages
+2. 格式转换：to_api_message, messages_to_api, content_to_markdown
+3. 工具块处理：extract_tool_result_blocks, make_tool_result_block
+4. 工具调用处理：normalize_tool_call
+
+性能优化：
+- 预编译正则表达式（_SANITIZE_PATTERN 等）
+- normalize_message 快速路径检测已规范化消息
+- to_api_message 快速路径避免重复规范化
+"""
 import orjson as json
 import re
 from functools import lru_cache
@@ -330,8 +344,29 @@ def normalize_tool_call(tool_call: Any) -> Optional[Dict[str, Any]]:
 
 
 def normalize_message(message: Any) -> Optional[Dict[str, Any]]:
+    """规范化消息格式。性能优化：快速路径检测已规范化消息"""
     if not isinstance(message, dict):
         return None
+
+    # ========== 性能优化：快速路径 ==========
+    # 如果消息已经是规范化格式（有 role 且格式正确），直接返回
+    # 这避免了重复的 content_to_text 调用和工具调用规范化
+    role = message.get("role", "")
+    if role in VALID_MESSAGE_ROLES:
+        # 检查是否有必需字段（已规范化消息的标志）
+        if role == "assistant":
+            # assistant 消息至少有 content 或 tool_calls 或 reasoning_content
+            if message.get("content") is not None or message.get("tool_calls") or message.get("reasoning_content"):
+                # 已经是规范化格式，快速返回（避免重复处理）
+                return dict(message)  # 返回副本避免修改原始数据
+        elif role == "tool":
+            # tool 消息有 tool_call_id
+            if message.get("tool_call_id"):
+                return dict(message)
+        else:
+            # system/user 消息通常是字符串 content
+            return dict(message)
+    # ======================================
 
     role = str(message.get("role", "") or "").strip()
     if role not in VALID_MESSAGE_ROLES:
@@ -442,7 +477,38 @@ def to_api_message(message: Dict[str, Any]) -> Dict[str, Any]:
     """
     将内部消息格式转换为标准API请求格式。
     用于发送给API的消息构建。
+    
+    性能优化：快速路径检测已规范化消息，避免重复规范化。
     """
+    if not isinstance(message, dict):
+        return {}
+
+    # ========== 性能优化：快速路径 ==========
+    # 如果消息已经是 API 格式（有 role 且符合 API 规范），直接转换
+    role = message.get("role", "")
+    if role in VALID_MESSAGE_ROLES:
+        # system/user/tool 消息通常是已格式化的
+        if role in ("system", "tool"):
+            return {
+                "role": role,
+                "content": _extract_text_content(message.get("content", "")),
+            }
+        elif role == "assistant":
+            # assistant 消息可能有 tool_calls
+            api_msg: Dict[str, Any] = {"role": "assistant"}
+            text = _extract_text_content(message.get("content", ""))
+            if text:
+                api_msg["content"] = text
+            tool_calls = message.get("tool_calls")
+            if tool_calls:
+                api_msg["tool_calls"] = tool_calls
+            reasoning = message.get("reasoning_content")
+            if reasoning:
+                api_msg["reasoning_content"] = reasoning
+            return api_msg
+    # ======================================
+
+    # 慢路径：需要规范化
     normalized_message = normalize_message(message)
     if not normalized_message:
         return {}

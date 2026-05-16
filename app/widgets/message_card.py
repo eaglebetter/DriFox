@@ -111,6 +111,8 @@ _TOOL_SUCCESS_PATTERN = re.compile(r"^success:\s*(.+?)\s*$", re.MULTILINE)
 _TOOL_ID_PATTERN = re.compile(r"^tool_call_id:\s*(.+?)\s*$", re.MULTILINE)
 _TOOL_RESULT_PATTERN = re.compile(r"^result:\s*(.*)$", re.MULTILINE)
 _NEXT_FIELD_PATTERN = re.compile(r"\n\w+:")
+# 性能优化：正则提取后备方案使用的预编译模式
+_EXTRACT_KEY_VALUE_PATTERN = re.compile(r'"([^"\\]+)"\s*:\s*"([^"]*)"', re.DOTALL)
 
 
 def get_markdown_instance():
@@ -729,19 +731,15 @@ def _extract_args_by_regex(content: str) -> dict:
 
 
 def _extract_by_regex_fallback(content: str) -> dict:
-    """正则提取后备方案 - 很少使用"""
-    import re
+    """正则提取后备方案 - 很少使用（使用预编译正则）"""
     args = {}
-    pattern = re.compile(r'"([^"\\]+)"\s*:\s*"([^"]*)"', re.DOTALL)
-    for match in pattern.finditer(content):
+    for match in _EXTRACT_KEY_VALUE_PATTERN.finditer(content):
         key = match.group(1)
         value = match.group(2)
         quote_count = value.count('"')
         if quote_count % 2 != 0:
             continue
         args[key] = value
-    return args
-
     return args
 
 
