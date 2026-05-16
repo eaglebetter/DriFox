@@ -566,17 +566,26 @@ class OpenAIChatWorker(QThread):
                     compacted, state, cache = self._compactor.compact(
                         current_messages,
                         budget,
-                        existing_cache=self._compaction_cache,
+                        # 注意：不传 existing_cache
+                        # Worker 内的 current_messages 已经是 ContextBuilder 压缩后的结果
+                        # （摘要 + tail + 当前用户消息 + 工具迭代结果），结构完全不同于
+                        # 建立缓存时的原始消息列表。复用缓存会导致 cutoff_index 错位，
+                        # 可能丢弃当前用户消息和重要的 tail 消息。
+                        existing_cache=None,
                         allow_llm_summary=False,  # 工具迭代中只用启发式，避免嵌套 LLM 调用
                     )
                     if compacted != current_messages:
                         current_messages = compacted
                         self._last_compaction_state = state
                         self._compaction_cache = cache
-                        # 重建 API 消息缓存（转换格式）
-                        self._api_messages_cache = current_messages
                         self._emit_compaction_status(state)
-                    current_session_messages = [system_message] + current_session_messages
+                    # 修复：重新插入 system_message，否则下一轮 API 调用会丢失系统提示
+                    current_messages.insert(0, system_message)
+                    # 修复：始终更新 API 缓存以匹配 current_messages（含 system）
+                    self._api_messages_cache = current_messages
+                    # 注意：current_session_messages 故意不做同步压缩。
+                    # 它的增长会在 worker 结束时由 _on_messages_updated 的
+                    # preserve_compaction=False 清空缓存，下轮发送时由 ContextBuilder 统一压缩。
                 else:
                     # 更新 API 消息缓存
                     self._append_to_api_cache(response_sequence)

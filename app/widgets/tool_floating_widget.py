@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+import time
+
 import orjson as json
 from PyQt5.QtCore import Qt, pyqtSignal, QTimer, QRectF
 from PyQt5.QtGui import QPixmap, QPainter
@@ -8,7 +10,7 @@ from PyQt5.QtWidgets import (
     QLabel,
     QPushButton,
     QHBoxLayout,
-    QWidget,
+    QWidget, QApplication,
 )
 from qfluentwidgets import SimpleCardWidget
 
@@ -176,9 +178,6 @@ class ToolFloatingWidget(SimpleCardWidget):
 
     def start_tool(self, tool_name: str, args: dict = None):
         """开始执行工具"""
-        import time
-        from PyQt5.QtWidgets import QApplication
-
         self._task_start_time = time.time()
         self._is_running = True
         self._current_tool = tool_name
@@ -195,18 +194,17 @@ class ToolFloatingWidget(SimpleCardWidget):
         if args:
             args_str = json.dumps(args).decode('utf-8')
             if len(args_str) > 60:
-                args_preview = f" | {args_str[:60]}..."
+                args_preview = f"{args_str[:60]}..."
             else:
-                args_preview = f" | {args_str}"
+                args_preview = f"{args_str}"
 
-        self.task_label.setText(f"⏳ 正在运行{args_preview}")
+        self.task_label.setText(f"⏳ {args_preview}")
 
         self.cancel_btn.setEnabled(True)
         self.cancel_btn.setText("中止")
 
         self.setVisible(True)
         self.raise_()
-        QApplication.processEvents()
         QApplication.processEvents()
 
     def _append_progress(self, text: str):

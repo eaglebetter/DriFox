@@ -3325,6 +3325,7 @@ class OpenAIChatToolWindow(ToolWindow):
             return
 
         target_index = self._pending_scroll_to_index
+        target_batch_index = self._pending_scroll_to_batch
         self._pending_scroll_to_index = None
         self._pending_scroll_to_batch = None
 
@@ -3333,31 +3334,72 @@ class OpenAIChatToolWindow(ToolWindow):
         if total_nodes > 0:
             self._pending_scroll_to_update = target_index
 
+        # 如果 target_batch_index 未提供，从 _message_batch 查找
+        if target_batch_index is None:
+            user_count = 0
+            for idx, batch in enumerate(self._message_batch):
+                if batch and batch[0].get("role") == "user":
+                    if user_count == target_index:
+                        target_batch_index = idx
+                        break
+                    user_count += 1
+
         # 确保目标批次的卡片已经懒渲染
-        target_batch_index = -1
-        user_count = 0
-        for idx, batch in enumerate(self._message_batch):
-            if batch and batch[0].get("role") == "user":
-                if user_count == target_index:
-                    target_batch_index = idx
-                    break
-                user_count += 1
+        if target_batch_index is not None:
+            if 0 <= target_batch_index < len(self._batch_cards):
+                cards = self._batch_cards[target_batch_index]
+                if cards:
+                    for card in cards:
+                        if sip.isdeleted(card):
+                            continue
+                        if isinstance(card, MessageCard):
+                            card.ensure_rendered()
 
-        if target_batch_index >= 0 and target_batch_index < len(self._batch_cards):
-            cards = self._batch_cards[target_batch_index]
-            if cards:
-                for card in cards:
-                    if sip.isdeleted(card):
-                        continue
-                    if isinstance(card, MessageCard):
-                        card.ensure_rendered()
+        # 方法1：通过 _batch_cards 直接查找 user card（最可靠）
+        target_widget = self._find_user_card_in_batch(target_batch_index)
 
-        # 现在目标卡片应该已经渲染，尝试找到它并滚动
-        target_widget = find_user_card_at_index(self.chat_layout, target_index)
+        # 方法2：通过 _message_index 遍历查找
+        if target_widget is None:
+            target_widget = self._find_user_card_by_message_index(
+                target_batch_index if target_batch_index is not None else 0
+            )
+
+        # 方法3：通过计数查找（后备方案）
+        if target_widget is None:
+            target_widget = find_user_card_at_index(self.chat_layout, target_index)
+
         if target_widget:
             self.chat_scroll_area.verticalScrollBar().setValue(target_widget.y())
         else:
             logger.info(f"[NodePreview] Still not found after rendering, target_index={target_index}")
+
+    def _find_user_card_in_batch(self, target_batch_index):
+        """从 _batch_cards 中查找指定 batch 的 user card"""
+        if target_batch_index is None or target_batch_index < 0:
+            return None
+        if target_batch_index >= len(self._batch_cards):
+            return None
+        cards = self._batch_cards[target_batch_index]
+        if not cards:
+            return None
+        for card in cards:
+            if sip.isdeleted(card):
+                continue
+            if isinstance(card, MessageCard) and card.role == "user":
+                return card
+        return None
+
+    def _find_user_card_by_message_index(self, target_batch_index):
+        """在布局中查找 _message_index 等于目标 batch 的 user card"""
+        for i in range(self.chat_layout.count()):
+            item = self.chat_layout.itemAt(i)
+            if not item or not item.widget():
+                continue
+            widget = item.widget()
+            if isinstance(widget, MessageCard) and widget.role == "user":
+                if getattr(widget, '_message_index', None) == target_batch_index:
+                    return widget
+        return None
 
     def _scroll_to_batch_index(self, batch_index: int, node_index: int = -1):
         """
@@ -3381,10 +3423,24 @@ class OpenAIChatToolWindow(ToolWindow):
                     if isinstance(card, MessageCard):
                         card.ensure_rendered()
 
-        # 计算 node_index 对应的 user card 在布局中的索引
-        target_widget = find_user_card_at_index(self.chat_layout, node_index if node_index >= 0 else batch_index)
+        # 优先通过 _batch_cards 直接查找（最可靠）
+        target_widget = self._find_user_card_in_batch(batch_index)
+
+        # 后备：通过 _message_index 查找
+        if target_widget is None:
+            target_widget = self._find_user_card_by_message_index(batch_index)
+
+        # 最后后备：通过计数查找
+        if target_widget is None:
+            target_widget = find_user_card_at_index(
+                self.chat_layout, node_index if node_index >= 0 else batch_index
+            )
+
         if target_widget:
             self.chat_scroll_area.verticalScrollBar().setValue(target_widget.y())
+        # 如果仍然没找到，记录警告但不阻塞
+        else:
+            logger.warning(f"[NodePreview] Cannot find card for batch_index={batch_index}, node_index={node_index}")
 
     def _on_node_preview_clicked(self, index: int):
         # 先确保目标卡片的批次已经渲染（懒渲染可能还没创建卡片）
@@ -3406,8 +3462,15 @@ class OpenAIChatToolWindow(ToolWindow):
                     if isinstance(card, MessageCard):
                         card.ensure_rendered()
 
-        # 使用辅助函数找到目标卡片
-        target_widget = find_user_card_at_index(self.chat_layout, index)
+        # 使用优先方法找到目标卡片
+        # 方法1: 通过 _batch_cards 直接查找
+        target_widget = self._find_user_card_in_batch(target_batch_index)
+        # 方法2: 通过 _message_index 查找
+        if target_widget is None:
+            target_widget = self._find_user_card_by_message_index(target_batch_index)
+        # 方法3: 通过计数查找
+        if target_widget is None:
+            target_widget = find_user_card_at_index(self.chat_layout, index)
 
         if target_widget:
             # 标记目标索引，让 _sync_node_preview_to_scroll 自动计算正确的值
@@ -3601,17 +3664,28 @@ class OpenAIChatToolWindow(ToolWindow):
         if not session:
             return
 
-        # 关键修复：从 session 数据计算 round_index，不依赖 UI 布局
-        # 这样即使卡片动态加载（只渲染部分），也能正确工作
-        user_text = card.get_plain_text()
-        timestamp = card.timestamp
-
-        # 在 session.messages 中找到对应的 user 消息
-        round_index = self._find_user_round_index_from_session(
-            session, user_text, timestamp
-        )
+        # 优先使用 card._round_index（卡创建时已正确设置）
+        # 避免使用 session 模糊匹配导致的错误（重复文本、时间戳格式差异）
+        round_index = card._round_index
         if round_index is None:
-            logger.warning("[UNDO] Cannot find user message in session")
+            # 降级：尝试使用 _message_index 计算 round_index
+            if card._message_index is not None:
+                # 计算该 batch 之前的 user batch 数量
+                round_index = 0
+                for idx in range(card._message_index):
+                    if idx < len(self._message_batch) and self._message_batch[idx] and \
+                       self._message_batch[idx][0].get("role") == "user":
+                        round_index += 1
+            else:
+                # 最终降级：使用 session 文本匹配
+                user_text = card.get_plain_text()
+                timestamp = card.timestamp
+                round_index = self._find_user_round_index_from_session(
+                    session, user_text, timestamp
+                )
+
+        if round_index is None or round_index < 0:
+            logger.warning("[UNDO] Cannot determine round_index for card")
             return
 
         if self._is_streaming:
@@ -3834,18 +3908,41 @@ class OpenAIChatToolWindow(ToolWindow):
         # 显示面板
         self._sub_agent_floating_widget.setVisible(True)
 
-    def _on_card_diff_requested(self, round_index: int):
+    def _on_card_diff_requested(self, round_index: int, message_index: int = -1):
         """
         处理卡片级差异对比请求，汇总一次对话中所有工具调用的文件修改。
 
         Args:
             round_index: 用户回合索引
+            message_index: 消息在 _message_batch 中的索引（用于 fallback）
         """
-        if round_index is None:
+        if round_index < 0 and message_index < 0:
             return
 
         session = self.session_manager.get_current_session()
         if not session:
+            return
+
+        # 验证 round_index 是否有效，如果无效则尝试从 message_index 重新计算
+        canonical_messages = consolidate_messages(session.messages)
+        round_ranges = get_user_round_ranges(canonical_messages)
+        if round_index < 0 or round_index >= len(round_ranges):
+            logger.debug(f"[card-diff] round_index={round_index} out of range ({len(round_ranges)}), recomputing")
+            round_index = -1
+
+        if round_index < 0 and message_index >= 0:
+            # 从 _message_batch 中的位置计算 round_index
+            computed = 0
+            for idx in range(message_index):
+                if idx < len(self._message_batch) and self._message_batch[idx] and \
+                   self._message_batch[idx][0].get("role") == "user":
+                    computed += 1
+            if computed < len(round_ranges):
+                round_index = computed
+                logger.debug(f"[card-diff] recomputed round_index={round_index} from message_index={message_index}")
+
+        if round_index < 0 or round_index >= len(round_ranges):
+            logger.warning(f"[card-diff] cannot determine valid round_index")
             return
 
         session_id = session.session_id
@@ -4585,7 +4682,11 @@ class OpenAIChatToolWindow(ToolWindow):
             return
 
         self._history_preview_messages = None
-        session.set_messages(messages or [], preserve_compaction=True)
+        # 注意：preserve_compaction=False
+        # worker 送回来的 current_session_messages 是原始未压缩消息，
+        # 保留旧的压缩缓存会导致 state 不一致（缓存说"已压缩"但消息已膨胀）。
+        # 清空缓存让下一次 ContextBuilder 从原始消息正确重新压缩。
+        session.set_messages(messages or [], preserve_compaction=False)
         self._refresh_context_usage_indicator()
 
     def _on_engine_error(self, error: str):
@@ -4618,6 +4719,8 @@ class OpenAIChatToolWindow(ToolWindow):
             if "error" not in result
             else f"[Skill Error] {result.get('error')}"
         )
+        # 确保 round_index 正确
+        self._current_assistant_round_index = self._get_current_user_round_index()
         new_card = self._append_assistant_message()
         new_card.update_content(str(content))
         new_card.finish_streaming()

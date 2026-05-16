@@ -2444,7 +2444,7 @@ class MessageCard(SimpleCardWidget):
     interventionRequested = pyqtSignal(dict)
     toolDiffRequested = pyqtSignal(str)  # tool_call_id
     subAgentLogRequested = pyqtSignal(str)  # task_ids (comma-separated)
-    cardDiffRequested = pyqtSignal(int)  # message_index（消息在 session.messages 中的索引）
+    cardDiffRequested = pyqtSignal(int, int)  # round_index, message_index（消息在 _message_batch 中的索引）
     saveFileRequested = pyqtSignal(str, str)  # code, lang
     lazyRenderCompleted = pyqtSignal()  # 懒渲染完成信号，用于通知滚动保持
 
@@ -3000,8 +3000,9 @@ class MessageCard(SimpleCardWidget):
 
     def _emit_card_diff_requested(self):
         """发射卡片差异请求信号"""
-        if self._round_index is not None:
-            self.cardDiffRequested.emit(self._round_index)
+        round_idx = self._round_index if self._round_index is not None else -1
+        msg_idx = self._message_index if self._message_index is not None else -1
+        self.cardDiffRequested.emit(round_idx, msg_idx)
 
     def _update_height(self, h):
         target_height = max(40, h)
