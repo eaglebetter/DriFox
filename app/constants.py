@@ -1,36 +1,83 @@
 MAX_SESSION_CARD_CACHE_SIZE = 10
 
-PARAM_UI_MAP = {
-    "API_KEY": "password",
-    "温度": "slider",
-    "temp": "slider",
-    "最大Token": "spinbox",
-    "上下文长度": "spinbox",
-    "max_new_tokens": "spinbox",
-    "top_p": "slider",
-    "frequency_penalty": "slider",
-    "presence_penalty": "slider",
-    "选择模型": "model_selector",
-    "启用技能": "checkbox",
-    "思考模式": "checkbox",
-    "思考等级": "combobox",
-}
-
-
-PARAM_RANGE_MAP = {
-    "温度": {"min": 0.0, "max": 2.0, "step": 0.01, "type": "float"},
-    "temp": {"min": 0.0, "max": 2.0, "step": 0.01, "type": "float"},
-    "最大Token": {"min": 1, "max": 99999999, "step": 1, "type": "int"},
-    "上下文长度": {"min": 1, "max": 99999999, "step": 1, "type": "int"},
-    "最大新Token": {"min": 1, "max": 18192, "step": 1, "type": "int"},
-    "top_p": {"min": 0.0, "max": 1.0, "step": 0.01, "type": "float"},
-    "frequency_penalty": {"min": -2.0, "max": 2.0, "step": 0.01, "type": "float"},
-    "presence_penalty": {"min": -2.0, "max": 2.0, "step": 0.01, "type": "float"},
-}
-
-
-PARAM_OPTIONS_MAP = {
-    "思考等级": ["low", "medium", "high", "max"],
+# ============================================================
+# 统一参数 schema：定义所有模型参数的 UI 表现与 API 映射
+# - ui_type:   checkbox / combobox / slider / spinbox / password / line
+# - display_name: 展示名（不传则用 key 本身）
+# - api_param:   映射到 API 请求的字段名（不传则需在 worker 中特殊处理）
+# - range:       slider/spinbox 的取值范围
+# - options:     combobox 的选项列表
+# ============================================================
+PARAM_SCHEMA = {
+    "温度": {
+        "display_name": "温度",
+        "ui_type": "slider",
+        "range": {"min": 0.0, "max": 2.0, "step": 0.01, "type": "float"},
+        "api_param": "temperature",
+    },
+    "temp": {
+        "display_name": "温度",
+        "ui_type": "slider",
+        "range": {"min": 0.0, "max": 2.0, "step": 0.01, "type": "float"},
+        "api_param": "temperature",
+    },
+    "最大Token": {
+        "display_name": "上下文长度",
+        "ui_type": "spinbox",
+        "range": {"min": 1, "max": 99999999, "step": 1, "type": "int"},
+        "api_param": "max_tokens",
+    },
+    "上下文长度": {
+        "display_name": "上下文长度",
+        "ui_type": "spinbox",
+        "range": {"min": 1, "max": 99999999, "step": 1, "type": "int"},
+        "api_param": "max_tokens",
+    },
+    "max_new_tokens": {
+        "display_name": "最大新Token",
+        "ui_type": "spinbox",
+        "range": {"min": 1, "max": 18192, "step": 1, "type": "int"},
+        "api_param": "max_tokens",
+    },
+    "top_p": {
+        "display_name": "核采样 (top_p)",
+        "ui_type": "slider",
+        "range": {"min": 0.0, "max": 1.0, "step": 0.01, "type": "float"},
+        "api_param": "top_p",
+    },
+    "frequency_penalty": {
+        "display_name": "频率惩罚",
+        "ui_type": "slider",
+        "range": {"min": -2.0, "max": 2.0, "step": 0.01, "type": "float"},
+        "api_param": "frequency_penalty",
+    },
+    "presence_penalty": {
+        "display_name": "存在惩罚",
+        "ui_type": "slider",
+        "range": {"min": -2.0, "max": 2.0, "step": 0.01, "type": "float"},
+        "api_param": "presence_penalty",
+    },
+    "思考模式": {
+        "display_name": "思考模式",
+        "ui_type": "checkbox",
+        # 无 api_param，由 chat_worker 特殊处理
+    },
+    "思考等级": {
+        "display_name": "思考等级",
+        "ui_type": "combobox",
+        "options": ["low", "medium", "high", "max"],
+        "api_param": "reasoning_effort",
+    },
+    "启用技能": {
+        "display_name": "启用技能",
+        "ui_type": "checkbox",
+    },
+    "API_KEY": {
+        "ui_type": "password",
+    },
+    "选择模型": {
+        "ui_type": "model_selector",
+    },
 }
 
 

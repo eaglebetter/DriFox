@@ -20,6 +20,7 @@ from openai import (
     OpenAI, BadRequestError, RateLimitError, APIError, APIConnectionError,
 )
 
+from app.constants import PARAM_SCHEMA
 from app.core.message_content import consolidate_messages, append_text_block, messages_to_api, to_api_message
 from app.core.permission_cache import PermissionCache
 from app.core.provider_profile import get_provider_profile
@@ -387,14 +388,6 @@ class OpenAIChatWorker(QThread):
         model = str(self.llm_config.get("模型名称", "gpt-4o"))
 
         extra_body = {}
-        mapping = {
-            "温度": "temperature",
-            "最大Token": "max_tokens",
-            "核采样": "top_p",
-            "频率惩罚": "presence_penalty",
-            "重复惩罚": "frequency_penalty",
-            "思考等级": "reasoning_effort",
-        }
 
         skip_params = {"temperature", "top_p", "presence_penalty", "frequency_penalty"}
         if model and (model.startswith("o1") or model.startswith("o3")):
@@ -403,7 +396,9 @@ class OpenAIChatWorker(QThread):
         for cn_key, value in self.llm_config.items():
             if cn_key in ["API_KEY", "API_URL", "模型名称", "系统提示", "启用技能"]:
                 continue
-            en_key = mapping.get(cn_key)
+            # 从 PARAM_SCHEMA 查找 API 参数名
+            meta = PARAM_SCHEMA.get(cn_key, {})
+            en_key = meta.get("api_param")
             if not en_key and _VALID_IDENTIFIER_PATTERN.match(cn_key):
                 en_key = cn_key
             if not en_key or en_key in skip_params:

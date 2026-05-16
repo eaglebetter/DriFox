@@ -206,32 +206,59 @@ explorer "{skill_path}\assets\agent_canvas.html"
 
 ---
 
-## 热更新画布流程
+## 热更新画布流程 v3.0
 
-使用专用服务器启动画布，实现热更新开发流程。
+**架构升级**：v3.0 使用 SSE（Server-Sent Events）实现秒级热推送，替代旧版 3s 轮询。
 
-### 完整流程
+### 技术栈
+
+| 层 | 技术 | 说明 |
+|----|------|------|
+| 前端 | TypeScript + React + React Flow + Vite | 组件化画布 |
+| 热更新 | SSE (Server-Sent Events) | 500ms 文件监控 + 即时推送 |
+| 后端 | Python HTTP Server | 静态服务 + POST 保存 + SSE |
+| 状态管理 | Zustand | 轻量响应式 store |
+| 画布引擎 | @xyflow/react (React Flow v12) | 专业节点编排 |
+
+### 完整流程（人在回路）
 
 ```
-1. bg_start 启动画布服务器 (C:/tmp/canvas)   ← server.py
+1. 首次部署: cd canvas-app && deploy.bat（构建 dist + 复制到 C:\tmp\canvas）
        ↓
-2. write config.json 写入画布配置
+2. bg_start 启动画布服务器
        ↓
-3. bash 打开浏览器 (start http://localhost:8081/agent_canvas.html)
+3. write config.json 写入画布配置
        ↓
-4. 画布自动加载 config.json（有则直接显示，无则兜底默认流程）
+4. bash 打开浏览器 (start http://localhost:8081)
        ↓
-5. 用户在画布上编辑（拖拽节点、修改配置、增删连线）
+5. 画布通过 SSE 实时加载 config.json（秒级）
        ↓
-6. 1.5 秒防抖后画布自动 POST 保存到 feedback.json，Toast 提示「💾 已自动保存」
+6. 用户在画布上编辑（拖拽节点、修改配置、增删连线、键盘 Delete 删除）
        ↓
-7. 用户告诉大模型"改好了"
+7. 300ms 防抖后自动 POST /save-config → 状态指示器显示「💾 保存中... → ✅ 已保存」
        ↓
-8. 大模型 read feedback.json 获取修改内容
+8. 用户告诉大模型"改好了"
        ↓
-9. 大模型修复后 write config.json
+9. 大模型读取当前状态（GET /get-state 或直接 read config.json）
        ↓
-10. 画布每3秒轮询检测到 config.json 变化 → 自动刷新 ✅
+10. 大模型修复后 write config.json
+       ↓
+11. 服务器文件监控（500ms）检测到变化 → SSE 推送到浏览器
+       ↓
+12. 画布毫秒级更新 + Toast「🤖 大模型已更新画布」✅
+```
+
+### 首次部署
+
+```bash
+# 进入画布项目目录
+cd D:\work\DriFoxx\app\skills\agent-canvas-designer\canvas-app
+
+# 安装依赖（仅首次）
+npm install
+
+# 一键部署：构建 + 复制到 C:\tmp\canvas
+deploy.bat
 ```
 
 ### 启动服务器
@@ -240,11 +267,7 @@ explorer "{skill_path}\assets\agent_canvas.html"
 <bg_start command="cmd.exe /c \"cd /d C:\tmp\canvas && python server.py\"" />
 ```
 
-> ⚠️ cwd 参数在 cmd.exe 中不生效，必须在命令里 `cd /d C:\tmp\canvas`
-
 ### 写入配置（大模型用）
-
-大模型修改设计后写入 `config.json`，画布 3 秒后自动刷新：
 
 ```xml
 <write path="C:/tmp/canvas/config.json">
@@ -260,188 +283,90 @@ explorer "{skill_path}\assets\agent_canvas.html"
 </write>
 ```
 
+> 💡 **无需等待轮询**：服务器 500ms 内检测到文件变化，SSE 即时推送到浏览器，画布秒级刷新。
+
 ### 读取画布编辑结果（大模型用）
 
-用户编辑画布后自动保存到 `feedback.json`，大模型通过 GET 接口或直接读文件获取：
-
 ```bash
-# 方式一：GET 接口（推荐）
+# 方式一：GET 接口（推荐，直接获取当前状态）
 webfetch url="http://localhost:8081/get-state"
 
 # 方式二：直接读文件
-read path="C:/tmp/canvas/feedback.json"
+read path="C:/tmp/canvas/config.json"
 ```
 
 ### 打开浏览器
 
 ```xml
-<bash command="start http://localhost:8081/agent_canvas.html" />
+<bash command="start http://localhost:8081" />
 ```
 
-### 读取用户修改
+### 状态指示器
 
-用户点击「📤 导出反馈」后，画布自动 POST 到 `/save-feedback`，直接保存到 `C:/tmp/canvas/feedback.json`。
+画布顶部工具栏实时显示同步状态：
 
-**大模型读取反馈的流程**：
-```bash
-# 每次画布编辑后自动保存，用户只需说"改好了"
-# 大模型直接读取 feedback.json 获取最新编辑结果
-read path="C:/tmp/canvas/feedback.json"
-
-# 处理完成后删除（可选，防止重复读取）
-bash command="del \"C:\tmp\canvas\feedback.json\""
-```
-
-> 💡 不再需要手动点导出！编辑完成后 1.5 秒自动保存，大模型可直接读取
+| 状态 | 含义 |
+|------|------|
+| ✅ 已就绪 | 画布等待编辑 |
+| 💾 保存中... | 正在保存到服务器 |
+| ✅ 已保存 | 最新编辑已同步 |
+| ❌ 保存失败 | 保存出错 |
+| 🤖 LLM 已更新 | 大模型推送了新配置 |
+| 👤 已修改 | 用户做了编辑 |
 
 ### 停止服务器
-
-先查 bg_list 找到任务 ID，再 bg_stop：
 
 ```xml
 <bg_list />  ← 找到 server.py 的 task_id
 <bg_stop task_id="bg_xxxxxxxx" />
 ```
 
-也可用 `netstat -ano | findstr :8081` 找到 PID 后 `taskkill /F /PID xxx`
-
 ### 文件位置
 
 ```
 C:/tmp/canvas/
-├── server.py           # 专用服务器（支持保存）
-├── agent_canvas.html   # 画布主文件
-├── config.json         # 当前配置（大模型写入）
-└── feedback.json       # 用户导出（大模型读取）
+├── dist/               # Vite 构建产物（前端）
+│   ├── index.html
+│   └── assets/
+├── server.py           # 专用服务器（SSE + 文件监控）
+├── config.json         # 当前配置（大模型写入 / 画布自动保存）
+└── feedback.json       # 用户导出反馈（兼容旧版）
 ```
 
-### server.py 源码
+### 开发模式（本地修改代码时）
 
-```python
-#!/usr/bin/env python3
-"""
-画布专用服务器 — 支持热重载
-- GET   /*          服务静态文件
-- POST  /save-feedback  保存用户反馈到 feedback.json
-- POST  /save-config    保存配置到 config.json（供大模型写回）
-"""
-
-import http.server
-import socketserver
-import json
-import os
-
-PORT = 8081
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
-
-class CanvasHandler(http.server.SimpleHTTPRequestHandler):
-
-    def do_POST(self):
-        parsed = urllib.parse.urlparse(self.path)
-        path = parsed.path.rstrip('/')
-        content_length = int(self.headers.get('Content-Length', 0))
-        body = self.rfile.read(content_length)
-
-        if path == '/save-feedback':
-            self._save_file('feedback.json', body)
-        elif path == '/save-config':
-            self._save_file('config.json', body)
-        else:
-            self.send_response(404)
-            self.send_header('Content-Type', 'application/json')
-            self.end_headers()
-            self.wfile.write(json.dumps({'error': 'not found'}).encode())
-
-    def _save_file(self, filename, data):
-        """保存文件并返回 JSON 响应"""
-        try:
-            json.loads(data)  # 验证 JSON 合法性
-            with open(os.path.join(BASE_DIR, filename), 'wb') as f:
-                f.write(data)
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json')
-            self.end_headers()
-            self.wfile.write(json.dumps({'success': True, 'size': len(data)}).encode())
-            print(f'✅ 已保存 {filename} ({len(data)} bytes)')
-        except Exception as e:
-            self.send_response(500)
-            self.send_header('Content-Type', 'application/json')
-            self.end_headers()
-            self.wfile.write(json.dumps({'error': str(e)}).encode())
-
-    def do_GET(self):
-        if self.path == '' or self.path.endswith('/'):
-            self.send_response(302)
-            self.send_header('Location', '/agent_canvas.html')
-            self.end_headers()
-            return
-        return super().do_GET()
-
-    def log_message(self, format, *args):
-        print(f'[画布] {self.client_address[0]} - {format % args}')
-
-
-if __name__ == '__main__':
-    os.chdir(BASE_DIR)
-    print(f'🚀 画布服务器: http://localhost:{PORT}/agent_canvas.html')
-    print(f'   POST /save-feedback → feedback.json')
-    print(f'   POST /save-config   → config.json')
-    with socketserver.TCPServer(('0.0.0.0', PORT), CanvasHandler) as httpd:
-        httpd.serve_forever()
+```bash
+cd D:\work\DriFoxx\app\skills\agent-canvas-designer\canvas-app
+npm run dev
+# → Vite HMR 开发服务器 http://localhost:5173
+# → 自动代理 API 到 http://localhost:8081
 ```
-
-> ⚠️ 必须使用 `server.py` 而不是 `python -m http.server`，后者不支持 POST 保存文件
-
-### 画布交互
-
-- **📂 加载配置** - 手动重新加载 config.json
-- **📤 导出反馈** - POST 到服务器保存到 `C:/tmp/canvas/feedback.json`，底部弹出 Toast 通知
-- **自动保存** - 画布每次编辑后 1.5 秒自动 POST 到 `/save-config`，无需手动导出，大模型可直接读取
-- **自动加载** - 打开画布直接加载 config.json（不存在则显示默认流程）
-- **热更新** - 每 3 秒自动检查 config.json 变化，有更新自动刷新
-
-### 注意事项
-
-1. Python 在 Windows 上 `C:/tmp` 解析为 C:\tmp
-2. 画布每 3 秒自动检查 config.json 更新
-3. 每次修改配置后，用户刷新页面即可看到新配置
-4. 导出的是完整的画布 JSON，包含节点位置和连线信息
 
 ---
 
 ## 已知问题与调试
 
-### 连线无法显示
+### 画布无法加载
 
-**症状**：从 config.json 加载后，节点显示正常但连线缺失。
+**症状**：`http://localhost:8081` 返回 404
 
-**原因**：`loadConfigData` 函数中 `createNode` 返回的是节点 ID 字符串，但后续代码错误地把它当成节点对象访问 `.eps` 属性。
+**解决**：确保 `deploy.bat` 已执行，`C:/tmp/canvas/dist/` 存在构建产物。
 
-**修复**：通过节点 ID 在 `nodes` 数组中查找真正的节点对象：
-```javascript
-var sourceId = nodeIdMap[conn.sourceId];
-var targetNode = nodes.find(function(n) { return n.id === sourceId; });
-```
+### 热更新不工作
 
-**验证**：刷新画布后，检查浏览器控制台是否有 "连接失败" 日志。
+**症状**：大模型写入 config.json 后画布不刷新
 
-### 浏览器控制台调试
+**排查**：
+1. 浏览器控制台查看 SSE 连接状态（Network → EventStream）
+2. 服务器控制台查看 `🔄 检测到 config.json 变化` 日志
+3. 确认 config.json 写入路径为 `C:/tmp/canvas/config.json`
 
-画布运行时会输出以下日志：
-- `✅ 已加载配置: xxx` — 配置加载成功
-- `🔄 检测到配置更新，重新加载...` — 热更新触发
-- `连接失败: {sourceId, targetId}` — 连线创建失败
+### 重新构建
 
-**调试方法**：按 `F12` 打开开发者工具 → Console 面板
+修改前端代码后重新部署：
 
-### 画布与技能目录同步
-
-画布主文件位于两个位置：
-- `C:/tmp/canvas/agent_canvas.html` — 开发调试用
-- `DriFox/app/skills/agent-canvas-designer/assets/agent_canvas.html` — 技能发布用
-
-修改画布后需要同步到技能目录：
 ```bash
-copy /Y "C:\tmp\canvas\agent_canvas.html" "D:\work\DriFox\app\skills\agent-canvas-designer\assets\agent_canvas.html"
+cd D:\work\DriFoxx\app\skills\agent-canvas-designer\canvas-app
+npm run build
+# 然后复制 dist/ 到 C:\tmp\canvas\dist\
 ```
