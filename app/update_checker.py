@@ -1,6 +1,9 @@
 import os
+import platform
+import plistlib
 import subprocess
 import tempfile
+import glob
 
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import QWidget, QApplication, QProgressDialog, QHBoxLayout
@@ -124,7 +127,6 @@ class UpdateChecker(QWidget):
 
     def _start_download(self, latest_release):
         """根据平台寻找安装文件并下载"""
-        import platform
         update_url = None
         exe_name = f"Update_{latest_release['tag_name']}.exe"
 
@@ -132,7 +134,7 @@ class UpdateChecker(QWidget):
         system = platform.system().lower()
 
         # 遍历 Release 资产定位安装文件
-        for asset in latest_release.get("assets", []):
+        for asset in latest_release.get("assets", []) or []:
             asset_name = asset["name"].lower()
             if system == "darwin" and asset_name.endswith(".dmg"):
                 # macOS 下载 dmg
@@ -141,11 +143,6 @@ class UpdateChecker(QWidget):
                 break
             elif system == "windows" and asset_name.endswith(".exe"):
                 # Windows 下载 exe
-                update_url = asset["browser_download_url"]
-                exe_name = asset["name"]
-                break
-            elif asset_name.endswith(".exe"):
-                # 其他平台优先使用 exe
                 update_url = asset["browser_download_url"]
                 exe_name = asset["name"]
                 break
@@ -174,13 +171,18 @@ class UpdateChecker(QWidget):
         self.download_thread.start()
 
     def _handle_download_finished(self):
-        """下载完成：不再执行解压和 BAT，直接运行 EXE"""
+        """下载完成：按平台提示用户安装"""
         if self.progress_dialog:
             self.progress_dialog.close()
 
         # 专业软件的最后确认：询问是否关闭程序并安装
+        system = platform.system().lower()
         title = "下载完成"
-        content = "安装包已准备就绪，是否立即关闭程序并升级？"
+        content = (
+            "安装包已准备就绪，是否立即关闭程序并升级？"
+            if system == "windows"
+            else "新版本已下载，是否立即关闭程序并自动升级？"
+        )
         msg_box = MessageBox(title, content, self.parent or self)
         msg_box.yesButton.setText(self.tr("现在安装"))
         msg_box.cancelButton.setText(self.tr("稍后手动安装"))
@@ -189,20 +191,73 @@ class UpdateChecker(QWidget):
             self._run_installer()
 
     def _run_installer(self):
-        """启动 Inno Setup 安装向导"""
+        """启动安装向导（Windows 运行 exe，macOS 自动升级）"""
+        system = platform.system().lower()
         try:
-            subprocess.Popen(
-                [self.installer_path],
-                shell=True,
-                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP
-                | subprocess.DETACHED_PROCESS,
-            )
+            if system == "darwin":
+                self._run_macos_upgrade()
+            else:
+                # Windows 运行 EXE 安装向导
+                subprocess.Popen(
+                    [self.installer_path],
+                    shell=True,
+                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP
+                    | subprocess.DETACHED_PROCESS,
+                )
 
             # 立即关闭主程序
             QApplication.quit()
             os._exit(0)
         except Exception as e:
             self.create_errorbar("启动失败", str(e))
+
+    def _run_macos_upgrade(self):
+        """macOS 自动升级：挂载DMG → 拷贝 .app 到 /Applications → 启动新版本"""
+        # 1. 挂载 DMG（输出 plist 格式以便解析挂载点）
+        result = subprocess.run(
+            ["hdiutil", "attach", "-quiet", "-nobrowse", "-plist", self.installer_path],
+            capture_output=True, text=True,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"DMG 挂载失败: {result.stderr}")
+
+        # 2. 解析 plist 获取挂载点
+        plist_data = plistlib.loads(result.stdout.encode())
+        mount_point = None
+        for entity in plist_data.get("system-entities", []):
+            mount_point = entity.get("mount-point")
+            if mount_point:
+                break
+
+        if not mount_point:
+            raise RuntimeError("无法找到 DMG 挂载点")
+
+        # 3. 在挂载卷中找到 .app 并拷贝到 /Applications
+        app_bundles = glob.glob(os.path.join(mount_point, "*.app"))
+        if not app_bundles:
+            raise RuntimeError(f"DMG 挂载卷中未找到 .app: {mount_point}")
+
+        src_app = app_bundles[0]
+        dst_app = os.path.join("/Applications", os.path.basename(src_app))
+
+        # 删除旧版本（如果存在）
+        if os.path.exists(dst_app):
+            subprocess.run(["rm", "-rf", dst_app], check=True)
+
+        # 使用 ditto 拷贝（保留代码签名、资源分支等 macOS 元数据）
+        subprocess.run(["ditto", src_app, dst_app], check=True)
+
+        # 4. 卸载 DMG
+        subprocess.run(["hdiutil", "detach", "-quiet", mount_point], capture_output=True)
+
+        # 5. 清理临时 DMG 文件
+        try:
+            os.remove(self.installer_path)
+        except OSError:
+            pass
+
+        # 6. 启动新版本（open 会自动使用新路径的 .app）
+        subprocess.Popen(["open", dst_app])
 
     def _cancel_download(self):
         if self.download_thread:
