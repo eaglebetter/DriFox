@@ -1,24 +1,40 @@
 # -*- coding: utf-8 -*-
 """
-消息上下文构建器 - 从 ChatEngine 提取
+消息上下文构建器 - ContextBudgetAllocator
 
-负责构建 LLM 消息上下文和预算计算。
+负责：
+1. 组装 LLM 消息上下文（系统提示、技能、自定义提示、记忆等）
+2. 预算分配决策（决定压缩策略、保留比例）
+3. 委托 HistoryCompactor 执行实际压缩
+
+设计原则：
+- 预算决策集中在此处，调整 token 分配只需改这里
+- 实际压缩逻辑委托给 HistoryCompactor，避免重复
 """
 
 import anyio
 from datetime import datetime
-from typing import Dict, List, Optional, Any, Callable
+from typing import Dict, List, Optional, Any
 
 from loguru import logger
 
 from app.core.message_content import consolidate_messages
-from app.core.provider_profile import get_provider_profile
 from app.core.token_estimator import count_messages_tokens
 from app.utils.config import Settings
 
 
-class ContextBuilder:
-    """负责构建 LLM 消息上下文和预算计算"""
+# 预算分配常量
+SYSTEM_PROMPT_RESERVE_RATIO = 0.15  # 预留 15% 给系统提示（含技能、记忆等）
+MIN_HISTORY_BUDGET_RATIO = 0.30  # 历史消息最少保留 30%
+
+
+class ContextBudgetAllocator:
+    """
+    上下文预算分配器 - 负责任务：
+    1. 计算可用预算并分配给各部分
+    2. 组装完整消息上下文
+    3. 委托压缩器执行实际压缩
+    """
 
     def __init__(
         self,
@@ -29,8 +45,8 @@ class ContextBuilder:
         """
         Args:
             agent_manager: AgentManager 实例
-            memory_context_getter: 获取记忆上下文的回调
-            compactor: HistoryCompactor 实例
+            compactor: HistoryCompactor 实例（用于实际压缩）
+            backend: 后端实例（用于获取记忆上下文）
         """
         self._agent_manager = agent_manager
         self.backend = backend
@@ -45,13 +61,13 @@ class ContextBuilder:
     ) -> List[Dict]:
         """
         构建发送给 LLM 的消息列表。
-        
+
         Args:
             session: ChatSession 实例
             llm_config: LLM 配置字典
             allow_llm_summary: 是否允许 LLM 摘要
             current_agent: 当前智能体名称
-            
+
         Returns:
             消息列表
         """
@@ -111,8 +127,8 @@ class ContextBuilder:
             params = history_messages[-1].get("params", {})
             history_messages = history_messages[:-1]
 
-        # 上下文压缩
-        budget = self._compactor.get_budget(llm_config)
+        # 上下文压缩 - 使用分配器计算的预算
+        budget = self._allocate_history_budget(full_system_content, llm_config)
         history_for_api, compaction_state, compaction_cache = anyio.run(
             anyio.to_thread.run_sync,
             lambda: self._compactor.compact(
@@ -137,60 +153,77 @@ class ContextBuilder:
 
         return messages
 
+    def _allocate_history_budget(self, system_content: str, llm_config: Dict) -> int:
+        """
+        分配历史消息预算。
+
+        策略：
+        1. 获取模型上下文上限
+        2. 估算系统提示 token
+        3. 剩余空间分配给历史消息
+
+        Args:
+            system_content: 组装后的系统提示内容
+            llm_config: LLM 配置
+
+        Returns:
+            历史消息可用 token 数
+        """
+        # 委托给 compactor 计算总预算
+        total_budget = self._compactor.get_budget(llm_config)
+
+        # 估算系统提示 token
+        system_tokens = count_messages_tokens([{"role": "system", "content": system_content}])
+
+        # 动态分配：系统提示越大，历史预算越少
+        system_ratio = system_tokens / max(total_budget, 1)
+        if system_ratio > SYSTEM_PROMPT_RESERVE_RATIO:
+            # 系统提示超出预期，压缩历史预算
+            history_budget = int(total_budget * (1 - system_ratio))
+        else:
+            # 正常情况：至少保留 MIN_HISTORY_BUDGET_RATIO
+            history_budget = int(total_budget * MIN_HISTORY_BUDGET_RATIO)
+
+        return max(500, history_budget)
+
     def get_context_budget(self, llm_config: Dict) -> int:
         """
-        计算上下文预算。
-        
+        计算上下文预算（委托给 HistoryCompactor）。
+
         Args:
             llm_config: LLM 配置字典
-            
+
         Returns:
             可用的上下文 token 数
         """
-        profile = get_provider_profile(llm_config)
-        context_limit = int(profile.get("context_limit", 128000))
+        return self._compactor.get_budget(llm_config)
 
-        # 支持多种上下文长度配置字段名
-        for key in (
-            "context_limit",
-            "context_window",
-            "max_context_tokens",
-            "max_input_tokens",
-            "最大Token",
-        ):
-            value = llm_config.get(key)
-            if value not in (None, ""):
-                try:
-                    context_limit = int(value)
-                    break
-                except (ValueError, TypeError):
-                    logger.debug(f"Failed to parse context_limit: {value}")
-                    continue
+    def get_budget_breakdown(self, llm_config: Dict, system_content: str = None) -> Dict[str, int]:
+        """
+        获取预算分解（用于 UI 显示）。
 
-        max_output_tokens = llm_config.get(
-            "最大新Token",
-            llm_config.get(
-                "max_tokens",
-                llm_config.get("max_output_tokens", profile.get("max_output_tokens", 4096)),
-            ),
-        )
-        try:
-            max_output_tokens = int(max_output_tokens)
-        except (ValueError, TypeError):
-            logger.debug(f"Failed to parse max_output_tokens: {max_output_tokens}")
-            max_output_tokens = int(profile.get("max_output_tokens", 4096))
+        Args:
+            llm_config: LLM 配置
+            system_content: 系统提示内容（可选）
 
-        model_name = str(llm_config.get("model", "")).lower()
-        profile_max_output = int(profile.get("max_output_tokens", 4096))
+        Returns:
+            预算分解字典，包含 total、system、history 等
+        """
+        total = self._compactor.get_budget(llm_config)
+        result = {
+            "total": total,
+            "system": 0,
+            "history": total,
+        }
 
-        if max_output_tokens > profile_max_output * 2:
-            context_limit = min(context_limit, max_output_tokens)
+        if system_content:
+            system_tokens = count_messages_tokens([
+                {"role": "system", "content": system_content}
+            ])
+            result["system"] = system_tokens
+            result["history"] = max(500, total - system_tokens)
 
-        reserved = min(800, max_output_tokens)
-        if "o1" in model_name or "o3" in model_name:
-            reserved = min(max_output_tokens, 32000)
-
-        return max(500, context_limit - reserved)
+        return result
 
     def count_tokens(self, messages: List[Dict]) -> int:
         """计算消息列表的 token 数"""

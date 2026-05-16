@@ -4875,7 +4875,7 @@ class OpenAIChatToolWindow(ToolWindow):
         # 注意：preserve_compaction=False
         # worker 送回来的 current_session_messages 是原始未压缩消息，
         # 保留旧的压缩缓存会导致 state 不一致（缓存说"已压缩"但消息已膨胀）。
-        # 清空缓存让下一次 ContextBuilder 从原始消息正确重新压缩。
+        # 清空缓存让下一次 ContextBudgetAllocator 从原始消息正确重新压缩。
         session.set_messages(messages or [], preserve_compaction=False)
         self._refresh_context_usage_indicator()
 

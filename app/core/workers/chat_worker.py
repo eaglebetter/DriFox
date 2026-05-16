@@ -568,7 +568,7 @@ class OpenAIChatWorker(QThread):
                     self._api_messages_cache = current_messages
                     # 注意：current_session_messages 故意不做同步压缩。
                     # 它的增长会在 worker 结束时由 _on_messages_updated 的
-                    # preserve_compaction=False 清空缓存，下轮发送时由 ContextBuilder 统一压缩。
+                    # preserve_compaction=False 清空缓存，下轮发送时由 ContextBudgetAllocator 统一压缩。
                 else:
                     # 更新 API 消息缓存
                     self._append_to_api_cache(response_sequence)

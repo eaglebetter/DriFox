@@ -11,7 +11,7 @@ from app.core.chat_session import (
     ChatSession,
     SessionManager,
 )
-from app.core.context_builder import ContextBuilder
+from app.core.context_builder import ContextBudgetAllocator
 from app.core.history_compactor import HistoryCompactor
 from app.core.message_content import (
     consolidate_messages,
@@ -63,8 +63,8 @@ class ChatEngine:
             agent_manager=agent_manager,
         )
         
-        # 初始化 ContextBuilder
-        self._context_builder = ContextBuilder(
+        # 初始化 ContextBudgetAllocator
+        self._context_builder = ContextBudgetAllocator(
             agent_manager=agent_manager,
             compactor=self._compactor,
             backend=backend
@@ -298,7 +298,7 @@ class ChatEngine:
         llm_config: Dict,
         allow_llm_summary: bool = False,
     ) -> List[Dict]:
-        """委托给 ContextBuilder 构建消息"""
+        """委托给 ContextBudgetAllocator 构建消息"""
         messages = self._context_builder.build_messages(
             session=session,
             llm_config=llm_config,
