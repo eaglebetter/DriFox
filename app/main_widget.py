@@ -146,6 +146,7 @@ class OpenAIChatToolWindow(ToolWindow):
     _todo_floating_widget = None
     _question_floating_widget = None
     _question_tool_call_id = None
+    _todo_was_visible_before_system: bool = False  # 打开系统卡片前todo的可见状态
     _window_active: bool = True
     # AutoLoop 状态
     _is_auto_loop_running: bool = False
@@ -416,6 +417,7 @@ class OpenAIChatToolWindow(ToolWindow):
         """切换设置卡片的显示"""
         if self._settings_popup.isVisible():
             self._settings_popup.hide()
+            self._restore_after_system_close()
         else:
             self._hide_main_popups()  # 隐藏其他主面板
             self._settings_popup.show()
@@ -1382,8 +1384,15 @@ class OpenAIChatToolWindow(ToolWindow):
         """隐藏主要的悬浮面板（互斥显示）
 
         包括：系统设置、模型配置、历史会话、记忆管理、AutoLoop
-        不包括：工具悬浮、Todo、子智能体等工具类浮窗
+        现在也保存并隐藏 todo/tool/sub_agent 实时卡片
         """
+        # 保存 todo 可见状态，用于系统卡片关闭后恢复
+        self._todo_was_visible_before_system = self._todo_floating_widget.isVisible()
+        # 隐藏实时卡片
+        self._todo_floating_widget.setVisible(False)
+        self._tool_floating_widget.setVisible(False)
+        self._sub_agent_floating_widget.setVisible(False)
+        # 隐藏系统卡片
         self._model_config_card.hide()
         self._history_card.hide()
         self._settings_popup.hide()
@@ -1393,11 +1402,44 @@ class OpenAIChatToolWindow(ToolWindow):
         if not self._is_auto_loop_running:
             self._auto_loop_running_card.hide()
 
+    def _system_cards(self) -> list:
+        """返回所有系统卡片的列表，用于检查是否有系统卡片可见"""
+        return [
+            self._model_config_card,
+            self._history_card,
+            self._settings_popup,
+            self._memory_card,
+            self._provider_edit_card,
+            self._auto_loop_config_card,
+            self._hook_edit_card,
+        ]
+
+    def _is_any_system_card_visible(self) -> bool:
+        """检查是否有任何系统卡片可见"""
+        for card in self._system_cards():
+            if card.isVisible():
+                return True
+        # auto_loop_running_card 较特殊，单独检查
+        if self._auto_loop_running_card.isVisible():
+            return True
+        return False
+
+    def _restore_after_system_close(self):
+        """系统卡片关闭后，恢复 todo/tool/sub_agent 实时卡片"""
+        if self._is_any_system_card_visible():
+            return  # 还有其他系统卡片开着，不恢复
+        # 恢复 todo（如果之前是显示的且还有内容）
+        if self._todo_was_visible_before_system and self._todo_floating_widget._todo_list:
+            self._todo_floating_widget.setVisible(True)
+        # tool 和 sub_agent 有自我生命周期管理，不需要强制恢复
+        # 它们在 finish_tool/clear 等方法中自行管理可见性
+
     def _toggle_model_config_card(self):
         """切换模型配置卡片的显示"""
         # 切换当前卡片
         if self._model_config_card.isVisible():
             self._model_config_card.hide()
+            self._restore_after_system_close()
         else:
             self._hide_main_popups()  # 隐藏其他主面板
             # 每次打开都重新加载配置
@@ -1560,6 +1602,7 @@ class OpenAIChatToolWindow(ToolWindow):
         # 切换当前卡片
         if self._history_card.isVisible():
             self._history_card.hide()
+            self._restore_after_system_close()
         else:
             self._hide_main_popups()  # 隐藏其他主面板
             self._history_card.show()
@@ -1658,6 +1701,7 @@ class OpenAIChatToolWindow(ToolWindow):
             self._load_history_session_from_popup(index)
         # 关闭历史会话卡片
         self._history_card.hide()
+        self._restore_after_system_close()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -4396,6 +4440,7 @@ class OpenAIChatToolWindow(ToolWindow):
             return
 
         if tool_name == "question":
+            self._hide_all_cards_for_question()
             question_text = arguments.get("question", "")
             options = arguments.get("options", [])
             multiple = arguments.get("multiple", False)
@@ -4807,9 +4852,35 @@ class OpenAIChatToolWindow(ToolWindow):
         new_card.finish_streaming()
         self._scroll_to_bottom()
 
+    def _hide_all_cards_for_question(self):
+        """Question 卡片显示时，隐藏所有其他卡片（最高优先级）"""
+        # 保存 todo 可见状态（用于 question 关闭后恢复）
+        self._todo_was_visible_before_system = self._todo_floating_widget.isVisible()
+        # 隐藏所有卡片
+        self._todo_floating_widget.setVisible(False)
+        self._tool_floating_widget.setVisible(False)
+        self._sub_agent_floating_widget.setVisible(False)
+        self._model_config_card.hide()
+        self._history_card.hide()
+        self._settings_popup.hide()
+        self._memory_card.hide()
+        self._provider_edit_card.hide()
+        self._auto_loop_config_card.hide()
+        self._hook_edit_card.hide()
+        if not self._is_auto_loop_running:
+            self._auto_loop_running_card.hide()
+
+    def _restore_after_question_close(self):
+        """Question 卡片关闭后，恢复非系统卡片的显示状态"""
+        # 恢复 todo（如果之前是显示的且还有内容）
+        if self._todo_was_visible_before_system and self._todo_floating_widget._todo_list:
+            self._todo_floating_widget.setVisible(True)
+        # tool 和 sub_agent 有自我生命周期管理，不需要强制恢复
+
     def _on_question_asked(
             self, tool_call_id: str, question: str, options: list, multiple: bool = False
     ):
+        self._hide_all_cards_for_question()
         self._question_tool_call_id = tool_call_id
         if not isinstance(options, list):
             options = []
@@ -4817,6 +4888,7 @@ class OpenAIChatToolWindow(ToolWindow):
         self._notify_if_inactive("需要回答问题", question[:100])
 
     def _on_question_answered(self, answer: str):
+        self._restore_after_question_close()
         if self._pending_permission_tool_call_id:
             tool_call_id = self._pending_permission_tool_call_id
             self._pending_permission_tool_call_id = None
@@ -4846,6 +4918,7 @@ class OpenAIChatToolWindow(ToolWindow):
 
     def _on_question_cancelled(self):
         """用户关闭问题窗口时，返回空答案让大模型继续"""
+        self._restore_after_question_close()
         if self._pending_permission_tool_call_id:
             tool_call_id = self._pending_permission_tool_call_id
             self._pending_permission_tool_call_id = None
@@ -4874,6 +4947,7 @@ class OpenAIChatToolWindow(ToolWindow):
     ):
         self._pending_permission_tool_call_id = tool_call_id
         self._pending_permission_auto_allow = False
+        self._hide_all_cards_for_question()  # question卡片最高优先级
         try:
             arg_str = str(arguments)[:200] if arguments else ""
             question_text = f"工具 `{tool_name}` 需要权限执行。\n\n参数: {arg_str}"
@@ -4883,6 +4957,7 @@ class OpenAIChatToolWindow(ToolWindow):
             logger.error(f"[Permission] Approval error: {e}")
             self.backend.deny_tool_permission(tool_call_id)
             self._pending_permission_tool_call_id = None
+            self._restore_after_question_close()
 
     def _on_compaction_updated(self, task_id: str, new_summary: str):
         """
@@ -5140,6 +5215,7 @@ class OpenAIChatToolWindow(ToolWindow):
         """切换记忆管理卡片的显示"""
         if self._memory_card.isVisible():
             self._memory_card.hide()
+            self._restore_after_system_close()
         else:
             self._hide_main_popups()  # 隐藏其他主面板
             self._memory_card.show()
@@ -5335,6 +5411,7 @@ class OpenAIChatToolWindow(ToolWindow):
 
         if self._auto_loop_config_card.isVisible():
             self._auto_loop_config_card.hide()
+            self._restore_after_system_close()
         else:
             self._hide_main_popups()
             self._auto_loop_config_card.show()
@@ -5542,6 +5619,7 @@ class OpenAIChatToolWindow(ToolWindow):
         # 隐藏运行卡
         self._auto_loop_running_card.stop_animation()
         self._auto_loop_running_card.hide()
+        self._restore_after_system_close()
 
         # 保存 AutoLoop 消息到会话历史
         if self._auto_loop_worker:
