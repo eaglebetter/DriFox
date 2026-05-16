@@ -1394,6 +1394,7 @@ class OpenAIChatToolWindow(ToolWindow):
         # 隐藏实时卡片
         self._todo_floating_widget.setVisible(False)
         self._tool_floating_widget.setVisible(False)
+        self._tool_floating_widget.set_suppress_visible(True)
         self._sub_agent_floating_widget.setVisible(False)
         # 隐藏系统卡片
         self._model_config_card.hide()
@@ -1429,8 +1430,9 @@ class OpenAIChatToolWindow(ToolWindow):
 
     def _restore_after_system_close(self):
         """系统卡片关闭后，恢复 todo/tool/sub_agent 实时卡片"""
-        # 标记系统卡片全部关闭
+        # 标记系统卡片全部关闭，解除压制
         self._is_system_card_visible = False
+        self._tool_floating_widget.set_suppress_visible(False)
         if self._is_any_system_card_visible():
             return  # 还有其他系统卡片开着，不恢复
         # 恢复 todo（如果之前是显示的且还有内容）

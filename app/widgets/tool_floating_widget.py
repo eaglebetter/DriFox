@@ -67,6 +67,7 @@ class ToolFloatingWidget(SimpleCardWidget):
         self._is_running = False
         self._current_tool = None
         self._current_process = None
+        self._suppress_visible = False  # 被系统卡片压制，工具调用期间不自行显示
         self._rotation_angle = 0
         self._rotation_timer = QTimer(self)
         self._rotation_timer.timeout.connect(self._update_rotation)
@@ -210,36 +211,23 @@ class ToolFloatingWidget(SimpleCardWidget):
     def _append_progress(self, text: str):
         self.task_label.setText(text)
 
+    def show_when_ready(self):
+        """根据经过时间决定是否显示（供外部在适当时机调用）"""
+        if self._suppress_visible:
+            return
+        self.setVisible(True)
+
     def update_progress(self, message: str):
         """更新进度"""
-        import time
-
-        elapsed = time.time() - self._task_start_time if self._task_start_time else 0
-
-        if elapsed > 3:
-            self.setVisible(True)
-
         self.task_label.setText(f"⏳ {message}")
 
     def add_tool_call(self, tool_name: str, args: dict = None):
         """添加工具调用"""
-        import time
-
-        elapsed = time.time() - self._task_start_time if self._task_start_time else 0
-
-        if elapsed > 3:
-            self.setVisible(True)
-
         self.tool_name_label.setText(f" {tool_name} ")
 
     def add_tool_result(self, result: str, success: bool = True):
         """添加工具结果"""
-        import time
-
-        elapsed = time.time() - self._task_start_time if self._task_start_time else 0
-
-        if elapsed > 3:
-            self.setVisible(True)
+        pass
 
     def finish_tool(self, result: str = None, success: bool = True):
         """完成工具执行"""
@@ -298,6 +286,12 @@ class ToolFloatingWidget(SimpleCardWidget):
         """根据耗时决定是否显示"""
         if elapsed > 3:
             self.setVisible(True)
+
+    def set_suppress_visible(self, suppress: bool):
+        """设置是否压制显示（系统卡片打开时调用）"""
+        self._suppress_visible = suppress
+        if suppress:
+            self.setVisible(False)
 
     def set_opacity(self, opacity: float):
         """设置透明度，用于响应全局透明度变化"""
