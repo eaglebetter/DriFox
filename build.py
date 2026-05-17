@@ -23,7 +23,8 @@ to_remove = [
     "tensorflow",
     "torchaudio",
     "sqlalchemy",
-    "PIL"
+    "PIL",
+    "PyQt5/Qt5/translations"
 ]
 # 2. 图标选择 (跨平台)
 icon_arg = None
