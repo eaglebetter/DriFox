@@ -154,7 +154,6 @@ class OpenAIChatToolWindow(ToolWindow):
     _auto_loop_config_card: Optional[AutoLoopConfigCard] = None
     _auto_loop_running_card: Optional[AutoLoopRunningCard] = None
     _auto_loop_worker: Optional[AutoLoopWorker] = None
-    _saved_workdir: Optional[str] = None
     _history_preview_messages: Optional[List[dict]] = None
     _history_preview_title: str = ""
     insertResponse = pyqtSignal(str)
@@ -5607,21 +5606,19 @@ class OpenAIChatToolWindow(ToolWindow):
         
         abs_path = os.path.abspath(project_path)
         if os.path.isdir(abs_path):
-            if self.backend.tool_executor and self.backend.tool_executor.builtin_tools:
-                self._saved_workdir = str(self.backend.tool_executor.builtin_tools.workdir)
-                self.backend.tool_executor.builtin_tools.set_workdir(abs_path)
+            if self.backend.tool_executor:
+                # 通过 ToolExecutor.set_workdir 统一设置，同时更新 builtin_tools
+                self.backend.tool_executor.set_workdir(abs_path)
             config.project_path = abs_path
             logger.info(f"[AutoLoop] Workdir set to: {abs_path}")
         else:
-            self._saved_workdir = None
+            logger.warning(f"[AutoLoop] Project path does not exist: {abs_path}")
 
         # 隐藏配置卡，显示运行卡
         self._auto_loop_config_card.hide()
         self._auto_loop_running_card.show()
         # 确保停止按钮可见（彻底修复完成后重新运行时停止按钮消失的问题）
-        if hasattr(self._auto_loop_running_card, '_stop_btn'):
-            self._auto_loop_running_card._stop_btn.show()
-            self._auto_loop_running_card._stop_btn.update()
+        self._auto_loop_running_card.show_stop_button()
         self._auto_loop_running_card.start_animation()
         self._auto_loop_running_card.set_max_tokens(config.max_tokens)
         self._auto_loop_running_card.set_task(config.task_prompt)
@@ -5673,7 +5670,6 @@ class OpenAIChatToolWindow(ToolWindow):
         )
 
         # 连接信号 - 注意：tokens_updated 必须用 DirectConnection 确保实时更新
-        from PyQt5.QtCore import Qt
         self._auto_loop_worker.iteration_started.connect(self._on_auto_loop_iteration_started, Qt.QueuedConnection)
         self._auto_loop_worker.iteration_completed.connect(self._on_auto_loop_iteration_completed, Qt.QueuedConnection)
         self._auto_loop_worker.progress_updated.connect(self._on_auto_loop_progress, Qt.QueuedConnection)
@@ -5681,6 +5677,7 @@ class OpenAIChatToolWindow(ToolWindow):
         self._auto_loop_worker.loop_error.connect(self._on_auto_loop_error, Qt.QueuedConnection)
         self._auto_loop_worker.loop_stopped.connect(self._on_auto_loop_stopped, Qt.QueuedConnection)
         self._auto_loop_worker.log_signal.connect(self._on_auto_loop_log, Qt.QueuedConnection)
+        self._auto_loop_worker.phase_changed.connect(self._on_auto_loop_phase_changed, Qt.QueuedConnection)
         # tokens_updated 使用 QueuedConnection 确保 UI 更新在主线程执行（避免 DirectConnection 在 worker 线程执行导致 UI 无法更新）
         self._auto_loop_worker.tokens_updated.connect(self._on_auto_loop_tokens_updated, Qt.QueuedConnection)
 
@@ -5699,37 +5696,31 @@ class OpenAIChatToolWindow(ToolWindow):
         """AutoLoop 阶段变更"""
         if self._auto_loop_running_card:
             self._auto_loop_running_card.set_phase(phase)
-            if phase == "planning":
-                self._auto_loop_running_card._status_label.setText("📋 拆解任务中...")
-            elif phase == "executing":
-                self._auto_loop_running_card._status_label.setText("🔨 按计划执行中...")
-            elif phase == "completed":
-                self._auto_loop_running_card._status_label.setText("✅ 全部完成")
 
     def _on_auto_loop_iteration_started(self, current: int, total: int):
         """迭代开始"""
         if self._auto_loop_running_card:
-            # 判断是规划阶段还是执行阶段
-            if self._auto_loop_worker and self._auto_loop_worker._engine:
-                engine = self._auto_loop_worker._engine
-                if engine.is_planning_phase():
-                    # 规划阶段
-                    self._auto_loop_running_card.set_phase("planning")
-                    self._auto_loop_running_card._status_label.setText(f"📋 第 {current} 轮: 规划中...")
+            progress = self._auto_loop_worker.get_current_progress()
+            phase = progress.get("phase", "planning")
+            current_step = progress.get("current_step", 0)
+            total_steps = progress.get("total_steps", 0)
+
+            if phase == "planning":
+                # 规划阶段
+                self._auto_loop_running_card.set_phase("planning")
+                self._auto_loop_running_card.set_status(f"📋 第 {current} 轮: 规划中...")
+            else:
+                # 执行阶段
+                self._auto_loop_running_card.set_phase("executing")
+                # 显示当前步骤在状态文本中
+                if total_steps > 0:
+                    self._auto_loop_running_card.set_status(
+                        f"▶ 第 {current} 轮 / 共 {total} 轮 | 步骤 {current_step}/{total_steps}"
+                    )
                 else:
-                    # 执行阶段
-                    self._auto_loop_running_card.set_phase("executing")
-                    # 显示当前步骤在状态文本中
-                    step = engine._current_step
-                    total_steps = engine._total_steps
-                    if total_steps > 0:
-                        self._auto_loop_running_card._status_label.setText(
-                            f"▶ 第 {current} 轮 / 共 {total} 轮 | 步骤 {step}/{total_steps}"
-                        )
-                    else:
-                        self._auto_loop_running_card._status_label.setText(
-                            f"▶ 第 {current} 轮 / 共 {total} 轮"
-                        )
+                    self._auto_loop_running_card.set_status(
+                        f"▶ 第 {current} 轮 / 共 {total} 轮"
+                    )
 
     def _on_auto_loop_iteration_completed(self, iteration: int, summary: str):
         """迭代完成"""
@@ -5742,11 +5733,9 @@ class OpenAIChatToolWindow(ToolWindow):
             self._auto_loop_running_card.append_log(text)
 
     def _on_auto_loop_tokens_updated(self, total_tokens: int):
-        """Token 实时更新（同步模式：直接用 engine 的 total_tokens 更新显示）"""
-        if self._auto_loop_running_card and self._auto_loop_worker and self._auto_loop_worker._engine:
-            engine = self._auto_loop_worker._engine
-            # 使用 engine 的 _total_tokens 同步更新显示（而非累加本次增量）
-            self._auto_loop_running_card.update_tokens(engine._total_tokens)
+        """Token 实时更新 — 直接使用信号携带的值"""
+        if self._auto_loop_running_card:
+            self._auto_loop_running_card.update_tokens(total_tokens)
 
     def _on_auto_loop_progress(self, progress: dict):
         """更新运行卡进度（不更新 token，因为 update_tokens() 会专门处理）
@@ -5779,15 +5768,8 @@ class OpenAIChatToolWindow(ToolWindow):
         """清理 AutoLoop 状态"""
         self._is_auto_loop_running = False
 
-        # 恢复工作目录
-        if self._saved_workdir:
-            try:
-                if self.backend.tool_executor and self.backend.tool_executor.builtin_tools:
-                    self.backend.tool_executor.builtin_tools.set_workdir(self._saved_workdir)
-                    logger.info(f"[AutoLoop] Workdir restored to: {self._saved_workdir}")
-            except Exception as e:
-                logger.warning(f"[AutoLoop] Failed to restore workdir: {e}")
-            self._saved_workdir = None
+        # 恢复为当前项目配置的工作目录
+        self._sync_working_directory()
 
         # 停止动画
         if self._auto_loop_running_card:
@@ -5856,8 +5838,8 @@ class OpenAIChatToolWindow(ToolWindow):
         
         # 确保 user 消息存在（第一条 user 消息）
         has_user = any(msg.get("role") == "user" for msg in existing_messages + messages)
-        if not has_user and self._auto_loop_worker and self._auto_loop_worker._config:
-            task_prompt = self._auto_loop_worker._config.task_prompt
+        if not has_user and self._auto_loop_worker:
+            task_prompt = self._auto_loop_worker.get_task_prompt()
             if task_prompt:
                 from datetime import datetime
                 user_msg = {

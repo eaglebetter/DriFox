@@ -23,16 +23,17 @@ from loguru import logger
 
 from app.core.auto_loop_config import AutoLoopConfig
 from app.core.auto_loop_engine import AutoLoopEngine, LoopState
+from app.core.auto_loop_prompt_composer import AutoLoopPromptComposer
 from app.core.workers import OpenAIChatWorker
 
 
 # ========== 规划阶段受限工具集 ==========
-PLANNING_TOOLS = {
-    # 扫描工具
-    "scan_repo", "glob", "grep", "list", "read", "websearch", "webfetch"
-    # 笔记写入工具
-    "write",
-}
+# PLANNING_TOOLS = {
+#     # 扫描工具
+#     "scan_repo", "glob", "grep", "list", "read", "websearch", "webfetch", ""
+#     # 笔记写入工具
+#     "write",
+# }
 
 
 class AutoLoopWorker(QThread):
@@ -69,6 +70,7 @@ class AutoLoopWorker(QThread):
 
         self._is_cancelled = False
         self._engine: Optional[AutoLoopEngine] = None
+        self._prompt_composer: Optional[AutoLoopPromptComposer] = None
         self._current_worker: Optional[OpenAIChatWorker] = None
 
         # 执行阶段的步骤追踪
@@ -85,15 +87,7 @@ class AutoLoopWorker(QThread):
 
     def _configure_tools_for_phase(self, tools_schema: List[Dict]) -> List[Dict]:
         """根据当前阶段配置工具集"""
-        if self._engine and self._engine.is_planning_phase():
-            # 规划阶段：只允许受限工具
-            allowed = set(PLANNING_TOOLS)
-            filtered = [t for t in tools_schema if t.get("function", {}).get("name", "") in allowed]
-            logger.info(f"[AutoLoop] Planning phase: restricting to {len(filtered)} tools")
-            return filtered
-        else:
-            # 执行阶段：使用完整工具集
-            return self._all_tools_schema or tools_schema
+        return self._all_tools_schema or tools_schema
 
     def configure(
             self,
@@ -133,6 +127,7 @@ class AutoLoopWorker(QThread):
 
         self._is_cancelled = False
         self._engine = AutoLoopEngine(self._config)
+        self._prompt_composer = AutoLoopPromptComposer(self._engine)
         self._engine.start()
         self._last_step = 0
         self._first_planning_done = False
@@ -233,8 +228,8 @@ class AutoLoopWorker(QThread):
             except Exception as e:
                 logger.error(f"[AutoLoop] Worker error on iteration {iteration}: {e}")
                 self.loop_error.emit(f"第{iteration}轮出错: {str(e)}")
-                self._engine._consecutive_failures += 1
-                if self._engine._consecutive_failures >= 3:
+                self._engine.increment_consecutive_failures()
+                if self._engine.consecutive_failures >= 3:
                     self.loop_error.emit("连续失败 3 次，已停止")
                     return
                 self._emit_progress()
@@ -250,7 +245,7 @@ class AutoLoopWorker(QThread):
 
 - 时间: {timestamp_str}
 - 阶段: {'PLANNING' if self._engine.is_planning_phase() else 'EXECUTING'}
-- 当前步骤: {self._engine._current_step} / {self._engine._total_steps}
+- 当前步骤: {self._engine.current_step} / {self._engine.total_steps}
 
 ## 完整响应
 
@@ -273,9 +268,7 @@ class AutoLoopWorker(QThread):
                     current, max_verified, total = self._engine.parse_current_and_next_step(notes)
                     # 从笔记同步已勾选完成的步骤到缓存
                     self._engine.sync_verified_steps_from_notes(notes)
-                    self._engine._total_steps = total
-                    # 设置当前应该执行的步骤
-                    self._engine._current_step = current
+                    self._engine.set_step_progress(current, total)
                     self.log_signal.emit(f"✅ 规划完成！共 {total} 个步骤，{max_verified} 已完成")
                     self.log_signal.emit(f"📋 开始执行步骤 {current}/{total}: {self._get_next_step_preview(notes, current)}")
                     
@@ -307,20 +300,19 @@ class AutoLoopWorker(QThread):
                 current_step, max_verified, total_steps = self._engine.parse_current_and_next_step(notes)
                 
                 if total_steps > 0:
-                    self._engine._total_steps = total_steps
-                    
-                    # 如果当前步骤还没设置（引擎的 _current_step 为 0），则设置为当前应该执行的步骤
-                    if self._engine._current_step == 0 or self._engine._current_step <= max_verified:
-                        self._engine._current_step = current_step
+                    self._engine.set_step_progress(
+                        current_step if (self._engine.current_step == 0 or self._engine.current_step <= max_verified) else self._engine.current_step,
+                        total_steps,
+                    )
                     
                     # 检测当前步骤是否已完成
-                    step_completed = self._check_step_completed(response, notes, self._engine._current_step)
+                    step_completed = self._check_step_completed(response, notes, self._engine.current_step)
                     
                     if step_completed:
-                        self._last_step = self._engine._current_step
-                        self.log_signal.emit(f"✓ 步骤 {self._engine._current_step}/{total_steps} 完成")
+                        self._last_step = self._engine.current_step
+                        self.log_signal.emit(f"✓ 步骤 {self._engine.current_step}/{total_steps} 完成")
                         
-                        if self._engine._current_step >= total_steps:
+                        if self._engine.current_step >= total_steps:
                             # 所有步骤完成，输出 DONE
                             self.log_signal.emit("🎉 所有步骤完成！任务结束")
                             self.phase_changed.emit("completed")
@@ -328,8 +320,8 @@ class AutoLoopWorker(QThread):
                             return
                         else:
                             # 前进到下一步
-                            self._engine.advance_to_step(self._engine._current_step + 1)
-                            self.log_signal.emit(f"📋 执行步骤 {self._engine._current_step}/{total_steps}: {self._get_next_step_preview(notes, self._engine._current_step)}")
+                            self._engine.advance_to_step(self._engine.current_step + 1)
+                            self.log_signal.emit(f"📋 执行步骤 {self._engine.current_step}/{total_steps}: {self._get_next_step_preview(notes, self._engine.current_step)}")
                     else:
                         # 步骤未完成，可能需要继续执行或验证
                         # 检查是否有验证失败的情况
@@ -355,340 +347,40 @@ class AutoLoopWorker(QThread):
             self._engine.state = LoopState.COMPLETED
             self.loop_completed.emit(f"达到最大迭代次数 ({self._config.max_iterations})，已停止")
 
-    # ========== 内部辅助方法 ==========
-
-    def _get_step_completion_keyword(self, notes: str, step_num: int) -> Optional[str]:
-        """从笔记中提取步骤完成的关键词"""
-        import re
-        # 匹配 "[步骤 N] 描述" 并找下一行的关键词
-        pattern = rf'- \[步骤\s*{step_num}\].*?(?=\n- \[步骤|\Z)'
-        match = re.search(pattern, notes, re.DOTALL)
-        if match:
-            step_text = match.group(0)
-            # 提取验证方式中冒号后的内容
-            verify_match = re.search(r'验证方式[:：]\s*(.+)', step_text)
-            if verify_match:
-                return verify_match.group(1).strip()
-            # 或者取完整描述
-            return step_text.split('|')[1].strip() if '|' in step_text else step_text.strip()
-        return None
+    # ========== 内部辅助方法（委托给 Engine）==========
 
     def _check_step_completed(self, response: str, notes: str, step_num: int) -> bool:
-        """检测当前步骤是否完成
-        
-        完成条件（满足任一即可）：
-        1. 响应中包含 "步骤 N 完成" / "step N complete" / "完成验证"
-        2. 笔记中该步骤标记为完成（如 [x] 或 ✓）
-        3. 响应末尾包含 DONE
-        4. 笔记中有"步骤 N 结果"或"当前状态"更新
-        """
-        import re
-        
-        # 条件1：响应中明确提到步骤完成
-        patterns = [
-            rf'步骤\s*{step_num}\s*(完成|已验证|验证成功)',
-            rf'step\s*{step_num}\s*(complete|verified|done)',
-            rf'验证.*?成功|verify.*?success',
-        ]
-        for p in patterns:
-            if re.search(p, response, re.IGNORECASE):
-                return True
-        
-        # 条件2：笔记中该步骤已标记完成
-        if notes:
-            # 匹配 - [x] 步骤 N 或 - [✓] 步骤 N 格式
-            pattern = rf'- \[(x|✓)\]\s*步骤\s*{step_num}'
-            if re.search(pattern, notes, re.IGNORECASE):
-                return True
-            # 或者匹配 "步骤 N 结果" 段落在笔记中出现
-            if re.search(rf'步骤\s*{step_num}\s+结果', notes):
-                return True
-            # 或者有"当前状态"包含步骤完成信息
-            if re.search(rf'步骤\s*{step_num}.*完成', notes, re.DOTALL):
-                return True
-        
-        # 条件3：响应末尾有 DONE
-        if response.strip().endswith("DONE"):
-            return True
-        
-        return False
+        """检测当前步骤是否完成（委托给 Engine）"""
+        return self._engine.check_step_completed(response, notes, step_num) if self._engine else False
 
     def _get_next_step_preview(self, notes: str, step_num: int) -> str:
-        """获取下一步骤的预览文本"""
-        import re
-        # 匹配 - [ ] [步骤 N] 或 - [x] [步骤 N] 或 - [步骤 N]
-        pattern = rf'- \[.?\]?\s*\[步骤\s*{step_num}\].*?(?=\n-|\Z)'
-        match = re.search(pattern, notes, re.DOTALL)
-        if match:
-            step_text = match.group(0)
-            # 移除 "- [ ] [步骤 N]" 或 "- [x] [步骤 N]" 前缀，只保留描述
-            preview = re.sub(r'^-\s*\[.?\]?\s*\[步骤\s*\d+\]\s*', '', step_text)
-            # 去掉管道符后面的验证方式，只保留描述
-            if '|' in preview:
-                preview = preview.split('|')[0].strip()
-            # 只取前 60 字符
-            return preview[:60].strip() + ('...' if len(preview) > 60 else '')
-        return f"步骤 {step_num}"
+        """获取下一步骤的预览文本（委托给 Engine）"""
+        return self._engine.get_next_step_preview(notes, step_num) if self._engine else f"步骤 {step_num}"
 
     def _check_relay_doc_updated(self, iteration: int) -> bool:
-        """检查接力文档是否已更新
-        
-        Returns:
-            True: 已更新，可以继续
-            False: 未更新，需要强制要求更新
-        """
-        notes = self._engine.read_shared_notes() if self._engine else ""
-        
-        # 检查接力文档是否为空或几乎为空
-        if not notes or len(notes.strip()) < 50:
-            logger.warning(f"[AutoLoop] Iteration {iteration}: relay doc is empty or too short")
-            return False
-        
-        # 检查规划阶段：必须有执行计划
-        if self._engine.is_planning_phase():
-            if "## 执行计划" not in notes and "- [步骤" not in notes:
-                logger.warning(f"[AutoLoop] Iteration {iteration}: no execution plan in relay doc")
-                return False
-            return True
-        
-        # 执行阶段：检查当前步骤是否有结果记录
-        current_step = self._engine._current_step if self._engine else 1
-        total_steps = self._engine._total_steps if self._engine else 0
-        
-        if total_steps > 0:
-            # 检查是否有"步骤 X 结果"段落
-            result_pattern = rf'步骤\s*{current_step}\s+结果|## 步骤\s*{current_step}\s+结果'
-            if not re.search(result_pattern, notes, re.IGNORECASE):
-                # 也检查是否有"当前状态"更新
-                if "## 当前状态" not in notes and "当前状态" not in notes:
-                    logger.warning(f"[AutoLoop] Iteration {iteration}: no step {current_step} result recorded")
-                    return False
-        
-        return True
+        """检查接力文档是否已更新（委托给 Engine）"""
+        return self._engine.check_relay_doc_updated(iteration) if self._engine else False
 
-    def _build_forced_update_prompt(self, iteration: int) -> str:
-        """生成强制更新接力文档的提示"""
-        current_step = self._engine._current_step if self._engine else 1
-        total_steps = self._engine._total_steps if self._engine else 0
-        is_planning = self._engine.is_planning_phase() if self._engine else True
-        
-        if is_planning:
-            return f"""
-## ⚠️ 【强制】接力文档未更新！
-
-你（迭代 {iteration} 轮）尚未更新接力文档 `SHARED_TASK_NOTES.md`。
-
-根据规则，你必须：
-1. 使用 `write` 工具将完整的执行计划写入 SHARED_TASK_NOTES.md
-2. 包含所有步骤的描述、目标文件、验证方式
-3. 然后输出 `PLANNING_COMPLETE`
-
-当前接力文档状态：
-```
-{self._engine.read_shared_notes()[:500] if self._engine else ""}...
-```
-
-请立即使用 `write` 工具更新接力文档，然后输出 `PLANNING_COMPLETE`。
-"""
-        else:
-            return f"""
-## ⚠️ 【强制】接力文档未更新！
-
-你（迭代 {iteration} 轮）尚未更新接力文档 `SHARED_TASK_NOTES.md`。
-
-根据规则，你必须：
-1. 更新 SHARED_TASK_NOTES.md 中的"步骤 {current_step} 结果"章节
-2. 记录本轮执行的改动、验证命令和结果
-3. 然后才能继续下一步或输出 DONE
-
-当前接力文档状态：
-```
-{self._engine.read_shared_notes()[:500] if self._engine else ""}...
-```
-
-请立即使用 `write` 工具更新接力文档（追加步骤结果），然后继续执行。
-"""
-
-    # ========== 内部辅助 ==========
+    # ========== 消息构建（委托给 PromptComposer）==========
 
     def _build_messages(self, task_prompt: str, iteration: int, force_update: bool = False) -> List[Dict]:
-        """构建本轮对话消息 — 两阶段上下文注入
-        
-        Args:
-            task_prompt: 原始任务提示
-            iteration: 当前迭代轮次
-            force_update: 是否强制要求更新接力文档
-        """
+        """构建本轮对话消息（委托给 PromptComposer）"""
         system_prompt = self._agent_system_prompt_getter("auto_loop") if self._agent_system_prompt_getter else ""
-
-        # 根据阶段注入不同上下文
-        workflow_context = self._build_workflow_context(iteration, force_update)
-        
-        # 【核心改进】在最开头注入当前阶段强约束（大模型对开头权重更高）
-        if self._engine:
-            stage_constraint = self._engine.get_stage_constraint()
-            if stage_constraint:
-                workflow_context = stage_constraint + "\n\n" + workflow_context
-        
-        # 增量执行进度总结（放在末尾，提醒模型只处理当前步骤）
-        if self._engine:
-            incremental_summary = self._engine.get_incremental_summary()
-            if incremental_summary:
-                workflow_context = workflow_context + incremental_summary
-
-        system_content = system_prompt
-
-        messages = [{"role": "system", "content": system_content}]
-        messages.append({"role": "user", "content": task_prompt + "\n\n" + workflow_context})
-        return messages
-
-    def _build_workflow_context(self, iteration: int, force_update: bool = False) -> str:
-        """根据当前阶段构建工作流上下文
-        
-        Args:
-            iteration: 当前迭代轮次
-            force_update: 是否强制要求更新接力文档
-        """
         project_path = self._config.project_path or ""
-        is_planning = self._engine.is_planning_phase() if self._engine else True
-        
-        lines = []
-        
-        # 【新增】强制更新提示
-        if force_update:
-            lines.append("## ⚠️ 【强制】接力文档未更新！\n")
-            lines.append("你必须使用 `write` 工具更新 `SHARED_TASK_NOTES.md` 后才能继续。\n")
-            lines.append("**不更新接力文档就继续是违规行为！**\n")
-        
-        if is_planning:
-            # ========== 规划阶段上下文 ==========
-            lines = [
-                "## 🚀 PHASE 1: TASK PLANNING",
-                "",
-                "你正处于**任务规划阶段**。你的职责是将复杂任务拆解为可验证的步骤。",
-                "",
-                "### 规划流程",
-                "1. **扫描项目**: 使用 `scan_repo`/`glob`/`grep` 了解项目结构",
-                "2. **拆解任务**: 将任务分为 N 个可验证的子步骤",
-                "3. **写入笔记**: 将计划写入 SHARED_TASK_NOTES.md",
-                "4. **输出信号**: 在响应末尾输出 `PLANNING_COMPLETE` 表示规划完成",
-                "",
-                "### 步骤格式（必须严格遵循）",
-                "```",
-                "[步骤 1] <简短描述> | <目标文件> | <验证方式>",
-                "[步骤 2] <简短描述> | <目标文件> | <验证方式>",
-                "...",
-                "```",
-                "",
-                "### 验证方式参考",
-                "| 类型 | 示例 | 说明 |",
-                "|------|------|------|",
-                "| 测试 | `测试: pytest tests/` | 运行测试 |",
-                "| Lint | `lint: flake8` | 代码检查 |",
-                "| 检查 | `检查: 文件包含 xxx` | 内容验证 |",
-                "| 运行 | `运行: python main.py` | 命令执行 |",
-                "",
-                "### SHARED_TASK_NOTES.md 模板",
-                "```markdown",
-                "# SHARED_TASK_NOTES",
-                "",
-                "## 任务概述",
-                "<一句话描述要完成的目标>",
-                "",
-                "## 执行计划",
-                "- [步骤 1] <描述> | <文件> | <验证方式>",
-                "- [步骤 2] <描述> | <文件> | <验证方式>",
-                "- [步骤 3] <描述> | <文件> | <验证方式>",
-                "",
-                "## 当前状态",
-                "等待开始执行",
-                "",
-                "## 下一步",
-                "执行步骤 1",
-                "```",
-                "",
-                "### ⚠️ 重要规则",
-                "- **不要在规划阶段执行代码改动**！先规划，后执行",
-                "- 必须输出 `PLANNING_COMPLETE` 才能进入执行阶段",
-                "- 每个步骤必须有明确的验证方式，否则无法确认完成",
-                "- `## 任务概述` 和 `## 执行计划` 一旦写入，进入执行阶段后将被锁定保护，**禁止修改**，执行阶段只能更新 `## 当前状态` 和追加步骤结果",
-            ]
-        else:
-            # ========== 执行阶段上下文 ==========
-            current_step = self._engine._current_step if self._engine else 1
-            total_steps = self._engine._total_steps if self._engine else 0
-            notes = self._engine.read_shared_notes() if self._engine else ""
-            
-            lines = [
-                "## ⚡ PHASE 2: EXECUTION LOOP",
-                "",
-                f"**当前进度**: 步骤 {current_step} / {total_steps}",
-                "",
-                "### 📋 文档保护规则（必须严格遵守！）",
-                "",
-                "✅ **允许修改**: `## 当前状态` 和 `## 下一步` 以及新增的 `步骤 X 结果` 章节",
-                "❌ **禁止修改**: `## 任务概述` 和 `## 执行计划` 这两个章节一旦在规划阶段完成，**绝对不能修改或重写**，必须原样保留！",
-                "❌ **禁止简化**: 不得将原详细的多步骤计划简化为少数步骤，必须保留所有原始步骤细节。",
-                "",
-                "### 执行规则（严格遵守）",
-                "",
-                "**每轮只做一件事，然后验证**。不要试图一次完成多个步骤。",
-                "",
-                "### 工作流程",
-                "1. 读 `SHARED_TASK_NOTES.md` 确认当前步骤",
-                "2. 读取相关目标文件",
-                "3. 执行当前步骤（**只做一件事**）",
-                "4. **必须运行验证命令**（不能跳过）",
-                "5. 更新 `SHARED_TASK_NOTES.md`: **只追加/更新当前步骤结果和当前状态，不得改动执行计划部分**",
-                "6. 判断：继续当前步骤 | 前进到下一步 | 输出 DONE",
-                "",
-                "### 验证失败处理",
-                "- 验证失败 → 分析原因 → 修复 → 重试",
-                "- 连续失败 3 次 → 记录问题 → 尝试降级方案或跳过",
-                "- 验证成功 → 前进到下一步",
-                "",
-                "### 完成条件",
-                "- 所有计划步骤都验证通过",
-                "- 输出 `DONE`（独占一行）",
-                "",
-                "### 当前步骤详情",
-            ]
-            
-            # 提取当前步骤信息
-            if notes:
-                import re
-                pattern = rf'- \[步骤\s*{current_step}\].*?'
-                match = re.search(pattern, notes)
-                if match:
-                    step_text = match.group(0)
-                    lines.append(f"```")
-                    lines.append(step_text)
-                    lines.append("```")
-                else:
-                    lines.append(f"(未找到步骤 {current_step} 信息)")
-            else:
-                lines.append("(暂无笔记信息，请先读取 SHARED_TASK_NOTES.md)")
 
-        if project_path:
-            lines.extend([
-                "",
-                "## Project Root Directory",
-                f"`WORKDIR`: {project_path}",
-                "所有文件操作使用相对路径：",
-                f"  - write(path='src/main.py', ...) → {project_path}/src/main.py",
-                f"  - read(path='src/main.py')    → 读取 {project_path}/src/main.py",
-            ])
-        
-        if not is_planning and notes:
-            lines.extend([
-                "",
-                "## 当前 SHARED_TASK_NOTES.md 内容",
-                "```",
-                notes[:2000],  # 限制长度避免 token 浪费
-                "```" if len(notes) <= 2000 else "...[已截断]",
-            ])
+        if self._prompt_composer:
+            return self._prompt_composer.build_messages(
+                task_prompt=task_prompt,
+                iteration=iteration,
+                system_prompt=system_prompt,
+                project_path=project_path,
+                force_update=force_update,
+            )
 
-        return "\n".join(lines)
+        # fallback：无 PromptComposer 时使用最简单的消息
+        messages = [{"role": "system", "content": system_prompt}]
+        messages.append({"role": "user", "content": task_prompt})
+        return messages
 
     def _create_worker(self, messages: List[Dict], tools: List[Dict] = None) -> OpenAIChatWorker:
         """创建 ChatWorker"""
@@ -706,7 +398,7 @@ class AutoLoopWorker(QThread):
                 from app.core.token_estimator import count_messages_tokens
                 token_count = count_messages_tokens(msgs)
                 self._engine.add_tokens(token_count)
-                self.tokens_updated.emit(self._engine._total_tokens)
+                self.tokens_updated.emit(self._engine.total_tokens)
                 
                 # 检查是否超预算，超预算则取消
                 reason = self._engine.check_budget()
@@ -818,10 +510,28 @@ class AutoLoopWorker(QThread):
         if self._engine:
             self.progress_updated.emit(self._engine.get_progress())
 
-    def _check_planning_complete(self, response: str) -> bool:
-        """检测规划阶段是否完成（旧方法，保留兼容性）"""
-        return "PLANNING_COMPLETE" in response.upper()
-    
     def get_all_messages(self) -> List[Dict]:
         """获取所有消息（用于保存到会话）"""
         return self._all_messages.copy()
+
+    # ========== 公共接口（供 main_widget 等外部调用）==========
+
+    def get_current_progress(self) -> dict:
+        """获取当前进度信息（替代外部穿透访问 _engine 私有属性）
+        
+        Returns:
+            dict with keys: iteration, max_iterations, current_step, total_steps,
+                            total_tokens, phase, state
+        """
+        if not self._engine:
+            return {
+                "iteration": 0, "max_iterations": 0,
+                "current_step": 0, "total_steps": 0,
+                "total_tokens": 0, "phase": "idle", "state": "idle",
+            }
+        progress = self._engine.get_progress()
+        return progress
+
+    def get_task_prompt(self) -> str:
+        """获取任务提示（替代外部穿透访问 _config）"""
+        return self._config.task_prompt if self._config else ""
