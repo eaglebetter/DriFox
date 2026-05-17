@@ -1399,8 +1399,9 @@ class OpenAIChatToolWindow(ToolWindow):
         self._todo_was_visible_before_system = self._todo_floating_widget.isVisible()
         # 隐藏实时卡片
         self._todo_floating_widget.setVisible(False)
+        # 先压制（保存可见状态），再隐藏卡片
+        self._tool_floating_widget.set_suppress_visible(True)
         self._tool_floating_widget.setVisible(False)
-        self._tool_floating_widget.set_suppress_visible(True)  # 压制工具卡片显示
         self._sub_agent_floating_widget.setVisible(False)
         # 隐藏系统卡片
         self._model_config_card.hide()

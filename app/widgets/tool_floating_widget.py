@@ -73,6 +73,11 @@ class ToolFloatingWidget(SimpleCardWidget):
         self._rotation_timer = QTimer(self)
         self._rotation_timer.timeout.connect(self._update_rotation)
         self._rotating = False
+        self._running_count = 0  # 并发工具计数
+        self._hide_timer = QTimer(self)
+        self._hide_timer.setSingleShot(True)
+        self._hide_timer.setInterval(2000)
+        self._hide_timer.timeout.connect(self.hide)
         self._svg_renderer = _RotatingIcon(":/icons/执行中.svg", size=18)
         self._setup_ui()
 
@@ -163,13 +168,16 @@ class ToolFloatingWidget(SimpleCardWidget):
 
     def _on_cancel(self):
         self._is_running = False
+        self._running_count = 0
         self._stop_rotation()
         self.cancel_btn.setEnabled(False)
+        self.cancel_btn.setVisible(False)
         self.cancel_btn.setText("已中止")
         self.title_label.setText("执行已中止")
         self.title_label.setStyleSheet("color: #ef5350;")
         self._update_style(False)
         self.cancelled.emit()
+        self._hide_timer.start()
 
     def set_suppress_visible(self, suppressed: bool):
         """设置压制状态：系统卡片打开时压制工具卡片显示"""
@@ -195,6 +203,11 @@ class ToolFloatingWidget(SimpleCardWidget):
 
     def start_tool(self, tool_name: str, args: dict = None):
         """开始执行工具"""
+        # 取消之前的自动隐藏定时器，防止上一个工具的隐藏影响当前工具
+        self._hide_timer.stop()
+
+        self._running_count += 1
+        is_first = self._running_count == 1
 
         self._task_start_time = time.time()
         self._is_running = True
@@ -205,7 +218,8 @@ class ToolFloatingWidget(SimpleCardWidget):
         self.title_label.setStyleSheet("color: #ffb74d;")
         self._update_style(None)
 
-        self._start_rotation()
+        if is_first:
+            self._start_rotation()
 
         self.tool_name_label.setText(f" {tool_name} ")
 
@@ -217,16 +231,18 @@ class ToolFloatingWidget(SimpleCardWidget):
             else:
                 args_preview = f"{args_str}"
 
-        self.task_label.setText(f"⏳ {args_preview}")
+        if self._running_count > 1:
+            self.task_label.setText(f"⏳ [{self._running_count}个并发] {args_preview}")
+        else:
+            self.task_label.setText(f"⏳ {args_preview}")
 
         self.cancel_btn.setEnabled(True)
         self.cancel_btn.setText("中止")
         self.cancel_btn.setVisible(True)
 
         if self._suppress_visible:
-            # 压制状态下记录任务但不显示
             self.setVisible(False)
-        else:
+        elif is_first:
             self.setVisible(True)
             self.raise_()
         QApplication.processEvents()
@@ -248,6 +264,20 @@ class ToolFloatingWidget(SimpleCardWidget):
 
     def finish_tool(self, result: str = None, success: bool = True):
         """完成工具执行"""
+        self._running_count -= 1
+        if self._running_count < 0:
+            self._running_count = 0
+
+        # 还有工具在运行，只更新进度不显示完成状态
+        if self._running_count > 0:
+            self.tool_name_label.setText("")
+            if success:
+                self.task_label.setText(f"✓ [{self._running_count}个进行中] 部分工具完成")
+            else:
+                self.task_label.setText(f"✗ [{self._running_count}个进行中] 部分工具失败")
+            return
+
+        # 所有工具执行完毕
         self._is_running = False
         self._current_process = None
         self._stop_rotation()
@@ -260,6 +290,9 @@ class ToolFloatingWidget(SimpleCardWidget):
         self.icon_label.setText("✅" if success else "❌")
 
         self._update_style(success)
+
+        # 隐藏中止按钮
+        self.cancel_btn.setVisible(False)
 
         if success:
             self.title_label.setText("执行完成")
@@ -280,7 +313,7 @@ class ToolFloatingWidget(SimpleCardWidget):
         else:
             self.setVisible(True)
             self.raise_()
-            QTimer.singleShot(2000, self.hide)
+            self._hide_timer.start()
 
     def is_cancelled(self) -> bool:
         """检查是否已被中止"""
@@ -288,8 +321,10 @@ class ToolFloatingWidget(SimpleCardWidget):
 
     def clear(self):
         """清空显示"""
+        self._hide_timer.stop()
         self._task_start_time = None
         self._is_running = False
+        self._running_count = 0
         self._current_tool = None
         self._current_process = None
         self._stop_rotation()
