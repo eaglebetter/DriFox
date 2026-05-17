@@ -43,6 +43,7 @@ class KeyDocumentsRepository:
                     file_name TEXT,
                     added_at TEXT,
                     added_by TEXT DEFAULT 'manual',
+                    is_working_dir INTEGER DEFAULT 0,
                     UNIQUE(project, file_path)
                 )
             ''')
@@ -50,6 +51,15 @@ class KeyDocumentsRepository:
         except Exception as e:
             logger.error(f"[KeyDocumentsRepository] 创建表失败: {e}")
             return False
+
+    def _migrate(self):
+        """迁移：添加新列"""
+        if not self.is_initialized:
+            return
+        try:
+            self._execute(f"ALTER TABLE {self.TABLE_NAME} ADD COLUMN is_working_dir INTEGER DEFAULT 0")
+        except Exception:
+            pass  # 列已存在
 
     def add(self, project: str, file_path: str, added_by: str = "manual") -> bool:
         """
@@ -65,6 +75,7 @@ class KeyDocumentsRepository:
         """
         if not self._ensure_table():
             return False
+        self._migrate()
         
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         # 统一路径分隔符
@@ -82,6 +93,58 @@ class KeyDocumentsRepository:
         except Exception as e:
             logger.error(f"[KeyDocumentsRepository] add 异常: {e}")
             return False
+
+    def set_working_directory(self, project: str, file_path: str) -> bool:
+        """
+        设置项目的工作目录（互斥：只会有一个工作目录）
+        如果 file_path 为空或"clear"，则清除工作目录设置
+        """
+        if not self._ensure_table():
+            return False
+        self._migrate()
+
+        try:
+            # 先清除所有工作目录标记
+            self._execute(
+                f'UPDATE {self.TABLE_NAME} SET is_working_dir = 0 WHERE project = ?',
+                (project,)
+            )
+            if not file_path or file_path == "clear":
+                return True
+            # 设置指定路径为工作目录
+            file_path = str(file_path).replace("\\", "/")
+            success, _ = self._execute(
+                f'UPDATE {self.TABLE_NAME} SET is_working_dir = 1 WHERE project = ? AND file_path = ?',
+                (project, file_path)
+            )
+            return success
+        except Exception as e:
+            logger.error(f"[KeyDocumentsRepository] set_working_directory 异常: {e}")
+            return False
+
+    def get_working_directory(self, project: str) -> Optional[str]:
+        """
+        获取项目当前工作目录
+        
+        Returns:
+            Optional[str]: 工作目录路径，未设置返回 None
+        """
+        if not self.is_initialized:
+            return None
+        self._migrate()
+        
+        try:
+            success, rows = self._execute(
+                f'SELECT file_path FROM {self.TABLE_NAME} WHERE project = ? AND is_working_dir = 1 LIMIT 1',
+                (project,)
+            )
+            if success and rows:
+                row = rows[0]
+                return row[0] if isinstance(row, tuple) else row.get("file_path", "")
+            return None
+        except Exception as e:
+            logger.error(f"[KeyDocumentsRepository] get_working_directory 异常: {e}")
+            return None
 
     def get_by_project(self, project: str, limit: int = 20) -> List[Dict]:
         """
@@ -113,6 +176,7 @@ class KeyDocumentsRepository:
                         "file_name": d.get("file_name", ""),
                         "added_at": d.get("added_at", ""),
                         "added_by": d.get("added_by", "manual"),
+                        "is_working_dir": bool(d.get("is_working_dir", 0)),
                     })
                 return result
             return []

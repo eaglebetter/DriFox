@@ -168,6 +168,18 @@ class MemoryManagerCore:
             return 0
         return self._key_documents_repo.clear_by_project(project)
 
+    def set_working_directory(self, project: str, file_path: str) -> bool:
+        """设置项目的工作目录（互斥）"""
+        if not self._key_documents_repo:
+            return False
+        return self._key_documents_repo.set_working_directory(project, file_path)
+
+    def get_working_directory(self, project: str) -> Optional[str]:
+        """获取项目的工作目录"""
+        if not self._key_documents_repo:
+            return None
+        return self._key_documents_repo.get_working_directory(project)
+
     # ==================== 上下文格式化 ====================
 
     def format_memories_for_prompt(

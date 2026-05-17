@@ -2335,7 +2335,7 @@ class PlainTextViewer(QWidget):
 
     def _init_ui(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 8, 12, 8)
+        layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(0)
 
         self.text_edit = QTextEdit(self)
@@ -2559,9 +2559,10 @@ class MessageCard(SimpleCardWidget):
 
     def _setup_ui(self):
         main = QVBoxLayout(self)
-        main.setContentsMargins(10, 10, 10, 10)
+        main.setContentsMargins(6, 6, 6, 6)
         main.setSpacing(8)
         top = QHBoxLayout()
+        top.setContentsMargins(8, 2, 8, 2)
         top.setSpacing(10)
 
         av = QLabel(self)

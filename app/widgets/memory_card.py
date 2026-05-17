@@ -8,7 +8,7 @@
 import os
 
 from PyQt5.QtCore import pyqtSignal, Qt
-from PyQt5.QtGui import QDropEvent, QDragEnterEvent, QDragMoveEvent
+from PyQt5.QtGui import QDropEvent, QDragEnterEvent, QDragMoveEvent, QColor
 from PyQt5.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -28,7 +28,7 @@ from qfluentwidgets import (
     TextEdit,
 )
 
-from app.utils.utils import get_font_family_css
+from app.utils.utils import get_font_family_css, get_icon
 
 # Tab 标识
 TAB_ENTRY_MEMORIES = "entries"
@@ -234,6 +234,7 @@ class KeyDocumentItemWidget(QWidget):
     removed = pyqtSignal(str)  # doc_id
     open_file = pyqtSignal(str)  # file_path
     open_folder = pyqtSignal(str)  # folder_path
+    setAsWorkingDir = pyqtSignal(str)  # file_path
 
     def __init__(
         self,
@@ -241,11 +242,14 @@ class KeyDocumentItemWidget(QWidget):
         file_name: str,
         file_path: str,
         added_by: str = "manual",
+        is_working_dir: bool = False,
         parent=None,
     ):
         super().__init__(parent)
         self.doc_id = doc_id
         self.file_path = file_path
+        self._is_folder = os.path.isdir(file_path) if file_path else False
+        self._is_working_dir = is_working_dir and self._is_folder
         self._init_ui(file_name, file_path, added_by)
 
     def _get_icon(self, file_name: str, file_path: str) -> str:
@@ -313,6 +317,18 @@ class KeyDocumentItemWidget(QWidget):
         self.setFixedHeight(44)
         self.setSizePolicy(1, 0)
 
+        # 工作目录高亮背景（用 Palette 方式避免 QListWidget 样式表冲突）
+        if self._is_working_dir:
+            palette = self.palette()
+            palette.setColor(self.backgroundRole(), QColor(46, 160, 67, 35))
+            self.setPalette(palette)
+            self.setAutoFillBackground(True)
+            self.setStyleSheet("border-radius: 4px;")
+        else:
+            self.setAutoFillBackground(False)
+            self.setPalette(self.style().standardPalette())
+            self.setStyleSheet("")
+
         main_layout = QHBoxLayout(self)
         main_layout.setContentsMargins(8, 4, 8, 4)
         main_layout.setSpacing(4)
@@ -341,7 +357,26 @@ class KeyDocumentItemWidget(QWidget):
         main_layout.addWidget(path_label)
 
         # 操作按钮
+        # 工作目录按钮（仅文件夹显示）
+        self.wd_btn = None
+        if self._is_folder:
+            from qfluentwidgets import PrimaryToolButton
+            self.wd_btn = TransparentToolButton(get_icon("根目录"), self)
+            self.wd_btn.setToolTip("设置为工作目录（工具将在此目录下使用相对路径）")
+            self.wd_btn.setFixedSize(24, 24)
+            if self._is_working_dir:
+                self.wd_btn.setStyleSheet("""
+                    TransparentToolButton {
+                        background-color: rgba(46, 160, 67, 0.3);
+                        border: 1px solid rgba(46, 160, 67, 0.6);
+                        border-radius: 4px;
+                    }
+                """)
+            self.wd_btn.clicked.connect(lambda: self.setAsWorkingDir.emit(self.file_path))
+            main_layout.addWidget(self.wd_btn)
+
         self.open_btn = TransparentToolButton(FluentIcon.FOLDER, self)
+        self.open_btn.setToolTip("打开所在文件夹")
         self.open_btn.setToolTip("打开所在文件夹")
         self.open_btn.clicked.connect(lambda: self.open_folder.emit(self.file_path))
 
@@ -439,6 +474,7 @@ class MemoryCardContent(QWidget):
 
     memorySaved = pyqtSignal(list)
     projectNoteChanged = pyqtSignal(str, str)  # project, content
+    workingDirChanged = pyqtSignal(str)  # 工作目录路径，空字符串=清除
 
     def __init__(self, memory_manager, parent=None):
         super().__init__(parent)
@@ -895,30 +931,42 @@ class MemoryCardContent(QWidget):
     # ==================== 关键文档操作 ====================
 
     def _load_key_documents(self):
-        """加载关键文档（支持搜索过滤）"""
+        """加载关键文档（支持搜索过滤和工作目录置顶）"""
         self.docs_list.clear()
         memory_mgr = self._get_memory_manager()
         if not memory_mgr:
             return
 
         docs = memory_mgr.get_key_documents(self._current_project)
+
+        # 搜索过滤（按文件名/路径匹配，忽略大小写）
+        if self._search_filter:
+            keyword = self._search_filter.lower()
+            docs = [
+                d for d in docs
+                if keyword in d.get("file_name", "").lower()
+                or keyword in d.get("file_path", "").lower()
+            ]
+
+        # 工作目录置顶排序
+        docs.sort(key=lambda d: (0 if d.get("is_working_dir") else 1, d.get("added_at", "")))
+
         for doc in docs:
             doc_id = doc.get("id", "")
             file_name = doc.get("file_name", "")
             file_path = doc.get("file_path", "")
             added_by = doc.get("added_by", "manual")
-
-            # 搜索过滤（按文件名/路径匹配，忽略大小写）
-            if self._search_filter:
-                keyword = self._search_filter.lower()
-                if keyword not in file_name.lower() and keyword not in file_path.lower():
-                    continue
+            is_working_dir = doc.get("is_working_dir", False)
 
             item = QListWidgetItem()
             item.setSizeHint(self._get_doc_item_size())
-            widget = KeyDocumentItemWidget(doc_id, file_name, file_path, added_by)
+            widget = KeyDocumentItemWidget(
+                doc_id, file_name, file_path, added_by,
+                is_working_dir=is_working_dir,
+            )
             widget.removed.connect(self._remove_key_document)
             widget.open_folder.connect(self._open_folder)
+            widget.setAsWorkingDir.connect(self._set_as_working_directory)
             self.docs_list.addItem(item)
             self.docs_list.setItemWidget(item, widget)
 
@@ -945,6 +993,22 @@ class MemoryCardContent(QWidget):
         memory_mgr = self._get_memory_manager()
         if memory_mgr:
             memory_mgr.remove_key_document(doc_id)
+        self._load_key_documents()
+
+    def _set_as_working_directory(self, file_path: str):
+        """设置为工作目录（再次点击取消）"""
+        memory_mgr = self._get_memory_manager()
+        if not memory_mgr:
+            return
+        # 检查当前是否已经是工作目录（如果再次点击则取消）
+        current_wd = memory_mgr.get_working_directory(self._current_project)
+        if current_wd == file_path:
+            # 取消设置
+            memory_mgr.set_working_directory(self._current_project, "clear")
+            self.workingDirChanged.emit("")
+        else:
+            memory_mgr.set_working_directory(self._current_project, file_path)
+            self.workingDirChanged.emit(file_path)
         self._load_key_documents()
 
     def _open_folder(self, path: str):

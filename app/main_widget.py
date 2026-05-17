@@ -597,6 +597,8 @@ class OpenAIChatToolWindow(ToolWindow):
             QTimer.singleShot(0, self._create_new_session)
 
         QTimer.singleShot(100, self._load_model_configs)
+        # 初始化当前项目的工作目录
+        QTimer.singleShot(200, self._sync_working_directory)
         self._connect_opacity_signal()
         super().showEvent(event)
 
@@ -851,7 +853,7 @@ class OpenAIChatToolWindow(ToolWindow):
         self.chat_container = QWidget()
         self.chat_container.setStyleSheet("background: transparent;")
         self.chat_layout = QVBoxLayout(self.chat_container)
-        self.chat_layout.setContentsMargins(8, 8, 8, 8)
+        self.chat_layout.setContentsMargins(6, 6, 6, 6)
         self.chat_layout.setSpacing(8)
         self.chat_layout.setAlignment(Qt.AlignBottom)
         self.chat_scroll_area.setWidget(self.chat_container)
@@ -927,6 +929,8 @@ class OpenAIChatToolWindow(ToolWindow):
         )
         self._memory_card_popup = MemoryCardContent(self.backend.memory_manager, self)
         self._memory_card_popup.memorySaved.connect(self._on_memory_card_saved)
+        # 工作目录变更 → 同步到工具执行器
+        self._memory_card_popup.workingDirChanged.connect(self._on_working_dir_changed)
         self._memory_card_popup.set_project(self._current_project)  # 初始化时设置当前项目
         self._memory_card.content_layout.addWidget(self._memory_card_popup)
         self._memory_card.setVisible(False)
@@ -5267,6 +5271,8 @@ class OpenAIChatToolWindow(ToolWindow):
             from loguru import logger
             logger.info(f"[MainWidget] Calling set_project({project}) on memory_card_popup")
             self._memory_card_popup.set_project(project)
+            # 切换项目时自动同步工作目录
+            self._sync_working_directory()
         # 刷新历史面板（切换项目过滤）
         self._current_history_project = project
         self._history_popup_card.set_current_project(project)
@@ -5287,6 +5293,8 @@ class OpenAIChatToolWindow(ToolWindow):
             self._memory_card_popup.set_project(project)
             # 自动切换到项目笔记tab（触发头部标签和内容同步切换）
             self._memory_card.set_current_tab(TAB_PROJECT_NOTES)
+            # 切换项目时自动同步工作目录
+            self._sync_working_directory()
         # 刷新历史面板
         self._history_popup_card.refreshRequested.emit()
         # 自动弹出长期记忆卡片
@@ -5351,6 +5359,25 @@ class OpenAIChatToolWindow(ToolWindow):
             search_input.setPlaceholderText(placeholders.get(tab_id, "🔍 搜索..."))
         # 切换内容
         self._memory_card_popup.switch_tab(tab_id)
+
+    def _on_working_dir_changed(self, file_path: str):
+        """工作目录变更 → 同步到工具执行器"""
+        if self.backend and self.backend.tool_executor:
+            self.backend.tool_executor.set_workdir(file_path or None)
+            from loguru import logger
+            logger.info(f"[MainWidget] Working directory synced to tool executor: {file_path or 'default'}")
+
+    def _sync_working_directory(self):
+        """切换项目时自动加载并同步工作目录"""
+        if not self.backend or not self.backend.tool_executor:
+            return
+        project = self._current_project
+        workdir = None
+        if self.backend.memory_manager:
+            workdir = self.backend.memory_manager.get_working_directory(project)
+        self.backend.tool_executor.set_workdir(workdir)
+        from loguru import logger
+        logger.info(f"[MainWidget] Synced working directory for project '{project}': {workdir or 'default'}")
 
     def _show_soul_memory(self):
         """切换记忆管理卡片的显示"""
