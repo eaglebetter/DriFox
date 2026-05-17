@@ -822,6 +822,7 @@ class OpenAIChatToolWindow(ToolWindow):
 
         self._tool_floating_widget = ToolFloatingWidget(self)
         self._tool_floating_widget.setVisible(False)
+        self._tool_floating_widget.cancelled.connect(self._on_tool_cancelled)
 
         layout.addWidget(self._settings_popup)
 
@@ -4615,11 +4616,20 @@ class OpenAIChatToolWindow(ToolWindow):
         self._sub_agent_manager.task_finished.emit(task_id, result)
 
     def _on_tool_cancelled(self):
-        """工具执行被用户中止"""
+        """工具执行被用户中止 — 连接自 tool_floating_widget.cancelled 信号"""
         logger.info("[ToolFloatingWidget] Tool execution cancelled by user")
 
         self._tool_cancelled_by_user = True
         self._cancelled_tool_call_id = getattr(self, "_current_tool_call_id", None)
+
+        # 不停止流式接收，只标记 worker 跳过工具执行
+        # worker 收到标记后，在 _execute_all_tools 中会跳过剩余工具
+        # 并自动发送 "用户中止" 的 tool_result 给模型继续迭代
+        if self.backend and self.backend._chat_engine and self.backend._chat_engine._current_worker:
+            worker = self.backend._chat_engine._current_worker
+            worker._is_cancelled = True
+            worker._tool_execution_cancelled = True
+
         self._tool_floating_widget.finish_tool("用户中止", success=False)
 
         tool_call_id = getattr(self, "_current_tool_call_id", None)

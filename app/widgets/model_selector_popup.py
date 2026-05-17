@@ -152,6 +152,7 @@ class ModelSelectorPopup(QWidget):
         self._model_widgets: List[ModelItem] = []
         self._reference_widget: Optional[QWidget] = None
         self._all_model_items: List[Tuple[ModelItem, str, str]] = []  # (widget, provider, model)
+        self._active_model_item: Optional[ModelItem] = None  # 当前选中模型的 item 引用
 
         # 安装事件过滤器，用于点击外部关闭弹窗（在 _setup_ui 之前）
         QApplication.instance().installEventFilter(self)
@@ -307,6 +308,7 @@ class ModelSelectorPopup(QWidget):
         self._provider_models = [(p, m) for p, m, _ in provider_models]
         self._model_widgets.clear()
         self._all_model_items.clear()
+        self._active_model_item = None
 
         # 清空内容区域（保留最后的 stretch）
         while self.content_layout.count() > 0:
@@ -337,6 +339,8 @@ class ModelSelectorPopup(QWidget):
                     provider_name == current_provider and model_name == current_model
                 )
                 item = ModelItem(provider_name, model_name, is_active, self)
+                if is_active:
+                    self._active_model_item = item
                 item.clicked.connect(self._on_model_clicked)
                 self.content_layout.addWidget(item)
                 self._model_widgets.append(item)
@@ -388,6 +392,11 @@ class ModelSelectorPopup(QWidget):
 
             self.move(x, y)
 
+            # 搜索后重建列表时，重新滚动到当前选中模型
+            if self._active_model_item is not None:
+                QApplication.processEvents()
+                self._scroll_to_item_center(self._active_model_item)
+
     def _clear_layout(self, layout):
         while layout.count():
             child = layout.takeAt(0)
@@ -395,6 +404,16 @@ class ModelSelectorPopup(QWidget):
                 child.widget().deleteLater()
             elif child.layout():
                 self._clear_layout(child.layout())
+
+    def _scroll_to_item_center(self, item_widget: QWidget):
+        """滚动滚动区域，使指定 item 居中显示"""
+        scrollbar = self.scroll_area.verticalScrollBar()
+        item_y = item_widget.pos().y()
+        item_half = item_widget.height() // 2
+        view_half = self.scroll_area.viewport().height() // 2
+        target_scroll = item_y + item_half - view_half
+        target_scroll = max(0, min(target_scroll, scrollbar.maximum()))
+        scrollbar.setValue(target_scroll)
 
     def _on_search_changed(self, text: str):
         """搜索文本变化时刷新列表"""
@@ -490,6 +509,12 @@ class ModelSelectorPopup(QWidget):
         self.move(x, y)
         self.show()
         self.raise_()
+
+        # 滚动到当前选中模型，使其居中显示
+        if self._active_model_item is not None:
+            QApplication.processEvents()
+            self._scroll_to_item_center(self._active_model_item)
+
         self.search_edit.setFocus()
         self.search_edit.selectAll()
 

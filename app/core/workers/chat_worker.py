@@ -1456,8 +1456,9 @@ class OpenAIChatWorker(QThread):
                 )
                 if not self._legacy_direct_callbacks:
                     QApplication.processEvents()
-                self._is_cancelled = True
-                return None
+                # 不设置 _is_cancelled = True，让 worker 继续下次迭代
+                # 返回空列表而非 None，避免进入问答等待逻辑
+                return []
 
             tool_name = tc["function"]["name"]
             arguments = tc["function"]["arguments"]
