@@ -37,7 +37,8 @@ import re
 # ============================================================
 
 def get_github_token() -> str:
-    """从环境变量获取 GitHub Token"""
+    """从环境变量或命令行参数获取 GitHub Token"""
+    # 优先从环境变量获取
     token = os.environ.get('GITHUB_TOKEN')
     if token:
         return token
@@ -45,16 +46,27 @@ def get_github_token() -> str:
     raise ValueError(
         "GitHub Token not found. Please set environment variable:\n"
         "  set GITHUB_TOKEN=your_token_here  (Windows)\n"
-        "  export GITHUB_TOKEN=your_token_here  (Linux/Mac)"
+        "Or use parameter:\n"
+        "  $env:GITHUB_TOKEN='your_token'; python script.py ..."
     )
 
-TOKEN = get_github_token()
-HEADERS = {
-    'Authorization': f'token {TOKEN}',
-    'Accept': 'application/vnd.github.v3+json',
-    'Content-Type': 'application/json'
-}
+# 延迟获取 token，在需要时再获取
+def get_headers():
+    return {
+        'Authorization': f'token {get_github_token()}',
+        'Accept': 'application/vnd.github.v3+json',
+        'Content-Type': 'application/json'
+    }
+
 BASE_URL = 'https://api.github.com'
+
+# 初始化 headers (延迟获取 token)
+def _init_headers():
+    global HEADERS
+    HEADERS = get_headers()
+    return HEADERS
+
+HEADERS = _init_headers()
 
 
 # ============================================================
