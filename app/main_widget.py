@@ -1422,16 +1422,13 @@ class OpenAIChatToolWindow(ToolWindow):
         for card in self._system_cards():
             if card.isVisible():
                 return True
-        # auto_loop_running_card 较特殊，单独检查
-        if self._auto_loop_running_card.isVisible():
-            return True
         return False
 
     def _restore_after_system_close(self):
         """系统卡片关闭后，恢复 todo/tool/sub_agent 实时卡片"""
-        # 标记系统卡片全部关闭
-        self._is_system_card_visible = False
-        # 不再解除压制，工具卡片有自我生命周期管理
+        if not self._is_any_system_card_visible():
+            # 只有当所有系统卡片都关闭时才重置标志
+            self._is_system_card_visible = False
         # 恢复 todo（如果之前是显示的且还有内容）
         if self._todo_was_visible_before_system and self._todo_floating_widget._todo_list:
             self._todo_floating_widget.setVisible(True)
@@ -4503,6 +4500,7 @@ class OpenAIChatToolWindow(ToolWindow):
             return
 
         # 如果系统卡片打开，阻止工具卡片自行显示（但仍记录任务）
+        print(f"[DEBUG] _on_tool_call_started: tool={tool_name}, _is_system_card_visible={self._is_system_card_visible}")
         if self._is_system_card_visible:
             return
 
@@ -4652,6 +4650,7 @@ class OpenAIChatToolWindow(ToolWindow):
             error_msg = str(getattr(result, "error", "") or "")
             content = str(result) if result else ""
 
+        print(f"[DEBUG] _on_tool_call_finished: tool={tool_name}, _is_system_card_visible={self._is_system_card_visible}")
         # 如果系统卡片打开，阻止工具卡片显示（但仍记录结果到消息卡片）
         if self._is_system_card_visible:
             if tool_name in ("todowrite", "todoread"):
