@@ -4,15 +4,21 @@ UI 渲染辅助函数
 """
 
 import hashlib
-import json
+import orjson as json
 import re
 from html import escape
 
-# 预编译正则表达式
+# 预编译正则表达式（模块级别缓存，避免重复编译）
 _CODE_BLOCK_PATTERN = re.compile(r"```[\w]*\n")
 _CODE_BLOCK_FINAL_PATTERN = re.compile(r"```")
 # 匹配 HTML 代码块标签
 _HTML_CODE_BLOCK_PATTERN = re.compile(r"<(pre|code)[^>]*>.*?</\1>", re.DOTALL | re.IGNORECASE)
+# HTML 标签清理正则（避免每次调用 re.sub）
+_HTML_TAG_PATTERN = re.compile(r"<[^>]+>")
+# UUID 模式（用于提取 task_id）
+_UUID_PATTERN = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', re.IGNORECASE)
+# Null 字符清理（编译一次，多次使用）
+_NULL_CHAR = '\x00'  # 避免 str.replace 被重复调用
 
 
 def format_tool_block(
@@ -22,7 +28,7 @@ def format_tool_block(
     success: bool = True,
 ) -> str:
     """格式化工具块为纯文本标记，用于存储"""
-    args_json = json.dumps(tool_args, ensure_ascii=False)
+    args_json = json.dumps(tool_args).decode('utf-8')
     result_str = str(result) if result else ""
 
     return (
@@ -52,10 +58,10 @@ def _escape_text_for_plain(text: str) -> str:
     text = _CODE_BLOCK_FINAL_PATTERN.sub("", text)
     # 3. 移除独立的反引号
     text = text.replace("`", "")
-    # 4. 移除 HTML 标签（用于清理残留的 HTML 标记）
-    text = re.sub(r"<[^>]+>", "", text)
+    # 4. 移除 HTML 标签（使用预编译正则）
+    text = _HTML_TAG_PATTERN.sub("", text)
     # 5. 移除可能造成渲染问题的特殊空白字符
-    text = text.replace("\x00", "")  # 移除 null 字符
+    text = text.replace(_NULL_CHAR, "")  # 移除 null 字符
     # 6. 规范化换行符并转义为字面量（用于不支持多行的显示）
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     text = text.replace("\n", "\\n")  # 换行符转为字面量 \n
@@ -65,10 +71,10 @@ def _escape_text_for_plain(text: str) -> str:
 def _truncate_value(v, max_len: int = 80) -> str:
     """截断单个参数值"""
     if isinstance(v, dict):
-        s = json.dumps(v, ensure_ascii=False)
+        s = json.dumps(v).decode('utf-8')
         return s[:max_len] + "..." if len(s) > max_len else s
     elif isinstance(v, list):
-        s = json.dumps(v, ensure_ascii=False)
+        s = json.dumps(v).decode('utf-8')
         return s[:max_len] + "..." if len(s) > max_len else s
     elif isinstance(v, str):
         return v[:max_len] + "..." if len(v) > max_len else v
@@ -153,9 +159,9 @@ def _format_unified_table(tool_args: dict, result: str = None, is_sub_agent_task
     if tool_args:
         for key, value in tool_args.items():
             if isinstance(value, dict):
-                value_str = json.dumps(value, ensure_ascii=False)
+                value_str = json.dumps(value).decode('utf-8')
             elif isinstance(value, list):
-                value_str = json.dumps(value, ensure_ascii=False)
+                value_str = json.dumps(value).decode('utf-8')
             else:
                 value_str = str(value)
             
@@ -216,9 +222,8 @@ def _parse_subagent_task_ids(result: str) -> str:
         pass
     
     # 尝试从文本中提取 task_id（UUID 格式）
-    import re
-    uuid_pattern = r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
-    matches = re.findall(uuid_pattern, result)
+    # 使用预编译的 _UUID_PATTERN
+    matches = _UUID_PATTERN.findall(result)
     if matches:
         return ",".join(matches)
     
@@ -260,7 +265,7 @@ def render_tool_block(
 
     # 文件编辑工具判断
     file_edit_tools = {"write", "edit", "multiedit", "patch"}
-    is_file_edit = tool_name in file_edit_tools and tool_args.get("path")
+    is_file_edit = tool_name in file_edit_tools
 
     # 差异对比按钮
     diff_icon_html = ""
@@ -306,7 +311,7 @@ def render_tool_block(
     # 生成哈希 key
     block_seed = "|".join([
         str(tool_name or ""),
-        json.dumps(tool_args or {}, ensure_ascii=False, sort_keys=True),
+        json.dumps(tool_args or {}, option=json.OPT_SORT_KEYS).decode('utf-8'),
         str(result or ""),
         str(success),
     ])
@@ -330,6 +335,52 @@ def render_tool_block(
         <span style="display: flex; align-items: center; flex: 0 0 auto; margin-left: 8px;">
             {diff_icon_html}
             {subagent_log_btn_html}
+        </span>
+    </button>
+    <div class="cm-collapsible__body"{body_style}>
+        {expanded_content}
+    </div>
+</div>"""
+
+
+def render_hook_block(event_name: str, content: str, collapsed: bool = True) -> str:
+    """渲染 Hook 输出块（折叠样式）"""
+    icon = "⚡"
+    title_color = "#00BCD4"
+    
+    # 事件名称格式化
+    event_display = event_name.replace("Pre", "Pre ").replace("Post", "Post ")
+    
+    # 预览文本
+    max_preview = 50
+    if len(content) > max_preview:
+        content_preview = content[:max_preview].replace("\n", " ") + "..."
+    else:
+        content_preview = content.replace("\n", " ")
+    
+    # 生成唯一 block_key
+    block_key = "hook-" + hashlib.md5(f"{event_name}:{content[:50]}".encode()).hexdigest()[:8]
+    
+    expanded_attr = "false" if collapsed else "true"
+    body_style = "" if collapsed else ' style="height:auto; opacity:1;"'
+    
+    expanded_content = f"""
+    <div class="hook-content" style="padding: 10px 12px; font-family: Consolas, monospace; font-size: 12px; color: #e0e0e0; white-space: pre-wrap; word-break: break-word; line-height: 1.5;">
+        {escape(content)}
+    </div>
+    """
+    
+    return f"""<div class="cm-collapsible hook-block" data-block-key="{block_key}" data-expanded="{expanded_attr}" data-hook-event="{escape(event_name)}" style="margin: 8px 0; background: rgba(0, 188, 212, 0.08); border: 1px solid rgba(0, 188, 212, 0.2); border-left: 3px solid {title_color}; border-radius: 6px;">
+    <button type="button" class="cm-collapsible__summary hook-block__summary" aria-expanded="{expanded_attr}" style="cursor: pointer; padding: 8px 12px; color: {title_color}; font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 10px; width: 100%; background: transparent; border: none; text-align: left; box-sizing: border-box;">
+        <span style="display: inline-flex; align-items: center; gap: 4px; min-width: 100px; flex: 0 0 auto;">
+            <span class="cm-collapsible__chevron" aria-hidden="true"></span>
+            <span style="flex: 0 0 auto;">{icon}</span>
+            <span style="white-space: nowrap; flex: 0 0 auto;">{escape(event_display)}</span>
+        </span>
+        <span style="display: flex; align-items: flex-end; gap: 8px; margin-left: 10px; min-width: 0; flex: 1 1 auto; justify-content: flex-end; overflow: hidden;">
+            <span style="color: #888; font-size: 11px; text-align: right; word-break: break-all; white-space: normal; line-height: 1.4; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;">
+                {escape(content_preview)}
+            </span>
         </span>
     </button>
     <div class="cm-collapsible__body"{body_style}>

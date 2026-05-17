@@ -1,153 +1,139 @@
-#!/usr/bin/env python3
 """
-智能启动器 - 自动解决 Python 环境问题
-用户只需运行这个脚本，无需关心 Python 路径配置
-
-使用方法:
-    python launcher.py                    # 截图+分析
-    python launcher.py --skip-capture     # 仅分析已有截图
+截图分析一键启动器
+自动检测环境并执行截图分析
 """
 import os
 import sys
 import subprocess
 from pathlib import Path
 
+# 添加 common 目录到路径
+SCRIPT_DIR = Path(__file__).parent
+sys.path.insert(0, str(SCRIPT_DIR))
 
-def find_python():
-    """智能查找可用的 Python 解释器"""
-    # 方法1: 尝试 py launcher (Windows 推荐)
-    for version in ['-3.12', '-3.11', '-3.10', '-3.9', '-3']:
-        try:
-            result = subprocess.run(
-                ['py', version, '--version'],
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
-            if result.returncode == 0:
-                version_num = version.replace('-', '')
-                return ['py', version], version_num
-        except:
-            pass
-    
-    # 方法2: 直接尝试 python
-    for cmd in ['python', 'python3']:
-        try:
-            result = subprocess.run(
-                [cmd, '--version'],
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
-            if result.returncode == 0:
-                return [cmd], None
-        except:
-            pass
-    
-    return None, None
+from common.utils import get_python_executable, get_api_key, ConfigError, Screenshot
 
 
-def get_saved_api_key():
-    """从配置文件读取已保存的 API Key"""
-    config_file = Path.home() / ".minimax" / "api_key"
-    if config_file.exists():
-        content = config_file.read_text().strip()
-        # 跳过注释行
-        if content and not content.startswith('#'):
-            return content
-    return None
+def find_script(script_name):
+    """查找脚本路径"""
+    scripts = {
+        'capture': SCRIPT_DIR / 'capture_and_analyze.py',
+        'analyze': SCRIPT_DIR / 'analyze_image.py',
+        'screenshot': SCRIPT_DIR / 'take_screenshot.py',
+    }
+    return scripts.get(script_name)
 
 
-def save_api_key(api_key):
-    """保存 API Key 到配置文件"""
-    config_dir = Path.home() / ".minimax"
-    config_dir.mkdir(exist_ok=True)
-    config_file = config_dir / "api_key"
-    config_file.write_text(api_key)
-    return config_file
+def check_environment():
+    """检查运行环境"""
+    print("=" * 50)
+    print("  飘狐 DriFox - 截图分析")
+    print("=" * 50)
+    print()
+
+    errors = []
+
+    # 检查 Python
+    print("[1/4] 检测 Python 环境...")
+    try:
+        python_path = get_python_executable()
+        print(f"  ✓ 找到: {python_path}")
+    except ConfigError as e:
+        print(f"  ✗ 错误: {e}")
+        errors.append("Python")
+
+    # 检查 API Key
+    print()
+    print("[2/4] 检查 API Key...")
+    try:
+        api_key = get_api_key()
+        # 显示密钥前缀
+        prefix = api_key[:10] if len(api_key) > 10 else api_key
+        print(f"  ✓ 找到: {prefix}...")
+    except ConfigError as e:
+        print(f"  ✗ 错误: {e}")
+        print("  请设置环境变量 MINIMAX_API_KEY")
+        errors.append("API Key")
+
+    # 检查截图权限 (macOS)
+    print()
+    print("[3/4] 检查截图权限...")
+    try:
+        test_path = "/tmp/permission_test.png"
+        if Screenshot.take(test_path):
+            print("  ✓ 截图功能正常")
+            if os.path.exists(test_path):
+                os.remove(test_path)
+        else:
+            print("  ✗ 截图功能异常")
+            errors.append("截图")
+    except Exception as e:
+        print(f"  ✗ 错误: {e}")
+        errors.append("截图")
+
+    # 检查脚本
+    print()
+    print("[4/4] 检查脚本文件...")
+    script = find_script('capture')
+    if script and script.exists():
+        print(f"  ✓ 找到: {script.name}")
+    else:
+        print(f"  ✗ 未找到: capture_and_analyze.py")
+        errors.append("脚本")
+
+    print()
+    print("=" * 50)
+
+    return errors
 
 
 def main():
-    # 切换到脚本所在目录
-    script_dir = Path(__file__).parent.resolve()
-    os.chdir(script_dir)
-    
-    print("飘狐 DriFox - 截图分析")
-    print("=" * 40)
-    
-    # 0. 尝试从配置文件加载已保存的 API Key
-    saved_key = get_saved_api_key()
-    
-    # 1. 找 Python
-    print("\n[1/3] 检测 Python 环境...")
-    python_cmd, version_num = find_python()
-    
-    if python_cmd is None:
-        print("错误: 未找到可用的 Python 解释器")
-        print("请安装 Python 3.x: https://www.python.org/downloads/")
-        input("\n按 Enter 键退出...")
-        sys.exit(1)
-    
-    python_exe = ' '.join(python_cmd)
-    print(f"  找到: {python_exe}")
-    
-    # 2. 获取 API Key
-    print("\n[2/3] 检查 API Key...")
-    
-    # 优先级: 环境变量 > 保存的配置 > 用户输入
-    api_key = os.environ.get('MINIMAX_API_KEY')
-    
-    if not api_key and saved_key:
-        api_key = saved_key
-        print(f"  从配置文件读取: {api_key[:10]}...")
-    elif not api_key:
-        print("  未设置")
-        print("\n" + "=" * 40)
-        print("需要配置 API Key")
-        print("=" * 40)
-        
-        # 检查是否有保存的密钥
-        if saved_key:
-            print(f"发现已保存的密钥: {saved_key[:10]}...")
-            print("直接使用 (Enter) / 重新输入 (输入新密钥)")
-            choice = input("选择: ").strip()
-            if not choice:
-                api_key = saved_key
-            else:
-                api_key = choice
-                save_api_key(api_key)
-                print(f"已更新保存: {api_key[:10]}...")
-        else:
-            user_key = input("请输入 MiniMax API Key: ").strip()
-            if not user_key:
-                print("取消操作")
-                sys.exit(0)
-            api_key = user_key
-            
-            # 询问是否保存
-            save = input("是否保存到配置文件供下次使用? (y/N): ").strip().lower()
-            if save == 'y':
-                config_file = save_api_key(api_key)
-                print(f"已保存到: {config_file}")
-    
-    if api_key:
-        print(f"  使用 Key: {api_key[:10]}...")
-    
-    # 3. 执行
-    print("\n[3/3] 执行截图分析...")
-    env = os.environ.copy()
-    env['MINIMAX_API_KEY'] = api_key
-    
-    capture_args = [] if '--skip-capture' in sys.argv else []
-    
-    try:
-        cmd = python_cmd + ['-u', 'capture_and_analyze.py'] + capture_args
-        result = subprocess.run(cmd, env=env)
-        sys.exit(result.returncode)
-    except KeyboardInterrupt:
-        print("\n操作已取消")
-        sys.exit(0)
+    """主入口"""
+    errors = check_environment()
+
+    if errors:
+        print()
+        print("环境检查发现问题，请先解决上述错误")
+        print()
+        print("快速配置:")
+        print("  macOS/Linux: export MINIMAX_API_KEY=你的密钥")
+        print("  Windows:      set MINIMAX_API_KEY=你的密钥")
+        print()
+        print("按回车键退出...")
+        input()
+        return 1
+
+    print()
+    print("所有检查通过! 正在启动截图分析...")
+    print()
+
+    # 执行截图分析
+    script = find_script('capture')
+    if script:
+        try:
+            # 使用当前 Python 执行
+            result = subprocess.run(
+                [sys.executable, str(script)],
+                cwd=str(SCRIPT_DIR)
+            )
+            return result.returncode
+        except Exception as e:
+            print(f"执行失败: {e}")
+            return 1
+
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    # 如果带参数，直接执行
+    if len(sys.argv) > 1:
+        script_name = sys.argv[1]
+        script = find_script(script_name)
+        if script and script.exists():
+            result = subprocess.run([sys.executable, str(script)])
+            sys.exit(result.returncode)
+        else:
+            print(f"未知脚本: {script_name}")
+            sys.exit(1)
+    else:
+        sys.exit(main())

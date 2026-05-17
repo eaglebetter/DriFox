@@ -1,33 +1,101 @@
 MAX_SESSION_CARD_CACHE_SIZE = 10
 
-PARAM_UI_MAP = {
-    "API_KEY": "password",
-    "温度": "slider",
-    "temp": "slider",
-    "最大Token": "spinbox",
-    "上下文长度": "spinbox",
-    "max_new_tokens": "spinbox",
-    "top_p": "slider",
-    "frequency_penalty": "slider",
-    "presence_penalty": "slider",
-    "选择模型": "model_selector",
-    "启用技能": "checkbox",
-}
-
-
-PARAM_RANGE_MAP = {
-    "温度": {"min": 0.0, "max": 2.0, "step": 0.01, "type": "float"},
-    "temp": {"min": 0.0, "max": 2.0, "step": 0.01, "type": "float"},
-    "最大Token": {"min": 1, "max": 99999999, "step": 1, "type": "int"},
-    "上下文长度": {"min": 1, "max": 99999999, "step": 1, "type": "int"},
-    "最大新Token": {"min": 1, "max": 18192, "step": 1, "type": "int"},
-    "top_p": {"min": 0.0, "max": 1.0, "step": 0.01, "type": "float"},
-    "frequency_penalty": {"min": -2.0, "max": 2.0, "step": 0.01, "type": "float"},
-    "presence_penalty": {"min": -2.0, "max": 2.0, "step": 0.01, "type": "float"},
+# ============================================================
+# 统一参数 schema：定义所有模型参数的 UI 表现与 API 映射
+# - ui_type:   checkbox / combobox / slider / spinbox / password / line
+# - display_name: 展示名（不传则用 key 本身）
+# - api_param:   映射到 API 请求的字段名（不传则需在 worker 中特殊处理）
+# - range:       slider/spinbox 的取值范围
+# - options:     combobox 的选项列表
+# ============================================================
+PARAM_SCHEMA = {
+    "温度": {
+        "display_name": "温度",
+        "ui_type": "slider",
+        "range": {"min": 0.0, "max": 2.0, "step": 0.01, "type": "float"},
+        "api_param": "temperature",
+    },
+    "temp": {
+        "display_name": "温度",
+        "ui_type": "slider",
+        "range": {"min": 0.0, "max": 2.0, "step": 0.01, "type": "float"},
+        "api_param": "temperature",
+    },
+    "最大Token": {
+        "display_name": "上下文长度",
+        "ui_type": "spinbox",
+        "range": {"min": 1, "max": 99999999, "step": 1, "type": "int"},
+        "api_param": "max_tokens",
+    },
+    "上下文长度": {
+        "display_name": "上下文长度",
+        "ui_type": "spinbox",
+        "range": {"min": 1, "max": 99999999, "step": 1, "type": "int"},
+        "api_param": "max_tokens",
+    },
+    "max_new_tokens": {
+        "display_name": "最大新Token",
+        "ui_type": "spinbox",
+        "range": {"min": 1, "max": 18192, "step": 1, "type": "int"},
+        "api_param": "max_tokens",
+    },
+    "top_p": {
+        "display_name": "核采样 (top_p)",
+        "ui_type": "slider",
+        "range": {"min": 0.0, "max": 1.0, "step": 0.01, "type": "float"},
+        "api_param": "top_p",
+    },
+    "frequency_penalty": {
+        "display_name": "频率惩罚",
+        "ui_type": "slider",
+        "range": {"min": -2.0, "max": 2.0, "step": 0.01, "type": "float"},
+        "api_param": "frequency_penalty",
+    },
+    "presence_penalty": {
+        "display_name": "存在惩罚",
+        "ui_type": "slider",
+        "range": {"min": -2.0, "max": 2.0, "step": 0.01, "type": "float"},
+        "api_param": "presence_penalty",
+    },
+    "思考模式": {
+        "display_name": "思考模式",
+        "ui_type": "checkbox",
+        # 无 api_param，由 chat_worker 特殊处理
+    },
+    "思考预算": {
+        "display_name": "思考预算",
+        "ui_type": "spinbox",
+        "range": {"min": 256, "max": 65536, "step": 256, "type": "int"},
+        "api_param": "thinking_budget",
+    },
+    "思考等级": {
+        "display_name": "思考等级",
+        "ui_type": "combobox",
+        "options": ["low", "medium", "high", "max"],
+        "api_param": "reasoning_effort",
+    },
+    "启用技能": {
+        "display_name": "启用技能",
+        "ui_type": "checkbox",
+    },
+    "API_KEY": {
+        "ui_type": "password",
+    },
+    "选择模型": {
+        "ui_type": "model_selector",
+    },
 }
 
 
 PROVIDER_MODELS = {
+    "火山方舟": [
+        "doubao-seed-code",
+        "kimi-k2.6 ",
+        "kimi-k2.5",
+        "minimax-m2.7",
+        "glm-4.7",
+        "glm5.1"
+    ],
     "MiniMax": [
         "MiniMax-M2.7",
         "MiniMax-M2.7-highspeed",
@@ -120,11 +188,21 @@ FREE_PROVIDERS = {
         "认证方式": "bearer",
         "获取地址": "https://platform.minimaxi.com/user-center/basic-information/interface-key",
     },
+    "火山方舟": {
+        "API_URL": "https://ark.cn-beijing.volces.com/api/coding/v3",
+        "API_KEY": "",
+        "模型名称": "doubao-pro-32k",
+        "温度": 0.7,
+        "最大Token": 200000,
+        "认证方式": "bearer",
+        "获取地址": "https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey",
+    },
     "SiliconFlow (硅基流动)": {
         "API_URL": "https://api.siliconflow.cn/v1",
         "API_KEY": "",
-        "模型名称": "Qwen/Qwen2.5-7B-Instruct",
-        "温度": 0.7,
+        "思考预算": "medium",
+        "模型名称": "deepseek-ai/DeepSeek-R1",
+        "温度": 0.6,
         "最大Token": 200000,
         "认证方式": "bearer",
         "获取地址": "https://cloud.siliconflow.cn/account/ak",
@@ -141,6 +219,7 @@ FREE_PROVIDERS = {
     "智谱AI": {
         "API_URL": "https://open.bigmodel.cn/api/paas/v4",
         "API_KEY": "",
+        "思考模式": True,
         "模型名称": "glm-4-flash",
         "温度": 0.7,
         "最大Token": 40960,
@@ -150,6 +229,8 @@ FREE_PROVIDERS = {
     "DeepSeek": {
         "API_URL": "https://api.deepseek.com",
         "API_KEY": "",
+        "思考模式": False,
+        "思考等级": "high",
         "模型名称": "deepseek-chat",
         "温度": 0.7,
         "最大Token": 40960,
@@ -213,6 +294,7 @@ FREE_PROVIDERS = {
 }
 
 PROVIDER_ICONS = {
+    "火山方舟": "火山引擎",
     "MiniMax": "MiniMax",
     "SiliconFlow (硅基流动)": "siliconflow",
     "阿里云 (DashScope)": "qwen",

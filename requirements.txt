@@ -16,3 +16,4 @@ pyinstaller~=6.16.0
 markdown
 pygments
 requests
+orjson>=3.8.0

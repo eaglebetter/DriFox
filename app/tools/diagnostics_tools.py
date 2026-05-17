@@ -1,21 +1,34 @@
-import json
+# -*- coding: utf-8 -*-
+"""
+诊断工具集 - 提供代码静态分析功能
+
+支持：
+- Python: pyright 语法检查
+- JavaScript/TypeScript: ESLint 检查
+- 通用: grep 搜索错误关键词
+"""
+import orjson as json
 import subprocess
 from pathlib import Path
 from typing import Optional, Tuple
 
 from app.tools.result import ToolResult
 
-# 尝试导入 pyright Python 模块
+# pyright Python 模块可用性检测
 try:
     from pyright import cli as pyright_cli
-    HAS_PYRIGHT_MODULE = True
+    _HAS_PYRIGHT = True
 except ImportError:
-    HAS_PYRIGHT_MODULE = False
+    _HAS_PYRIGHT = False
 
 
 class DiagnosticsTools:
-    def __init__(self, workdir: Path):
-        self.workdir = workdir
+    def __init__(self, owner):
+        self._owner = owner
+
+    @property
+    def workdir(self) -> Path:
+        return self._owner.workdir
 
     def _detect_language(self, file_path: str) -> str:
         ext = Path(file_path).suffix.lower()
@@ -100,7 +113,7 @@ class DiagnosticsTools:
 
         if lang == "python":
             # 优先使用 pyright Python 模块
-            if HAS_PYRIGHT_MODULE:
+            if _HAS_PYRIGHT:
                 rc, out = self._run_pyright_module(abs_path)
                 if rc != -1:
                     parsed = self._parse_pyright_json(out)

@@ -23,6 +23,42 @@ to_remove = [
     "tensorflow",
     "torchaudio",
     "sqlalchemy",
+    "PIL",
+    "PyQt5/Qt5/translations",
+    "ast_serialize",
+    "websockets",
+    "PyQt5/Qt5/qml/QtQuick3D",
+    "PyQt5/Qt5/qml/QtBluetooth",
+    "PyQt5/Qt5/qml/QtRemoteObjects",
+    "PyQt5/Qt5/qml/QtSensors",
+    "PyQt5/Qt5/qml/QtTest",
+    "PyQt5/Qt5/qml/QtWebSockets",
+    "PyQt5/Qt5/qml/QtQuick.2",
+    "PyQt5/Qt5/qml/QtQuick3D",
+    "watchfiles",
+    # "PyQt5/Qt5/bin/opengl32sw.dll",
+    "PyQt5/Qt5/bin/libGLESv2.dll",
+    "PyQt5/Qt5/bin/d3dcompiler_47.dll",
+    "PyQt5/Qt5/bin/Qt5Quick3D.dll",
+    "PyQt5/Qt5/bin/Qt5Quick3DAssetImport.dll",
+    "PyQt5/Qt5/bin/Qt5Quick3DRuntimeRender.dll",
+    "PyQt5/Qt5/bin/Qt5Quick3DRender.dll",
+    "PyQt5/Qt5/bin/Qt5Quick3DUtils.dll",
+    "PyQt5/Qt5/bin/Qt5RemoteObjects.dll",
+    "PyQt5/Qt5/bin/Qt5Sensors.dll",
+    "PyQt5/Qt5/bin/Qt5QuickTest.dll",
+    "PyQt5/Qt5/bin/Qt5QuickTemplates2.dll",
+    "PyQt5/Qt5/bin/Qt5QuickShapes.dll",
+    "PyQt5/Qt5/bin/Qt5QuickParticles.dll",
+    "PyQt5/Qt5/bin/Qt5QuickControls2.dll",
+
+    "PyQt5/Qt5/bin/Qt5Bluetooth.dll",
+    "PyQt5/Qt5/bin/libcrypto-1_1-x64.dll",
+    "PyQt5/Qt5/bin/Qt5Location.dll",
+    "PyQt5/Qt5/qml/QtQuick",
+    "PyQt5/Qt5/resources/qtwebengine_devtools_resources.pak",
+    "PyQt5/Qt5/resources/qtwebengine_resources_200p.pak",
+    "PyQt5/Qt5/resources/qtwebengine_resources_100p.pak",
 ]
 # 2. 图标选择 (跨平台)
 icon_arg = None
@@ -31,7 +67,7 @@ if platform.system() == "Windows":
     if icon_path.exists():
         icon_arg = f"--icon={icon_path}"
 elif platform.system() == "Darwin":
-    icon_path = Path(base_dir) / "icons" / "logoico.ico"
+    icon_path = Path(base_dir) / "icons" / "drifox.ico"
     if icon_path.exists():
         icon_arg = f"--icon={icon_path}"
 

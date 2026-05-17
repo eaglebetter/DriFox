@@ -1,14 +1,72 @@
+# -*- coding: utf-8 -*-
+"""
+文件工具集 - 提供文件读写和编辑功能
+
+支持：
+- 读取：read, glob, grep, scan_repo
+- 写入：write, write_file
+- 编辑：edit, edit_file, multi_edit, patch, apply_patch
+- 目录：list, mkdir, delete_file
+- 搜索：grep (异步), scan_repo (异步)
+"""
 import fnmatch
 import re
 from typing import Dict, List, Optional, Callable
 from pathlib import Path
 import os
+from functools import lru_cache
 
 from PyQt5.QtCore import QObject, pyqtSignal, QThreadPool, QRunnable
 from loguru import logger
 from app.tools.result import ToolResult
+from app.tools.patch_applier import PatchApplier
 
 MAX_GREP_CONTENT_LENGTH = 15000
+
+# ========== 性能优化：模块级别常量和缓存 ==========
+# Grep 排除目录（性能优化：预创建集合）
+_GREP_EXCLUDE_DIRS = frozenset({
+    '.drifox', '.mypy_cache', '.git', 'node_modules', '__pycache__',
+    'venv', '.venv', 'dist', 'build', '.idea', '.vscode'
+})
+
+
+@lru_cache(maxsize=128)
+def _compile_grep_pattern(pattern: str) -> re.Pattern:
+    """
+    编译 grep 正则表达式（带缓存）
+
+    性能优化：避免每次调用都重新编译相同的正则表达式
+    """
+    return re.compile(pattern, re.IGNORECASE)
+
+
+def _resolve_path(workdir: Path, path: str) -> Path:
+    """
+    解析相对路径为绝对路径
+
+    Args:
+        workdir: 工作目录
+        path: 要解析的路径
+
+    Returns:
+        解析后的绝对路径
+    """
+    if not path:
+        return workdir
+    try:
+        expanded = os.path.expandvars(path)
+        if expanded != path:
+            path = expanded
+        p = Path(path)
+        if p.is_absolute():
+            return p.resolve()
+        else:
+            return (workdir / p).resolve()
+    except (ValueError, OSError, RuntimeError) as e:
+        logger.warning(f"[FileTools] Failed to resolve path {path}: {e}")
+        return workdir
+
 
 class GrepTask(QRunnable):
     """异步 Grep 任务，在子线程中执行"""
@@ -39,28 +97,28 @@ class GrepTask(QRunnable):
             if not self.path:
                 search_root = self.workdir
             else:
-                search_root = self._resolve_path(self.path)
-            
-            regex = re.compile(self.pattern, re.IGNORECASE)
+                search_root = _resolve_path(self.workdir, self.path)
+
+            # 性能优化：使用带缓存的编译函数
+            regex = _compile_grep_pattern(self.pattern)
+
             results = []
-            
-            exclude_dirs = {'.drifox', '.mypy_cache', '.git', 'node_modules', '__pycache__', 'venv', '.venv',
-                           'dist', 'build', '.idea', '.vscode'}
-            
+
             for root, dirs, files in os.walk(search_root):
                 # 定期检查取消标志
                 if self.cancelled_ref and self.cancelled_ref[0]:
                     return ToolResult(False, error="搜索已取消")
-                
-                dirs[:] = [d for d in dirs if d not in exclude_dirs]
-                
+
+                # 性能优化：使用 frozenset
+                dirs[:] = [d for d in dirs if d not in _GREP_EXCLUDE_DIRS]
+
                 for filename in files:
                     if self.cancelled_ref and self.cancelled_ref[0]:
                         return ToolResult(False, error="搜索已取消")
-                    
+
                     if self.include and not fnmatch.fnmatch(filename, self.include):
                         continue
-                    
+
                     file_path = Path(root) / filename
                     try:
                         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
@@ -78,39 +136,36 @@ class GrepTask(QRunnable):
                                             results) + "\n\n... (Too many matches, please refine your search pattern)")
                     except:
                         continue
-            
+
             content = "\n".join(results) if results else "No matches found."
             if len(content) > MAX_GREP_CONTENT_LENGTH:
                 content = content[:MAX_GREP_CONTENT_LENGTH] + f"\n\n... (Content truncated, exceeds {MAX_GREP_CONTENT_LENGTH} characters limit)"
             return ToolResult(True, content=content)
         except Exception as e:
             return ToolResult(False, error=f"Grep error: {str(e)}")
-    
+
     def _resolve_path(self, path: str) -> Path:
-        if not path:
-            return self.workdir
-        try:
-            expanded = os.path.expandvars(path)
-            if expanded != path:
-                path = expanded
-            p = Path(path)
-            if p.is_absolute():
-                return p.resolve()
-            else:
-                return (self.workdir / p).resolve()
-        except (ValueError, OSError, RuntimeError) as e:
-            logger.warning(f"[GrepTask] Failed to resolve path {path}: {e}")
-            return self.workdir
+        """委托给模块级函数"""
+        return _resolve_path(self.workdir, path)
 
 
 class FileTools:
-    def __init__(self, workdir: Path):
-        self.workdir = workdir
+    def __init__(self, owner):
+        self._owner = owner
         self._thread_pool: Optional[QThreadPool] = None
         self._current_grep_task: Optional[GrepTask] = None
         self._grep_cancelled = [False]  # 使用列表引用，可以在子线程中被检查
         # 文件修改时间追踪：{绝对路径: 修改时间戳}
         self._file_mtimes: Dict[str, float] = {}
+
+    @property
+    def workdir(self) -> Path:
+        return self._owner.workdir
+
+    @workdir.setter
+    def workdir(self, value: Path):
+        """保留向后兼容：外部设置 workdir 时同步更新 owner"""
+        self._owner.workdir = value
     
     def _get_thread_pool(self) -> QThreadPool:
         """获取或创建线程池"""
@@ -127,20 +182,8 @@ class FileTools:
         self._grep_cancelled[0] = False
     
     def _resolve_path(self, path: str) -> Path:
-        if not path:
-            return self.workdir
-        try:
-            expanded = os.path.expandvars(path)
-            if expanded != path:
-                path = expanded
-            p = Path(path)
-            if p.is_absolute():
-                return p.resolve()
-            else:
-                return (self.workdir / p).resolve()
-        except (ValueError, OSError, RuntimeError) as e:
-            logger.warning(f"[FileTools] Failed to resolve path {path}: {e}")
-            return self.workdir
+        """委托给模块级函数"""
+        return _resolve_path(self.workdir, path)
 
     def _check_file_modified(self, full_path: Path) -> Optional[ToolResult]:
         """
@@ -306,19 +349,18 @@ class FileTools:
         """同步执行 grep"""
         try:
             search_root = self._resolve_path(path)
-            regex = re.compile(pattern, re.IGNORECASE)
+            # 性能优化：使用带缓存的编译函数
+            regex = _compile_grep_pattern(pattern)
             results = []
 
-            exclude_dirs = {'.mypy_cache', '.git', 'node_modules', '__pycache__', 'venv', '.venv',
-                           'dist', 'build', '.idea', '.vscode'}
-
             for root, dirs, files in os.walk(search_root):
-                dirs[:] = [d for d in dirs if d not in exclude_dirs]
+                # 性能优化：使用 frozenset
+                dirs[:] = [d for d in dirs if d not in _GREP_EXCLUDE_DIRS]
 
                 for filename in files:
                     if self._grep_cancelled[0]:
                         return ToolResult(False, error="搜索已取消")
-                    
+
                     if include and not fnmatch.fnmatch(filename, include):
                         continue
 
@@ -441,11 +483,7 @@ class FileTools:
     def apply_patch(self, path: str, patch_content: str) -> ToolResult:
         """
         应用 unified diff 格式的 patch 到指定文件。
-
-        修正说明（原实现有多个 bug）：
-        - context 匹配未考虑 '+' 行不占用文件行位置，导致 context 偏移错误
-        - 先删后插的索引计算未处理删除导致的偏移
-        - 重写为顺序逐行处理，与标准 patch 语义一致
+        使用 PatchApplier 模块处理解析和应用逻辑。
         """
         try:
             full_path = self._resolve_path(path)
@@ -457,150 +495,24 @@ class FileTools:
                 return check_result
 
             with open(full_path, "r", encoding="utf-8") as f:
-                original_lines = f.read().splitlines()
+                original_content = f.read()
 
-            processed_content = patch_content.strip()
-            real_newlines = processed_content.count('\n')
-            escaped_newlines = processed_content.count('\\n')
-            if escaped_newlines > real_newlines:
-                processed_content = processed_content.replace('\\n', '\n')
+            # 使用 PatchApplier 应用补丁
+            success, error_msg, modified_content = PatchApplier.apply_to_content(
+                original_content, patch_content
+            )
 
-            patch_lines = processed_content.split('\n')
-            hunks = self._parse_unified_diff(patch_lines)
-
-            if not hunks:
-                return ToolResult(False, error="No valid hunk found in patch")
-
-            # 从后往前处理 hunk，避免索引偏移
-            result = list(original_lines)
-            for hunk in reversed(hunks):
-                content = hunk['content']
-                old_start = hunk['old_start']  # 1-based
-
-                # ---------------------- 验证阶段 ----------------------
-                # 逐行校验：context 行和 delete 行必须匹配文件内容
-                # '+' 行不消耗文件行，所以 file_pos 只对 context/delete 递增
-                file_pos = old_start - 1  # 转为 0-based
-                for typ, text in content:
-                    if typ in (' ', '-'):
-                        if file_pos >= len(result):
-                            return ToolResult(False,
-                                error=f"❌ Patch context mismatch at line {file_pos + 1} (hunk @@ -{old_start},... @@):\n"
-                                      f"  Patch expects: {repr(text)}\n"
-                                      f"  File has:      <EOF>\n"
-                                      f"  → The patch goes beyond the end of file.\n"
-                                      f"  → Check if @@ -{old_start} line number is too large. "
-                                      f"The file has {len(result)} line(s) in total.")
-                        if result[file_pos] != text:
-                            # 获取周围上下文帮助定位问题
-                            prev_line = repr(result[file_pos - 1]) if file_pos > 0 else '<start>'
-                            next_line = repr(result[file_pos + 1]) if file_pos + 1 < len(result) else '<EOF>'
-                            return ToolResult(False,
-                                error=f"❌ Patch context mismatch at line {file_pos + 1} (hunk @@ -{old_start},... @@):\n"
-                                      f"  Patch expects:  {repr(text)}\n"
-                                      f"  File has:       {repr(result[file_pos])}\n"
-                                      f"  File line {file_pos}:     {prev_line}\n"
-                                      f"  File line {file_pos + 2}: {next_line}\n"
-                                      f"\n"
-                                      f"Possible causes:\n"
-                                      f"  1. @@ line number is wrong — the first context line '{content[0][1] if content else ''}' "
-                                      f"actually starts at a different position\n"
-                                      f"  2. Patch content doesn't exactly match the file (check indentation/spaces)\n"
-                                      f"  3. The file has been modified since it was last read")
-                        file_pos += 1
-                    # '+' 行不消耗文件行，跳过
-
-                # ---------------------- 应用阶段 ----------------------
-                # 重新定位到 hunk 起始位置
-                file_pos = old_start - 1
-                replace_start = old_start - 1
-                replace_end = file_pos  # 会被下面的遍历更新
-
-                # 构建替换内容
-                replacement = []
-                for typ, text in content:
-                    if typ == ' ':
-                        # context 行：保留原文件行
-                        replacement.append(result[file_pos])
-                        file_pos += 1
-                    elif typ == '-':
-                        # delete 行：跳过原文件行，不加入替换结果
-                        file_pos += 1
-                    elif typ == '+':
-                        # add 行：加入替换结果，不推进文件指针
-                        replacement.append(text)
-                replace_end = file_pos  # 更新结束位置
-
-                # 执行替换
-                result[replace_start:replace_end] = replacement
+            if not success:
+                return ToolResult(False, error=error_msg)
 
             with open(full_path, "w", encoding="utf-8") as f:
-                f.write("\n".join(result) + "\n")
+                f.write(modified_content)
 
             self._file_mtimes[str(full_path)] = full_path.stat().st_mtime
 
             return ToolResult(True, content=f"Patch applied: {path}")
         except Exception as e:
             return ToolResult(False, error=f"Patch error: {str(e)}")
-
-    def _parse_unified_diff(self, patch_lines: list) -> list:
-        """
-        解析 unified diff 格式，返回 hunks 列表
-
-        每个 hunk 包含:
-        - old_start: 旧文件起始行号（1-based）
-        - old_count: 旧文件受影响行数（0 表示未知）
-        - new_count: 新文件受影响行数（0 表示未知）
-        - content: [(typ, text), ...] 其中 typ=' '/'-'/ '+'
-        """
-        hunks = []
-        i = 0
-
-        # 跳过头部
-        while i < len(patch_lines) and not patch_lines[i].startswith("@@"):
-            i += 1
-
-        while i < len(patch_lines):
-            line = patch_lines[i]
-            if not line.startswith("@@"):
-                i += 1
-                continue
-
-            m = re.match(r"@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@", line)
-            if not m:
-                i += 1
-                continue
-
-            old_start = int(m.group(1))
-            old_count = int(m.group(2)) if m.group(2) else 1  # 默认 1
-            new_count = int(m.group(4)) if m.group(4) else 1  # 默认 1
-            hunk_content = []
-
-            i += 1
-            while i < len(patch_lines):
-                pl = patch_lines[i]
-                if pl.startswith("@@") or (not pl and not pl.startswith((' ', '+', '-'))):
-                    break
-
-                if pl.startswith("+") and not pl.startswith("+++"):
-                    hunk_content.append(('+', pl[1:]))
-                elif pl.startswith("-") and not pl.startswith("---"):
-                    hunk_content.append(('-', pl[1:]))
-                elif pl.startswith(" "):
-                    hunk_content.append((' ', pl[1:]))
-                elif pl:
-                    break
-                i += 1
-
-            if hunk_content:
-                hunks.append({
-                    'old_start': old_start,
-                    'old_count': old_count,
-                    'new_count': new_count,
-                    'content': hunk_content
-                })
-
-        return hunks
 
     def diff_files(
         self, file1: str, file2: str = None, use_git: bool = False

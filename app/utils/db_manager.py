@@ -1,4 +1,10 @@
 # -*- coding: utf-8 -*-
+"""
+SQLite 数据库管理器 - 单例模式
+
+提供 SQLite 数据库连接管理和 CRUD 操作封装。
+每个数据库文件只有一个 DatabaseManager 实例。
+"""
 import sqlite3
 from typing import Optional, List, Dict, Any, Tuple
 from pathlib import Path

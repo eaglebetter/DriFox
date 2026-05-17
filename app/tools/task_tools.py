@@ -1,21 +1,37 @@
+# -*- coding: utf-8 -*-
+"""
+任务工具集 - 提供待办事项和技能管理功能
+
+支持：
+- 待办事项：add_todo, update_todo, delete_todo, todowrite, todoread
+- 技能管理：load_skill, execute_skill, list_skills
+- 批处理任务：task_execute_batch
+"""
 import os
-import time
 from pathlib import Path
 from typing import Dict, List, Optional
 
 from loguru import logger
 
 from app.tools.result import ToolResult
+from app.utils.utils import list_skills_with_intro
+from app.utils.utils import load_skill as utils_load_skill
 
 
 class TaskTools:
-    def __init__(self, workdir: Path):
-        self.workdir = workdir
+    def __init__(self, owner):
+        self._owner = owner
         self._todo_list: List[Dict] = []
         self._loaded_skills: Dict[str, str] = {}
         self._skill_workspaces: Dict[str, str] = {}
         self._sub_agent_manager = None
         self._set_stage_callback = None
+        self._key_documents_repo = None  # 关键文档仓储
+        self._current_project = "默认项目"  # 当前项目
+
+    @property
+    def workdir(self) -> Path:
+        return self._owner.workdir
 
     def _normalize_todos(self, todos: List[Dict]) -> List[Dict]:
         normalized: List[Dict] = []
@@ -69,7 +85,7 @@ class TaskTools:
             return ToolResult(False, error=f"Todo read error: {str(e)}")
 
     def task_execute_batch(
-        self, tasks: List[Dict]
+            self, tasks: List[Dict], share_context: bool = False
     ) -> ToolResult:
         """
         批量执行子智能体任务（并行）。
@@ -79,6 +95,7 @@ class TaskTools:
                 - agent: str 子智能体名称
                 - description: str 任务描述
                 - context: str (可选) 父任务上下文
+            share_context: bool 是否共享主智能体上下文给子智能体
 
         Returns:
             ToolResult: success=True, content={"task_ids": [str], "status": "running"}
@@ -110,6 +127,7 @@ class TaskTools:
                     on_finished=None,
                     on_error=None,
                     executor_ref=None,
+                    share_context=share_context,
                 )
                 task_ids.append(task_id)
 
@@ -126,16 +144,6 @@ class TaskTools:
             logger.error(f"[Task] task_execute_batch exception: {e}")
             return ToolResult(False, error=f"批量任务启动失败: {str(e)}")
 
-    # def task_wait(
-    #     self,
-    #     task_ids: List[str],
-    #     timeout: int = 1800,
-    #     poll_interval: float = 0.1,
-    # ) -> ToolResult:
-    #     """
-    #     【已禁用】请使用自动回调机制。
-    #     任务完成后系统会自动发送 `[后台任务状态]` 消息。
-    #     """
         if not hasattr(self, "_sub_agent_manager") or not self._sub_agent_manager:
             return ToolResult(False, error="子智能体管理器未初始化")
 
@@ -147,12 +155,12 @@ class TaskTools:
         try:
             while pending:
                 now = time.time()
-                
+
                 # 每 10 秒检查一次卡死的任务
                 if now - last_cleanup_check > 10:
                     self._sub_agent_manager.cleanup_dead_tasks(timeout_seconds=300)
                     last_cleanup_check = now
-                
+
                 if now - start_time > timeout:
                     logger.warning(f"[task_wait] Timeout after {timeout}s, pending: {pending}")
                     # 超时后，先清理卡死任务（这会将它们移到 _finished_tasks）
@@ -163,9 +171,11 @@ class TaskTools:
                         if existing.get("result"):
                             results.append({"task_id": tid, "status": "finished", "result": existing.get("result", "")})
                         elif existing.get("error"):
-                            results.append({"task_id": tid, "status": "timeout", "result": "", "error": existing.get("error", "")})
+                            results.append(
+                                {"task_id": tid, "status": "timeout", "result": "", "error": existing.get("error", "")})
                         else:
-                            results.append({"task_id": tid, "status": "timeout", "result": "", "error": "Task execution timeout"})
+                            results.append(
+                                {"task_id": tid, "status": "timeout", "result": "", "error": "Task execution timeout"})
                     break
 
                 # 检查已完成的任务
@@ -219,90 +229,24 @@ class TaskTools:
             return self._sub_agent_manager.get_all_active_tasks_with_details(with_log, with_result)
 
     def load_skill(self, name: str) -> ToolResult:
-        try:
-            search_paths = [
-                Path(__file__).parent.parent / "skills" / name / f"SKILL.md",
-                Path(".drifox") / "skills" / name / f"SKILL.md",
-                Path.home() / ".agents" / "skills" / name / f"SKILL.md",
-            ]
-            found_path = None
-            for path in search_paths:
-                if path.exists():
-                    found_path = path
-                    break
-
-            if not found_path:
-                return ToolResult(False, error=f"Skill not found: {name}")
-
-            with open(found_path, "r", encoding="utf-8") as f:
-                content = f.read()
-                content = content.split("---", 2)[-1].strip()
-
+        """加载指定技能"""
+        success, content, workspace = utils_load_skill(name)
+        
+        if success:
             self._loaded_skills[name] = content
-            self._skill_workspaces[name] = str(found_path.parent.resolve())
-
+            self._skill_workspaces[name] = workspace
             return ToolResult(
                 True,
-                content=f"Skill loaded: {name}\n\nSkill workspace: {str(found_path.parent.resolve())}\n\n{content}",
+                content=f"Skill loaded: {name}\n\nSkill workspace: {workspace}\n\n{content}",
             )
-        except Exception as e:
-            return ToolResult(False, error=f"Load skill error: {str(e)}")
+        else:
+            return ToolResult(False, error=content)
 
     def list_skills(self) -> ToolResult:
+        """获取所有技能列表"""
         try:
-            import yaml
-
-            skills_dirs = [
-                Path(__file__).parent.parent / "skills",
-                Path(".drifox") / "skills",
-                Path.home() / ".agents" / "skills",
-            ]
-            results = []
-
-            skills_intro = ""
-            main_skills_dir = Path(__file__).parent.parent / "skills"
-            skills_readme = main_skills_dir / "SKILLS.md"
-            if skills_readme.exists():
-                content = skills_readme.read_text(encoding="utf-8")
-                skills_intro = content + "\n\n"
-
-            for skills_dir in skills_dirs:
-                if not skills_dir.exists():
-                    continue
-                for skill_dir in skills_dir.iterdir():
-                    if not skill_dir.is_dir():
-                        continue
-                    if skill_dir.name.startswith("_") or skill_dir.name.startswith("."):
-                        continue
-
-                    skill_file = skill_dir / "SKILL.md"
-                    if not skill_file.exists():
-                        skill_file = skill_dir / "skill.md"
-
-                    if not skill_file.exists():
-                        continue
-
-                    content = skill_file.read_text(encoding="utf-8")
-                    name = skill_dir.name
-                    description = ""
-
-                    if content.startswith("---"):
-                        try:
-                            frontmatter = content.split("---", 2)[1]
-                            meta = yaml.safe_load(frontmatter)
-                            if meta:
-                                name = meta.get("name", skill_dir.name)
-                                description = meta.get("description", "")
-                        except Exception:
-                            pass
-
-                    results.append({"name": name, "description": description})
-
-            skills_xml = "<available_skills>\n"
-            for skill in results:
-                skills_xml += f"  <skill>\n    <name>{skill['name']}</name>\n    <description>{skill['description']}</description>\n  </skill>\n"
-            skills_xml += "</available_skills>"
-            return ToolResult(True, content=skills_intro + skills_xml)
+            content = list_skills_with_intro()
+            return ToolResult(True, content=content)
         except Exception as e:
             return ToolResult(False, error=f"List skills error: {str(e)}")
 
@@ -327,7 +271,7 @@ class TaskTools:
                     d
                     for d in dirs
                     if d not in {'.mypy_cache', '.git', 'node_modules', '__pycache__', 'venv', '.venv',
-                           'dist', 'build', '.idea', '.vscode'}
+                                 'dist', 'build', '.idea', '.vscode'}
                 ]
                 rel_root = Path(root).relative_to(target_path)
                 display_root = "." if str(rel_root) == "." else str(rel_root)
@@ -352,14 +296,28 @@ class TaskTools:
                     continue
                 resolved = self._resolve_path(file_path)
                 staged.append(str(resolved))
+                
+                # 自动关联到关键文档
+                if self._key_documents_repo:
+                    self._key_documents_repo.add(
+                        self._current_project,
+                        str(resolved),
+                        added_by="stage_files"
+                    )
+            
             if not staged:
                 return ToolResult(True, content="No files staged")
+            
+            # 添加关键文档关联提示
+            if self._key_documents_repo:
+                return ToolResult(True, content="Staged files:\n" + "\n".join(staged) + f"\n\n[已关联 {len(staged)} 个文件到项目「{self._current_project}」的关键文档]")
+            
             return ToolResult(True, content="Staged files:\n" + "\n".join(staged))
         except Exception as e:
             return ToolResult(False, error=f"stage_files error: {str(e)}")
 
     def ask_question(
-        self, question: str, options: List[str] = None, multiple: bool = False
+            self, question: str, options: List[str] = None, multiple: bool = False
     ) -> ToolResult:
         return ToolResult(
             True,

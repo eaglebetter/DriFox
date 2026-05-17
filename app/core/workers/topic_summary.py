@@ -1,0 +1,137 @@
+# -*- coding: utf-8 -*-
+"""
+话题摘要任务 - 异步生成话题摘要
+"""
+
+import orjson as json
+import re
+
+from loguru import logger
+from PyQt5.QtCore import QRunnable, pyqtSlot
+from openai import OpenAI
+
+from app.core.retry_helper import create_api_call_with_retry
+
+_JSON_PATTERN = re.compile(r"\{[^{}]*\}", re.DOTALL)
+
+
+def _extract_json(text: str) -> dict | None:
+    """从文本中提取并解析 JSON"""
+    code_block_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+    if code_block_match:
+        try:
+            return json.loads(code_block_match.group(1))
+        except Exception:
+            pass
+    try:
+        decoder = json.JSONDecoder()
+        obj, _ = decoder.raw_decode(text.strip())
+        return obj
+    except Exception:
+        pass
+    return None
+
+
+class TopicSummaryTask(QRunnable):
+    """异步生成话题摘要任务"""
+
+    def __init__(
+        self,
+        messages: list,
+        llm_config: dict,
+        callback,
+        previous_summary: str = None,
+    ):
+        super().__init__()
+        self.messages = messages
+        self.llm_config = llm_config
+        self.callback = callback
+        self.previous_summary = previous_summary
+        self.setAutoDelete(True)
+
+    def _build_conversation_context(self) -> str:
+        """构建包含更多历史的消息上下文"""
+        user_only_msgs = [msg for msg in self.messages if msg.get("role") == "user"]
+        lines = []
+        for msg in user_only_msgs:
+            content = msg.get("content", "")
+            if isinstance(content, list):
+                texts = [item.get("text", "") for item in content if item.get("type") == "text"]
+                content = "\n".join(texts)
+            truncated = content[:300] + ("..." if len(content) > 300 else "")
+            lines.append(truncated)
+        return "\n".join(lines)
+
+    @pyqtSlot()
+    def run(self):
+        try:
+            if not self.messages:
+                self.callback({"topic_summary": ""})
+                return
+            
+            summary_text = self._build_conversation_context()
+
+            if self.previous_summary:
+                prompt = (
+                    "你是一个对话标题助手。\n"
+                    "最近的用户对话历史：\n"
+                    f"{summary_text}\n\n"
+                    "根据对话生成标题。\n\n"
+                    "【标题要求】\n"
+                    "- 不超过15字，体现用户意图\n"
+                    "- 如：\"生成PPT\"、\"调试bug\"、\"咨询问题\"\n\n"
+                    "【标题更新原则】\n"
+                    "你不应该仅根据最新一条消息就生成新标题。而是应该：\n"
+                    "1. 如果已有标题反映的是本次对话的核心主题，即使最新消息是简单问候，也要保留原标题\n"
+                    "2. 只有当对话主题发生实质性转变时才更新标题\n\n"
+                    "【之前的标题】\n"
+                    f"{self.previous_summary}\n\n"
+                    "输出JSON：\n"
+                    "```json\n"
+                    "{\n"
+                    '  "topic_summary": ""\n'
+                    "}\n"
+                    "```"
+                )
+            else:
+                prompt = (
+                    "你是一个对话标题助手。\n"
+                    "最近的用户对话历史：\n"
+                    f"{summary_text}\n\n"
+                    "根据对话生成标题。\n\n"
+                    "【标题要求】\n"
+                    "- 不超过15字，体现用户意图\n"
+                    "- 如：\"生成PPT\"、\"调试bug\"、\"咨询问题\"\n\n"
+                    "输出JSON：\n"
+                    "```json\n"
+                    "{\n"
+                    '  "topic_summary": ""\n'
+                    "}\n"
+                    "```"
+                )
+
+            client = OpenAI(
+                api_key=self.llm_config.get("API_KEY", ""),
+                base_url=self.llm_config.get("API_URL"),
+            )
+
+            def create_task():
+                return client.chat.completions.create(
+                    model=self.llm_config.get("模型名称", "gpt-4o"),
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.3,
+                    max_tokens=1500,
+                )
+
+            resp = create_api_call_with_retry(client, create_task)
+            raw_response = resp.choices[0].message.content.strip()
+            result = _extract_json(raw_response)
+            
+            if result:
+                self.callback({"topic_summary": result.get("topic_summary", "")})
+            else:
+                self.callback({"topic_summary": self.messages[-1].get("content", "")[:15]})
+            
+        except Exception as e:
+            logger.exception(f"[TopicSummary] 生成摘要失败: {e}")
+            self.callback(None, error=str(e))

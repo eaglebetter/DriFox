@@ -23,3 +23,6 @@ logs/
 # OS
 .DS_Store
 Thumbs.db
+/.drifox/
+/.drifox/app.config
+/docs/

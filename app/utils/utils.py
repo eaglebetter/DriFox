@@ -1,12 +1,29 @@
 # -*- coding: utf-8 -*-
-import json
+"""
+通用工具函数模块
+
+提供应用程序使用的各种工具函数：
+- 路径和资源管理
+- 字体和图标配置
+- 技能加载和管理
+- 应用更新检查
+- 异步更新检查器
+- JSON 序列化/反序列化
+"""
+import asyncio  # 用于 AsyncUpdateChecker
 import os
+import sys
+
+import httpx
+import orjson as json
 import re
 import socket
-import sys
 from pathlib import Path
 
 import psutil
+import requests
+import yaml
+from PyQt5.QtCore import QThread, pyqtSignal
 from PyQt5.QtGui import QIcon, QFont
 
 from app.utils.config import Settings
@@ -39,6 +56,39 @@ ANSI_COLOR_MAP = {
 }
 _ICON_CACHE = {}  # 缓存图标名 → QIcon 实例
 
+
+def get_app_data_dir() -> Path:
+    """获取应用数据目录（跨平台兼容）
+    
+    开发环境: 当前目录/.drifox
+    PyInstaller打包: 应用支持目录/.drifox（可写）
+    macOS .app: ~/Library/Application Support/Drifox/.drifox
+    """
+    # 开发环境
+    if not hasattr(sys, '_MEIPASS') and not getattr(sys, 'frozen', False):
+        return Path('.drifox')
+    
+    # macOS .app: 使用 Application Support（用户可写）
+    if sys.platform == 'darwin':
+        from AppKit import NSApplicationSupportDirectory, NSUserDomainMask, NSFileManager
+        paths = NSFileManager.defaultManager().URLsForDirectory_inDomains_(
+            NSApplicationSupportDirectory, NSUserDomainMask
+        )
+        if paths:
+            # paths[0].path 是 ObjC native-selector，用 fileSystemRepresentation() 转 bytes 再解码
+            app_support_path = paths[0].fileSystemRepresentation().decode('utf-8')
+            app_support = Path(app_support_path) / 'Drifox'
+            app_support.mkdir(parents=True, exist_ok=True)
+            return app_support / '.drifox'
+    
+    # Windows/Linux 或其他平台
+    if hasattr(sys, '_MEIPASS'):
+        # 使用 MEIPASS 的同级的可写目录
+        return Path(sys._MEIPASS).parent / '.drifox'
+    
+    # Fallback
+    return Path.home() / '.drifox'
+
 def get_pinyin_search_keys(text):
     """生成拼音全拼和首字母缩写"""
     if not pinyin or not text:
@@ -62,6 +112,13 @@ def kill_proc_tree(pid):
         pass
 
 
+# 预编译 ANSI 处理正则表达式
+_ANSI_CURSOR_PATTERN = re.compile(r"\x1b\[[0-9;]*[ABCDHfJKmnsu]")
+_ANSI_COLOR_PATTERN = re.compile(r"\x1b\[([0-9;]*)m")
+_ANSI_RESET_PATTERN = re.compile(r"\x1b\[0m")
+_ANSI_REMAINS_PATTERN = re.compile(r"\x1b\[[0-9;]*m")
+
+
 def ansi_to_html(text):
     """
     将 ANSI 颜色代码转换为 HTML span 标签
@@ -70,7 +127,7 @@ def ansi_to_html(text):
         return ""
 
     # 移除光标控制序列（如 \x1b[2K）
-    text = re.sub(r"\x1b\[[0-9;]*[ABCDHfJKmnsu]", "", text)
+    text = _ANSI_CURSOR_PATTERN.sub("", text)
 
     # 处理颜色代码
     def replace_ansi(match):
@@ -95,13 +152,13 @@ def ansi_to_html(text):
             return "<span>"
 
     # 替换 ANSI 开始序列 \x1b[...m
-    text = re.sub(r"\x1b\[([0-9;]*)m", replace_ansi, text)
+    text = _ANSI_COLOR_PATTERN.sub(replace_ansi, text)
 
     # 替换 ANSI 结束序列 \x1b[0m 为 </span>
-    text = re.sub(r"\x1b\[0m", "</span>", text)
+    text = _ANSI_RESET_PATTERN.sub("</span>", text)
 
     # 处理剩余的 ANSI 序列（清理）
-    text = re.sub(r"\x1b\[[0-9;]*m", "", text)
+    text = _ANSI_REMAINS_PATTERN.sub("", text)
 
     # 转换换行符
     text = text.replace("\n", "<br>")
@@ -169,6 +226,128 @@ def get_icon(icon_name: str) -> QIcon:
 
     # 3. 最终 fallback
     return QIcon()
+
+
+def get_local_skills() -> list:
+    """获取本地技能列表，支持多个搜索路径
+    
+    搜索路径：
+    - app/skills (内置技能)
+    - .opencode/skills (opencode 技能)
+    - ~/.agents/skills (用户技能)
+    - 应用数据目录/skills
+    """
+    skills_dirs = [
+        Path(__file__).parent.parent / "skills",
+        Path(__file__).parent.parent / ".opencode" / "skills",  # opencode 技能
+        get_app_data_dir() / "skills",
+        Path.home() / ".agents" / "skills",
+    ]
+
+    results = []
+    seen = set()
+
+    for skills_base in skills_dirs:
+        if not skills_base.exists():
+            continue
+
+        for skill_dir in skills_base.iterdir():
+            if not skill_dir.is_dir():
+                continue
+            if skill_dir.name.startswith("_") or skill_dir.name.startswith("."):
+                continue
+
+            skill_file = skill_dir / "SKILL.md"
+            if not skill_file.exists():
+                skill_file = skill_dir / "skill.md"
+            if not skill_file.exists():
+                continue
+
+            content = skill_file.read_text(encoding="utf-8")
+            name = skill_dir.name
+            description = ""
+
+            # 解析 frontmatter
+            if content.startswith("---"):
+                try:
+                    frontmatter = content.split("---", 2)[1]
+                    meta = yaml.safe_load(frontmatter)
+                    if meta:
+                        name = meta.get("name", skill_dir.name)
+                        description = meta.get("description", "")
+                except Exception:
+                    pass
+
+            if name not in seen:
+                seen.add(name)
+                results.append({
+                    "name": name,
+                    "description": description
+                })
+
+    return results
+
+
+def get_skill_by_name(name: str) -> dict | None:
+    """根据名称获取技能信息"""
+    skills = get_local_skills()
+    for skill in skills:
+        if skill["name"] == name:
+            return skill
+    return None
+
+
+def load_skill(name: str) -> tuple[bool, str, str]:
+    """加载指定技能，返回 (成功, 内容, 工作目录)
+    
+    Args:
+        name: 技能名称
+        
+    Returns:
+        (成功标志, 内容或错误信息, 技能工作目录路径)
+    """
+    search_paths = [
+        Path(__file__).parent.parent / "skills" / name / "SKILL.md",
+        Path(__file__).parent.parent / ".opencode" / "skills" / name / "SKILL.md",
+        get_app_data_dir() / "skills" / name / "SKILL.md",
+        Path.home() / ".agents" / "skills" / name / "SKILL.md",
+    ]
+    found_path = None
+    for path in search_paths:
+        if path.exists():
+            found_path = path
+            break
+    
+    if not found_path:
+        return (False, f"Skill not found: {name}", "")
+    
+    content = found_path.read_text(encoding="utf-8")
+    # 去除 frontmatter
+    content = content.split("---", 2)[-1].strip()
+    workspace = str(found_path.parent.resolve())
+    
+    return (True, content, workspace)
+
+
+def list_skills_with_intro() -> str:
+    """获取技能列表，包含 SKILLS.md 介绍"""
+    skills = get_local_skills()
+    
+    # 获取技能介绍
+    skills_intro = ""
+    main_skills_dir = Path(__file__).parent.parent / "skills"
+    skills_readme = main_skills_dir / "SKILLS.md"
+    if skills_readme.exists():
+        skills_intro = skills_readme.read_text(encoding="utf-8") + "\n\n"
+    
+    # 生成 XML 格式
+    skills_xml = "<available_skills>\n"
+    for skill in skills:
+        desc = skill.get("description", "").replace("<", "&lt;").replace(">", "&gt;")
+        skills_xml += f"  <skill>\n    <name>{skill['name']}</name>\n    <description>{desc}</description>\n  </skill>\n"
+    skills_xml += "</available_skills>"
+    
+    return skills_intro + skills_xml
 
 
 def get_canvas_font(size=10, bold=False):
@@ -251,3 +430,117 @@ def deserialize_from_json(obj):
         return [deserialize_from_json(v) for v in obj]
     else:
         return obj
+
+
+class DownloadThread(QThread):
+    progress_signal = pyqtSignal(int)  # 进度信号
+    finished_signal = pyqtSignal(str)  # 完成信号（返回文件路径）
+    error_signal = pyqtSignal(str)  # 错误信号
+    canceled_signal = pyqtSignal()  # 取消信号（新增）
+
+    def __init__(self, url, file_path, token):
+        super().__init__()
+        self.url = url
+        self.file_path = file_path
+        self.headers = {"Authorization": token} if token else {}
+        self.is_canceled = False  # 取消标志位
+        self.session = requests.Session()  # 使用 Session 以便关闭连接
+
+    def run(self):
+        try:
+            response = self.session.get(self.url, headers=self.headers, stream=True, timeout=10)
+            response.raise_for_status()
+
+            total_size = int(response.headers.get('content-length', 0))
+            downloaded = 0
+
+            with open(self.file_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=1024):
+                    if self.is_canceled:  # 每次读取前检查取消标志
+                        f.close()
+                        os.remove(self.file_path)  # 删除不完整文件
+                        self.canceled_signal.emit()
+                        return
+                    if chunk:
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        if total_size > 0:
+                            progress = int((downloaded / total_size) * 100)
+                            self.progress_signal.emit(progress)
+
+            self.finished_signal.emit(self.file_path)
+        except Exception as e:
+            if not self.is_canceled:  # 非取消情况才触发错误信号
+                self.error_signal.emit(str(e))
+        finally:
+            self.session.close()  # 确保释放网络资源
+
+
+class AsyncUpdateChecker(QThread):
+    finished = pyqtSignal(object)  # 返回 latest_release 或 None
+    error = pyqtSignal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.repo = parent.repo
+        self.platform = parent.platform
+        self.token = parent.token
+
+    async def fetch_github(self):
+        headers = {
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28"
+        }
+        headers = headers | {"Authorization": f"token {self.token}"} if self.token else headers
+        url = f"https://api.github.com/repos/{self.repo}/releases/latest"
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(url, headers=headers)
+            if resp.status_code == 200:
+                print("GitHub API 响应:", resp.json())
+                return resp.json()
+            else:
+                print("GitHub API 响应:", resp.text)
+                self.error.emit(f"GitHub API 请求失败：{resp.status_code}")
+                return None
+
+    async def fetch_gitee(self):
+        headers = {"Authorization": self.token} if self.token else {}
+        url = f"https://gitee.com/api/v5/repos/{self.repo}/releases/latest"
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(url, headers=headers)
+            if resp.status_code == 200:
+                return resp.json()
+            else:
+                self.error.emit(f"Gitee API 请求失败：{resp.status_code}")
+                return None
+
+    async def fetch_gitcode(self):
+        headers = {"Authorization": self.token} if self.token else {}
+        url = f"https://gitcode.com/api/v5/repos/{self.repo}/releases/latest"
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(url, headers=headers)
+            if resp.status_code == 200:
+                return resp.json()
+            else:
+                self.error.emit(f"Gitcode API 请求失败：{resp.status_code}")
+                return None
+
+    def run(self):
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        try:
+            if self.platform == "github":
+                result = loop.run_until_complete(self.fetch_github())
+            elif self.platform == "gitee":
+                result = loop.run_until_complete(self.fetch_gitee())
+            elif self.platform == "gitcode":
+                result = loop.run_until_complete(self.fetch_gitcode())
+            else:
+                result = None
+                self.error.emit("不支持的平台")
+        except Exception as e:
+            self.error.emit(str(e))
+            result = None
+        finally:
+            self.finished.emit(result)

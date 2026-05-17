@@ -9,10 +9,6 @@ from PyQt5.QtWidgets import (
     QSizePolicy,
     QVBoxLayout,
     QPushButton,
-    QDialog,
-    QLineEdit,
-    QDoubleSpinBox,
-    QFrame,
 )
 from qfluentwidgets import (
     ToolButton,
@@ -21,22 +17,15 @@ from qfluentwidgets import (
     qconfig,
     ExpandSettingCard,
     ConfigItem,
-    LineEdit,
     Dialog,
-    PrimaryPushButton,
-    StrongBodyLabel,
     IconWidget,
-    BodyLabel,
 )
 
-from app.widgets.searchable_editable_combobox import SearchableEditableComboBox
-from app.utils.design_tokens import CardStyles, ItemStyles, Colors, Sizes
-from app.utils.utils import get_icon, get_unified_font
 from app.constants import (
     PROVIDER_ICONS,
-    PROVIDER_MODELS,
-    FREE_PROVIDERS,
 )
+from app.utils.design_tokens import Colors
+from app.utils.utils import get_icon, get_unified_font
 
 
 def _is_text_chat_model(model_id: str) -> bool:
@@ -48,13 +37,14 @@ def _is_text_chat_model(model_id: str) -> bool:
     
     # 非文本模型关键词黑名单
     non_text_keywords = [
-        # 图片生成模型
+        # 图片生成/视觉模型
         'dall-e', 'dalle', 'stable-diffusion', 'sd-', 'imagen', 'flux',
-        'image', 'diffusion', 'kandinsky', 'midjourney', "wan"
+        'image', 'diffusion', 'kandinsky', 'midjourney', 'wan', 'vision',
+        'vl', 'llava', 'seance', 'cogview', 'cogvideo', 'pixart', 'visual',
         # 音频模型
-        'whisper', 'tts', 'speech', 'audio', 'piper', "voice"
+        'whisper', 'tts', 'speech', 'audio', 'piper', 'voice',
         # 词嵌入模型
-        'embedding', 'embed', 'text-embedding', 'bge'
+        'embedding', 'embed', 'text-embedding', 'bge',
         # 其他非聊天模型
         'moderation', 'rerank', 'search', 'retrieval',
     ]
@@ -416,7 +406,7 @@ class ProviderListSettingCard(ExpandSettingCard):
         if item.provider_name not in self.providers:
             return
         del self.providers[item.provider_name]
-        qconfig.set(self.configItem, self.providers)
+        qconfig.set(self.configItem, self.providers, save=True)
         self.viewLayout.removeWidget(item)
         item.deleteLater()
         self._adjustViewSize()
@@ -424,7 +414,7 @@ class ProviderListSettingCard(ExpandSettingCard):
         if self.default_provider == item.provider_name:
             keys = list(self.providers.keys())
             self.default_provider = keys[0] if keys else ""
-            qconfig.set(self.defaultProviderItem, self.default_provider)
+            qconfig.set(self.defaultProviderItem, self.default_provider, save=True)
             self.defaultProviderChanged.emit(self.default_provider)
 
     def _select_provider(self, item: ProviderItem):
@@ -434,5 +424,5 @@ class ProviderListSettingCard(ExpandSettingCard):
                 w.radioButton.setChecked(False)
         item.radioButton.setChecked(True)
         self.default_provider = item.provider_name
-        qconfig.set(self.defaultProviderItem, self.default_provider)
+        qconfig.set(self.defaultProviderItem, self.default_provider, save=True)
         self.defaultProviderChanged.emit(self.default_provider)

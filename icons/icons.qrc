@@ -11,6 +11,7 @@
     <file>fox_bg.png</file>
     <file>gemini-ai.svg</file>
     <file>groq.svg</file>
+    <file>hooks.svg</file>
     <file>qwen.svg</file>
     <file>siliconflow.png</file>
     <file>分支.svg</file>
@@ -25,12 +26,14 @@
     <file>快捷键.svg</file>
     <file>惊叹号.svg</file>
     <file>成功.svg</file>
+    <file>执行中.svg</file>
     <file>折叠.svg</file>
     <file>提示.svg</file>
     <file>撤销.svg</file>
     <file>放大.svg</file>
     <file>新建.svg</file>
     <file>新建窗口.svg</file>
+    <file>无限.svg</file>
     <file>日志.svg</file>
     <file>智能体.svg</file>
     <file>智谱.svg</file>
@@ -38,6 +41,7 @@
     <file>最大化.svg</file>
     <file>最小化.svg</file>
     <file>模型选择.svg</file>
+    <file>火山引擎.svg</file>
     <file>解锁.svg</file>
     <file>配置管理.svg</file>
     <file>重命名.svg</file>

@@ -14,6 +14,7 @@ import yaml
 from loguru import logger
 
 from app.tools import get_builtin_tools_schema
+from app.core.hook_manager import HookManager
 
 
 @dataclass
@@ -31,6 +32,9 @@ class Agent:
     top_p: Optional[float] = None
     prompt: str = ""
     tools: Dict[str, bool] = field(default_factory=dict)
+    inherit_history: bool = False  # 是否继承主智能体历史消息
+    inherit_history_count: Optional[int] = None  # 继承最近 N 条消息，None 表示全部
+    inherit_history_max_chars: Optional[int] = 500  # 每条消息最大字符数
 
     @classmethod
     def from_dict(cls, data: Dict) -> "Agent":
@@ -51,6 +55,9 @@ class Agent:
             top_p=data.get("top_p"),
             prompt=data.get("prompt", ""),
             tools=tools,
+            inherit_history=data.get("inherit_history", False),
+            inherit_history_count=data.get("inherit_history_count"),
+            inherit_history_max_chars=data.get("inherit_history_max_chars", 500),
         )
 
     def to_dict(self) -> Dict:
@@ -78,6 +85,12 @@ class Agent:
             result["prompt"] = self.prompt
         if self.tools:
             result["tools"] = self.tools
+        if self.inherit_history:
+            result["inherit_history"] = True
+        if self.inherit_history_count is not None:
+            result["inherit_history_count"] = self.inherit_history_count
+        if self.inherit_history_max_chars != 500:
+            result["inherit_history_max_chars"] = self.inherit_history_max_chars
         return result
 
     def is_primary(self) -> bool:
@@ -110,10 +123,10 @@ class PermissionResolver:
     }
 
     def __init__(
-        self,
-        permission_config: Dict[str, Any],
-        global_config: Optional[Dict[str, Any]] = None,
-        tools_config: Optional[Union[Dict[str, bool], List[str]]] = None,
+            self,
+            permission_config: Dict[str, Any],
+            global_config: Optional[Dict[str, Any]] = None,
+            tools_config: Optional[Union[Dict[str, bool], List[str]]] = None,
     ) -> None:
         self._config = permission_config
         self._global = global_config or {}
@@ -198,14 +211,23 @@ class PermissionResolver:
 
 
 class AgentManager:
+    """
+    Agent/Skill 管理器
+    
+    支持从以下位置加载 hooks:
+    - agents/{name}/hooks/hooks.json
+    - skills/{name}/hooks/hooks.json  
+    - skills/{name}/SKILL.md (frontmatter hooks 配置)
+    """
     DEFAULT_TOOLS = ["Read", "Grep", "Glob", "Bash", "write", "edit"]
 
-    def __init__(self, agents_dir: Optional[str] = None):
+    def __init__(self, agents_dir: Optional[str] = None, hook_manager: Optional[HookManager] = None):
         self.agents_dir = (
             Path(agents_dir) if agents_dir else Path(__file__).parent.parent / "agents"
         )
         self._agents: Dict[str, Agent] = {}
         self._hidden_agents: Dict[str, Agent] = {}
+        self._hook_manager = hook_manager
         self._global_permission: Dict[str, Any] = {}
         self._load_agents()
 
@@ -241,6 +263,169 @@ class AgentManager:
                     logger.info(f"[AgentManager] Loaded agent (yaml): {agent.name}")
             except Exception as e:
                 logger.error(f"[AgentManager] Failed to load {yaml_file}: {e}")
+
+        # 检查所有子目录，查找 hooks/hooks.json 配置（不修改agent加载逻辑，只加载hooks）
+        if self._hook_manager is not None:
+            # Check current agents_dir for hooks (app/agents)
+            for agent_dir in self.agents_dir.iterdir():
+                if agent_dir.is_dir():
+                    hooks_file = agent_dir / "hooks" / "hooks.json"
+                    if hooks_file.exists():
+                        try:
+                            import json
+                            with open(hooks_file, 'r', encoding='utf-8') as f:
+                                config = json.load(f)
+                            skill_name = agent_dir.name
+                            skill_root = str(agent_dir.absolute())
+                            count = self._hook_manager.register_hooks_from_json(skill_name, skill_root, config, str(hooks_file))
+                            if count > 0:
+                                logger.info(f"[AgentManager] Loaded {count} hooks from {skill_name}")
+                        except Exception as e:
+                            logger.error(f"[AgentManager] Failed to load hooks from {hooks_file}: {e}")
+            # Also check skills directory (app/skills) for hooks from skills
+            skills_dir = self.agents_dir.parent / "skills"
+            if skills_dir.exists():
+                for skill_dir in skills_dir.iterdir():
+                    if skill_dir.is_dir():
+                        hooks_file = skill_dir / "hooks" / "hooks.json"
+                        if hooks_file.exists():
+                            try:
+                                import json
+                                with open(hooks_file, 'r', encoding='utf-8') as f:
+                                    config = json.load(f)
+                                skill_name = skill_dir.name
+                                skill_root = str(skill_dir.absolute())
+                                count = self._hook_manager.register_hooks_from_json(skill_name, skill_root, config, str(hooks_file))
+                                if count > 0:
+                                    logger.info(f"[AgentManager] Loaded {count} hooks from skill {skill_name}")
+                            except Exception as e:
+                                logger.error(f"[AgentManager] Failed to load hooks from skill {hooks_file}: {e}")
+                        
+                        # 支持从 SKILL.md frontmatter 加载 hooks
+                        skill_md = skill_dir / "SKILL.md"
+                        if skill_md.exists():
+                            try:
+                                self._load_skill_hooks_from_markdown(skill_dir, skill_md)
+                            except Exception as e:
+                                logger.error(f"[AgentManager] Failed to load hooks from SKILL.md {skill_md}: {e}")
+
+    def _load_skill_hooks_from_markdown(self, skill_dir: Path, md_file: Path):
+        """
+        从 SKILL.md frontmatter 加载 hooks 配置
+        
+        支持格式:
+        ---
+        name: my-skill
+        ---
+        <hooks>
+        SessionStart:
+          - command: echo "Hello"
+        PreToolUse:
+          - matcher: "tool:bash"
+            command: echo "Running bash"
+        </hooks>
+        """
+        import re
+        
+        content = md_file.read_text(encoding='utf-8')
+        
+        # 解析 frontmatter
+        if not content.startswith("---"):
+            return None
+            
+        parts = content.split("---", 2)
+        if len(parts) < 3:
+            return
+        
+        frontmatter = parts[1]
+        body = parts[2]
+        
+        # 查找 <hooks> 块
+        hooks_pattern = r'<hooks>(.*?)</hooks>'
+        hooks_match = re.search(hooks_pattern, body, re.DOTALL)
+        
+        if not hooks_match:
+            return
+        
+        hooks_text = hooks_match.group(1).strip()
+        skill_name = skill_dir.name
+        skill_root = str(skill_dir.absolute())
+        
+        # 解析简化的 hooks 格式
+        config = self._parse_inline_hooks(hooks_text)
+        
+        if config.get("hooks"):
+            count = self._hook_manager.register_hooks_from_json(skill_name, skill_root, config, str(md_file))
+            if count > 0:
+                logger.info(f"[AgentManager] Loaded {count} hooks from SKILL.md of {skill_name}")
+    
+    def _parse_inline_hooks(self, hooks_text: str) -> dict:
+        """
+        解析内联 hooks 文本格式
+        
+        格式:
+        EventName:
+          - command: "echo hello"
+          - matcher: "tool:bash"
+            command: "echo bash"
+        """
+        import re
+        
+        config = {"hooks": {}}
+        current_event = None
+        current_hook = None
+        
+        for line in hooks_text.split('\n'):
+            line = line.rstrip()
+            
+            # 跳过空行和注释
+            if not line.strip() or line.strip().startswith('#'):
+                continue
+            
+            # 检测事件名 (行首无缩进的键名)
+            if line and not line.startswith(' ') and not line.startswith('\t') and ':' in line:
+                event_name = line.split(':')[0].strip()
+                if event_name:
+                    current_event = event_name
+                    if event_name not in config["hooks"]:
+                        config["hooks"][event_name] = []
+                    continue
+            
+            if current_event is None:
+                continue
+            
+            # 检测 hook 条目 (以 - 开头)
+            if line.strip().startswith('-'):
+                hook_data = {}
+                indent = len(line) - len(line.lstrip())
+                hook_indent = indent
+                
+                # 解析 - 后面的内容
+                after_dash = line.lstrip()[1:].strip()
+                
+                if ':' in after_dash:
+                    key, value = after_dash.split(':', 1)
+                    hook_data[key.strip()] = value.strip().strip('"\'')
+                
+                current_hook = hook_data
+                config["hooks"][current_event].append({"hooks": [hook_data]})
+                continue
+            
+            # 检测 continuation (同缩进的键值对)
+            if current_hook is not None and ':' in line:
+                indent = len(line) - len(line.lstrip())
+                key, value = line.split(':', 1)
+                key = key.strip()
+                value = value.strip().strip('"\'')
+                
+                # 检查是否是 tool: 前缀
+                if value.startswith('tool:') or value.startswith('regex:'):
+                    # 这实际上是 matcher
+                    current_hook['matcher'] = value
+                else:
+                    current_hook[key] = value
+        
+        return config
 
     def _parse_markdown_agent(self, file_path: Path) -> Optional[Agent]:
         content = file_path.read_text(encoding="utf-8")
@@ -293,18 +478,52 @@ class AgentManager:
         agents = self.list_subagents(include_hidden=include_hidden)
         return [a.name for a in agents]
 
+    def get_available_subagents_for_prompt(self, include_hidden: bool = False) -> str:
+        """
+        获取可用于主智能体提示词中的子智能体列表（格式化文本）。
+
+        用于主智能体提示词动态注入可用子智能体信息，避免硬编码。
+
+        Returns:
+            格式化子智能体列表文本，格式：
+            ## Available Subagents
+            - name: description
+            - name: description
+            ...
+        """
+        agents = self.list_subagents(include_hidden=include_hidden)
+        if not agents:
+            return ""
+
+        lines = ["## Available Subagents\n可直接使用的子智能体列表："]
+        for a in agents:
+            lines.append(f"- **{a.name}**: {a.description}")
+
+        return "\n".join(lines)
+
+    def unload_skill(self, skill_name: str):
+        """卸载一个技能，包括其 Hooks"""
+        if skill_name in self._agents:
+            del self._agents[skill_name]
+        if skill_name in self._hidden_agents:
+            del self._hidden_agents[skill_name]
+        if self._hook_manager:
+            self._hook_manager.unregister_skill_hooks(skill_name)
+        logger.info(f"[AgentManager] Unloaded skill: {skill_name}")
+
     def get_agent_tools_schema(
-        self, agent_name: str, global_permission: Optional[Dict[str, Any]] = None
+            self, agent_name: str, global_permission: Optional[Dict[str, Any]] = None, is_subagent_call: bool = False
     ) -> List[Dict]:
         agent = self.get_agent(agent_name)
         if not agent:
             return []
 
-        all_tools = get_builtin_tools_schema()
+        all_tools = get_builtin_tools_schema(self)  # 传递 agent_manager 用于动态生成
 
-        # 【新增】子智能体禁止使用 question 工具（需要用户交互，不支持）
-        if agent.is_subagent():
-            all_tools = [t for t in all_tools if t["function"]["name"].lower() != "question"]
+        # 【新增】子智能体禁止使用交互和嵌套子智能体工具（需要用户交互或发布子智能体，不支持）
+        forbidden_tools = {"question", "task_batch", "task_status"}
+        if is_subagent_call:
+            all_tools = [t for t in all_tools if t["function"]["name"].lower() not in forbidden_tools]
 
         perm_resolver = PermissionResolver(
             agent.permission, global_permission or {}, agent.tools
@@ -319,7 +538,22 @@ class AgentManager:
 
         return filtered_tools
 
-    def get_agent_system_prompt(self, agent_name: str, base_prompt: str = "") -> str:
+    def get_agent_system_prompt(
+            self,
+            agent_name: str,
+            base_prompt: str = "",
+            is_subagent_call: bool = False,
+    ) -> str:
+        """
+        获取智能体的系统提示词。
+
+        Args:
+            agent_name: 智能体名称
+            base_prompt: 基础提示词（通常为 skill 内容）
+            is_subagent_call: 是否为子智能体调用上下文。
+                - True: 主智能体通过 task_batch 调用子智能体（子智能体看到的是任务描述，不是完整上下文）
+                - False: 主智能体自身运行，或子智能体独立运行
+        """
         agent = self.get_agent(agent_name)
         if not agent:
             return base_prompt
@@ -336,8 +570,8 @@ class AgentManager:
         subagent_constraints = """
 ## 子智能体约束
 - 【禁止】使用 `question` 工具（需要用户交互，不支持）
+- 【禁止】使用 `task_batch` 和 `task_status` 工具（子智能体不能再发布子智能体）
 - 【禁止】使用 `todowrite` 工具（避免与主智能体冲突）
-- 【禁止】调用 task/task_batch/task_wait 工具（不允许嵌套子智能体）
 - 【必须】任务一次性执行完毕，不支持中途暂停或等待用户确认
 - 【必须】独立完成任务，不需要主智能体介入
 - 如果遇到不确定的情况，根据已有信息做出合理假设并继续执行
@@ -351,11 +585,21 @@ class AgentManager:
 - 如果已经有 todo，优先沿用现有执行上下文。
 """.strip()
 
-        # 根据智能体类型选择约束
-        if agent.is_subagent():
+        # 【核心修复】根据 is_subagent_call 区分调用上下文
+        # 场景1: 主智能体自身运行（primary mode，is_subagent_call=False）
+        # 场景2: 主智能体通过 task_batch 调用子智能体（子智能体看到任务描述，is_subagent_call=True）
+        # 场景3: 子智能体独立运行（subagent mode，is_subagent_call=False）
+
+        if is_subagent_call:
+            # 场景2：被主智能体调用，子智能体看到的是任务描述
             role_constraints = subagent_constraints
         else:
+            # 场景1：主智能体运行
             role_constraints = primary_constraints
+            # 主智能体需要动态注入可用子智能体列表
+            subagents_info = self.get_available_subagents_for_prompt()
+            if subagents_info:
+                global_contract = global_contract + "\n\n" + subagents_info
 
         if agent.prompt:
             return "\n\n".join(
@@ -389,53 +633,21 @@ Use the tools available to you based on your permissions.
 不要在回复中重复消息内容，直接给出检查结果和建议。""".strip()
 
     def get_enabled_skills_content(self, enabled_skills: List[str]) -> str:
+        """获取已启用的技能内容"""
+        from app.utils.utils import get_local_skills
+        
         if not enabled_skills:
             return ""
-        skills_dirs = [
-            Path(__file__).parent.parent / "skills",
-            Path.home() / ".agents" / "skills",
-            Path(".drifox") / "skills",
-        ]
+        
+        all_skills = get_local_skills()
         result_parts = [
             "\n\n## 偏好技能\n以下是部分用户偏好的智能体技能，如果以下技能不能满足用户需求，可以使用 `list_skills` 技能加载完整技能列表：\n"
         ]
-
-        for skills_base in skills_dirs:
-            if not skills_base.exists():
-                continue
-
-            for skill_dir in skills_base.iterdir():
-                if not skill_dir.is_dir():
-                    continue
-                if skill_dir.name not in enabled_skills:
-                    continue
-                if skill_dir.name.startswith("_") or skill_dir.name.startswith("."):
-                    continue
-
-                skill_file = skill_dir / "SKILL.md"
-                if not skill_file.exists():
-                    skill_file = skill_dir / "skill.md"
-                if not skill_file.exists():
-                    continue
-
-                try:
-                    content = skill_file.read_text(encoding="utf-8")
-                    name = skill_dir.name
-                    description = ""
-
-                    if content.startswith("---"):
-                        try:
-                            frontmatter = content.split("---", 2)[1]
-                            meta = yaml.safe_load(frontmatter)
-                            if meta:
-                                name = meta.get("name", skill_dir.name)
-                                description = meta.get("description", "")
-                        except Exception:
-                            pass
-                    result_parts.append(f"\n### {name}\n{description}\n")
-                except Exception:
-                    continue
-
+        
+        for skill in all_skills:
+            if skill["name"] in enabled_skills:
+                result_parts.append(f"\n### {skill['name']}\n{skill.get('description', '')}\n")
+        
         return "\n".join(result_parts) if len(result_parts) > 1 else ""
 
     def get_agent_config(self, agent_name: str) -> Dict[str, Any]:
@@ -452,11 +664,11 @@ Use the tools available to you based on your permissions.
         }
 
     def check_permission(
-        self,
-        agent_name: str,
-        tool: str,
-        pattern: str = "*",
-        global_permission: Optional[Dict[str, Any]] = None,
+            self,
+            agent_name: str,
+            tool: str,
+            pattern: str = "*",
+            global_permission: Optional[Dict[str, Any]] = None,
     ) -> str:
         agent = self.get_agent(agent_name)
         if not agent:
@@ -469,48 +681,9 @@ Use the tools available to you based on your permissions.
 
 
 def get_available_skills() -> List[Dict]:
-    """获取内置 skills 列表。"""
-    skills_dir = Path(__file__).parent.parent / "skills"
-    opencode_skills_dir = Path(__file__).parent.parent / ".opencode" / "skills"
-
-    results = []
-
-    for skills_base in [skills_dir, opencode_skills_dir]:
-        if not skills_base.exists():
-            continue
-
-        for skill_dir in skills_base.iterdir():
-            if not skill_dir.is_dir():
-                continue
-            if skill_dir.name.startswith("_") or skill_dir.name.startswith("."):
-                continue
-
-            skill_file = skill_dir / "SKILL.md"
-            if not skill_file.exists():
-                skill_file = skill_dir / "skill.md"
-            if not skill_file.exists():
-                continue
-
-            try:
-                content = skill_file.read_text(encoding="utf-8")
-            except Exception:
-                continue
-
-            name = skill_dir.name
-            description = ""
-            if content.startswith("---"):
-                try:
-                    frontmatter = content.split("---", 2)[1]
-                    meta = yaml.safe_load(frontmatter)
-                    if meta:
-                        name = meta.get("name", name)
-                        description = meta.get("description", "")
-                except Exception:
-                    pass
-
-            results.append({"name": name, "description": description})
-
-    return results
+    """获取内置 skills 列表"""
+    from app.utils.utils import get_local_skills
+    return get_local_skills()
 
 
 def create_agent_manager(agents_dir: Optional[str] = None) -> AgentManager:

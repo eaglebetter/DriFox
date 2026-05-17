@@ -23,14 +23,13 @@ LLM Chatter HTTP API 服务
 - POST /chat/stop                   - 停止当前流式请求
 """
 
-import asyncio
-import json
 import threading
-from typing import Optional, Dict, Any, List, Callable
+from typing import Optional, Dict, Any
+
+import orjson as json
 
 # 注册 QProcess::ExitStatus 元类型，解决跨线程信号连接问题
 # PyInstaller 打包后必须注册，否则 QProcess::finished 信号跨线程连接会失败
-from PyQt5.QtCore import QProcess
 try:
     qRegisterMetaType("QProcess::ExitStatus")
 except NameError:
@@ -256,23 +255,6 @@ class LLMAPIService:
             handler.stop_stream(stream_id)
             
             return {"success": True, "message": "已停止流式请求"}
-
-        # ==================== 保留旧接口（简单测试用） ====================
-        @self.app.get("/providers")
-        async def get_providers():
-            """获取所有服务商列表（兼容旧接口）"""
-            handler = self.get_session_handler()
-            if handler and handler._main_widget:
-                try:
-                    # 从 UI 获取服务商列表
-                    config_popup = handler._main_widget._settings_popup
-                    if config_popup and hasattr(config_popup, '_providers'):
-                        providers = config_popup._providers
-                        return {"success": True, "providers": providers}
-                except Exception as e:
-                    logger.error(f"[API] get_providers 失败: {e}")
-            
-            return {"success": True, "providers": []}
 
         @self.app.get("/config")
         async def get_config():

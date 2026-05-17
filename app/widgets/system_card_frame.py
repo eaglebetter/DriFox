@@ -1,0 +1,236 @@
+# -*- coding: utf-8 -*-
+"""
+SystemCardFrame — QFrame 基类 + 标准头部布局 + 固定边框
+
+用于所有系统设置卡片（settings/history/memory/model_config/provider_edit/hook_edit 等）
+- 固定边框（无动画）
+- 标准头部（图标 + 标题 + 标签/统计 + 关闭按钮）
+- ScrollArea 内容区
+"""
+
+from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea, QFrame,
+)
+from qfluentwidgets import (
+    StrongBodyLabel, TransparentToolButton, FluentIcon, PrimaryToolButton)
+
+from app.utils.design_tokens import TabStyles
+from app.utils.utils import get_unified_font, get_icon
+
+
+class SystemCardFrame(QFrame):
+    """系统卡片基类 — 固定边框样式，无动画"""
+
+    closed = pyqtSignal()
+    tabChanged = pyqtSignal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._build_base_ui()
+
+    # ── UI 构建 ──────────────────────────────────────────
+
+    def _build_base_ui(self):
+        self.setSizePolicy(1, 0)
+        self.setFixedHeight(180)
+        self._apply_base_style()
+
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(6, 5, 6, 5)
+        main_layout.setSpacing(4)
+
+        # ── 头部 ──
+        self._header_layout = QHBoxLayout()
+        self._header_layout.setSpacing(4)
+
+        self.icon_label = QLabel(self)
+        self.icon_label.setFont(get_unified_font(11))
+
+        self.title_label = StrongBodyLabel(self)
+        self.title_label.setFont(get_unified_font(10, True))
+        self.title_label.setStyleSheet("color: #C9A85C;")
+
+        self._header_layout.addWidget(self.icon_label)
+        self._header_layout.addWidget(self.title_label)
+
+        # 数量统计
+        self._count_label = QLabel("", self)
+        self._count_label.setFont(get_unified_font(10))
+        self._count_label.setStyleSheet("color: rgba(255,255,255,0.5); padding-left: 2px;")
+        self._count_label.setVisible(False)
+        self._header_layout.addWidget(self._count_label)
+
+        # 标签按钮容器
+        self._tab_buttons_container = QHBoxLayout()
+        self._tab_buttons_container.setSpacing(4)
+        self._header_layout.addLayout(self._tab_buttons_container)
+
+        self._header_layout.addStretch()
+
+        # 额外按钮容器
+        self._extra_buttons_container = QHBoxLayout()
+        self._extra_buttons_container.setSpacing(4)
+        self._header_layout.addLayout(self._extra_buttons_container)
+
+        # 关闭按钮
+        self.close_btn = TransparentToolButton(FluentIcon.CLOSE)
+        self.close_btn.setFixedSize(24, 24)
+        self.close_btn.mousePressEvent = lambda e: self._on_close()
+        self._header_layout.addWidget(self.close_btn)
+
+        main_layout.addLayout(self._header_layout)
+
+        # ── 内容区 ──
+        self.scroll_area = QScrollArea(self)
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setStyleSheet(self._scroll_style())
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
+        self.content_widget = QWidget()
+        self.content_widget.setStyleSheet("background: transparent;")
+        self._content_layout = QVBoxLayout(self.content_widget)
+        self._content_layout.setContentsMargins(4, 2, 4, 2)
+        self._content_layout.setSpacing(4)
+
+        self.scroll_area.setWidget(self.content_widget)
+        main_layout.addWidget(self.scroll_area, 1)
+
+    @property
+    def content_layout(self):
+        return self._content_layout
+
+    # ── 样式 ──────────────────────────────────────────
+
+    def _apply_base_style(self):
+        self.setStyleSheet("""
+            SystemCardFrame {
+                background: rgba(22, 30, 45, 230);
+                border: 1px solid #3d4a60;
+                border-radius: 10px;
+            }
+        """)
+
+    @staticmethod
+    def _scroll_style() -> str:
+        return """
+            QScrollArea {
+                border: none;
+                background: transparent;
+            }
+            QScrollArea > QWidget > QWidget {
+                background: transparent;
+            }
+            QScrollBar:vertical {
+                border: none;
+                background: transparent;
+                width: 10px;
+                margin: 4px 2px 4px 2px;
+            }
+            QScrollBar::handle:vertical {
+                background: rgba(255,255,255,0.18);
+                border-radius: 5px;
+                min-height: 30px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: rgba(255,255,255,0.3);
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0px;
+            }
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+                background: none;
+            }
+        """
+
+    # ── 公开控制 ───────────────────────────────────────
+
+    def set_icon(self, icon: str):
+        self.icon_label.setText(icon)
+
+    def set_title_text(self, text: str):
+        self.title_label.setText(text)
+
+    def set_count(self, count: int, limit: int = None):
+        if limit and limit > 0:
+            self._count_label.setText(f"({count}/{limit})")
+        elif count > 0:
+            self._count_label.setText(f"({count})")
+        else:
+            self._count_label.setText("")
+        self._count_label.setVisible(count > 0 or (limit and limit > 0))
+
+    def set_count_label(self, text: str):
+        self._count_label.setText(f"({text})" if text else "")
+        self._count_label.setVisible(bool(text))
+
+    def setup_tabs(self, tabs: list, default_tab: str = None):
+        while self._tab_buttons_container.count():
+            item = self._tab_buttons_container.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        self._tabs = tabs
+        self._default_tab = default_tab or (tabs[0][0] if tabs else None)
+        self._current_tab = self._default_tab
+        self._tab_buttons = {}
+
+        for tab_id, tab_name in tabs:
+            btn = QLabel(f" {tab_name} ", self)
+            btn.setFont(get_unified_font(11))
+            btn.setStyleSheet(TabStyles.inactive())
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.mousePressEvent = lambda e, tid=tab_id: self._on_tab_clicked(tid)
+            self._tab_buttons_container.addWidget(btn)
+            self._tab_buttons[tab_id] = btn
+
+        self._update_tab_styles()
+
+    def _on_tab_clicked(self, tab_id: str):
+        if self._current_tab != tab_id:
+            self._current_tab = tab_id
+            self._update_tab_styles()
+            self.tabChanged.emit(tab_id)
+
+    def _update_tab_styles(self):
+        for tab_id, btn in self._tab_buttons.items():
+            btn.setStyleSheet(TabStyles.active() if tab_id == self._current_tab else TabStyles.inactive())
+            btn.setFont(get_unified_font(11))
+
+    def set_extra_button_handler(self, handler):
+        while self._extra_buttons_container.count():
+            item = self._extra_buttons_container.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        btn = TransparentToolButton(get_icon("导入"), self)
+        btn.setToolTip("导入会话")
+        btn.clicked.connect(handler)
+        self._extra_buttons_container.addWidget(btn)
+
+    def set_save_button_handler(self, handler):
+        while self._extra_buttons_container.count():
+            item = self._extra_buttons_container.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        btn = PrimaryToolButton(FluentIcon.SAVE, self)
+        btn.setFixedSize(30, 30)
+        btn.clicked.connect(handler)
+        self._extra_buttons_container.addWidget(btn)
+
+    # ── 生命周期 ──────────────────────────────────────
+
+    def _on_close(self):
+        self.setVisible(False)
+        self.closed.emit()
+
+    def show(self):
+        self.setVisible(True)
+        self.raise_()
+
+    def hide(self):
+        self.setVisible(False)
+
+    def set_opacity(self, opacity: float):
+        pass

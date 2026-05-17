@@ -3,7 +3,7 @@
 扁平式模型选择上拉框 - 类似 OpenCode 风格
 展示所有已配置服务商的模型，服务商作为小标题，下面是模型列表
 """
-from typing import List, Tuple, Dict, Any
+from typing import List, Tuple, Dict, Any, Optional
 
 from PyQt5.QtCore import Qt, pyqtSignal, QPoint
 from PyQt5.QtWidgets import (
@@ -150,6 +150,7 @@ class ModelSelectorPopup(QWidget):
         self._current_provider: str = ""
         self._current_model: str = ""
         self._model_widgets: List[ModelItem] = []
+        self._reference_widget: Optional[QWidget] = None
         self._all_model_items: List[Tuple[ModelItem, str, str]] = []  # (widget, provider, model)
 
         # 安装事件过滤器，用于点击外部关闭弹窗（在 _setup_ui 之前）
@@ -362,6 +363,31 @@ class ModelSelectorPopup(QWidget):
         content_size = self.main_frame.sizeHint()
         self.resize(content_size.width(), content_size.height())
 
+        # 如果弹窗已显示且有参考控件，重新计算位置确保下边缘对齐按钮向上扩展
+        if self.isVisible() and self._reference_widget is not None:
+            reference_widget = self._reference_widget
+            screen = QApplication.primaryScreen()
+            screen_geom = screen.availableGeometry() if screen else None
+
+            btn_rect = reference_widget.rect()
+            btn_global_pos = reference_widget.mapToGlobal(btn_rect.topLeft())
+
+            popup_width = min(self.width(), self.maximumWidth())
+            popup_height = min(self.height(), self.maximumHeight())
+
+            x = btn_global_pos.x()
+            y = btn_global_pos.y() - popup_height
+
+            if screen_geom:
+                if x < screen_geom.left():
+                    x = screen_geom.left() + 10
+                if x + popup_width > screen_geom.right():
+                    x = screen_geom.right() - popup_width - 10
+                if y < screen_geom.top():
+                    y = btn_global_pos.y() + btn_rect.height()
+
+            self.move(x, y)
+
     def _clear_layout(self, layout):
         while layout.count():
             child = layout.takeAt(0)
@@ -412,6 +438,7 @@ class ModelSelectorPopup(QWidget):
 
     def show_at(self, reference_widget: QWidget):
         """在参考控件上方显示弹窗（向上展开）"""
+        self._reference_widget = reference_widget
         # 先显示以激活布局计算
         self.show()
         QApplication.processEvents()

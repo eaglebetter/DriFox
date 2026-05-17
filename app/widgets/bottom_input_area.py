@@ -1,14 +1,18 @@
 # 大模型输入框
+import os
 import re
-from pathlib import Path
 
 from PyQt5.QtCore import Qt, pyqtSignal, QTimer, QRect, QPoint, QSize
-from PyQt5.QtGui import QKeyEvent, QKeySequence, QDragEnterEvent, QDropEvent, QTextCursor, QPainter, QFont, QColor, QTextCharFormat
-from PyQt5.QtWidgets import QShortcut, QTextEdit, QWidget, QVBoxLayout, QListWidget, QListWidgetItem, QApplication, QLabel
+from PyQt5.QtGui import QKeyEvent, QKeySequence, QTextCursor, QColor, QTextCharFormat
+from PyQt5.QtWidgets import QGraphicsDropShadowEffect
+from PyQt5.QtWidgets import QShortcut, QWidget, QVBoxLayout, QListWidget, QListWidgetItem, QApplication, QLabel
 from qfluentwidgets import FluentIcon, ComboBox
 from qfluentwidgets import TextEdit, TransparentToolButton
-from qtpy import QtCore
-from app.utils.utils import get_font_family_css
+
+from app.utils.utils import get_font_family_css, get_local_skills
+
+# 预编译正则表达式
+_FILE_PREFIX_PATTERN = re.compile(r'^file:/{1,3}')
 
 
 class SkillListItem(QWidget):
@@ -86,6 +90,7 @@ class SkillCompleterPopup(QWidget):
         self.setMaximumHeight(280)
 
         self._list_widget = QListWidget(self)
+        self._list_widget.setFrameShape(QListWidget.NoFrame)  # 去掉默认 frame，尺寸完全由样式表控制
         self._list_widget.setFocusPolicy(Qt.NoFocus)
         self._list_widget.setStyleSheet(f"""
             QListWidget {{
@@ -106,9 +111,9 @@ class SkillCompleterPopup(QWidget):
             }}
         """)
         self._list_widget.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._list_widget.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self._list_widget.itemClicked.connect(self._on_item_clicked)
         self._list_widget.itemDoubleClicked.connect(self._on_item_double_clicked)
-        self._list_widget.itemSelectionChanged.connect(self._on_selection_changed)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
@@ -118,46 +123,53 @@ class SkillCompleterPopup(QWidget):
         self._current_query = ""
 
     def load_skills(self, skills: list, query: str = ""):
-        """加载技能列表"""
+        """加载技能列表——只添加匹配的项，不再操作隐藏项"""
         self._skills = skills
         self._current_query = query
         self._list_widget.clear()
-        
-        visible_count = 0
+
+        matched_count = 0
         for skill in skills:
+            name = skill["name"]
+            if query and query.lower() not in name.lower():
+                continue  # 不匹配直接跳过，不创建 item
+            matched_count += 1
             item = QListWidgetItem()
-            item.setData(Qt.UserRole, skill["name"])
-            
-            # 匹配过滤
-            if query and query.lower() not in skill["name"].lower():
-                item.setHidden(True)
-            else:
-                visible_count += 1
-                # 设置自定义widget
-                widget = SkillListItem(skill["name"], query)
-                item.setSizeHint(QSize(212, 36))
-                self._list_widget.addItem(item)
-                self._list_widget.setItemWidget(item, widget)
-        
-        # 没有可见项则隐藏
-        if visible_count == 0:
+            item.setData(Qt.UserRole, name)
+            widget = SkillListItem(name, query)
+            item.setSizeHint(QSize(212, 36))
+            self._list_widget.addItem(item)
+            self._list_widget.setItemWidget(item, widget)
+
+        # 没有匹配项则隐藏弹窗
+        if matched_count == 0:
             self.hide()
             return
-            
-        if self._list_widget.count() > 0:
-            self._list_widget.setCurrentRow(0)
-            
-        # 调整高度
+
+        self._list_widget.setCurrentRow(0)
         self._adjust_height()
-        
+
     def _adjust_height(self):
-        """调整弹窗高度"""
-        visible_count = sum(1 for i in range(self._list_widget.count()) if not self._list_widget.item(i).isHidden())
-        height = min(visible_count * 36 + 8, 288)
-        self.setFixedHeight(max(40, height))
-        # 触发位置重计算
-        if hasattr(self.parent(), '_on_at_trigger_check'):
-            self._pending_resize = True
+        """精确计算弹窗高度，基于已知像素值，避免 QListWidget 内部坐标系的歧义"""
+        count = self._list_widget.count()
+        if count == 0:
+            self.hide()
+            return
+
+        # 各层空间消耗（像素值均来自样式表/布局设置）：
+        #   SkillCompleterPopup 布局 margin:    4 top + 4 bottom = 8
+        #   QListWidget 样式表 border:          1 top + 1 bottom = 2
+        #   QListWidget 样式表 padding:         4 top + 4 bottom = 8
+        #   items (每个 36px):                  count * 36
+        #   总计: count * 36 + 18
+        item_area = count * 36
+        list_border_and_padding = 10  # 1(border-top) + 1(border-bottom) + 4(padding-top) + 4(padding-bottom)
+        layout_margins = self.layout().contentsMargins()
+        margin_vertical = layout_margins.top() + layout_margins.bottom()
+
+        outer_height = item_area + list_border_and_padding + margin_vertical
+        outer_height = min(outer_height, 280)
+        self.setFixedHeight(max(40, outer_height))
 
     def _on_item_clicked(self, item):
         self._select_current()
@@ -165,26 +177,13 @@ class SkillCompleterPopup(QWidget):
     def _on_item_double_clicked(self, item):
         self._select_current()
 
-    def _on_selection_changed(self):
-        """选中项变化时更新高亮"""
-        pass  # 可以在这里做额外处理
-
     def _select_current(self):
-        """选择当前项（使用可见项索引）"""
-        visible_items = [i for i in range(self._list_widget.count()) 
-                       if not self._list_widget.item(i).isHidden()]
-        if not visible_items:
-            return
-            
+        """选择当前行（所有行都是可见的）"""
         current_row = self._list_widget.currentRow()
-        if current_row in visible_items:
-            skill_name = self._list_widget.item(current_row).data(Qt.UserRole)
-            self.skillSelected.emit(skill_name)
-        else:
-            # 选中第一个可见项
-            self._list_widget.setCurrentRow(visible_items[0])
-            skill_name = self._list_widget.item(visible_items[0]).data(Qt.UserRole)
-            self.skillSelected.emit(skill_name)
+        if current_row < 0 or current_row >= self._list_widget.count():
+            return
+        skill_name = self._list_widget.item(current_row).data(Qt.UserRole)
+        self.skillSelected.emit(skill_name)
         self.hide()
 
     def key_event(self, event: QKeyEvent):
@@ -209,24 +208,19 @@ class SkillCompleterPopup(QWidget):
         return False
 
     def _move_selection(self, delta: int):
-        """移动选择，只在可见项间移动"""
-        visible_items = [i for i in range(self._list_widget.count()) if not self._list_widget.item(i).isHidden()]
-        if not visible_items:
+        """移动选择（所有项都是可见的，简化循环逻辑）"""
+        count = self._list_widget.count()
+        if count == 0:
             return
 
         current = self._list_widget.currentRow()
-        try:
-            idx = visible_items.index(current)
-        except ValueError:
-            idx = -1
-
-        new_idx = idx + delta
+        new_idx = current + delta
         if new_idx < 0:
-            new_idx = len(visible_items) - 1
-        elif new_idx >= len(visible_items):
+            new_idx = count - 1
+        elif new_idx >= count:
             new_idx = 0
-            
-        self._list_widget.setCurrentRow(visible_items[new_idx])
+
+        self._list_widget.setCurrentRow(new_idx)
 
     def show_at_cursor(self, text_edit, cursor_top_global: QPoint, prefer_below: bool = True):
         """在光标位置显示，自动换向避免超出屏幕
@@ -297,70 +291,7 @@ class SkillCompleterPopup(QWidget):
             text_edit.setFocus(Qt.OtherFocusReason)
 
 
-def get_local_skills() -> list:
-    """获取本地技能列表，与 list_skills 保持一致"""
-    import yaml
-
-    skills_dirs = [
-        Path(__file__).parent.parent / "skills",
-        Path(".drifox") / "skills",
-        Path.home() / ".agents" / "skills",
-    ]
-
-    results = []
-    seen = set()
-
-    for skills_base in skills_dirs:
-        if not skills_base.exists():
-            continue
-
-        for skill_dir in skills_base.iterdir():
-            if not skill_dir.is_dir():
-                continue
-            if skill_dir.name.startswith("_") or skill_dir.name.startswith("."):
-                continue
-
-            skill_file = skill_dir / "SKILL.md"
-            if not skill_file.exists():
-                skill_file = skill_dir / "skill.md"
-            if not skill_file.exists():
-                continue
-
-            content = skill_file.read_text(encoding="utf-8")
-            name = skill_dir.name
-            description = ""
-
-            # 解析 frontmatter
-            if content.startswith("---"):
-                try:
-                    frontmatter = content.split("---", 2)[1]
-                    meta = yaml.safe_load(frontmatter)
-                    if meta:
-                        name = meta.get("name", skill_dir.name)
-                        description = meta.get("description", "")
-                except Exception:
-                    pass
-
-            if name not in seen:
-                seen.add(name)
-                results.append({
-                    "name": name,
-                    "description": description
-                })
-
-    return results
-
-
-def get_skill_by_name(name: str) -> dict | None:
-    """根据名称获取技能信息"""
-    skills = get_local_skills()
-    for skill in skills:
-        if skill["name"] == name:
-            return skill
-    return None
-
-
-class SendableTextEdit(QTextEdit):
+class SendableTextEdit(TextEdit):
     sendMessageRequested = pyqtSignal()
     stopMessageRequested = pyqtSignal()
     clearRequested = pyqtSignal()
@@ -372,6 +303,7 @@ class SendableTextEdit(QTextEdit):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._initializing = True  # 初始化标志，防止早期高度调整
+        self._glow_effect = None
         self.setPlaceholderText("给 DriFox 发送消息，Enter 发送，Shift+Enter 换行")
         self.setAcceptRichText(False)
         self.setLineWrapMode(TextEdit.WidgetWidth)
@@ -379,6 +311,9 @@ class SendableTextEdit(QTextEdit):
         self.setMinimumHeight(72)
         self.setMaximumHeight(200)
         self.setFixedHeight(72)  # 初始化时设为最小高度
+        
+        # 设置发光效果
+        self._setup_glow_effect()
         self.setStyleSheet(f"""
             QTextEdit {{
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
@@ -392,8 +327,12 @@ class SendableTextEdit(QTextEdit):
                 {get_font_family_css()} font-size: 14px;
             }}
             QTextEdit:focus {{
-                border: 1px solid #C9A85C;
-                background: rgba(22, 29, 41, 200);
+                border: 2px solid #C9A85C;
+                border-radius: 18px;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 rgba(22, 29, 41, 220),
+                    stop:1 rgba(28, 36, 50, 220));
+                color: #FFFFFF;
             }}
             QTextEdit QScrollBar:vertical {{
                 background: rgba(255, 255, 255, 0.05);
@@ -480,6 +419,10 @@ class SendableTextEdit(QTextEdit):
         self.textChanged.connect(self._on_text_changed)
         self.textChanged.connect(self._on_at_trigger_check)
 
+        # 关闭 qfluentwidgets TextEdit 焦点时的底部高亮
+        if hasattr(self, 'layer'):
+            self.layer.hide()
+
         self._setup_keyboard_shortcuts()
 
         # 技能补全弹窗
@@ -497,46 +440,42 @@ class SendableTextEdit(QTextEdit):
         self._initializing = False
 
     def _on_at_trigger_check(self):
-        """检测 @ 触发"""
-        cursor = self.textCursor()
-        text = self.toPlainText()
-        cursor_pos = cursor.position()
-        if cursor_pos - 1 > len(text):
-            return
-        if cursor_pos > 0 and text[cursor_pos - 1] == "@":
-            # 找到 @ 的位置
-            self._at_trigger_pos = cursor_pos - 1
+        """检测 @ 触发——统一逻辑：始终检查光标前是否有 @，不再依赖弹窗可见性"""
+        try:
+            cursor = self.textCursor()
+            text = self.toPlainText()
+            cursor_pos = cursor.position()
 
-            # 显示补全弹窗
-            skills = get_local_skills()
-            self._completer_popup.load_skills(skills, "")
-            self._show_completer_popup()
-        elif self._completer_popup.isVisible():
-            # 检查是否还在 @ 后面
+            if cursor_pos < 0 or cursor_pos > len(text):
+                return
+
             text_before_cursor = text[:cursor_pos]
             last_at = text_before_cursor.rfind("@")
-            if last_at == -1:
-                self._completer_popup.hide()
-            else:
-                # 计算 @ 后面的内容
+
+            if last_at >= 0:
                 query = text_before_cursor[last_at + 1:]
-                # 如果有空格则关闭
+                # 如果有空格或换行，说明 @ 触发已结束
                 if " " in query or "\n" in query:
+                    if self._completer_popup.isVisible():
+                        self._completer_popup.hide()
+                    self._at_trigger_pos = -1
+                    return
+
+                # 还在 @ 触发中
+                self._at_trigger_pos = last_at
+                self._completer_popup.load_skills(get_local_skills(), query)
+
+                # load_skills 只会在无匹配时隐藏弹窗，但不会主动显示（首次触发时弹窗处于隐藏状态）
+                # 因此需要根据是否有匹配项来决定是否显示
+                if self._completer_popup._list_widget.count() > 0:
+                    self._show_completer_popup()
+            else:
+                # 没有 @ 符号
+                if self._completer_popup.isVisible():
                     self._completer_popup.hide()
-                else:
-                    # 重新加载并调整位置
-                    old_height = self._completer_popup.height()
-                    self._completer_popup.load_skills(get_local_skills(), query)
-                    new_height = self._completer_popup.height()
-                    
-                    # 如果高度变化，重新计算位置
-                    if old_height != new_height and hasattr(self._completer_popup, '_show_below'):
-                        # 获取当前光标位置重新定位
-                        rect = self.cursorRect()
-                        viewport_pos = self.viewport().mapToGlobal(QPoint(0, 0))
-                        cursor_x = viewport_pos.x() + rect.left()
-                        cursor_y = viewport_pos.y() + rect.top()
-                        self._completer_popup.show_at_cursor(self, QPoint(cursor_x, cursor_y))
+                self._at_trigger_pos = -1
+        except Exception:
+            pass
 
     def _show_completer_popup(self):
         """显示补全弹窗，位置紧贴光标"""
@@ -555,27 +494,31 @@ class SendableTextEdit(QTextEdit):
         text = self.toPlainText()
         cursor_pos = cursor.position()
 
-        if self._at_trigger_pos >= 0:
+        # 用局部变量保存，防止后续 insertText() 触发 textChanged → _on_at_trigger_check
+        # 递归修改 self._at_trigger_pos 导致定位错乱
+        trigger_pos = self._at_trigger_pos
+
+        if trigger_pos >= 0:
             # 删除 @ 符号和后面的内容
-            cursor.setPosition(self._at_trigger_pos)
+            cursor.setPosition(trigger_pos)
             cursor.setPosition(cursor_pos, QTextCursor.KeepAnchor)
-            
+
             # 插入技能名，@符号也保留但给 @ 高亮
             insert_text = f"@{skill_name} "
             cursor.insertText(insert_text)
-            
+
             # 高亮显示 @ 部分（用特殊颜色）
-            cursor.setPosition(self._at_trigger_pos)
-            cursor.setPosition(self._at_trigger_pos + 1 + len(skill_name), QTextCursor.KeepAnchor)
-            
+            cursor.setPosition(trigger_pos)
+            cursor.setPosition(trigger_pos + 1 + len(skill_name), QTextCursor.KeepAnchor)
+
             # 创建高亮格式
             highlight_format = cursor.charFormat()
             highlight_format.setForeground(QColor("#C9A85C"))
             highlight_format.setFontWeight(700)
             cursor.setCharFormat(highlight_format)
-            
+
             # 恢复光标到插入文本之后
-            cursor.setPosition(self._at_trigger_pos + len(insert_text))
+            cursor.setPosition(trigger_pos + len(insert_text))
             self.setTextCursor(cursor)
 
         self._completer_popup.hide()
@@ -600,8 +543,11 @@ class SendableTextEdit(QTextEdit):
 
     def _on_text_changed(self):
         has_text = bool(self.toPlainText().strip())
-        self.send_btn.setDisabled(not has_text)
-        # 初始化期间不调整高度
+        # 在停止模式下，按钮应该始终可用（用于停止正在进行的请求）
+        # 只在发送模式下才根据文本内容决定是否启用
+        if not getattr(self, '_is_stop_mode', False):
+            self.send_btn.setDisabled(not has_text)
+        # 文本变化时总是需要调整高度，不管是否在停止模式
         if not getattr(self, '_initializing', False):
             self._adjust_height_to_content()
 
@@ -634,14 +580,18 @@ class SendableTextEdit(QTextEdit):
     def toggle_send_button(self, enable: bool):
         """启用/禁用发送按钮"""
         if enable:
+            self._is_stop_mode = False
             self.send_btn.setIcon(FluentIcon.SEND)
             self.send_btn.setToolTip("发送（Enter）")
             self._rebind_send_btn(self._on_send_click)
             self._on_text_changed()
+            # 发送完成后，确保输入框高度重置（即使在停止模式下也可能需要调整高度）
+            self._adjust_height_to_content()
         else:
+            self._is_stop_mode = True
             self.send_btn.setIcon(FluentIcon.PAUSE)
             self.send_btn.setToolTip("停止")
-            QtCore.QTimer.singleShot(100, lambda: self.send_btn.setDisabled(False))
+            self.send_btn.setDisabled(False)  # 停止模式下按钮应该始终可用
             self._rebind_send_btn(self._on_stop_click)
 
     def _on_send_click(self):
@@ -696,49 +646,174 @@ class SendableTextEdit(QTextEdit):
         else:
             super().keyPressEvent(event)
 
-    def dragEnterEvent(self, event: QDragEnterEvent):
-        if event.mimeData().hasText():
-            event.acceptProposedAction()
-        else:
-            super().dragEnterEvent(event)
+    def insertFromMimeData(self, source):
+        """重写以处理拖放的文本格式化和高亮"""
+        try:
+            # 首先检查是否是真正的文件拖拽（通过 URLs）
+            is_file_drop = False
+            component_path = ""
+            extension_path = ""
+            
+            if source.hasUrls():
+                # 这是真正的文件拖拽
+                urls = source.urls()
+                if urls:
+                    # 取第一个 URL 作为主文件
+                    component_path = urls[0].toLocalFile()
+                    # 如果有多个 URL，第二个作为扩展资源路径
+                    if len(urls) > 1:
+                        extension_path = urls[1].toLocalFile()
+                    is_file_drop = True
+            elif source.hasText():
+                text = source.text()
+                
+                # 对于文本内容，严格判断是否是文件路径
+                # 只有完全符合路径格式且实际存在的路径才被认为是文件
+                
+                if "file:/" in text:
+                    # 包含 file:/ 的可能是文件路径
+                    try:
+                        lines = text.split("\n")
+                        candidate_component = lines[0] if lines else ""
+                        candidate_extension = lines[1] if len(lines) > 1 else ""
+                        
+                        # 去除 file:/ 前缀
+                        candidate_component = _FILE_PREFIX_PATTERN.sub('', candidate_component)
+                        candidate_extension = _FILE_PREFIX_PATTERN.sub('', candidate_extension)
+                        
+                        # 验证路径是否存在
+                        if candidate_component and os.path.exists(candidate_component):
+                            component_path = candidate_component
+                            extension_path = candidate_extension
+                            is_file_drop = True
+                    except Exception:
+                        # 任何解析错误都不作为文件处理
+                        pass
+                elif "\n" in text:
+                    # 有换行符时，检查是否是合法的文件路径
+                    try:
+                        lines = text.split("\n")
+                        if len(lines) >= 1 and lines[0]:
+                            candidate_path = lines[0]
+                            # 严格判断：必须是绝对路径且实际存在
+                            if candidate_path and os.path.isabs(candidate_path) and os.path.exists(candidate_path):
+                                component_path = candidate_path
+                                extension_path = lines[1] if len(lines) > 1 else ""
+                                # 同样检查扩展路径
+                                if extension_path and not os.path.exists(extension_path):
+                                    extension_path = ""
+                                is_file_drop = True
+                    except Exception:
+                        # 任何解析错误都不作为文件处理
+                        pass
+            
+            if is_file_drop and component_path:
+                try:
+                    # 保存默认格式
+                    cursor = self.textCursor()
+                    default_format = QTextCharFormat()  # 创建干净的默认格式
+                    
+                    # 先插入一个空格占位符，用默认格式
+                    cursor.insertText(" ", default_format)
+                    
+                    # 准备要插入的文件路径文本
+                    insert_text = f"路径: {component_path}"
+                    if extension_path:
+                        insert_text += f"\n扩展资源路径: {extension_path}"
+                    
+                    # 记录文件路径的起始位置
+                    path_start = cursor.position()
+                    
+                    # 插入文件路径文本
+                    cursor.insertText(insert_text)
+                    
+                    # 记录文件路径的结束位置
+                    path_end = cursor.position()
+                    
+                    # 高亮显示拖入的文件路径
+                    cursor.setPosition(path_start)
+                    cursor.setPosition(path_end, QTextCursor.KeepAnchor)
+                    
+                    # 创建高亮格式 - 使用和技能一样的金色
+                    highlight_format = QTextCharFormat()
+                    highlight_format.setForeground(QColor("#C9A85C"))
+                    highlight_format.setFontWeight(700)
+                    cursor.setCharFormat(highlight_format)
+                    
+                    # 最后再插入一个空格，用默认格式
+                    cursor.setPosition(path_end)
+                    cursor.clearSelection()
+                    cursor.insertText(" ", default_format)
+                    
+                    # 确保光标在最后，使用默认格式
+                    final_pos = cursor.position()
+                    cursor.setPosition(final_pos)
+                    cursor.setCharFormat(default_format)
+                    self.setTextCursor(cursor)
+                    
+                    # 确保输入框有焦点
+                    self.setFocus(Qt.OtherFocusReason)
+                    
+                    return
+                except Exception:
+                    # 如果文件路径插入失败，回退到默认处理
+                    pass
+            
+            # 其他情况使用默认处理
+            super().insertFromMimeData(source)
+            
+        except Exception as e:
+            # 捕获所有异常，确保应用不会崩溃
+            try:
+                # 发生任何错误时，回退到默认处理
+                super().insertFromMimeData(source)
+            except Exception:
+                # 最后的保障
+                pass
 
-    def dropEvent(self, event: QDropEvent):
-        text = event.mimeData().text()
-        if text:
-            lines = text.split("\n")
-            component_path = lines[0] if lines else ""
-            extension_path = lines[1] if len(lines) > 1 else ""
-
-            # 统一去除 file:/ 或 file:/// 前缀
-            component_path = re.sub(r'^file:/{1,3}', '', component_path)
-            extension_path = re.sub(r'^file:/{1,3}', '', extension_path)
-
-            insert_text = f"路径: {component_path}"
-            if extension_path:
-                insert_text += f"\n扩展资源路径: {extension_path}"
-
-            # 获取当前文本和光标位置
-            current_text = self.toPlainText()
-            cursor = self.textCursor()
-
-            # 记录当前光标位置
-            cursor_pos = cursor.position()
-
-            # 在当前光标位置插入文本
-            cursor.insertText(insert_text)
-
-            # 重置光标到插入后的位置（保持在此位置，可以自由移动）
-            cursor.setPosition(cursor_pos + len(insert_text))
-            self.setTextCursor(cursor)
-
-            self._on_text_changed()
-            event.acceptProposedAction()
-        else:
-            super().dropEvent(event)
+    def _setup_glow_effect(self):
+        """设置发光效果"""
+        try:
+            self._glow_effect = QGraphicsDropShadowEffect(self)
+            self._glow_effect.setBlurRadius(0)
+            self._glow_effect.setColor(QColor(201, 168, 92, 0))
+            self._glow_effect.setOffset(0, 0)
+            self.setGraphicsEffect(self._glow_effect)
+        except Exception:
+            self._glow_effect = None
+        
+    def _animate_glow(self, target_blur, target_alpha, duration=300):
+        """动画发光效果"""
+        if not self._glow_effect:
+            return
+        
+        try:
+            # 直接设置最终状态，避免复杂动画可能导致的问题
+            self._glow_effect.setBlurRadius(target_blur)
+            color = QColor(201, 168, 92, target_alpha)
+            self._glow_effect.setColor(color)
+        except Exception:
+            # 发光效果失败时安全忽略
+            pass
 
     def focusInEvent(self, event):
-        super().focusInEvent(event)
-        QTimer.singleShot(0, self._ensure_cursor_visible)
+        try:
+            super().focusInEvent(event)
+            # 激活发光效果
+            self._animate_glow(25, 180, 250)
+            QTimer.singleShot(0, self._ensure_cursor_visible)
+        except Exception:
+            # 确保即使出错也不会崩溃
+            pass
+        
+    def focusOutEvent(self, event):
+        try:
+            super().focusOutEvent(event)
+            # 取消发光效果
+            self._animate_glow(0, 0, 200)
+        except Exception:
+            # 确保即使出错也不会崩溃
+            pass
 
     def _ensure_cursor_visible(self):
         cursor = self.textCursor()

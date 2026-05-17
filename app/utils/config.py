@@ -1,11 +1,19 @@
 # -*- coding: utf-8 -*-
-import json
-import os
-import sys
+"""
+全局配置管理 - 基于 qfluentwidgets QConfig
+
+使用单例模式管理全局配置，包括：
+- LLM 模型配置（API URL、模型名称、认证方式）
+- 界面配置（主题、字体）
+- 用户偏好配置
+
+配置持久化到 JSON 文件。
+"""
+import orjson as json
+
 from copy import deepcopy
 from enum import Enum
 from uuid import uuid4
-
 from loguru import logger
 from qfluentwidgets import (
     ConfigSerializer,
@@ -18,7 +26,6 @@ from qfluentwidgets import (
     ConfigValidator,
     RangeConfigItem,
 )
-
 
 
 class PatchPlatform(Enum):
@@ -57,9 +64,12 @@ class Settings(QConfig):
         """获取配置实例（单例模式）"""
         if cls._instance is None:
             cls._instance = cls()
-            CONFIG_FILE = "app.config"
+            # 配置文件路径：使用数据目录
+            from app.utils.utils import get_app_data_dir
+            app_data_dir = get_app_data_dir()
+            cls._instance.file = app_data_dir / "app.config"
             try:
-                cls._instance.load(CONFIG_FILE)
+                cls._instance.load()
             except:
                 logger.exception("无法加载配置文件")
         return cls._instance
@@ -67,7 +77,8 @@ class Settings(QConfig):
     @classmethod
     def save_config(cls):
         """保存配置"""
-        pass
+        instance = cls.get_instance()
+        instance.save()
 
     def set(self, item, value, save=False, copy=True):
         """set the value of config item
@@ -113,11 +124,11 @@ class Settings(QConfig):
         # 确保目录存在
         self.file.parent.mkdir(parents=True, exist_ok=True)
         # 写入文件
-        with open(self.file, "w", encoding="utf-8") as f:
-            json.dump(self.toDict(), f, ensure_ascii=False, indent=4)
+        with open(self.file, "wb") as f:
+            f.write(json.dumps(self.toDict(), option=json.OPT_INDENT_2))
 
     # 版本信息
-    current_version = "v0.1.0"
+    current_version = "v0.1.6"
     user_name = ConfigItem("General", "UserName", str(uuid4().hex))
     # 通用设置
     auto_check_update = ConfigItem("General", "AutoCheckUpdate", True, BoolValidator())
@@ -131,7 +142,7 @@ class Settings(QConfig):
     )
 
     # GitHub 配置
-    github_repo = ConfigItem("Patch", "GitHub/Repo", "martin98-afk/CanvasMind")
+    github_repo = ConfigItem("Patch", "GitHub/Repo", "martin98-afk/DriFox")
     github_token = ConfigItem("Patch", "GitHub/Token", "")
 
     # ========== 大模型对话默认配置 ==========

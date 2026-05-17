@@ -1,7 +1,18 @@
+# -*- coding: utf-8 -*-
+"""
+网页工具集 - 提供网页获取和搜索功能
+
+支持：
+- fetch_web: 获取网页内容，支持 markdown/html/text 格式
+- search_web: 搜索网页，支持 DuckDuckGo
+
+提供异步和同步两种调用方式。
+"""
 import os
 import re
 import httpx
 import html2text
+
 from pathlib import Path
 from typing import Optional, Callable
 
@@ -18,6 +29,21 @@ _MULTI_NEWLINE_PATTERN = re.compile(r"\n{3,}")
 _TITLE_PATTERN = re.compile(r'class="result__title"[^>]*>.*?<a[^>]*href="([^"]+)"[^>]*>(.*?)</a>', re.DOTALL)
 _SNIPPET_PATTERN = re.compile(r'class="result__snippet"[^>]*>(.*?)</div>', re.DOTALL)
 _HTML_TAG_PATTERN = re.compile(r"<[^>]+>")
+
+# 共享的 HTTP headers 配置
+_DEFAULT_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+}
+
+
+def _fetch_html_content(url: str) -> tuple[httpx.Response, str]:
+    """获取网页内容的共享函数"""
+    with httpx.Client(timeout=30, follow_redirects=True, headers=_DEFAULT_HEADERS) as client:
+        response = client.get(url)
+        response.raise_for_status()
+        return response, response.text
 
 
 class WebFetchTask(QRunnable):
@@ -44,19 +70,9 @@ class WebFetchTask(QRunnable):
             )
 
     def _do_fetch(self) -> ToolResult:
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-        }
-
+        """异步获取网页内容（使用共享函数）"""
         try:
-            with httpx.Client(
-                timeout=30, follow_redirects=True, headers=headers
-            ) as client:
-                response = client.get(self.url)
-                response.raise_for_status()
-                html_content = response.text
+            response, html_content = _fetch_html_content(self.url)
 
             if self.format == "html":
                 return ToolResult(True, content=html_content[: self.max_chars])
@@ -216,11 +232,15 @@ class WebSearchTask(QRunnable):
 
 
 class WebTools:
-    def __init__(self, workdir: Path):
-        self.workdir = workdir
+    def __init__(self, owner):
+        self._owner = owner
         self._thread_pool: Optional[QThreadPool] = None
         self._current_fetch_task: Optional[WebFetchTask] = None
         self._current_search_task: Optional[WebSearchTask] = None
+
+    @property
+    def workdir(self) -> Path:
+        return self._owner.workdir
 
     def _get_thread_pool(self) -> QThreadPool:
         if self._thread_pool is None:
@@ -248,20 +268,9 @@ class WebTools:
             return self._fetch_sync(url, format, max_chars)
 
     def _fetch_sync(self, url: str, format: str, max_chars: int) -> ToolResult:
-        """同步获取网页"""
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-        }
-
+        """同步获取网页（使用共享函数）"""
         try:
-            with httpx.Client(
-                timeout=30, follow_redirects=True, headers=headers
-            ) as client:
-                response = client.get(url)
-                response.raise_for_status()
-                html_content = response.text
+            response, html_content = _fetch_html_content(url)
 
             if format == "html":
                 return ToolResult(True, content=html_content[:max_chars])

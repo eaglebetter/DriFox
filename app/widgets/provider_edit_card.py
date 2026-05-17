@@ -15,6 +15,7 @@ from PyQt5.QtWidgets import (
 )
 from qfluentwidgets import (
     BodyLabel,
+    InfoBarPosition,
 )
 from qfluentwidgets import (
     LineEdit,
@@ -29,6 +30,7 @@ from app.constants import (
 from app.utils.utils import get_icon, get_font_family_css
 from app.widgets.provider_setting_card import ProviderIconWidget
 from app.widgets.searchable_editable_combobox import SearchableEditableComboBox
+from app.widgets.model_list_edit_dialog import ModelListEditDialog
 
 
 def _is_text_chat_model(model_id: str) -> bool:
@@ -37,10 +39,15 @@ def _is_text_chat_model(model_id: str) -> bool:
         return False
     model_lower = model_id.lower()
     non_text_keywords = [
+        # 图片生成/视觉模型
         'dall-e', 'dalle', 'stable-diffusion', 'sd-', 'imagen', 'flux',
-        'image', 'diffusion', 'kandinsky', 'midjourney', "wan",
-        'whisper', 'tts', 'speech', 'audio', 'piper', "voice",
+        'image', 'diffusion', 'kandinsky', 'midjourney', 'wan', 'vision',
+        'vl', 'llava', 'seance', 'cogview', 'cogvideo', 'pixart', 'visual',
+        # 音频模型
+        'whisper', 'tts', 'speech', 'audio', 'piper', 'voice',
+        # 词嵌入模型
         'embedding', 'embed', 'text-embedding', 'bge',
+        # 其他非聊天模型
         'moderation', 'rerank', 'search', 'retrieval',
     ]
     for keyword in non_text_keywords:
@@ -161,10 +168,12 @@ class ProviderEditCard(QWidget):
 
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(4, 2, 4, 2)
-        main_layout.setSpacing(4)
+        main_layout.setSpacing(3)
 
         # 连接配置区域
         # 服务商名称行
+        current_provider = self.provider_name if not self.is_new else None
+        template_url = ""
         if self.is_new:
             name_row = QHBoxLayout()
             # 服务商名称标签 - 固定宽度右对齐
@@ -188,11 +197,15 @@ class ProviderEditCard(QWidget):
             main_layout.addLayout(name_row)
             first_provider = self.nameCombo.currentText()
             template = FREE_PROVIDERS.get(first_provider, {})
+            current_provider = first_provider
+            template_url = template.get("API_URL", "")
         else:
             if self.provider_name in FREE_PROVIDERS:
                 template = FREE_PROVIDERS[self.provider_name]
             else:
                 template = self.provider_info
+            current_provider = self.provider_name
+            template_url = template.get("API_URL", "")
             name_row = QHBoxLayout()
             name_row.addWidget(BodyLabel("服务商:"))
             name_row.addWidget(ProviderIconWidget(self.provider_name, 24))
@@ -209,8 +222,9 @@ class ProviderEditCard(QWidget):
         url_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         url_row.addWidget(url_label)
         self.apiUrlCombo = SearchableEditableComboBox()
-        self._load_preset_urls()
-        current_url = self.provider_info.get("API_URL", template.get("API_URL", ""))
+        # 传入当前服务商名称和模板URL，加载预设URL列表
+        self._load_preset_urls(provider_name=current_provider, template_url=template_url)
+        current_url = self.provider_info.get("API_URL", template_url)
         if current_url:
             existing_items = [self.apiUrlCombo.itemText(i) for i in range(self.apiUrlCombo.count())]
             if current_url not in existing_items:
@@ -256,7 +270,8 @@ class ProviderEditCard(QWidget):
             elif "DeepSeek" in PROVIDER_MODELS:
                 self.modelCombo.addItems(PROVIDER_MODELS["DeepSeek"])
         else:
-            if saved_models and isinstance(saved_models, list):
+            has_saved_models = "模型列表" in self.provider_info and isinstance(saved_models, list) and len(saved_models) > 0
+            if has_saved_models:
                 self.modelCombo.addItems(saved_models)
             elif self.provider_name in PROVIDER_MODELS:
                 self.modelCombo.addItems(PROVIDER_MODELS[self.provider_name])
@@ -275,6 +290,12 @@ class ProviderEditCard(QWidget):
 
         model_row.addWidget(self.modelCombo, 1)
         model_row.addWidget(self.fetchBtn)
+
+        # 管理模型列表按钮
+        self.manageModelsBtn = PrimaryPushButton("编辑列表")
+        self.manageModelsBtn.clicked.connect(self._on_manage_models)
+        model_row.addWidget(self.manageModelsBtn)
+
         main_layout.addLayout(model_row)
 
         temp_row = QHBoxLayout()
@@ -351,6 +372,10 @@ class ProviderEditCard(QWidget):
                     "https://api.openai.com/v1",
                     "https://api.openai.com/v1/chat/completions",
                 ]
+            elif provider_name == "火山方舟":
+                preset_urls = [
+                    "https://ark.cn-beijing.volces.com/api/v3",
+                ]
             elif provider_name in FREE_PROVIDERS:
                 url = FREE_PROVIDERS[provider_name].get("API_URL", "")
                 if url:
@@ -408,11 +433,11 @@ class ProviderEditCard(QWidget):
         provider_name = self.nameCombo.currentText() if self.is_new else self.provider_name
 
         if not api_url or not api_key:
-            InfoBar.warning("提示", "请先填写 API URL 和 Key", parent=self.window(), duration=2000)
+            InfoBar.warning("提示", "请先填写 API URL 和 Key", parent=self.window(), duration=2000, position=InfoBarPosition.BOTTOM)
             return
 
         self.fetchBtn.setEnabled(False)
-        InfoBar.info("获取中", "正在获取模型列表...", parent=self.window(), duration=3000)
+        InfoBar.info("获取中", "正在获取模型列表...", parent=self.window(), duration=3000, position=InfoBarPosition.BOTTOM)
 
         def do_fetch():
             return fetch_provider_models(api_url, api_key, provider_name)
@@ -444,17 +469,33 @@ class ProviderEditCard(QWidget):
             self.modelCombo.setCurrentIndex(self.modelCombo.findText(current))
         self.modelCombo.blockSignals(False)
         from qfluentwidgets import InfoBar
-        InfoBar.success("成功", f"获取到 {len(models)} 个模型", parent=self.window(), duration=2000)
+        InfoBar.success("成功", f"获取到 {len(models)} 个模型", parent=self.window(), duration=2000, position=InfoBarPosition.BOTTOM)
 
     def _on_fetch_failed(self):
         """获取失败（主线程）"""
         self.fetchBtn.setEnabled(True)
         from qfluentwidgets import InfoBar
-        InfoBar.error("失败", "获取模型列表失败，请检查配置", parent=self.window(), duration=3000)
+        InfoBar.error("失败", "获取模型列表失败，请检查配置", parent=self.window(), duration=3000, position=InfoBarPosition.BOTTOM)
+
+    def _on_manage_models(self):
+        """打开模型列表管理对话框"""
+        current_models = self.modelCombo.get_all_models()
+        dialog = ModelListEditDialog(current_models, self.window())
+        if dialog.exec_() == dialog.Accepted:
+            new_models = dialog.get_models()
+            self.modelCombo.blockSignals(True)
+            self.modelCombo.clear()
+            self.modelCombo.addItems(new_models)
+            current = self.modelCombo.currentText()
+            if not current or self.modelCombo.findText(current) < 0:
+                if new_models:
+                    self.modelCombo.setCurrentIndex(0)
+            self.modelCombo.blockSignals(False)
 
     def _on_save(self):
         """保存"""
         provider_name = self.nameCombo.currentText() if self.is_new else self.provider_name
+        current_models = self.modelCombo.get_all_models()
         self.provider_info = {
             "API_URL": self.apiUrlCombo.currentText().strip(),
             "API_KEY": self.apiKeyEdit.text().strip(),
@@ -463,8 +504,10 @@ class ProviderEditCard(QWidget):
             "最大Token": int(self.contextLengthSpin.value()),
             "认证方式": "bearer",
         }
-        if self._fetched_models:
-            self.provider_info["模型列表"] = self._fetched_models
+        if current_models:
+            self.provider_info["模型列表"] = current_models
+        elif "模型列表" not in self.provider_info:
+            self.provider_info["模型列表"] = []
         self.saved.emit(provider_name, self.provider_info)
 
     def _on_cancel(self):

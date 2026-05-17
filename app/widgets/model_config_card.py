@@ -13,17 +13,13 @@ from qfluentwidgets import (
     SpinBox,
     SwitchButton,
     PasswordLineEdit,
-    ComboBox, SimpleCardWidget,
-)
+    ComboBox, )
 
-from app.constants import (
-    PARAM_UI_MAP,
-    PARAM_RANGE_MAP,
-)
+from app.constants import PARAM_SCHEMA
 from app.widgets.searchable_editable_combobox import SearchableEditableComboBox
 
 
-class ModelConfigCard(SimpleCardWidget):
+class ModelConfigCard(QWidget):
     """模型配置卡片内容 - 有变化自动保存"""
 
     configApplied = pyqtSignal(dict)
@@ -41,8 +37,8 @@ class ModelConfigCard(SimpleCardWidget):
 
     def _setup_ui(self):
         self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(0, 4, 0, 4)
-        self.layout.setSpacing(6)  # 恢复行间距
+        self.layout.setContentsMargins(4, 0, 4, 0)
+        self.layout.setSpacing(3)
 
     def _clear_layout(self, layout):
         """递归清理 layout"""
@@ -60,20 +56,17 @@ class ModelConfigCard(SimpleCardWidget):
         self._clear_layout(self.layout)
         self._widgets.clear()
 
-        # 仅显示参数配置（温度、上下文长度等），不显示连接/模型字段
-        skip_keys = ["模型名称", "API_URL", "API_KEY", "认证方式", "获取地址", "模型列表", "选择模型"]
-        # 显示名称映射（存储字段名 -> UI显示名）
-        display_name_map = {
-            "最大Token": "上下文长度",
-        }
+        # 连接信息字段（由外部过滤了再传进来，但补一个安全跳过）
+        skip_keys = {"模型名称", "API_URL", "API_KEY", "认证方式", "获取地址", "模型列表", "选择模型"}
+
         for key, value in config.items():
             if key in skip_keys:
                 continue
-            ui_type = self._infer_ui_type(key, value)
-            widget = self._create_widget(key, ui_type, value)
-            display_name = display_name_map.get(key, key)
+            meta = PARAM_SCHEMA.get(key, {})
+            ui_type = meta.get("ui_type") or self._infer_fallback_type(key, value)
+            widget = self._create_widget(key, ui_type, value, meta)
+            display_name = meta.get("display_name", key)
             label = BodyLabel(f"{display_name}：", self)
-            # label 和 widget 放同一行
             hlayout = QHBoxLayout()
             hlayout.setContentsMargins(0, 0, 0, 0)
             hlayout.setSpacing(8)
@@ -82,30 +75,28 @@ class ModelConfigCard(SimpleCardWidget):
             self.layout.addLayout(hlayout)
             self._widgets[key] = (label, widget)
 
-    def _infer_ui_type(self, key: str, value) -> str:
+    def _infer_fallback_type(self, key: str, value) -> str:
+        """对 schema 未收录的键做启发式猜测"""
         key_lower = key.lower()
-        if key in PARAM_UI_MAP:
-            return PARAM_UI_MAP[key]
-        # 排除最大Token和上下文长度，避免被误判为password
         if "key" in key_lower or ("token" in key_lower and key not in ["最大Token", "上下文长度"]):
             return "password"
         if isinstance(value, (int, float)):
-            if 0 <= value <= 1 or 0 <= value <= 2:
+            if 0 <= value <= 2:
                 return "slider"
-            else:
-                return "spinbox"
+            return "spinbox"
         return "line"
 
-    def _create_widget(self, key, ui_type: str, value):
+    def _create_widget(self, key, ui_type: str, value, meta: dict):
         if ui_type == "password":
             widget = PasswordLineEdit(self)
             widget.setText(str(value) if value else "")
-            widget.setMinimumWidth(280)  # 统一宽度
+            widget.setMinimumWidth(280)
             widget.textChanged.connect(lambda: self._on_field_changed())
             return widget
+
         elif ui_type == "slider":
-            range_info = PARAM_RANGE_MAP.get(
-                key, {"min": 0.0, "max": 1.0, "step": 0.01, "type": "float"}
+            range_info = meta.get(
+                "range", {"min": 0.0, "max": 1.0, "step": 0.01, "type": "float"}
             )
             min_val = range_info["min"]
             max_val = range_info["max"]
@@ -118,7 +109,7 @@ class ModelConfigCard(SimpleCardWidget):
             slider_value = int(round(current * scale))
 
             container = QWidget(self)
-            container.setFixedHeight(28)  # 固定高度，避免占用过大空间
+            container.setFixedHeight(28)
             hlayout = QHBoxLayout(container)
             hlayout.setContentsMargins(0, 0, 0, 0)
 
@@ -153,6 +144,7 @@ class ModelConfigCard(SimpleCardWidget):
             container.scale = scale
 
             return container
+
         elif ui_type == "checkbox":
             widget = SwitchButton(self)
             widget._onText = widget.tr("开启")
@@ -167,29 +159,41 @@ class ModelConfigCard(SimpleCardWidget):
             widget.setChecked(checked)
             widget.checkedChanged.connect(lambda: self._on_field_changed())
             return widget
+
+        elif ui_type == "combobox":
+            widget = ComboBox(self)
+            options = meta.get("options", [])
+            widget.addItems(options)
+            current = str(value) if value else ""
+            if current in options:
+                widget.setCurrentText(current)
+            elif options:
+                widget.setCurrentText(options[0])
+            widget.setMinimumWidth(280)
+            widget.currentTextChanged.connect(lambda: self._on_field_changed())
+            return widget
+
         elif ui_type == "spinbox":
             widget = SpinBox()
             val = int(value) if value else 2048
-            # 从 PARAM_RANGE_MAP 获取范围配置，默认为无限范围
-            range_info = PARAM_RANGE_MAP.get(key, {"min": 1, "max": 99999999})
+            range_info = meta.get("range", {"min": 1, "max": 99999999})
             widget.setRange(range_info["min"], range_info["max"])
             widget.setValue(val)
-            widget.setMinimumWidth(280)  # 统一宽度
+            widget.setMinimumWidth(280)
             widget.valueChanged.connect(lambda: self._on_field_changed())
             return widget
+
         else:
             widget = LineEdit(self)
-            widget.setMinimumWidth(280)  # 统一宽度
+            widget.setMinimumWidth(280)
             widget.setText(str(value) if value else "")
             widget.textChanged.connect(lambda: self._on_field_changed())
             return widget
 
     def _on_field_changed(self):
-        """字段变化时触发保存"""
         self._save_timer.start()
 
     def _do_save(self):
-        """执行保存"""
         config = self.get_config()
         self.configApplied.emit(config)
 

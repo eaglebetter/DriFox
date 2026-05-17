@@ -5,6 +5,7 @@
 用于记录文件操作并在需要时回滚
 """
 
+import re
 import shutil
 from dataclasses import dataclass
 from datetime import datetime
@@ -13,7 +14,10 @@ from typing import List, Dict, Optional, Tuple
 
 from loguru import logger
 
-from app.utils.session_store import SessionStore
+# 预编译文件名清理正则
+_SANITIZE_FILENAME_PATTERN = re.compile(r'[<>:"/\\|?*]')
+
+from app.core.store import SessionStore
 
 
 @dataclass
@@ -42,8 +46,9 @@ class FileOperationRecorder:
     }
 
     def __init__(self, session_store: Optional[SessionStore] = None):
-        self._session_store = session_store or SessionStore(db_dir=".drifox")
-        self._backup_base_dir = Path(".drifox") / "backups"
+        self._session_store = session_store or SessionStore.get_instance()
+        from app.utils.utils import get_app_data_dir
+        self._backup_base_dir = get_app_data_dir() / "backups"
 
     def is_tracked_operation(self, tool_name: str) -> bool:
         """判断是否为需要记录的操作"""
@@ -211,12 +216,6 @@ class FileOperationRecorder:
         except Exception as e:
             logger.warning(f"[FileRecorder] 清理备份失败: {e}")
 
-        except Exception as e:
-            logger.error(f"[FileRecorder] 备份失败: {e}")
-            import traceback
-            
-            return None
-
     def get_operations_for_preview(self, session_id: str, call_id: str) -> List[Dict]:
         """
         获取指定 call_id 的操作记录
@@ -347,5 +346,4 @@ class FileOperationRecorder:
 
     def _sanitize_filename(self, filename: str) -> str:
         """移除文件名中不合法的字符"""
-        import re
-        return re.sub(r'[<>:"/\\|?*]', "_", filename)
+        return _SANITIZE_FILENAME_PATTERN.sub("_", filename)

@@ -1,9 +1,12 @@
 ---
 description: 会话摘要生成智能体，自动为当前会话生成详细摘要，用于历史记录和上下文恢复。
-mode: primary
+mode: all
 hidden: true
 temperature: 0.2
 steps: 5
+inherit_history: true
+inherit_history_count: 300
+inherit_history_max_chars: 500
 permission:
   "*": deny
 ---

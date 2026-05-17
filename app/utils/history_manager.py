@@ -8,22 +8,22 @@
 - 损坏隔离
 - 增量更新
 """
-
-import json
-import uuid
-import re
 import os
+import re
+import uuid
+import orjson as json
+
 from datetime import datetime
 from typing import List, Dict, Optional
-from pathlib import Path
-
-from loguru import logger
 from PyQt5.QtCore import QTimer
+from loguru import logger
 
-from app.utils.message_content import consolidate_messages, content_to_text
-from app.utils.session_store import SessionStore
-from app.utils.utils import serialize_for_json, deserialize_from_json
+from app.core.message_content import consolidate_messages, content_to_text
+from app.core.store import SessionStore
+from app.utils.utils import get_app_data_dir, serialize_for_json, deserialize_from_json
 
+# 预编译文件名清理正则
+_SANITIZE_FILENAME_PATTERN = re.compile(r'[<>:"/\\|?*]')
 
 
 def merge_session_messages(messages: List[Dict]) -> List[Dict]:
@@ -32,7 +32,7 @@ def merge_session_messages(messages: List[Dict]) -> List[Dict]:
 
 def sanitize_filename(name: str) -> str:
     """移除文件名中不合法的字符"""
-    return re.sub(r'[<>:"/\\|?*]', "_", name)
+    return _SANITIZE_FILENAME_PATTERN.sub("_", name)
 
 
 class HistoryManager:
@@ -42,14 +42,16 @@ class HistoryManager:
     使用 SQLite 进行持久化存储，同时维护内存缓存以提高读取性能。
     """
 
-    def __init__(self, canvas_name: str):
-        self.canvas_name = canvas_name
-        self.archive_dir = Path(".drifox") / "archived"
+    def __init__(self):
+        self.archive_dir = get_app_data_dir() / "archived"
         self.archive_dir.mkdir(parents=True, exist_ok=True)
 
         self._history_limit = 100
         self._save_timer: Optional[QTimer] = None
         self._save_delay_ms = 1000
+
+        # 延迟保存的待处理会话 ID
+        self._pending_save_session_id: Optional[str] = None
 
         # SQLite 存储层
         self._session_store: Optional[SessionStore] = None
@@ -61,21 +63,37 @@ class HistoryManager:
         # 初始化存储
         self._init_storage()
 
+    def _deduplicate_history_sessions(self):
+        """去重历史会话列表，保持最新的一个"""
+        seen_ids = set()
+        unique_sessions = []
+        # 倒序遍历，保留最新的（后面的是更新的）
+        for session in reversed(self._history_sessions):
+            session_id = session.get("session_id")
+            if session_id not in seen_ids:
+                seen_ids.add(session_id)
+                unique_sessions.insert(0, session)  # 插回开头保持顺序
+        removed = len(self._history_sessions) - len(unique_sessions)
+        if removed > 0:
+            logger.warning(f"[HistoryManager] 移除了 {removed} 个重复会话")
+        self._history_sessions = unique_sessions
+
     def _init_storage(self):
         """初始化存储层"""
         use_sqlite = os.environ.get("LLM_SESSION_SQLITE", "1") == "1"
 
         if use_sqlite:
             try:
-                self._session_store = SessionStore(db_dir=".drifox")
+                self._session_store = SessionStore.get_instance()
                 if self._session_store.is_initialized:
                     self._use_sqlite = True
-                    logger.info(f"[HistoryManager] SQLite 存储已启用: {self.canvas_name}")
+                    logger.info(f"[HistoryManager] SQLite 存储已启用")
 
                     # 从 SQLite 加载
-                    self._history_sessions = self._session_store.load_sessions(
-                        self.canvas_name, self._history_limit
-                    )
+                    self._history_sessions = self._session_store.get_sessions(limit=500)
+
+                    # 去重
+                    self._deduplicate_history_sessions()
 
                     # 检查是否需要迁移旧 JSON 数据
                     self._migrate_if_needed()
@@ -92,7 +110,7 @@ class HistoryManager:
             return
 
         # 检查 SQLite 是否已有数据
-        if self._session_store.get_session_count(self.canvas_name) > 0:
+        if self._session_store.get_session_count() > 0:
             return
 
     def _normalize_sessions(self, data: List) -> List[Dict]:
@@ -167,26 +185,21 @@ class HistoryManager:
                 break
 
         if existing_index is not None:
-            self._history_sessions[existing_index] = session_record
+            # 更新现有会话时，移动到列表开头以保持与 SQLite ORDER BY updated_at DESC 一致
+            self._history_sessions.pop(existing_index)
+            self._history_sessions.insert(0, session_record)
         else:
             self._history_sessions.insert(0, session_record)
 
         self._history_sessions = self._history_sessions[: self._history_limit]
 
-        # 持久化
+        # 持久化到 SQLite
         self._persist_session(session_record)
 
     def _persist_session(self, session_record: Dict):
-        """持久化单个会话（延迟保存）"""
-        # 添加 canvas_id
-        session_record["canvas_id"] = self.canvas_name
-
+        """持久化单个会话（延迟保存到 SQLite）"""
         if self._use_sqlite and self._session_store:
-            # SQLite 模式：延迟保存，只保存当前会话
             self._schedule_save(session_record.get("session_id"))
-        else:
-            # JSON 模式
-            self._save_to_disk_json()
 
     def _build_session_record(
         self,
@@ -236,9 +249,6 @@ class HistoryManager:
     def update_session_title(self, index: int, new_title: str):
         if 0 <= index < len(self._history_sessions):
             self._history_sessions[index]["title"] = new_title
-            session = self._history_sessions[index]
-            session["canvas_id"] = self.canvas_name
-            self._persist_session(session)
 
     def update_topic_summary(self, index: int, summary: str):
         self.update_session_title(index, summary)
@@ -260,10 +270,6 @@ class HistoryManager:
             if msg.get("role") == "user":
                 count += 1
         return count
-
-    def _save_to_disk_json(self):
-        """保存到 JSON 文件（回退模式）- 不再使用"""
-        pass
 
     def load_latest_session(self) -> Optional[Dict]:
         if not self._history_sessions:
@@ -290,19 +296,24 @@ class HistoryManager:
         return most_recent
 
     def get_history_list(self, project: str = None) -> List[Dict]:
-        """获取历史会话列表，可选按项目过滤"""
+        """获取历史会话列表，可选按项目过滤，按最后对话时间排序"""
+        # 先去重
+        self._deduplicate_history_sessions()
+        
+        sessions = self._history_sessions
         if project:
-            return [s for s in self._history_sessions if s.get("project", "默认项目") == project]
-        return self._history_sessions
+            sessions = [s for s in sessions if s.get("project", "默认项目") == project]
+        # 按最后对话时间 last_time 降序排序
+        return sorted(sessions, key=lambda x: x.get("last_time", ""), reverse=True)
 
     def get_projects(self) -> List[str]:
         """获取所有不重复的项目名"""
         if self._use_sqlite and self._session_store:
-            return self._session_store.get_projects(self.canvas_name)
+            return self._session_store.get_projects()
         projects = set()
         for s in self._history_sessions:
             p = s.get("project", "默认项目")
-            if p:
+            if p and not p.startswith("__archived__/"):
                 projects.add(p)
         if not projects:
             return ["默认项目"]
@@ -313,7 +324,6 @@ class HistoryManager:
         if 0 <= index < len(self._history_sessions):
             self._history_sessions[index]["project"] = project
             session = self._history_sessions[index]
-            session["canvas_id"] = self.canvas_name
             if self._use_sqlite and self._session_store:
                 self._session_store.update_session_project(
                     session.get("session_id"), project
@@ -325,7 +335,7 @@ class HistoryManager:
     def archive_sessions_by_project(self, project: str) -> int:
         """批量归档指定项目的所有会话"""
         if self._use_sqlite and self._session_store:
-            count = self._session_store.archive_sessions_by_project(self.canvas_name, project)
+            count = self._session_store.archive_sessions_by_project(project)
             # 同步内存缓存
             self._history_sessions = [
                 s for s in self._history_sessions
@@ -333,6 +343,41 @@ class HistoryManager:
             ]
             return count
         return 0
+
+    def archive_project(self, project_name: str) -> int:
+        """归档整个项目，归档该项目所有会话并从项目列表中移除"""
+        # 获取项目下所有会话
+        sessions = self.get_history_list(project_name)
+        count = 0
+        
+        for session in sessions:
+            title = session.get("title", "未命名")
+            last_time = session.get("last_time", datetime.now().strftime("%Y-%m-%d"))
+            session_id = session.get("session_id", "unknown")
+
+            # 保存到归档目录 JSON 文件
+            safe_title = sanitize_filename(title[:50])
+            date_str = last_time[:10] if last_time else datetime.now().strftime("%Y-%m-%d")
+            filename = f"{date_str}_{safe_title}_{session_id}.json"
+            archive_file = self.archive_dir / filename
+
+            try:
+                with open(archive_file, "wb") as f:
+                    f.write(json.dumps(serialize_for_json(session), option=json.OPT_INDENT_2))
+            except Exception:
+                logger.warning(f"[HistoryManager] 归档会话失败: {archive_file}")
+                continue
+
+            # 从内存缓存移除
+            self._history_sessions = [s for s in self._history_sessions if s.get("session_id") != session_id]
+
+            # 从 SQLite 删除
+            if self._use_sqlite and self._session_store:
+                self._session_store.delete_session(session_id)
+
+            count += 1
+
+        return count
 
     def archive_history(self, index: int) -> bool:
         """归档历史记录"""
@@ -351,14 +396,10 @@ class HistoryManager:
             archive_file = self.archive_dir / filename
 
             try:
-                with open(archive_file, "w", encoding="utf-8") as f:
-                    json.dump(
-                        serialize_for_json(session),
-                        f,
-                        ensure_ascii=False,
-                        indent=2,
-                    )
+                with open(archive_file, "wb") as f:
+                    f.write(json.dumps(serialize_for_json(session), option=json.OPT_INDENT_2))
             except Exception:
+                logger.warning(f"[HistoryManager] 归档失败: {archive_file}")
                 return False
 
             # 从内存缓存移除
@@ -383,7 +424,8 @@ class HistoryManager:
         """
         try:
             with open(file_path, "r", encoding="utf-8") as f:
-                data = deserialize_from_json(json.load(f))
+                content = f.read()
+                data = deserialize_from_json(json.loads(content))
 
             if not isinstance(data, dict):
                 logger.warning(f"[HistoryManager] 导入失败，非法的会话数据格式: {file_path}")
@@ -397,9 +439,9 @@ class HistoryManager:
             if existing_session_id:
                 existing_index = self.find_index_by_session_id(existing_session_id)
                 if existing_index is not None:
-                    # 更新已存在的会话
-                    self._history_sessions[existing_index] = session
-                    session["canvas_id"] = self.canvas_name
+                    # 更新已存在的会话，移动到列表开头以保持与 SQLite ORDER BY updated_at DESC 一致
+                    self._history_sessions.pop(existing_index)
+                    self._history_sessions.insert(0, session)
                     self._schedule_save(existing_session_id)
                     logger.info(f"[HistoryManager] 更新已存在的会话: {existing_session_id}")
                 else:
@@ -412,7 +454,6 @@ class HistoryManager:
                         session["title"] = f"[导入] {session.get('title', '新对话')}"
 
                     # 添加到内存缓存顶部
-                    session["canvas_id"] = self.canvas_name
                     self._history_sessions.insert(0, session)
                     self._history_sessions = self._history_sessions[: self._history_limit]
                     self._schedule_save(session["session_id"])
@@ -420,7 +461,6 @@ class HistoryManager:
             else:
                 # 没有 session_id，生成一个新的
                 session["session_id"] = uuid.uuid4().hex[:8]
-                session["canvas_id"] = self.canvas_name
                 self._history_sessions.insert(0, session)
                 self._history_sessions = self._history_sessions[: self._history_limit]
                 self._schedule_save(session["session_id"])
@@ -483,7 +523,7 @@ class HistoryManager:
             for json_file in self.archive_dir.glob("*.json"):
                 try:
                     with open(json_file, "r", encoding="utf-8") as f:
-                        data = json.load(f)
+                        data = json.loads(f.read())
                     archived_files.append({
                         "path": str(json_file),
                         "name": json_file.name,
@@ -491,6 +531,7 @@ class HistoryManager:
                         "title": data.get("title", json_file.stem[:50]),
                     })
                 except Exception:
+                    logger.error(f"[HistoryManager] 读取归档文件失败: {json_file}")
                     # 跳过损坏的文件
                     continue
         except Exception:
@@ -581,36 +622,54 @@ class HistoryManager:
                 ),
                 project=project if project is not None else existing.get("project", "默认项目"),
             )
-            self._history_sessions[index] = updated
+            # 移动到列表开头以保持与 SQLite ORDER BY updated_at DESC 一致
+            self._history_sessions.pop(index)
+            self._history_sessions.insert(0, updated)
             self._schedule_save(existing.get("session_id"))
 
     def _schedule_save(self, session_id: str = None):
-        """延迟保存会话，指定 session_id 时只保存该会话"""
+        """
+        延迟保存会话，指定 session_id 时只保存该会话。
+        关键修复：合并对同一 session 的重复保存请求，防止丢失。
+        """
+        if not session_id:
+            return
+
+        # 如果当前已有待保存的请求，且是同一个 session，直接忽略（已被覆盖，无需重复）
+        if self._pending_save_session_id == session_id and self._save_timer is not None:
+            logger.debug(f"[HistoryManager] 合并保存请求: session_id={session_id[:8]}...")
+            return
+
+        # 如果有待保存的不同 session_id，先立即执行（防止丢失）
+        if self._pending_save_session_id and self._pending_save_session_id != session_id:
+            logger.debug(f"[HistoryManager] 立即保存被覆盖的会话: {self._pending_save_session_id[:8]}...")
+            self._do_save()
+
         self._pending_save_session_id = session_id
         if self._save_timer is None:
             self._save_timer = QTimer.singleShot(self._save_delay_ms, self._do_save)
 
     def _do_save(self):
-        """延迟保存会话"""
-        if self._use_sqlite and self._session_store:
-            # SQLite 模式下保存指定会话或所有会话
-            pending_id = getattr(self, '_pending_save_session_id', None)
-            logger.debug(f"[HistoryManager] 保存会话: pending_id={pending_id}, total={len(self._history_sessions)}")
-            if pending_id:
-                # 只保存指定会话
-                for session in self._history_sessions:
-                    if session.get("session_id") == pending_id:
-                        session["canvas_id"] = self.canvas_name
-                        self._session_store.save_session(session)
-                        break
-            else:
-                # 保存所有会话
-                for session in self._history_sessions:
-                    session["canvas_id"] = self.canvas_name
-                    self._session_store.save_session(session)
-        else:
-            self._save_to_disk_json()
+        """延迟保存会话到 SQLite"""
         self._save_timer = None
+
+        if not (self._use_sqlite and self._session_store):
+            logger.debug("[HistoryManager] SQLite 未就绪，跳过保存")
+            self._pending_save_session_id = None
+            return
+
+        pending_id = getattr(self, '_pending_save_session_id', None)
+        if not pending_id:
+            logger.debug("[HistoryManager] 无待保存会话，跳过")
+            self._pending_save_session_id = None
+            return
+
+        logger.debug(f"[HistoryManager] 保存会话: pending_id={pending_id[:8]}...")
+        for session in self._history_sessions:
+            if session.get("session_id") == pending_id:
+                self._session_store.save_session(session)
+                break
+
         self._pending_save_session_id = None
 
     def _extract_last_message_time(self, messages: List[Dict]) -> str:
@@ -653,9 +712,10 @@ class HistoryManager:
         """获取总存储大小"""
         if self._use_sqlite and self._session_store:
             # 估算 SQLite 数据库大小
-            db_path = os.path.join(".drifox", "sessions.db")
-            if os.path.exists(db_path):
-                return os.path.getsize(db_path)
+            from app.utils.utils import get_app_data_dir
+            db_path = get_app_data_dir() / "sessions.db"
+            if db_path.exists():
+                return db_path.stat().st_size
 
     def get_memory_stats(self) -> Dict:
         total_messages = sum(s.get("message_count", 0) for s in self._history_sessions)

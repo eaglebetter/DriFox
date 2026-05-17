@@ -1,54 +1,13 @@
 # -*- coding: utf-8 -*-
-from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
-from enum import Enum
-from typing import Optional, List, Any
-import psutil
+from typing import Optional
 
+import psutil
 from PyQt5.QtCore import pyqtSignal, QTimer, Qt
 from PyQt5.QtWidgets import QWidget, QHBoxLayout, QLabel
-
-from app.utils.utils import get_icon
-
 from qfluentwidgets import TransparentToolButton
 
 from app.utils.config import Settings
-
-
-class DockPosition(Enum):
-    TOP = "top"
-    BOTTOM = "bottom"
-    HIDDEN = "hidden"
-
-
-class DockCategory(Enum):
-    CANVAS = "运行画布"
-    COMPONENT = "组件开发"
-    PROJECT = "项目管理"
-
-
-@dataclass
-class PluginManifest:
-    name: str
-    display_name: str = ""
-    icon: Optional[Any] = None
-    position: DockPosition = DockPosition.HIDDEN
-    shortcut: Optional[str] = None
-    dependencies: List[str] = field(default_factory=list)
-    singleton: bool = True
-    auto_activate: bool = True
-
-
-class PluginProtocol(ABC):
-    @abstractmethod
-    def get_manifest(self) -> PluginManifest:
-        raise NotImplementedError
-
-    def on_activate(self):
-        pass
-
-    def on_deactivate(self):
-        pass
+from app.utils.utils import get_icon
 
 
 class ToolWindowTitleBar(QWidget):
@@ -66,7 +25,6 @@ class ToolWindowTitleBar(QWidget):
 
     def _setup_ui(self):
         from qfluentwidgets import (
-            ToolButton,
             IconWidget,
             isDarkTheme,
         )
@@ -291,10 +249,6 @@ class ToolWindow(QWidget):
     name: str = "Unnamed"
     icon = None
     singleton = True
-    default_position: DockPosition = DockPosition.HIDDEN
-    display_order: int = 999
-
-    _manifest: Optional[PluginManifest] = None
 
     def __init__(self, page, button):
         super().__init__()
@@ -307,7 +261,6 @@ class ToolWindow(QWidget):
         self._init_unified_font()
 
         self._init_title_bar()
-        self.setup_ui()
 
     def _init_title_bar(self):
         if self._title_bar:
@@ -398,30 +351,3 @@ class ToolWindow(QWidget):
                 font-family: "{font_name}";
             }}
         """)
-
-    def setup_ui(self):
-        raise NotImplementedError
-
-    def cleanup(self):
-        pass
-
-    @classmethod
-    def get_manifest(cls) -> PluginManifest:
-        if cls._manifest is not None:
-            return cls._manifest
-        return PluginManifest(
-            name=cls.name,
-            display_name=getattr(cls, "display_name", cls.name),
-            icon=cls.icon,
-            position=cls.default_position,
-            singleton=cls.singleton,
-            auto_activate=False,
-        )
-
-
-@dataclass
-class DockItem:
-    name: str
-    widget: ToolWindow
-    position: DockPosition  # TOP or BOTTOM
-    order: int  # 在同 position 内的排序索引

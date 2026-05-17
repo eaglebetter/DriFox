@@ -2,8 +2,14 @@
 """
 工具执行器模块 - 统一处理各种工具调用
 """
+import orjson
+import re
+
 from loguru import logger
 from typing import Dict, Optional, Callable
+
+# 预编译正则表达式
+_FILE_PREFIX_PATTERN = re.compile(r'^file:/{1,3}')
 
 from app.tools import BuiltinTools, ToolResult
 from app.utils.file_operation_recorder import (
@@ -19,8 +25,9 @@ class ToolExecutor:
         "write", "edit", "multiedit", "patch"
     }
 
-    def __init__(self, homepage=None, workdir: str = None):
+    def __init__(self, homepage=None, workdir: str = None, backend=None):
         self._homepage = homepage
+        self._backend = backend  # ChatBackend 引用，用于访问 HookManager
         self._builtin_tools: Optional[BuiltinTools] = None
         self._workdir = workdir
         self._custom_tools: Dict[str, Callable] = {}
@@ -69,11 +76,10 @@ class ToolExecutor:
             pass
         return True
 
-    @property
-    def todo_list(self):
-        """获取待办事项列表"""
+    def get_todos(self):
+        """获取待办事项列表（返回副本）"""
         if self._builtin_tools:
-            return self._builtin_tools.todo_list
+            return self._builtin_tools.get_todos()
         return []
 
     def clear_todo_list(self):
@@ -98,11 +104,11 @@ class ToolExecutor:
             except Exception as e:
                 logger.warning(f"[ToolExecutor] Failed to cleanup builtin_tools: {e}")
             self._builtin_tools = None
-        
+
         # 清理文件操作记录器
         if self._file_recorder:
             self._file_recorder = None
-        
+
         # 清理会话上下文
         self._session_id = None
         self._call_id = None
@@ -164,11 +170,9 @@ class ToolExecutor:
         logger.debug(f"[ToolExecutor] 准备记录文件操作: tool={tool_name}, path={path}")
 
         # 处理 URL 格式的文件路径 (如 file:/D:/xxx 或 file:///D:/xxx)
-        import re
         if path.startswith("file:"):
             # 移除 file: 前缀，处理单斜杠或双斜杠
-            path = re.sub(r'^file:/{1,3}', '', path)
-
+            path = _FILE_PREFIX_PATTERN.sub('', path)
 
         # 获取完整的文件路径
         if hasattr(self._builtin_tools, "_file_tools"):
@@ -176,8 +180,6 @@ class ToolExecutor:
         else:
             from pathlib import Path
             full_path = Path(path).resolve()
-
-
 
         # 记录操作（内部会处理文件不存在的情况）
         try:
@@ -247,6 +249,24 @@ class ToolExecutor:
                 "[ToolExecutor] Session messages getter attached to BuiltinTools"
             )
 
+    def set_agent_manager(self, agent_manager):
+        """设置 AgentManager 实例，用于动态生成工具 schema"""
+        if self._builtin_tools:
+            self._builtin_tools.set_agent_manager(agent_manager)
+
+    def set_current_project(self, project: str):
+        """设置当前项目（供 update_project_note 使用）"""
+        if self._builtin_tools:
+            self._builtin_tools.set_current_project(project)
+            logger.info("[ToolExecutor] AgentManager attached to BuiltinTools")
+
+    def set_key_documents_repo(self, repo, project: str = "默认项目"):
+        """设置关键文档仓储和当前项目"""
+        if self._builtin_tools and self._builtin_tools._task_tools:
+            self._builtin_tools._task_tools._key_documents_repo = repo
+            self._builtin_tools._task_tools._current_project = project
+            logger.info(f"[ToolExecutor] KeyDocumentsRepo attached to TaskTools (project={project})")
+
     # 工具必需参数定义
     REQUIRED_ARGS = {
         "read": ["path"],
@@ -257,6 +277,11 @@ class ToolExecutor:
         "glob": ["pattern"],
         "patch": ["path", "patch_content"],
         "bash": ["command"],
+        # 后台任务工具
+        "bg_start": ["command"],
+        "bg_stop": ["task_id"],
+        "bg_logs": ["task_id"],
+        "bg_list": [],
         "webfetch": ["url"],
         "websearch": ["query"],
         "scan_repo": [],
@@ -266,10 +291,8 @@ class ToolExecutor:
         "git_diff": [],
         "get_diagnostics": ["file_path"],
         "summarize_changes": ["text"],
-        "memory_list": [],
-        "memory_search": ["query"],
-        "memory_save": ["content"],
-        "memory_consolidate": [],
+        "edit_project_note": ["old_string", "new_string"],
+        "read_project_note": [],
         "todowrite": ["todos"],
         "todoread": [],
         "task_batch": ["tasks"],
@@ -301,6 +324,66 @@ class ToolExecutor:
 
         logger.info(f"[ToolExecutor] Executing tool: {tool_name}, args: {args}")
 
+        # Trigger PreToolUse hook（同步执行，支持跳过和输出回填）
+        if self._backend and self._backend.hook_manager:
+            import os
+            from app.core.hook_manager import HookDecision
+            context = {
+                "project_root": self._workdir or os.getcwd(),
+                "tool_name": tool_name,
+            }
+            file_path = args.get("path") or args.get("file")
+            if file_path:
+                context["file"] = file_path
+            # 将工具参数注入 context，供 hook 脚本通过 stdin JSON 读取
+            # webfetch 需要 url，websearch 需要 query，bash 需要 command
+            if "url" in args:
+                context["url"] = args["url"]
+            if "query" in args:
+                context["query"] = args["query"]
+            if "command" in args:
+                context["command"] = args["command"]
+            if "format" in args:
+                context["format"] = args["format"]
+            # 也保留完整的 args 供高级脚本使用
+            context["args"] = args
+            current_message_text = ""
+            if self._backend.session_manager:
+                session = self._backend.get_current_session()
+                if session and hasattr(session, 'messages'):
+                    for msg in reversed(session.messages):
+                        if msg.get('role') == 'user':
+                            current_message_text = msg.get('content', '')
+                            break
+            
+            # 同步执行 PreToolUse hooks
+            results = self._backend.hook_manager.trigger_event(
+                "PreToolUse",
+                context=context,
+                current_message=current_message_text,
+                trigger_async=False   # 关键：同步执行，才能检测 BLOCK 决策
+            )
+            
+            # 检查是否有 hook 要求跳过工具执行（exit 2 或 JSON {"decision":"block"}）
+            for result in results:
+                if result.decision == HookDecision.BLOCK:
+                    # Hook 要求跳过工具执行，将 hook 输出作为工具结果回填
+                    logger.info(f"[ToolExecutor] PreToolUse hook BLOCK: {tool_name}, output={result.output[:100] if result.output else 'empty'}")
+                    
+                    # 将 hook 输出注入到消息上下文（供 LLM 后续分析）
+                    if result.output and self._backend:
+                        hook_output_msg = f"<hook event=\"PreToolUse\">\n[BLOCKED] Tool '{tool_name}' was blocked by hook.\nHook output:\n{result.output}\n</hook>"
+                        self._backend.message_received.emit({
+                            "role": "assistant",
+                            "content": hook_output_msg
+                        })
+                    
+                    # 返回 hook 输出作为工具结果
+                    return ToolResult(
+                        True,
+                        content=result.output or f"Tool '{tool_name}' was blocked by PreToolUse hook (exit code 2 / decision:block)."
+                    )
+
         # 校验必需参数
         if tool_name in self.REQUIRED_ARGS:
             required = self.REQUIRED_ARGS[tool_name]
@@ -329,8 +412,8 @@ class ToolExecutor:
         tool_map = {
             "read": lambda: self._builtin_tools.read_file(
                 path=args.get("path"),  # 统一使用 path
-                offset=args.get("offset", 1),
-                limit=args.get("limit", 500),  # 建议默认值设为 500，防止 Token 溢出
+                offset=int(args.get("offset")) if args.get("offset") is not None else 1,
+                limit=int(args.get("limit")) if args.get("limit") is not None else 500,
                 show_line_numbers=args.get("show_line_numbers", False),
             ),
             "write": lambda: self._builtin_tools.write_file(
@@ -371,6 +454,19 @@ class ToolExecutor:
             "bash": lambda: self._builtin_tools.execute_bash(
                 args.get("command", ""), args.get("timeout", 120)
             ),
+            # 后台任务工具
+            "bg_start": lambda: self._builtin_tools.bg_start(
+                args.get("command", ""),
+                args.get("cwd")
+            ),
+            "bg_stop": lambda: self._builtin_tools.bg_stop(
+                args.get("task_id", "")
+            ),
+            "bg_logs": lambda: self._builtin_tools.bg_logs(
+                args.get("task_id", ""),
+                args.get("lines", 100)
+            ),
+            "bg_list": lambda: self._builtin_tools.bg_list(),
             "webfetch": lambda: self._builtin_tools.fetch_web(
                 args.get("url", ""), args.get("format", "markdown")
             ),
@@ -389,30 +485,21 @@ class ToolExecutor:
             "summarize_changes": lambda: self._builtin_tools.summarize_changes(
                 args.get("text", ""), args.get("limit", 1200)
             ),
-            "memory_list": lambda: self._builtin_tools.memory_list(
-                args.get("limit", 10),
-                args.get("include_disabled", False),
-            ),
-            "memory_search": lambda: self._builtin_tools.memory_search(
-                args.get("query", ""),
-                args.get("limit", 8),
-                args.get("include_disabled", False),
-            ),
-            "memory_save": lambda: self._builtin_tools.memory_save(
-                args.get("content", ""),
-                args.get("confidence", 0.8),
-                args.get("source", "assistant"),
-                args.get("conflict_group", ""),
-            ),
-            "memory_consolidate": lambda: self._builtin_tools.memory_consolidate(
-                args.get("max_items", 3),
-                args.get("save", True),
-            ),
             "todowrite": lambda: self._builtin_tools.todo_write(args.get("todos", [])),
+            "edit_project_note": lambda: self._builtin_tools.edit_project_note(
+                args.get("old_string", ""),
+                args.get("new_string", "")),
+            "read_project_note": lambda: self._builtin_tools.read_project_note(
+                args.get("offset", 1),
+                args.get("limit", 500)),
             "todoread": lambda: self._builtin_tools.todo_read(),
-            "task_batch": lambda: self._builtin_tools.task_execute_batch(
-                args.get("tasks", [])
-            ),
+            "task_batch": lambda: (
+                # 【修复】处理 tasks 可能是 JSON 字符串的情况
+                lambda tasks_val: self._builtin_tools.task_execute_batch(
+                    orjson.loads(tasks_val) if isinstance(tasks_val, str) else (tasks_val or []),
+                    args.get("share_context", True),
+                )
+            )(args.get("tasks", [])),
             "task_status": lambda: self._builtin_tools.task_status(
                 args.get("task_ids"),
                 args.get("with_log", False),
@@ -424,14 +511,7 @@ class ToolExecutor:
                 args.get("question", ""),
                 args.get("options"),
                 args.get("multiple", False),
-            ),
-            "list_webhooks": lambda: self._builtin_tools.list_canvases(),
-            "trigger_webhook": lambda: self._builtin_tools.trigger_canvas(
-                args.get("endpoint", ""),
-                args.get("data"),
-                args.get("callback_url"),
-                args.get("timeout", 300),
-            ),
+            )
         }
 
         executor = tool_map.get(tool_name)
@@ -441,41 +521,68 @@ class ToolExecutor:
                 # 文件操作成功后备份编辑后的文件（用于差异对比）
                 if tool_name in self._FILE_OPS_TO_TRACK and result and result.success:
                     self._record_file_operation_after(tool_name, args, file_path_before)
+                
+                # Trigger PostToolUse hook
+                if self._backend and self._backend.hook_manager:
+                    import os
+                    context = {
+                        "project_root": self._workdir or os.getcwd(),
+                        "tool_name": tool_name,
+                    }
+                    # Extract file path if available
+                    file_path = args.get("path") or args.get("file")
+                    if file_path:
+                        context["file"] = file_path
+                    
+                    # Get last user message for matching
+                    current_message_text = ""
+                    if self._backend.session_manager:
+                        session = self._backend.get_current_session()
+                        if session and hasattr(session, 'messages'):
+                            # Find last user message
+                            for msg in reversed(session.messages):
+                                if msg.get('role') == 'user':
+                                    current_message_text = msg.get('content', '')
+                                    break
+                    
+                    self._backend.hook_manager.trigger_event(
+                        "PostToolUse",
+                        context=context,
+                        current_message=current_message_text
+                    )
+                
                 return result
             except Exception as e:
                 return ToolResult(False, error=f"Execution error: {str(e)}")
-
-        if self._canvas_tools_executor and tool_name.startswith("canvas_"):
-            return self._execute_canvas_tool(tool_name, args)
 
         return ToolResult(False, error=f"Unknown tool: {tool_name}")
 
     def _execute_grep_async(self, args: dict, cancelled_ref: list = None) -> ToolResult:
         """
         异步执行 grep，使用子线程，完成后返回结果
-        
+
         Args:
             args: 工具参数
             cancelled_ref: 取消标志引用 [bool]
-        
+
         Returns:
             ToolResult: 执行结果
         """
         if not self._builtin_tools or not self._builtin_tools._file_tools:
             return ToolResult(False, error="FileTools not available")
-        
+
         pattern = args.get("pattern", "")
         path = args.get("path", "")
         include = args.get("include")
-        
+
         # 使用 FileTools 的异步接口
         result_holder = [None]
         finished = [False]
-        
+
         def on_grep_done(result):
             result_holder[0] = result
             finished[0] = True
-        
+
         # 启动异步 grep
         self._builtin_tools._file_tools.grep_files(
             pattern=pattern,
@@ -483,58 +590,58 @@ class ToolExecutor:
             include=include,
             callback=on_grep_done
         )
-        
+
         # 使用定时器循环处理主线程事件，这样取消信号可以被处理
         def wait_for_result():
             from PyQt5.QtWidgets import QApplication
             QApplication.processEvents()
-            
+
             if finished[0]:
                 return
-            
+
             # 检查取消标志
             if cancelled_ref is not None and cancelled_ref[0]:
                 self._builtin_tools._file_tools.cancel()
                 result_holder[0] = ToolResult(False, error="用户中止")
                 finished[0] = True
                 return
-            
+
             # 继续等待
             from PyQt5.QtCore import QTimer
             QTimer.singleShot(50, wait_for_result)
-        
+
         wait_for_result()
-        
+
         # 等待完成
         while not finished[0]:
             from PyQt5.QtWidgets import QApplication
             QApplication.processEvents()
             import time
             time.sleep(0.05)
-        
+
         return result_holder[0] if result_holder[0] else ToolResult(False, error="Grep failed")
 
     def _execute_webfetch_async(self, args: dict, cancelled_ref: list = None) -> ToolResult:
         """异步执行网页抓取"""
         if not self._builtin_tools or not self._builtin_tools._web_tools:
             return ToolResult(False, error="WebTools not available")
-        
+
         url = args.get("url", "")
         format = args.get("format", "markdown")
         max_chars = args.get("max_chars", 26000)
-        
+
         result_holder = [None]
         finished = [False]
-        
+
         def on_fetch_done(result):
             result_holder[0] = result
             finished[0] = True
-        
+
         self._builtin_tools._web_tools.fetch_web(
             url=url, format=format, max_chars=max_chars,
             callback=on_fetch_done, cancelled_ref=cancelled_ref
         )
-        
+
         def wait_for_result():
             from PyQt5.QtWidgets import QApplication
             QApplication.processEvents()
@@ -545,37 +652,37 @@ class ToolExecutor:
                 return
             from PyQt5.QtCore import QTimer
             QTimer.singleShot(50, wait_for_result)
-        
+
         wait_for_result()
-        
+
         while not finished[0]:
             from PyQt5.QtWidgets import QApplication
             QApplication.processEvents()
             import time
             time.sleep(0.05)
-        
+
         return result_holder[0] if result_holder[0] else ToolResult(False, error="WebFetch failed")
 
     def _execute_websearch_async(self, args: dict, cancelled_ref: list = None) -> ToolResult:
         """异步执行网络搜索"""
         if not self._builtin_tools or not self._builtin_tools._web_tools:
             return ToolResult(False, error="WebTools not available")
-        
+
         query = args.get("query", "")
         num_results = args.get("num_results", 10)
-        
+
         result_holder = [None]
         finished = [False]
-        
+
         def on_search_done(result):
             result_holder[0] = result
             finished[0] = True
-        
+
         self._builtin_tools._web_tools.search_web(
             query=query, num_results=num_results,
             callback=on_search_done, cancelled_ref=cancelled_ref
         )
-        
+
         def wait_for_result():
             from PyQt5.QtWidgets import QApplication
             QApplication.processEvents()
@@ -586,15 +693,15 @@ class ToolExecutor:
                 return
             from PyQt5.QtCore import QTimer
             QTimer.singleShot(50, wait_for_result)
-        
+
         wait_for_result()
-        
+
         while not finished[0]:
             from PyQt5.QtWidgets import QApplication
             QApplication.processEvents()
             import time
             time.sleep(0.05)
-        
+
         return result_holder[0] if result_holder[0] else ToolResult(False, error="WebSearch failed")
 
     def set_sub_agent_manager(self, sub_agent_manager):

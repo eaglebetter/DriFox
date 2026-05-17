@@ -5,14 +5,18 @@ Git Diff 差异对比模块
 提供生成 HTML diff 报告和在 PyQt WebEngine 中显示的功能
 样式 100% 复刻 GitHub 网页合并差异审核界面
 """
-
+import orjson as json
 import difflib
 import re
-from pathlib import Path
-from typing import List, Dict, Optional
+
 from datetime import datetime
+from pathlib import Path
+from typing import List, Dict
 
 from loguru import logger
+
+# 预编译正则表达式
+_HUNK_HEADER_PATTERN = re.compile(r"@@ -(\d+),?\d* \+(\d+),?\d* @@")
 
 
 class DiffHtmlGenerator:
@@ -778,8 +782,6 @@ class DiffHtmlGenerator:
     @classmethod
     def _generate_file_data_json(cls, files: List[Dict]) -> str:
         """生成文件数据 JSON（用于懒加载），只存储 diff 行数据，前端按需生成 HTML"""
-        import json
-
         files_data = []
         for i, file_info in enumerate(files):
             file_id = f"file-{i}"
@@ -798,7 +800,12 @@ class DiffHtmlGenerator:
                 "lines": file_info["lines"]
             })
 
-        return json.dumps(files_data, ensure_ascii=False)
+        result = json.dumps(files_data).decode('utf-8')
+        # fix: 转义 </ 为 \u003C/，防止嵌入 <script> 标签时被浏览器提前关闭
+        # 当 diff 内容包含 HTML/JS 代码（如 </script>、</div> 等）时，
+        # 浏览器 HTML 解析器会误将 JSON 字符串中的 </ 识别为脚本结束标记
+        result = result.replace('</', '\\u003C/')
+        return result
 
     @classmethod
     def _generate_file_block_header(cls, file_info: Dict, file_id: str) -> str:
@@ -827,7 +834,7 @@ class DiffHtmlGenerator:
 
         for line in lines:
             if line.startswith("@@"):
-                match = re.search(r"@@ -(\d+),?\d* \+(\d+),?\d* @@", line)
+                match = _HUNK_HEADER_PATTERN.search(line)
                 if match:
                     old_line_num = int(match.group(1))
                     new_line_num = int(match.group(2))
@@ -923,8 +930,9 @@ class DiffHtmlGenerator:
                 logger.warning("[DiffHtml] 没有找到有效的文件路径")
                 return ""
 
-            # 备份目录: .drifox/backups/{session_id}/
-            backup_dir = Path(".drifox/backups") / session_id
+            # 备份目录: {app_data_dir}/backups/{session_id}/
+            from app.utils.utils import get_app_data_dir
+            backup_dir = get_app_data_dir() / "backups" / session_id
 
             if not backup_dir.exists():
                 logger.warning(f"[DiffHtml] 备份目录不存在: {backup_dir}")

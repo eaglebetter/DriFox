@@ -2,7 +2,16 @@
 """
 UI 辅助模块 - 从 main_widget.py 提取的 UI 辅助方法
 
-这些方法独立于主类，可以安全使用。
+职责划分：
+1. 样式常量：窗口、滚动条、按钮等样式定义
+2. 卡片管理：卡片的创建、删除、回收逻辑
+3. 消息处理：消息格式化、导出、过滤
+4. Diff 辅助：生成文件对比 HTML
+
+使用注意：
+- 这些方法独立于主类，可以安全使用
+- 部分函数依赖 MessageCard，需确保已导入
+- 循环导入通过延迟导入解决
 """
 import re
 from datetime import datetime
@@ -12,6 +21,9 @@ from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QPixmap
 from PyQt5.QtWidgets import QLabel
 from loguru import logger
+
+from app.widgets import MessageCard
+
 
 __all__ = [
     # 代码保存辅助
@@ -72,7 +84,7 @@ def _get_content_to_text() -> Callable:
     """延迟获取 content_to_text 函数"""
     global _content_to_text_getter
     if _content_to_text_getter is None:
-        from app.utils.message_content import content_to_text
+        from app.core import content_to_text
         _content_to_text_getter = content_to_text
     return _content_to_text_getter
 
@@ -190,7 +202,7 @@ def export_messages_to_markdown(messages: list, timestamp: str = None) -> str:
         Markdown 格式的对话内容
     """
     from datetime import datetime
-    from app.utils.message_content import content_to_text
+    from app.core import content_to_text
     
     if timestamp is None:
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -791,7 +803,7 @@ def find_last_assistant_card(chat_layout) -> Any:
         最后一个 assistant 卡片，或 None
     """
     # 延迟导入避免循环依赖
-    from app.widgets.message_card import MessageCard
+    
     
     for i in range(chat_layout.count() - 1, -1, -1):
         item = chat_layout.itemAt(i)
@@ -818,7 +830,7 @@ def count_user_cards_in_layout(chat_layout) -> int:
         用户消息卡片数量
     """
     # 延迟导入避免循环依赖
-    from app.widgets.message_card import MessageCard
+    
     
     count = 0
     for i in range(chat_layout.count()):
@@ -846,7 +858,7 @@ def collect_message_cards_from_layout(
         卡片列表
     """
     # 延迟导入避免循环依赖
-    from app.widgets.message_card import MessageCard
+    
     
     cards = []
     for i in range(chat_layout.count()):
@@ -875,7 +887,7 @@ def collect_user_card_widgets(chat_layout) -> list:
         用户卡片 widget 列表
     """
     # 延迟导入避免循环依赖
-    from app.widgets.message_card import MessageCard
+    
     
     widgets = []
     for i in range(chat_layout.count()):
@@ -900,7 +912,7 @@ def create_session_from_record(session_record: dict, messages: list, title: str 
     Returns:
         ChatSession 实例
     """
-    from app.utils.chat_session import ChatSession
+    from app.core import ChatSession
     
     session_id = session_record.get("session_id")
     title = title or session_record.get("name") or "历史对话"
@@ -949,7 +961,7 @@ def get_round_message_indices(session, round_index: int) -> tuple:
     Returns:
         (start_idx, end_idx) 或 (None, None)
     """
-    from app.utils.message_content import consolidate_messages, get_user_round_ranges
+    from app.core import consolidate_messages, get_user_round_ranges
     
     canonical_messages = consolidate_messages(session.messages)
     round_ranges = get_user_round_ranges(canonical_messages)
@@ -972,7 +984,7 @@ def create_new_session_state(old_session_manager=None, old_chat_engine=None) -> 
         dict 包含 new_session, new_session_id
     """
     # 延迟导入避免循环依赖
-    from app.utils.chat_session import SessionManager
+    from app.core import SessionManager
     
     session_manager = SessionManager()
     session_manager.create_new_session()
@@ -1145,8 +1157,19 @@ def render_batch_to_assistant_card(assistant_card, batch: list) -> None:
         batch: 消息批次列表
     """
     for msg in batch:
-        if msg.get("role") == "assistant" and msg.get("content", ""):
-            assistant_card.append_text(msg.get("content", {}))
+        if msg.get("role") == "assistant":
+            # 处理思考内容：将 reasoning_content 转换成 <think> 标签格式
+            reasoning_content = msg.get("reasoning_content", "")
+            content = msg.get("content", "")
+            combined_content = ""
+            if reasoning_content:
+                combined_content += f"<think>{reasoning_content}</think>"
+            if content:
+                if combined_content:
+                    combined_content += "\n\n"
+                combined_content += content
+            if combined_content:
+                assistant_card.append_text(combined_content)
         elif msg.get("role") == "tool" and msg.get("content", ""):
             assistant_card.append_tool_result(
                 tool_name=msg.get("name", ""),
@@ -1230,8 +1253,6 @@ def find_user_card_at_index(chat_layout, target_index: int) -> Any:
         找到的卡片或 None
     """
     # 延迟导入避免循环依赖
-    from app.widgets.message_card import MessageCard
-    
     pair_index = 0
     for i in range(chat_layout.count()):
         item = chat_layout.itemAt(i)
@@ -1245,6 +1266,46 @@ def find_user_card_at_index(chat_layout, target_index: int) -> Any:
                 return widget
             pair_index += 1
     return None
+
+
+def find_user_round_index(session, user_text: str, timestamp: str) -> int:
+    """
+    从 session 中找到 user 消息对应的 round_index。
+    
+    通过在 session.messages 中定位 user 消息，然后计算它是第几个 user。
+    
+    Args:
+        session: ChatSession 对象
+        user_text: 用户消息的纯文本内容
+        timestamp: 用户消息的时间戳
+        
+    Returns:
+        round_index (0-based)，如果找不到返回 -1
+    """
+    if not session or not hasattr(session, 'messages'):
+        return -1
+    
+    round_index = 0
+    for msg in session.messages:
+        if msg.get("role") == "user":
+            # 检查是否匹配（通过文本内容或时间戳）
+            content = msg.get("content", "")
+            # 支持纯文本内容或结构化内容
+            if isinstance(content, dict):
+                content = content.get("text", "")
+            if isinstance(content, list):
+                for item in content:
+                    if isinstance(item, dict) and item.get("type") == "text":
+                        content = item.get("text", "")
+                        break
+            
+            # 通过时间戳或内容匹配
+            msg_timestamp = msg.get("timestamp", "")
+            if msg_timestamp == timestamp or (user_text and user_text in str(content)):
+                return round_index
+            round_index += 1
+    
+    return -1
 
 
 def clear_and_show_welcome(
@@ -1279,7 +1340,7 @@ def clear_and_show_welcome(
 def init_new_session_after_archive(
     self_widget,
     new_state,
-    tool_executor=None,
+    backend=None,
     clear_chat_func=None,
     show_welcome_func=None
 ) -> None:
@@ -1289,15 +1350,15 @@ def init_new_session_after_archive(
     Args:
         self_widget: 自身 widget（用于访问 session_manager 等）
         new_state: create_new_session_state 返回的状态
-        tool_executor: 工具执行器
+        backend: ChatBackend 实例
         clear_chat_func: 清空聊天函数
         show_welcome_func: 显示欢迎函数
     """
     self_widget.session_manager = new_state["session_manager"]
     self_widget._current_session_id = new_state["new_session_id"]
 
-    if tool_executor:
-        tool_executor.set_session_context(self_widget._current_session_id)
+    if backend:
+        backend.set_session_context(self_widget._current_session_id)
 
     if clear_chat_func:
         clear_chat_func()
@@ -1311,7 +1372,7 @@ def init_after_loading_session(
     session,
     session_id,
     title=None,
-    tool_executor=None
+    backend=None
 ) -> None:
     """
     加载会话后初始化
@@ -1321,15 +1382,15 @@ def init_after_loading_session(
         session: 加载的会话
         session_id: 会话 ID
         title: 会话标题
-        tool_executor: 工具执行器
+        backend: ChatBackend 实例
     """
     self_widget.session_manager.set_current_session(session)
     self_widget._history_preview_messages = None
     self_widget._current_session_id = session_id
     self_widget.title_edit.setText(title or "历史对话")
 
-    if tool_executor:
-        tool_executor.set_session_context(session_id)
+    if backend:
+        backend.set_session_context(session_id)
 
 
 def post_append_user_message(
@@ -1368,7 +1429,7 @@ def build_node_preview_from_session(
     Returns:
         节点预览数据列表
     """
-    from app.utils.message_content import consolidate_messages
+    from app.core import consolidate_messages
     
     messages = consolidate_messages(session.messages)
     return build_node_preview_data(messages, content_to_text_func, max_len)
@@ -1529,6 +1590,7 @@ def create_assistant_card_widget(
     on_card_diff=None,
     on_save_file=None,
     on_subagent_log=None,
+    immediate_render: bool = False,
 ) -> Any:
     """
     创建助手消息卡片（带标准配置）
@@ -1543,15 +1605,19 @@ def create_assistant_card_widget(
         on_card_diff: 卡片差异回调
         on_save_file: 保存文件回调
         on_subagent_log: 子智能体日志回调
+        immediate_render: 是否立即创建 QWebEngineView。流式输出需要 True；
+                         会话加载设为 False，由懒渲染队列统一控制。
 
     Returns:
         配置好的 MessageCard
     """
-    from app.widgets.message_card import MessageCard
-    
     card = MessageCard(parent=parent, role="assistant", timestamp=timestamp)
     card._round_index = round_index
-    card.viewer._install_dialog_filter()
+    if immediate_render:
+        # 流式输出需要立即渲染，否则内容无处写入
+        card.ensure_rendered()
+        if card.viewer is not None:
+            card.viewer._install_dialog_filter()
     
     if on_action:
         card.actionRequested.connect(on_action)
