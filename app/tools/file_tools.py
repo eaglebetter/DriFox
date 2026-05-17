@@ -9,9 +9,8 @@
 - 目录：list, mkdir, delete_file
 - 搜索：grep (异步), scan_repo (异步)
 """
-import fnmatch
 import re
-from typing import Dict, List, Optional, Callable
+from typing import Dict, List, Optional
 from pathlib import Path
 import os
 from functools import lru_cache

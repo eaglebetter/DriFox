@@ -7,12 +7,12 @@
 from PyQt5.QtCore import Qt, pyqtSignal, QTimer
 from PyQt5.QtGui import QFont, QColor
 from PyQt5.QtWidgets import (
-    QVBoxLayout, QFontComboBox,
+    QFontComboBox,
 )
 from loguru import logger
 
-from app.widgets.system_card_frame import SystemCardFrame
 from app.widgets.provider_setting_card import ProviderListSettingCard
+from app.widgets.system_card_frame import SystemCardFrame
 
 
 class NoWheelFontComboBox(QFontComboBox):

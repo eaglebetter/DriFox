@@ -10,7 +10,6 @@
 配置持久化到 JSON 文件。
 """
 import orjson as json
-import os
 import sys
 from copy import deepcopy
 from enum import Enum

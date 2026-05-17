@@ -3,7 +3,6 @@
 ChatBackend - 统一后端接口
 后端自己创建和管理所有组件，前端只负责 UI 调用
 """
-import os
 import orjson as json
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Callable

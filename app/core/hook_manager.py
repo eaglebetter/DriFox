@@ -14,13 +14,12 @@ HookManager - Hooks 机制核心管理类 (增强版)
 import re
 import subprocess
 import os
-import sys
 import json
 import time
 import threading
 from pathlib import Path
 from dataclasses import dataclass, field, asdict
-from typing import Dict, List, Optional, Any, Callable, Union
+from typing import Dict, List, Optional, Any, Callable
 from enum import Enum
 from PyQt5.QtCore import QThreadPool, QRunnable, pyqtSignal, QObject
 from loguru import logger

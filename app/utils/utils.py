@@ -14,10 +14,8 @@ import asyncio  # 用于 AsyncUpdateChecker
 
 import httpx
 import orjson as json
-import os
 import re
 import socket
-import sys
 from pathlib import Path
 
 import psutil

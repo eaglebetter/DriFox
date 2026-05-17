@@ -8,11 +8,9 @@
 
 提供异步和同步两种调用方式。
 """
-import os
 import re
 import httpx
 import html2text
-from pathlib import Path
 from typing import Optional, Callable
 
 from PyQt5.QtCore import QObject, pyqtSignal, QThreadPool, QRunnable

@@ -4,11 +4,10 @@ Chat Worker - OpenAI 对话执行器
 """
 
 import re
-import time
 from collections import deque
 from datetime import datetime
 from threading import Event
-from typing import Any, Dict, List, Callable, Optional
+from typing import Dict, List, Callable, Optional
 
 import httpcore
 import httpx

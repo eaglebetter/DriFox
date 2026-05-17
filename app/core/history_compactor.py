@@ -20,7 +20,7 @@
 """
 import re
 from datetime import datetime
-from typing import Dict, List, Optional, Any, Callable
+from typing import Dict, List, Optional
 
 import orjson as json
 from loguru import logger
