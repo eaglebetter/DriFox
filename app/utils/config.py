@@ -128,8 +128,7 @@ class Settings(QConfig):
             f.write(json.dumps(self.toDict(), option=json.OPT_INDENT_2))
 
     # 版本信息
-    current_version = "v0.1.6"
-    user_name = ConfigItem("General", "UserName", str(uuid4().hex))
+    current_version = "v0.1.7"
     # 通用设置
     auto_check_update = ConfigItem("General", "AutoCheckUpdate", True, BoolValidator())
 
@@ -142,7 +141,7 @@ class Settings(QConfig):
     )
 
     # GitHub 配置
-    github_repo = ConfigItem("Patch", "GitHub/Repo", "martin98-afk/DriFox")
+    github_repo = "martin98-afk/DriFox"
     github_token = ConfigItem("Patch", "GitHub/Token", "")
 
     # ========== 大模型对话默认配置 ==========
