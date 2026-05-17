@@ -154,7 +154,6 @@ class OpenAIChatToolWindow(ToolWindow):
     _auto_loop_config_card: Optional[AutoLoopConfigCard] = None
     _auto_loop_running_card: Optional[AutoLoopRunningCard] = None
     _auto_loop_worker: Optional[AutoLoopWorker] = None
-    _saved_workdir: Optional[str] = None
     _history_preview_messages: Optional[List[dict]] = None
     _history_preview_title: str = ""
     insertResponse = pyqtSignal(str)
@@ -5607,13 +5606,13 @@ class OpenAIChatToolWindow(ToolWindow):
         
         abs_path = os.path.abspath(project_path)
         if os.path.isdir(abs_path):
-            if self.backend.tool_executor and self.backend.tool_executor.builtin_tools:
-                self._saved_workdir = str(self.backend.tool_executor.builtin_tools.workdir)
-                self.backend.tool_executor.builtin_tools.set_workdir(abs_path)
+            if self.backend.tool_executor:
+                # 通过 ToolExecutor.set_workdir 统一设置，同时更新 builtin_tools
+                self.backend.tool_executor.set_workdir(abs_path)
             config.project_path = abs_path
             logger.info(f"[AutoLoop] Workdir set to: {abs_path}")
         else:
-            self._saved_workdir = None
+            logger.warning(f"[AutoLoop] Project path does not exist: {abs_path}")
 
         # 隐藏配置卡，显示运行卡
         self._auto_loop_config_card.hide()
@@ -5779,15 +5778,8 @@ class OpenAIChatToolWindow(ToolWindow):
         """清理 AutoLoop 状态"""
         self._is_auto_loop_running = False
 
-        # 恢复工作目录
-        if self._saved_workdir:
-            try:
-                if self.backend.tool_executor and self.backend.tool_executor.builtin_tools:
-                    self.backend.tool_executor.builtin_tools.set_workdir(self._saved_workdir)
-                    logger.info(f"[AutoLoop] Workdir restored to: {self._saved_workdir}")
-            except Exception as e:
-                logger.warning(f"[AutoLoop] Failed to restore workdir: {e}")
-            self._saved_workdir = None
+        # 恢复为当前项目配置的工作目录
+        self._sync_working_directory()
 
         # 停止动画
         if self._auto_loop_running_card:
