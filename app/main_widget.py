@@ -4500,7 +4500,6 @@ class OpenAIChatToolWindow(ToolWindow):
             return
 
         # 如果系统卡片打开，阻止工具卡片自行显示（但仍记录任务）
-        print(f"[DEBUG] _on_tool_call_started: tool={tool_name}, _is_system_card_visible={self._is_system_card_visible}")
         if self._is_system_card_visible:
             return
 
@@ -4650,7 +4649,6 @@ class OpenAIChatToolWindow(ToolWindow):
             error_msg = str(getattr(result, "error", "") or "")
             content = str(result) if result else ""
 
-        print(f"[DEBUG] _on_tool_call_finished: tool={tool_name}, _is_system_card_visible={self._is_system_card_visible}")
         # 如果系统卡片打开，阻止工具卡片显示（但仍记录结果到消息卡片）
         if self._is_system_card_visible:
             if tool_name in ("todowrite", "todoread"):
