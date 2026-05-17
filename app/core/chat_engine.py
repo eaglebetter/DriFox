@@ -403,6 +403,7 @@ class ChatEngine:
             self._current_worker.reasoning_content_received.connect(self._on_reasoning_content_received)
             self._current_worker.thinking_started.connect(self._on_thinking_started)
             self._current_worker.tool_call_started.connect(self._on_tool_call_started)
+            self._current_worker.tool_args_updated.connect(self._on_tool_args_updated)
             self._current_worker.tool_result_received.connect(self._on_tool_result_received)
             self._current_worker.error_occurred.connect(self._on_error)
             self._current_worker.finished_with_content.connect(self._on_worker_finished)
@@ -439,6 +440,11 @@ class ChatEngine:
     def _on_reasoning_finished(self):
         """DeepSeek 思考内容结束"""
         self._emit("reasoning_finished")
+
+    def _on_tool_args_updated(
+        self, tool_call_id: str, tool_name: str, partial_args: dict
+    ):
+        self._emit("tool_args_updated", tool_call_id, tool_name, partial_args)
 
     def _on_tool_call_started(
         self, tool_call_id: str, tool_name: str, arguments: dict, round_id: str

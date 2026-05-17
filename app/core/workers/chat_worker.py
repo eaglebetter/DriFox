@@ -40,6 +40,7 @@ class OpenAIChatWorker(QThread):
     finished_with_messages = pyqtSignal(list)
     compaction_status_changed = pyqtSignal(dict)
     tool_call_started = pyqtSignal(str, str, dict, str)
+    tool_args_updated = pyqtSignal(str, str, dict)  # 工具参数流式更新 (tool_call_id, tool_name, partial_args)
     tool_result_received = pyqtSignal(str, str, dict, object)
     question_asked = pyqtSignal(str, str, list, bool)
     permission_approval_requested = pyqtSignal(str, str, dict)
@@ -215,6 +216,7 @@ class OpenAIChatWorker(QThread):
             "finished_with_messages": WorkerEvent.FINISHED_WITH_MESSAGES,
             "compaction_status_changed": WorkerEvent.COMPACTION_STATUS,
             "tool_call_started": WorkerEvent.TOOL_CALL_STARTED,
+            "tool_args_updated": WorkerEvent.TOOL_CALL_STREAM,
             "tool_result_received": WorkerEvent.TOOL_RESULT_RECEIVED,
             "question_asked": WorkerEvent.QUESTION_ASKED,
             "permission_approval_requested": WorkerEvent.PERMISSION_REQUESTED,
@@ -1216,6 +1218,11 @@ class OpenAIChatWorker(QThread):
                                 # 标记已完成解析（用于决定是否发送 tool_call_started）
                                 self._current_tool_calls[tc_id]["_args_parsed"] = True
                                 self._tool_calls_buffer.pop(tc_id, None)
+                                # 流式中间状态：推送实际参数到 UI 更新预览
+                                self._emit_with_callback(
+                                    "tool_args_updated", self.tool_args_updated,
+                                    tc_id, tool_name, parsed_args
+                                )
                             except json.JSONDecodeError:
                                 # 短参数的 JSON 解析失败，记录到等待队列
                                 if tc_id not in self._waiting_tool_params:

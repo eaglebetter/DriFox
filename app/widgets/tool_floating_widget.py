@@ -73,12 +73,11 @@ class ToolFloatingWidget(SimpleCardWidget):
         self._rotation_timer = QTimer(self)
         self._rotation_timer.timeout.connect(self._update_rotation)
         self._rotating = False
-        self._running_count = 0  # 并发工具计数
+        self._svg_renderer = _RotatingIcon(":/icons/执行中.svg", size=18)
         self._hide_timer = QTimer(self)
         self._hide_timer.setSingleShot(True)
         self._hide_timer.setInterval(2000)
         self._hide_timer.timeout.connect(self.hide)
-        self._svg_renderer = _RotatingIcon(":/icons/执行中.svg", size=18)
         self._setup_ui()
 
     def _setup_ui(self):
@@ -168,10 +167,8 @@ class ToolFloatingWidget(SimpleCardWidget):
 
     def _on_cancel(self):
         self._is_running = False
-        self._running_count = 0
         self._stop_rotation()
         self.cancel_btn.setEnabled(False)
-        self.cancel_btn.setVisible(False)
         self.cancel_btn.setText("已中止")
         self.title_label.setText("执行已中止")
         self.title_label.setStyleSheet("color: #ef5350;")
@@ -206,9 +203,6 @@ class ToolFloatingWidget(SimpleCardWidget):
         # 取消之前的自动隐藏定时器，防止上一个工具的隐藏影响当前工具
         self._hide_timer.stop()
 
-        self._running_count += 1
-        is_first = self._running_count == 1
-
         self._task_start_time = time.time()
         self._is_running = True
         self._current_tool = tool_name
@@ -218,8 +212,7 @@ class ToolFloatingWidget(SimpleCardWidget):
         self.title_label.setStyleSheet("color: #ffb74d;")
         self._update_style(None)
 
-        if is_first:
-            self._start_rotation()
+        self._start_rotation()
 
         self.tool_name_label.setText(f" {tool_name} ")
 
@@ -231,18 +224,16 @@ class ToolFloatingWidget(SimpleCardWidget):
             else:
                 args_preview = f"{args_str}"
 
-        if self._running_count > 1:
-            self.task_label.setText(f"⏳ [{self._running_count}个并发] {args_preview}")
-        else:
-            self.task_label.setText(f"⏳ {args_preview}")
+        self.task_label.setText(f"⏳ {args_preview}")
 
         self.cancel_btn.setEnabled(True)
         self.cancel_btn.setText("中止")
         self.cancel_btn.setVisible(True)
 
         if self._suppress_visible:
+            # 压制状态下记录任务但不显示
             self.setVisible(False)
-        elif is_first:
+        else:
             self.setVisible(True)
             self.raise_()
         QApplication.processEvents()
@@ -264,20 +255,6 @@ class ToolFloatingWidget(SimpleCardWidget):
 
     def finish_tool(self, result: str = None, success: bool = True):
         """完成工具执行"""
-        self._running_count -= 1
-        if self._running_count < 0:
-            self._running_count = 0
-
-        # 还有工具在运行，只更新进度不显示完成状态
-        if self._running_count > 0:
-            self.tool_name_label.setText("")
-            if success:
-                self.task_label.setText(f"✓ [{self._running_count}个进行中] 部分工具完成")
-            else:
-                self.task_label.setText(f"✗ [{self._running_count}个进行中] 部分工具失败")
-            return
-
-        # 所有工具执行完毕
         self._is_running = False
         self._current_process = None
         self._stop_rotation()
@@ -291,13 +268,11 @@ class ToolFloatingWidget(SimpleCardWidget):
 
         self._update_style(success)
 
-        # 隐藏中止按钮
-        self.cancel_btn.setVisible(False)
-
         if success:
             self.title_label.setText("执行完成")
             self.title_label.setStyleSheet("color: #81c784;")
             self.task_label.setText("✓ 工具执行成功")
+            self.cancel_btn.setVisible(False)  # 成功时立即隐藏中止按钮
         else:
             self.title_label.setText("执行失败")
             self.title_label.setStyleSheet("color: #ef5350;")
@@ -313,7 +288,9 @@ class ToolFloatingWidget(SimpleCardWidget):
         else:
             self.setVisible(True)
             self.raise_()
+            # 工具完成后 2 秒自动隐藏，但 start_tool 时会取消正在等待的定时器
             self._hide_timer.start()
+            #（clear 在新建会话、停止对话、出错时触发）
 
     def is_cancelled(self) -> bool:
         """检查是否已被中止"""
@@ -324,7 +301,6 @@ class ToolFloatingWidget(SimpleCardWidget):
         self._hide_timer.stop()
         self._task_start_time = None
         self._is_running = False
-        self._running_count = 0
         self._current_tool = None
         self._current_process = None
         self._stop_rotation()

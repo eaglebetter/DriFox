@@ -310,6 +310,7 @@ class OpenAIChatToolWindow(ToolWindow):
             "reasoning_content_received": self._on_reasoning_content_received,
             "thinking_started": self._on_thinking_started,
             "tool_call_started": self._on_tool_call_started,
+            "tool_args_updated": self._on_tool_args_updated,
             "tool_call_sync_requested": self._request_tool_start_ui_sync,
             "tool_result_received": self._on_tool_result_received,
             "stream_started": self._on_stream_started,
@@ -1399,9 +1400,8 @@ class OpenAIChatToolWindow(ToolWindow):
         self._todo_was_visible_before_system = self._todo_floating_widget.isVisible()
         # 隐藏实时卡片
         self._todo_floating_widget.setVisible(False)
-        # 先压制（保存可见状态），再隐藏卡片
-        self._tool_floating_widget.set_suppress_visible(True)
         self._tool_floating_widget.setVisible(False)
+        self._tool_floating_widget.set_suppress_visible(True)  # 压制工具卡片显示
         self._sub_agent_floating_widget.setVisible(False)
         # 隐藏系统卡片
         self._model_config_card.hide()
@@ -4472,6 +4472,15 @@ class OpenAIChatToolWindow(ToolWindow):
         if card and getattr(card, '_content_data', None) is not None:
             card.start_streaming_anim()
             card.start_new_thinking_block()
+
+    def _on_tool_args_updated(self, tool_call_id: str, tool_name: str, partial_args: dict):
+        """工具参数流式更新 — 流式接收过程中，参数逐块解析完成后触发"""
+        if not self._tool_floating_widget:
+            return
+        args_str = json.dumps(partial_args).decode('utf-8') if isinstance(json.dumps(partial_args), bytes) else str(json.dumps(partial_args))
+        if len(args_str) > 80:
+            args_str = args_str[:80] + "..."
+        self._tool_floating_widget.update_progress(f"参数: {args_str}")
 
     def _on_tool_call_started(
             self, tool_call_id: str, tool_name: str, arguments: dict, round_id: str = None
