@@ -274,7 +274,7 @@ class UpdateChecker(QWidget):
             title,
             content,
             position=InfoBarPosition.BOTTOM,
-            duration=5000,
+            duration=2000,
             parent=self.parent or self,
         )
 
