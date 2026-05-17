@@ -776,6 +776,7 @@ class OpenAIChatToolWindow(ToolWindow):
         self._settings_popup = LLMSettingsCard(self)
         self._settings_popup.setVisible(False)
         self._settings_popup.configChanged.connect(self._load_model_configs)
+        self._settings_popup.closed.connect(self._restore_after_system_close)
 
         # 连接服务商添加/编辑信号
         self._settings_popup.llmProviderCard.showAddProviderCard.connect(self._show_provider_add_card)
@@ -793,6 +794,7 @@ class OpenAIChatToolWindow(ToolWindow):
         self._hook_edit_card.content_layout.addWidget(self._hook_edit_popup)
         self._hook_edit_card.set_save_button_handler(self._hook_edit_popup._on_save)
         self._hook_edit_card.setVisible(False)
+        self._hook_edit_card.closed.connect(self._restore_after_system_close)
         layout.addWidget(self._hook_edit_card)
 
         # 服务商编辑卡片
@@ -807,6 +809,7 @@ class OpenAIChatToolWindow(ToolWindow):
         save_handler = self._provider_edit_popup._on_save
         self._provider_edit_card.set_save_button_handler(save_handler)
         self._provider_edit_card.setVisible(False)
+        self._provider_edit_card.closed.connect(self._restore_after_system_close)
         layout.addWidget(self._provider_edit_card)
 
         self._todo_floating_widget = TodoFloatingWidget(self)
@@ -866,6 +869,7 @@ class OpenAIChatToolWindow(ToolWindow):
         self._model_config_popup.configApplied.connect(self._on_config_applied)
         self._model_config_card.content_layout.addWidget(self._model_config_popup)
         self._model_config_card.setVisible(False)
+        self._model_config_card.closed.connect(self._restore_after_system_close)
         layout.addWidget(self._model_config_card)
 
         # 历史会话卡片 - 在消息列表下方，和工具卡片同位置
@@ -896,6 +900,7 @@ class OpenAIChatToolWindow(ToolWindow):
         # 历史会话卡片
         self._history_card.content_layout.addWidget(self._history_popup_card)
         self._history_card.setVisible(False)
+        self._history_card.closed.connect(self._restore_after_system_close)
         layout.addWidget(self._history_card)
 
         # 记忆管理卡片 - 和历史会话卡片同位置
@@ -906,6 +911,7 @@ class OpenAIChatToolWindow(ToolWindow):
         self._memory_card_popup.set_project(self._current_project)  # 初始化时设置当前项目
         self._memory_card.content_layout.addWidget(self._memory_card_popup)
         self._memory_card.setVisible(False)
+        self._memory_card.closed.connect(self._restore_after_system_close)
         layout.addWidget(self._memory_card)
 
         # AutoLoop 配置卡片 - 和历史会话/记忆卡片同位置

@@ -19,6 +19,7 @@
     usage = compactor.get_usage(messages, budget)
 """
 import re
+import hashlib
 from datetime import datetime
 from typing import Dict, List, Optional, Callable, Any
 
@@ -62,27 +63,169 @@ MAX_TAIL_OVERFLOW_MULTIPLIER = 2.5
 # 不应被压缩的工具列表（这些工具的内容需要完整保留）
 PROTECTED_TOOLS = {"skill", "todowrite"}  # 可以添加更多工具
 
-# ========== 工具输出摘要常量 (参考 Hermes Agent) ==========
+# ========== Hermes Agent 预剪枝常量 ==========
 # 单图 token 估算（匹配 Claude Code 常量）
 IMAGE_TOKEN_ESTIMATE = 1600
 CHARS_PER_TOKEN = 4
 IMAGE_CHAR_EQUIVALENT = IMAGE_TOKEN_ESTIMATE * CHARS_PER_TOKEN
 
-# 截断后的工具输出占位符
-_PRUNED_TOOL_PLACEHOLDER = "[Old tool output cleared to save context space]"
+# 图片类型集合
+_IMAGE_PART_TYPES = frozenset({"image_url", "input_image", "image"})
 
 
-def _tool_result_summary(tool_name: str, tool_args: str, tool_content: str) -> str:
+# ----------------------------------------------------------------------------
+# 以下辅助函数完整复刻自 Hermes Agent (NousResearch/hermes-agent)
+# 完整移植了工具预剪枝、去重、图片处理逻辑
+# ----------------------------------------------------------------------------
+
+def _content_length_for_budget(raw_content: Any) -> int:
     """
-    创建工具调用的 1 行摘要（无需 LLM 调用）
+    Return the effective char-length of a message's content for token budgeting.
+    完整复刻自 Hermes Agent
     
-    用途：在压缩前预处理阶段，用简短但有用的描述替换大型工具输出，
-    而不是通用的占位符。
+    Plain strings: ``len(content)``. Multimodal lists: sum of text-part ``len(text)`` 
+    plus a flat ``_IMAGE_CHAR_EQUIVALENT`` per image part.
+    """
+    if isinstance(raw_content, str):
+        return len(raw_content)
+    if not isinstance(raw_content, list):
+        return len(str(raw_content or ""))
+    total = 0
+    for p in raw_content:
+        if isinstance(p, str):
+            total += len(p)
+            continue
+        if not isinstance(p, dict):
+            total += len(str(p))
+            continue
+        ptype = p.get("type")
+        if ptype in _IMAGE_PART_TYPES:
+            total += IMAGE_CHAR_EQUIVALENT
+        else:
+            # text / input_text / tool_result-with-text / anything else with
+            # a text field. Ignore the raw base64 payload inside image_url
+            # dicts — dimensions don't matter, only whether it's an image.
+            total += len(p.get("text", "") or "")
+    return total
+
+
+def _is_image_part(part: Any) -> bool:
+    """True if ``part`` is a multimodal image content block."""
+    if not isinstance(part, dict):
+        return False
+    return part.get("type") in _IMAGE_PART_TYPES
+
+
+def _content_has_images(content: Any) -> bool:
+    """True if a message's ``content`` is a multimodal list with image parts."""
+    if not isinstance(content, list):
+        return False
+    return any(_is_image_part(p) for p in content)
+
+
+def _strip_images_from_content(content: Any) -> Any:
+    """
+    Return a copy of ``content`` with every image part replaced by a short text placeholder.
+    完整复刻自 Hermes Agent
+    """
+    if not isinstance(content, list):
+        return content
+    if not any(_is_image_part(p) for p in content):
+        return content
+    new_parts: List[Any] = []
+    for p in content:
+        if _is_image_part(p):
+            new_parts.append({
+                "type": "text",
+                "text": "[Attached image — stripped after compression]",
+            })
+        else:
+            new_parts.append(p)
+    return new_parts
+
+
+def _strip_historical_media(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Replace image parts in older messages with placeholder text.
+    完整复刻自 Hermes Agent
     
-    返回示例：
-    - [terminal] ran `npm test` -> exit 0, 47 lines output
-    - [read_file] read config.py from line 1 (1,200 chars)
-    - [search_files] content search for 'compress' in agent/ -> 12 matches
+    The anchor is the *last* user message that has any image content.
+    Every message before that anchor gets its image parts replaced with a short placeholder
+    so the outgoing request stops re-shipping the same multi-MB base-64 image blobs on every turn.
+    """
+    if not messages:
+        return messages
+    # Find the newest user message that carries at least one image part.
+    anchor = -1
+    for i in range(len(messages) - 1, -1, -1):
+        msg = messages[i]
+        if not isinstance(msg, dict):
+            continue
+        if msg.get("role") != "user":
+            continue
+        if _content_has_images(msg.get("content")):
+            anchor = i
+            break
+    if anchor <= 0:
+        # No image-bearing user message, or it's the very first message —
+        # nothing before it to strip.
+        return messages
+    changed = False
+    result: List[Dict[str, Any]] = []
+    for i, msg in enumerate(messages):
+        if i >= anchor or not isinstance(msg, dict):
+            result.append(msg)
+            continue
+        content = msg.get("content")
+        if not _content_has_images(content):
+            result.append(msg)
+            continue
+        new_msg = msg.copy()
+        new_msg["content"] = _strip_images_from_content(content)
+        result.append(new_msg)
+        changed = True
+    return result if changed else messages
+
+
+def _truncate_tool_call_args_json(args: str, head_chars: int = 200) -> str:
+    """
+    Shrink long string values inside a tool-call arguments JSON blob 
+    while preserving JSON validity.
+    完整复刻自 Hermes Agent
+    
+    This helper parses the arguments, shrinks long string leaves inside 
+    the parsed structure, and re-serialises. If the arguments are not valid 
+    JSON to begin with, the original string is returned unchanged.
+    """
+    try:
+        parsed = json.loads(args)
+    except (json.JSONDecodeError, TypeError):
+        return args
+
+    def _shrink(obj: Any) -> Any:
+        if isinstance(obj, str):
+            if len(obj) > head_chars:
+                return obj[:head_chars] + "...[truncated]"
+            return obj
+        if isinstance(obj, dict):
+            return {k: _shrink(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [_shrink(v) for v in obj]
+        return obj
+
+    shrunken = _shrink(parsed)
+    # ensure_ascii=False preserves CJK/emoji instead of bloating with \uXXXX
+    return json.dumps(shrunken).decode('utf-8')
+
+
+def _summarize_tool_result(tool_name: str, tool_args: str, tool_content: str) -> str:
+    """
+    Create an informative 1-line summary of a tool call + result.
+    完整复刻自 Hermes Agent
+    
+    Used during the pre-compression pruning pass to replace large tool outputs 
+    with a short but useful description of what the tool did, rather than 
+    a generic placeholder that carries zero information.
     """
     try:
         args = json.loads(tool_args) if tool_args else {}
@@ -208,6 +351,175 @@ def _safe_subtract(a: int, b: int, fallback: int = 0) -> int:
     return max(0, result, fallback)
 
 
+def _prune_old_tool_results(
+    self,
+    messages: List[Dict[str, Any]],
+    protect_tail_count: int,
+    protect_tail_tokens: Optional[int] = None,
+) -> tuple[List[Dict[str, Any]], int]:
+    """
+    Replace old tool result contents with informative 1-line summaries.
+    完整复刻自 Hermes Agent
+    
+    Instead of a generic placeholder, generates a summary like::
+    [terminal] ran `npm test` -> exit 0, 47 lines output
+    [read_file] read config.py from line 1 (3,400 chars)
+    
+    Also deduplicates identical tool results (e.g. reading the same file 5x 
+    keeps only the newest full copy) and truncates large tool_call arguments 
+    in assistant messages outside the protected tail.
+    
+    Walks backward from the end, protecting the most recent messages that fall 
+    within ``protect_tail_tokens`` (when provided) OR the last 
+    ``protect_tail_count`` messages (backward-compatible default).
+    
+    Returns (pruned_messages, pruned_count).
+    """
+    if not messages:
+        return messages, 0
+
+    result = [m.copy() for m in messages]
+    pruned = 0
+
+    # Build index: tool_call_id -> (tool_name, arguments_json)
+    call_id_to_tool: Dict[str, tuple] = {}
+    for msg in result:
+        if msg.get("role") == "assistant":
+            for tc in msg.get("tool_calls") or []:
+                if isinstance(tc, dict):
+                    cid = tc.get("id", "")
+                    fn = tc.get("function", {})
+                    call_id_to_tool[cid] = (fn.get("name", "unknown"), fn.get("arguments", ""))
+                else:
+                    cid = getattr(tc, "id", "") or ""
+                    fn = getattr(tc, "function", None)
+                    name = getattr(fn, "name", "unknown") if fn else "unknown"
+                    args_str = getattr(fn, "arguments", "") if fn else ""
+                    call_id_to_tool[cid] = (name, args_str)
+
+    # Determine the prune boundary
+    if protect_tail_tokens is not None and protect_tail_tokens > 0:
+        # Token-budget approach: walk backward accumulating tokens
+        accumulated = 0
+        boundary = len(result)
+        min_protect = min(protect_tail_count, len(result))
+        for i in range(len(result) - 1, -1, -1):
+            msg = result[i]
+            raw_content = msg.get("content") or ""
+            content_len = _content_length_for_budget(raw_content)
+            msg_tokens = content_len // CHARS_PER_TOKEN + 10
+            for tc in msg.get("tool_calls") or []:
+                if isinstance(tc, dict):
+                    args = tc.get("function", {}).get("arguments", "")
+                    msg_tokens += len(args) // CHARS_PER_TOKEN
+            if accumulated + msg_tokens > protect_tail_tokens and (len(result) - i) >= min_protect:
+                boundary = i
+                break
+            accumulated += msg_tokens
+            boundary = i
+
+        # Translate the budget walk into a "protected count"
+        budget_protect_count = len(result) - boundary
+        protected_count = max(budget_protect_count, min_protect)
+        prune_boundary = len(result) - protected_count
+    else:
+        prune_boundary = len(result) - protect_tail_count
+
+    # Pass 1: Deduplicate identical tool results.
+    # When the same file is read multiple times, keep only the most recent
+    # full copy and replace older duplicates with a back-reference.
+    content_hashes: dict = {}  # hash -> (index, tool_call_id)
+    for i in range(len(result) - 1, -1, -1):
+        msg = result[i]
+        if msg.get("role") != "tool":
+            continue
+        content = msg.get("content") or ""
+        # Multimodal content — dedupe by the text summary if available.
+        if isinstance(content, list):
+            continue
+        if not isinstance(content, str):
+            continue
+        if len(content) < 200:
+            continue
+        h = hashlib.md5(content.encode("utf-8", errors="replace")).hexdigest()[:12]
+        if h in content_hashes:
+            # This is an older duplicate — replace with back-reference
+            result[i] = {**msg, "content": "[Duplicate tool output — same content as a more recent call]"}
+            pruned += 1
+        else:
+            content_hashes[h] = (i, msg.get("tool_call_id", "?"))
+
+    # Pass 2: Replace old tool results with informative summaries
+    for i in range(prune_boundary):
+        msg = result[i]
+        if msg.get("role") != "tool":
+            continue
+
+        tool_call_id = msg.get("tool_call_id")
+        if not tool_call_id or tool_call_id not in call_id_to_tool:
+            continue
+
+        tool_name, tool_args = call_id_to_tool[tool_call_id]
+        if tool_name in PROTECTED_TOOLS:
+            continue  # 保护特定工具不被剪枝
+
+        content = msg.get("content", "")
+        if not content:
+            continue
+
+        # 如果内容很短，不需要摘要
+        if isinstance(content, str) and len(content) < 1000:
+            continue
+
+        # 生成信息丰富的 1-line 摘要
+        summary = _summarize_tool_result(tool_name, tool_args, content)
+        result[i] = {**msg, "content": summary}
+        pruned += 1
+
+    # Pass 3: Truncate large tool_call arguments in assistant messages outside tail
+    for i in range(prune_boundary):
+        msg = result[i]
+        if msg.get("role") != "assistant":
+            continue
+        tool_calls = msg.get("tool_calls")
+        if not tool_calls or not isinstance(tool_calls, list):
+            continue
+
+        msg_copy = msg.copy()
+        new_tool_calls = []
+        truncated = False
+        for tc in tool_calls:
+            if not isinstance(tc, dict):
+                new_tool_calls.append(tc)
+                continue
+            fn = tc.get("function")
+            if not fn or not isinstance(fn, dict):
+                new_tool_calls.append(tc)
+                continue
+            args = fn.get("arguments")
+            if not args or not isinstance(args, str):
+                new_tool_calls.append(tc)
+                continue
+            if len(args) <= 400:
+                new_tool_calls.append(tc)
+                continue
+            # Truncate while preserving JSON validity
+            new_args = _truncate_tool_call_args_json(args, 200)
+            if new_args != args:
+                truncated = True
+                new_fn = {**fn, "arguments": new_args}
+                new_tc = {**tc, "function": new_fn}
+                new_tool_calls.append(new_tc)
+            else:
+                new_tool_calls.append(tc)
+        if truncated:
+            msg_copy["tool_calls"] = new_tool_calls
+            result[i] = msg_copy
+            pruned += 1
+
+    return result, pruned
+
+
 class HistoryCompactor:
     """
     历史消息压缩器
@@ -248,52 +560,52 @@ class HistoryCompactor:
         self._last_summary_error = None
         self._compression_count = 0
         self._last_compression_savings_pct = 100.0
+        self._ineffective_compression_count = 0
         self._summary_failure_cooldown_until = 0.0
 
-    def _prune_large_tool_outputs(self, messages: List[Dict]) -> List[Dict]:
+    def _prune_large_tool_outputs(
+        self,
+        messages: List[Dict],
+        protect_tail_count: int,
+        protect_tail_tokens: Optional[int] = None,
+    ) -> tuple[List[Dict], int]:
         """
         预压缩剪枝：替换大型工具输出为摘要（无需 LLM）
         
-        这是一个廉价的前置处理步骤，在 LLM 摘要前执行。
+        完整复刻 Hermes Agent 算法：
+        1. 为每个 tool_call 建立索引
+        2. 去重：相同内容的工具输出只保留最新一份完整拷贝
+        3. 修剪：旧的大工具输出替换为信息丰富的 1-line 摘要
+        4. 截断：过大的 tool_call 参数，保持 JSON 有效性
+        5. 图片处理：移除旧的图片（只保留最新用户消息中的图片）
+        
+        Args:
+            messages: 原始消息列表
+            protect_tail_count: 最少保护尾部消息数
+            protect_tail_tokens: 保护尾部的 token 预算（优先于此）
+        
+        Returns:
+            (pruned_messages, pruned_count)
         """
-        result = []
-        for msg in messages:
-            msg_copy = dict(msg)
-            role = msg.get("role")
-            
-            if role == "tool":
-                tool_name = msg.get("name", "")
-                tool_call_id = msg.get("tool_call_id", "")
-                tool_args = msg.get("arguments", "")
-                content = msg.get("content", "")
-                
-                # 跳过受保护的工具
-                if tool_name in PROTECTED_TOOLS:
-                    result.append(msg_copy)
-                    continue
-                
-                content_len = len(content) if isinstance(content, str) else 0
-                
-                # 大型输出用摘要替换（超过阈值）
-                if content_len > MAX_TOOL_CONTENT_CHARS * 2:
-                    summary = _tool_result_summary(tool_name, tool_args, content)
-                    msg_copy["content"] = summary
-                    msg_copy["_pruned"] = True
-                elif content_len > MAX_TOOL_CONTENT_CHARS:
-                    # 中等输出截断
-                    head = MAX_TOOL_CONTENT_CHARS // 2
-                    msg_copy["content"] = content[:head] + "\n\n... [工具输出截断] ...\n\n"
-                    msg_copy["_truncated"] = True
-                    
-            result.append(msg_copy)
-            
-        return result
+        # 先移除旧图片
+        pruned = _strip_historical_media(messages)
+        # 然后进行工具预剪枝
+        result, pruned_count = _prune_old_tool_results(
+            self,
+            pruned,
+            protect_tail_count,
+            protect_tail_tokens,
+        )
+        return result, pruned_count
 
     # ========== 公共接口 ==========
 
     def should_compact(self, messages: List[Dict], budget: int) -> bool:
         """
         判断是否需要压缩
+        
+        包含 Hermes Agent 的反抖动保护：
+        如果最后两次压缩每次节省都小于 10%，跳过压缩避免无限循环。
         
         Args:
             messages: 消息列表
@@ -306,7 +618,21 @@ class HistoryCompactor:
             return False
         
         soft_limit = self._get_soft_limit(budget)
-        return count_messages_tokens(messages) > soft_limit
+        current_tokens = count_messages_tokens(messages)
+        
+        if current_tokens <= soft_limit:
+            return False
+        
+        # ========== 反抖动保护（Hermes Agent） ==========
+        # 如果最近两次压缩效果都不好（每次节省 < 10%），跳过压缩
+        if hasattr(self, '_ineffective_compression_count') and self._ineffective_compression_count >= 2:
+            logger.warning(
+                f"[Compactor] 压缩跳过 — 最近 {self._ineffective_compression_count} 次压缩每次节省 < 10%。"
+                f"建议 /new 开始新会话，或手动 /compress。"
+            )
+            return False
+        
+        return current_tokens > soft_limit
 
     def compact(
         self,
@@ -537,15 +863,32 @@ class HistoryCompactor:
     ) -> tuple:
         """
         执行压缩的核心逻辑：
-        1. 从后向前尾保留（不拆分 tool 配对）
-        2. 对被截断的部分生成摘要
+        1. 预剪枝（Hermes Agent）：替换大型工具输出为摘要 + 去重 + 移除旧图片
+        2. 从后向前尾保留（不拆分 tool 配对）
+        3. 对被截断的部分生成摘要
 
         性能优化：
         - 预先计算所有消息的 token 数，避免循环内重复调用 count_messages_tokens
         - 使用 append + reverse 替代 list.insert(0)，将 O(n) 改为 O(1)
+        - 预剪枝不需要 LLM，节省大量 token 预算
         """
         target_limit = self._get_target_limit(budget)
         min_recent_tokens = int(target_limit * MIN_RECENT_TOKEN_RATIO)
+
+        # ========== 预压缩剪枝 (完整复刻 Hermes Agent) ==========
+        # 在 LLM 摘要之前先做廉价预剪枝：
+        # 1. 移除旧图片（只保留最新用户消息中的图片）
+        # 2. 去重：相同工具输出只保留最新一份完整拷贝
+        # 3. 用信息丰富的 1-line 摘要替换旧的大工具输出
+        # 4. 截断过大的 tool_call 参数，保持 JSON 有效性
+        pruned_messages, pruned_count = self._prune_large_tool_outputs(
+            normalized,
+            protect_tail_count=RECENT_HISTORY_MIN_MESSAGES,
+            protect_tail_tokens=target_limit,
+        )
+        if pruned_count > 0:
+            logger.info(f"[Compactor] Hermes 预剪枝完成: 修剪了 {pruned_count} 项")
+        normalized = pruned_messages
 
         # ========== 性能优化：预先计算 token 数（安全检查）==========
         # 避免循环内重复调用 count_messages_tokens
@@ -652,7 +995,12 @@ class HistoryCompactor:
 
         # ========== 预压缩剪枝（参考 Hermes Agent）==========
         # 在 LLM 摘要前，先用廉价的方式替换大型工具输出为简短摘要
-        compacted = self._prune_large_tool_outputs(compacted)
+        # 这里全部都需要剪枝（因为已经被截断了），所以保护 0 条
+        compacted, extra_pruned = self._prune_large_tool_outputs(
+            compacted,
+            protect_tail_count=0,
+            protect_tail_tokens=None,
+        )
 
         # ========== 生成摘要 ==========
         # 安全的预算计算（参考 Hermes Agent）
@@ -718,6 +1066,26 @@ class HistoryCompactor:
         summary_tokens = _safe_token_count([summary_message])
         recent_tokens_safe = _safe_token_count(recent_messages)
         summary_count = _safe_subtract(current_tokens, recent_tokens_safe)
+
+        # ========== 反抖动统计更新（Hermes Agent） ==========
+        # 计算压缩节省比例，更新无效压缩计数
+        original_tokens = _safe_token_count(normalized)
+        if original_tokens > 0 and current_tokens > 0:
+            savings_pct = ((original_tokens - current_tokens) / original_tokens) * 100
+            self._last_compression_savings_pct = savings_pct
+            # 如果这次压缩节省不到 10%，增加无效计数
+            if savings_pct < 10:
+                self._ineffective_compression_count += 1
+                logger.warning(
+                    f"[Compactor] 压缩效果不佳: 仅节省 {savings_pct:.1f}%，"
+                    f"累计 {self._ineffective_compression_count} 次"
+                )
+            else:
+                # 压缩有效，重置计数
+                self._ineffective_compression_count = 0
+
+        # 增加压缩次数统计
+        self._compression_count += 1
 
         return (
             result_messages,
