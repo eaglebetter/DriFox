@@ -59,8 +59,8 @@ class SessionRepository:
                 messages = json.loads(msg_raw)
             elif isinstance(msg_raw, list):
                 messages = msg_raw
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Failed to deserialize session messages: {e}")
 
         try:
             state_raw = d.get("compaction_state", "{}")
@@ -68,8 +68,8 @@ class SessionRepository:
                 compaction_state = json.loads(state_raw) if state_raw else {}
             elif isinstance(state_raw, dict):
                 compaction_state = state_raw
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Failed to deserialize compaction_state: {e}")
 
         try:
             cache_raw = d.get("compaction_cache", "{}")
@@ -77,8 +77,8 @@ class SessionRepository:
                 compaction_cache = json.loads(cache_raw) if cache_raw else {}
             elif isinstance(cache_raw, dict):
                 compaction_cache = cache_raw
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Failed to deserialize compaction_cache: {e}")
 
         return {
             "session_id": d.get("session_id", ""),
