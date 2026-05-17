@@ -160,7 +160,7 @@ def count_messages_tokens(
         tools: 工具定义列表
     
     Returns:
-        总 token 数
+        总 token 数 (最小为 0)
     """
     if not messages:
         return 0
@@ -171,42 +171,58 @@ def count_messages_tokens(
     total += len(messages) * 4
     
     for msg in messages:
+        if not isinstance(msg, dict):
+            continue
+            
         role = msg.get("role", "")
         if role:
-            total += estimate_tokens(role, model)
+            total += estimate_tokens(str(role), model)
         
         # content 处理
-        content = msg.get("content", "")
-        if isinstance(content, list):
+        content = msg.get("content")
+        if content is None:
+            pass  # 无 content，跳过
+        elif isinstance(content, str):
+            if content:  # 确保非空字符串
+                total += estimate_tokens(content, model)
+        elif isinstance(content, list):
             for item in content:
-                if isinstance(item, dict):
-                    if item.get("type") == "text":
-                        total += estimate_tokens(item.get("text", ""), model)
-                    elif item.get("type") == "image_url":
-                        # 图片 token 估算 (简化版)
-                        total += 85  # 图片基准开销
-        elif content:
-            total += estimate_tokens(content, model)
+                if not isinstance(item, dict):
+                    continue
+                if item.get("type") == "text":
+                    text = item.get("text", "")
+                    if text:
+                        total += estimate_tokens(text, model)
+                elif item.get("type") == "image_url":
+                    # 图片 token 估算 (简化版)
+                    total += 85  # 图片基准开销
         
         # tool_calls 处理
-        for tool_call in msg.get("tool_calls", []):
-            if not isinstance(tool_call, dict):
-                continue
-            
-            function = tool_call.get("function", {})
-            total += 3  # tool_call overhead
-            total += estimate_tokens(function.get("name", ""), model)
-            total += estimate_tokens(function.get("arguments", "{}"), model)
+        tool_calls = msg.get("tool_calls")
+        if tool_calls and isinstance(tool_calls, list):
+            for tool_call in tool_calls:
+                if not isinstance(tool_call, dict):
+                    continue
+                total += 3  # tool_call overhead
+                function = tool_call.get("function") or {}
+                name = function.get("name") if isinstance(function, dict) else ""
+                args = function.get("arguments") if isinstance(function, dict) else ""
+                if name:
+                    total += estimate_tokens(str(name), model)
+                if args:
+                    total += estimate_tokens(str(args), model)
         
         # tool_call_id 处理
-        if msg.get("tool_call_id"):
-            total += estimate_tokens(str(msg["tool_call_id"]), model)
+        tool_call_id = msg.get("tool_call_id")
+        if tool_call_id:
+            total += estimate_tokens(str(tool_call_id), model)
     
     # 工具定义 tokens
     if tools:
         total += count_tools_tokens(tools, model)
     
-    return total
+    # 确保返回值非负（防御性编程）
+    return max(0, total)
 
 
 def count_tools_tokens(tools: List[Dict], model: str = "gpt-4") -> int:

@@ -1393,10 +1393,9 @@ class OpenAIChatToolWindow(ToolWindow):
         self._todo_was_visible_before_system = self._todo_floating_widget.isVisible()
         # 隐藏实时卡片
         self._todo_floating_widget.setVisible(False)
-        self._tool_floating_widget.setVisible(False)
-        self._tool_floating_widget.set_suppress_visible(True)
+        # self._tool_floating_widget.setVisible(False)
         self._sub_agent_floating_widget.setVisible(False)
-        # 隐藏系统卡片
+        # 隐藏系统卡片set_suppress_visible
         self._model_config_card.hide()
         self._history_card.hide()
         self._settings_popup.hide()
@@ -1430,16 +1429,12 @@ class OpenAIChatToolWindow(ToolWindow):
 
     def _restore_after_system_close(self):
         """系统卡片关闭后，恢复 todo/tool/sub_agent 实时卡片"""
-        # 标记系统卡片全部关闭，解除压制
+        # 标记系统卡片全部关闭
         self._is_system_card_visible = False
-        self._tool_floating_widget.set_suppress_visible(False)
-        if self._is_any_system_card_visible():
-            return  # 还有其他系统卡片开着，不恢复
+        # 不再解除压制，工具卡片有自我生命周期管理
         # 恢复 todo（如果之前是显示的且还有内容）
         if self._todo_was_visible_before_system and self._todo_floating_widget._todo_list:
             self._todo_floating_widget.setVisible(True)
-        # tool 和 sub_agent 有自我生命周期管理，不需要强制恢复
-        # 它们在 finish_tool/clear 等方法中自行管理可见性
 
     def _toggle_model_config_card(self):
         """切换模型配置卡片的显示"""
@@ -4663,14 +4658,14 @@ class OpenAIChatToolWindow(ToolWindow):
                 todos = self.backend.get_todos()
                 self._todo_floating_widget.update_todos(todos)
                 # 不显示 todo，等系统卡片关闭后由 _restore_after_system_close 统一恢复
-        elif tool_name not in ("question", "task", "todowrite", "todoread"):
+        elif tool_name in ("question", "todowrite", "todoread"):
+            # 这几个工具不使用浮动工卡片，直接忽略
+            pass
+        else:
+            # 其他工具使用浮动工卡片
             self._tool_floating_widget.show_if_needed(elapsed)
             self._tool_floating_widget.finish_tool(content[:200], success)
             self._tool_floating_widget.show_when_ready()  # 系统卡片已关闭，尝试显示
-        elif tool_name in ("todowrite", "todoread"):
-            todos = self.backend.get_todos()
-            self._todo_floating_widget.update_todos(todos)
-            self._todo_floating_widget.setVisible(True)  # 只有 _is_system_card_visible=False 时才到这
 
         if self._current_assistant_card:
             self._current_assistant_card.append_tool_result(

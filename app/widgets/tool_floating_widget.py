@@ -68,6 +68,7 @@ class ToolFloatingWidget(SimpleCardWidget):
         self._current_tool = None
         self._current_process = None
         self._suppress_visible = False  # 被系统卡片压制，工具调用期间不自行显示
+        self._needs_show_after_unsuppress = False  # 工具完成但被压制，解除压制后需要显示
         self._rotation_angle = 0
         self._rotation_timer = QTimer(self)
         self._rotation_timer.timeout.connect(self._update_rotation)
@@ -176,6 +177,7 @@ class ToolFloatingWidget(SimpleCardWidget):
 
     def start_tool(self, tool_name: str, args: dict = None):
         """开始执行工具"""
+
         self._task_start_time = time.time()
         self._is_running = True
         self._current_tool = tool_name
@@ -209,12 +211,6 @@ class ToolFloatingWidget(SimpleCardWidget):
 
     def _append_progress(self, text: str):
         self.task_label.setText(text)
-
-    def show_when_ready(self):
-        """根据经过时间决定是否显示（供外部在适当时机调用）"""
-        if self._suppress_visible:
-            return
-        self.setVisible(True)
 
     def update_progress(self, message: str):
         """更新进度"""
@@ -253,9 +249,13 @@ class ToolFloatingWidget(SimpleCardWidget):
             error_msg = result if result else "执行失败"
             self.task_label.setText(f"✗ {error_msg[:50]}")
 
-        self.cancel_btn.setVisible(False)
 
-        self.show_when_ready()  # 统一由 show_when_ready 控制显示时机
+        # 工具完成时根据压制状态决定是否显示
+        if self._suppress_visible:
+            # 压制状态下先隐藏，等系统卡片关闭后由 set_suppress_visible(False) 显示
+            self.setVisible(False)
+        else:
+            self.setVisible(True)
         self.raise_()
 
         QTimer.singleShot(2000, self.hide)
@@ -272,6 +272,7 @@ class ToolFloatingWidget(SimpleCardWidget):
         self._current_process = None
         self._stop_rotation()
         self._rotation_angle = 0
+        self._needs_show_after_unsuppress = False  # 重置待显示标志
         self.setVisible(False)
         self.cancel_btn.setEnabled(True)
         self.cancel_btn.setVisible(True)
@@ -293,16 +294,6 @@ class ToolFloatingWidget(SimpleCardWidget):
         """统一控制显示时机（考虑压制状态）"""
         if not self._suppress_visible:
             self.setVisible(True)
-
-    def set_suppress_visible(self, suppress: bool):
-        """设置是否压制显示（系统卡片打开时调用）"""
-        self._suppress_visible = suppress
-        if suppress:
-            self.setVisible(False)
-        else:
-            # 解除压制，若工具仍在运行则重新显示
-            if self._is_running:
-                self.setVisible(True)
 
     def _update_style(self, success: bool = None):
         """更新卡片样式，根据状态改变边框颜色"""

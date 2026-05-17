@@ -62,6 +62,151 @@ MAX_TAIL_OVERFLOW_MULTIPLIER = 2.5
 # 不应被压缩的工具列表（这些工具的内容需要完整保留）
 PROTECTED_TOOLS = {"skill", "todowrite"}  # 可以添加更多工具
 
+# ========== 工具输出摘要常量 (参考 Hermes Agent) ==========
+# 单图 token 估算（匹配 Claude Code 常量）
+IMAGE_TOKEN_ESTIMATE = 1600
+CHARS_PER_TOKEN = 4
+IMAGE_CHAR_EQUIVALENT = IMAGE_TOKEN_ESTIMATE * CHARS_PER_TOKEN
+
+# 截断后的工具输出占位符
+_PRUNED_TOOL_PLACEHOLDER = "[Old tool output cleared to save context space]"
+
+
+def _tool_result_summary(tool_name: str, tool_args: str, tool_content: str) -> str:
+    """
+    创建工具调用的 1 行摘要（无需 LLM 调用）
+    
+    用途：在压缩前预处理阶段，用简短但有用的描述替换大型工具输出，
+    而不是通用的占位符。
+    
+    返回示例：
+    - [terminal] ran `npm test` -> exit 0, 47 lines output
+    - [read_file] read config.py from line 1 (1,200 chars)
+    - [search_files] content search for 'compress' in agent/ -> 12 matches
+    """
+    try:
+        args = json.loads(tool_args) if tool_args else {}
+    except (json.JSONDecodeError, TypeError):
+        args = {}
+
+    content = tool_content or ""
+    content_len = len(content)
+    line_count = content.count("\n") + 1 if content.strip() else 0
+
+    if tool_name == "terminal" or tool_name == "bash" or tool_name == "shell":
+        cmd = args.get("command", "")
+        if len(cmd) > 80:
+            cmd = cmd[:77] + "..."
+        # 尝试从输出中提取 exit code
+        exit_match = re.search(r'"exit_code"\s*:\s*(-?\d+)', content)
+        exit_code = exit_match.group(1) if exit_match else "?"
+        return f"[{tool_name}] ran `{cmd}` -> exit {exit_code}, {line_count} lines output"
+
+    if tool_name in ("read", "read_file", "Read"):
+        path = args.get("path", "?")
+        offset = args.get("offset", 1)
+        return f"[{tool_name}] read {path} from line {offset} ({content_len:,} chars)"
+
+    if tool_name in ("write", "write_file", "Write", "edit", "patch"):
+        path = args.get("path", "?")
+        written_lines = args.get("content", "").count("\n") + 1 if args.get("content") else "?"
+        return f"[{tool_name}] wrote to {path} ({written_lines} lines)"
+
+    if tool_name in ("grep", "search_files", "grep_content", "search"):
+        pattern = args.get("pattern", "?")
+        path = args.get("path", ".")
+        target = args.get("target", "content")
+        match_count = re.search(r'"total_count"\s*:\s*(\d+)', content)
+        count = match_count.group(1) if match_count else "?"
+        return f"[{tool_name}] {target} search for '{pattern}' in {path} -> {count} matches"
+
+    if tool_name in ("browser_navigate", "browser_click", "browser_snapshot",
+                     "browser_type", "browser_scroll", "browser_vision", "web"):
+        url = args.get("url", "")
+        ref = args.get("ref", "")
+        detail = f" {url}" if url else (f" ref={ref}" if ref else "")
+        return f"[{tool_name}]{detail} ({content_len:,} chars result)"
+
+    if tool_name in ("web_search", "search"):
+        query = args.get("query", "?")
+        return f"[web_search] query='{query}' ({content_len:,} chars result)"
+
+    if tool_name in ("web_fetch", "web_extract", "fetch"):
+        urls = args.get("urls", [])
+        url_desc = urls[0] if isinstance(urls, list) and urls else "?"
+        if isinstance(urls, list) and len(urls) > 1:
+            url_desc += f" (+{len(urls) - 1} more)"
+        return f"[web_fetch] {url_desc} ({content_len:,} chars)"
+
+    if tool_name in ("delegate_task", "subagent", "agent"):
+        goal = args.get("goal", "")
+        if len(goal) > 60:
+            goal = goal[:57] + "..."
+        return f"[{tool_name}] '{goal}' ({content_len:,} chars result)"
+
+    if tool_name in ("execute_code", "run_code", "python"):
+        code_preview = (args.get("code") or "")[:60].replace("\n", " ")
+        if len(args.get("code", "")) > 60:
+            code_preview += "..."
+        return f"[execute_code] `{code_preview}` ({line_count} lines output)"
+
+    if tool_name in ("skill_view", "skills_list", "skill_manage", "skill"):
+        name = args.get("name", "?")
+        return f"[{tool_name}] name={name} ({content_len:,} chars)"
+
+    if tool_name in ("vision", "vision_analyze", "analyze_image", "image_understanding"):
+        question = args.get("question", "")[:50]
+        return f"[vision] '{question}' ({content_len:,} chars)"
+
+    if tool_name in ("memory", "Todo"):
+        action = args.get("action", "?")
+        target = args.get("target", "?")
+        return f"[{tool_name}] {action} on {target}"
+
+    if tool_name == "Todo" or tool_name == "todowrite":
+        return "[todo] updated task list"
+
+    if tool_name in ("clarify", "ask", "question"):
+        return "[clarify] asked user a question"
+
+    # 通用回退
+    first_arg = ""
+    for k, v in list(args.items())[:2]:
+        sv = str(v)[:40]
+        first_arg += f" {k}={sv}"
+    return f"[{tool_name}]{first_arg} ({content_len:,} chars result)"
+
+
+def _safe_token_count(
+    messages: List[Dict],
+    model: str = "gpt-4",
+) -> int:
+    """
+    安全的 token 计数（返回非负值）
+    
+    Hermes Agent 风格：
+    - 返回 0 而不是负数
+    - 对异常进行防御性处理
+    """
+    try:
+        return max(0, count_messages_tokens(messages, model))
+    except Exception:
+        # 降级：按消息数量估算
+        return len(messages) * 4
+
+
+def _safe_subtract(a: int, b: int, fallback: int = 0) -> int:
+    """
+    安全的减法（返回非负值）
+    
+    Args:
+        a: 被减数
+        b: 减数
+        fallback: 结果为负时的默认值
+    """
+    result = a - b
+    return max(0, result, fallback)
+
 
 class HistoryCompactor:
     """
@@ -89,6 +234,60 @@ class HistoryCompactor:
         # HTTP 客户端缓存（性能优化）
         self._compaction_http_client: Optional[OpenAI] = None
         self._compaction_cache_config: Optional[str] = None
+        
+        # ========== 迭代摘要支持 (参考 Hermes Agent) ==========
+        self._previous_summary: Optional[str] = None  # 上一次压缩的摘要
+        self._last_summary_error: Optional[str] = None  # 上次摘要失败的错误
+        self._compression_count: int = 0  # 压缩次数统计
+        self._last_compression_savings_pct: float = 100.0  # 上次压缩节省比例
+        self._summary_failure_cooldown_until: float = 0.0  # 摘要失败冷却时间
+
+    def on_session_reset(self) -> None:
+        """重置会话状态（/new 或 /reset 时调用）"""
+        self._previous_summary = None
+        self._last_summary_error = None
+        self._compression_count = 0
+        self._last_compression_savings_pct = 100.0
+        self._summary_failure_cooldown_until = 0.0
+
+    def _prune_large_tool_outputs(self, messages: List[Dict]) -> List[Dict]:
+        """
+        预压缩剪枝：替换大型工具输出为摘要（无需 LLM）
+        
+        这是一个廉价的前置处理步骤，在 LLM 摘要前执行。
+        """
+        result = []
+        for msg in messages:
+            msg_copy = dict(msg)
+            role = msg.get("role")
+            
+            if role == "tool":
+                tool_name = msg.get("name", "")
+                tool_call_id = msg.get("tool_call_id", "")
+                tool_args = msg.get("arguments", "")
+                content = msg.get("content", "")
+                
+                # 跳过受保护的工具
+                if tool_name in PROTECTED_TOOLS:
+                    result.append(msg_copy)
+                    continue
+                
+                content_len = len(content) if isinstance(content, str) else 0
+                
+                # 大型输出用摘要替换（超过阈值）
+                if content_len > MAX_TOOL_CONTENT_CHARS * 2:
+                    summary = _tool_result_summary(tool_name, tool_args, content)
+                    msg_copy["content"] = summary
+                    msg_copy["_pruned"] = True
+                elif content_len > MAX_TOOL_CONTENT_CHARS:
+                    # 中等输出截断
+                    head = MAX_TOOL_CONTENT_CHARS // 2
+                    msg_copy["content"] = content[:head] + "\n\n... [工具输出截断] ...\n\n"
+                    msg_copy["_truncated"] = True
+                    
+            result.append(msg_copy)
+            
+        return result
 
     # ========== 公共接口 ==========
 
@@ -142,7 +341,8 @@ class HistoryCompactor:
             return [], self._make_state(), self._make_cache()
 
         # 未超软限制，无需压缩
-        if count_messages_tokens(normalized) <= soft_limit:
+        current_tokens = _safe_token_count(normalized)
+        if current_tokens <= soft_limit:
             return (
                 normalized,
                 self._make_state(original_count=len(normalized), kept_count=len(normalized)),
@@ -347,9 +547,13 @@ class HistoryCompactor:
         target_limit = self._get_target_limit(budget)
         min_recent_tokens = int(target_limit * MIN_RECENT_TOKEN_RATIO)
 
-        # ========== 性能优化：预先计算 token 数 ==========
+        # ========== 性能优化：预先计算 token 数（安全检查）==========
         # 避免循环内重复调用 count_messages_tokens
-        msg_tokens_list = [count_messages_tokens([msg]) for msg in normalized]
+        msg_tokens_list = []
+        for msg in normalized:
+            tokens = count_messages_tokens([msg])
+            # 防御：每条消息至少有基本开销
+            msg_tokens_list.append(max(4, tokens))
 
         # ========== 尾保留（从后向前） ==========
         # 性能优化：使用 append 后 reverse，替代 list.insert(0)
@@ -446,15 +650,27 @@ class HistoryCompactor:
         # 被截断的部分
         compacted = normalized[: len(normalized) - len(recent_messages)]
 
+        # ========== 预压缩剪枝（参考 Hermes Agent）==========
+        # 在 LLM 摘要前，先用廉价的方式替换大型工具输出为简短摘要
+        compacted = self._prune_large_tool_outputs(compacted)
+
         # ========== 生成摘要 ==========
-        # 即使 summary_budget 为负，也传一个最小正预算给 _summarize
-        # 确保启发式摘要始终有字符硬上限控制（避免 budget=None 跳过截断）
-        summary_budget = budget - recent_tokens - SUMMARY_OVERHEAD
-        summary_budget_for_heuristic = max(1, summary_budget) if summary_budget > 0 else 500
+        # 安全的预算计算（参考 Hermes Agent）
+        # 确保不会因为计算错误导致负数
+        # Hermes Agent 使用: summary_budget = target_tokens - recent_tokens - overhead
+        remaining_for_summary = budget - recent_tokens - SUMMARY_OVERHEAD
+        # 如果剩余空间不足，压缩可能效果不好，但仍尝试
+        if remaining_for_summary <= 0:
+            logger.warning(
+                f"[Compactor] 剩余空间不足: budget={budget}, recent_tokens={recent_tokens}, "
+                f"remaining={remaining_for_summary}，仍尝试压缩"
+            )
+            remaining_for_summary = 500  # 最小预算
+        summary_budget_safe = remaining_for_summary
         compact_summary = self._summarize(
             compacted, 
             allow_llm=allow_llm_summary,
-            budget=summary_budget_for_heuristic,
+            budget=summary_budget_safe,
             compacted_count=len(compacted),
         )
         
@@ -474,7 +690,9 @@ class HistoryCompactor:
                 first_non_tool = idx
                 break
         if first_non_tool > 0:
+            # 需要重新计算 recent_tokens（因为 recent_messages 被截断了）
             recent_messages = recent_messages[first_non_tool:]
+            recent_tokens = sum(count_messages_tokens([msg]) for msg in recent_messages)
         result_messages = [summary_message] + recent_messages
         current_tokens = count_messages_tokens(result_messages)
         kept_count = len(recent_messages)
@@ -495,6 +713,12 @@ class HistoryCompactor:
         else:
             summary_note = f"已压缩 {len(compacted)} 条较早消息"
 
+        # 计算摘要实际占用的 token 数（确保非负）
+        # 使用安全的 token 计数函数
+        summary_tokens = _safe_token_count([summary_message])
+        recent_tokens_safe = _safe_token_count(recent_messages)
+        summary_count = _safe_subtract(current_tokens, recent_tokens_safe)
+
         return (
             result_messages,
             self._make_state(
@@ -504,7 +728,7 @@ class HistoryCompactor:
                 original_count=len(normalized),
                 summarized_count=len(compacted),
                 kept_count=kept_count,
-                summary_count=current_tokens - count_messages_tokens(recent_messages),
+                summary_count=summary_count,
                 note=summary_note,
             ),
             self._make_cache(
@@ -688,9 +912,16 @@ class HistoryCompactor:
 
             resp = create_api_call_with_retry(client, create_task)
             content = (resp.choices[0].message.content or "").strip()
+            
+            # 更新迭代摘要缓存
+            self._previous_summary = content
+            self._last_summary_error = None
+            self._compression_count += 1
+            
             return content
         except Exception as exc:
             logger.warning(f"[Compactor] LLM summarization failed, fallback to heuristic: {exc}")
+            self._last_summary_error = str(exc)
             return ""
 
     def _get_summary_max_tokens(self, model: str) -> int:
@@ -733,7 +964,17 @@ class HistoryCompactor:
             else:
                 transcript_lines.append(f"[{role}] {single_line[:1200]}")
 
-        prompt = (
+        # ========== 迭代摘要支持 (参考 Hermes Agent) ==========
+        # 如果有之前的摘要，将其包含在 prompt 中以便迭代更新
+        prompt_parts = []
+        if self._previous_summary:
+            prompt_parts.append(
+                "【上一次压缩的摘要（请在此基础上迭代更新）】\n"
+                f"{self._previous_summary}\n\n"
+                "请在此基础上更新摘要，添加新的内容，修正之前的错误。\n\n"
+            )
+
+        prompt_parts.append(
             "请压缩下面的较早对话，使后续模型可以继续当前编码任务。\n\n"
             "输出要求：\n"
             "1. 使用 Markdown。\n"
@@ -743,6 +984,8 @@ class HistoryCompactor:
             "5. 如果信息不足，不要编造。\n\n"
             f"【待压缩对话】\n" + "\n".join(transcript_lines)
         )
+
+        prompt = "\n".join(prompt_parts)
 
         system_prompt = ""
         if self._agent_manager and self._agent_manager.get_agent("compaction"):
