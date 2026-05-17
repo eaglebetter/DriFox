@@ -45,10 +45,10 @@ class SystemCardFrame(QFrame):
         self._header_layout.setSpacing(4)
 
         self.icon_label = QLabel(self)
-        self.icon_label.setFont(get_unified_font(11))
+        self.icon_label.setFont(get_unified_font(12))
 
         self.title_label = StrongBodyLabel(self)
-        self.title_label.setFont(get_unified_font(10, True))
+        self.title_label.setFont(get_unified_font(12, True))
         self.title_label.setStyleSheet("color: #C9A85C;")
 
         self._header_layout.addWidget(self.icon_label)
@@ -238,7 +238,7 @@ class SystemCardFrame(QFrame):
     def _update_tab_styles(self):
         for tab_id, btn in self._tab_buttons.items():
             btn.setStyleSheet(TabStyles.active() if tab_id == self._current_tab else TabStyles.inactive())
-            btn.setFont(get_unified_font(11))
+            btn.setFont(get_unified_font(12))
 
     def set_extra_button_handler(self, handler):
         while self._extra_buttons_container.count():
