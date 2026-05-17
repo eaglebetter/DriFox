@@ -598,6 +598,21 @@ class AutoLoopRunningCard(QFrame):
         """设置最大 token 上限（启动时从 config 传入）"""
         self._max_tokens = max_tokens
 
+    # ========== 公共接口（供 main_widget 等外部调用）==========
+
+    def set_status(self, text: str):
+        """设置状态文本（替代外部直接访问 _status_label）"""
+        self._status_label.setText(text)
+
+    def show_stop_button(self):
+        """显示停止按钮（替代外部直接访问 _stop_btn）"""
+        self._stop_btn.show()
+        self._stop_btn.update()
+
+    def hide_stop_button(self):
+        """隐藏停止按钮"""
+        self._stop_btn.hide()
+
     def show_completed(self, message: str):
         """显示完成状态"""
         self._status_label.setText(f"✅ {message}")

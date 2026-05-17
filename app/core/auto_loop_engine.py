@@ -6,6 +6,7 @@ AutoLoop 循环引擎 — 管理循环状态、迭代追踪、完成信号检测
 1. PLANNING 阶段：拆解任务为步骤，写入 SHARED_TASK_NOTES.md
 2. EXECUTING 阶段：按步骤执行，每步必须验证
 """
+import re
 import time
 from pathlib import Path
 from typing import Optional, List
@@ -14,50 +15,6 @@ from loguru import logger
 
 from app.core.auto_loop_config import AutoLoopConfig
 
-
-# ========== 阶段约束常量 ==========
-# 这些常量定义了 AutoLoop 两阶段的行为约束，供 get_stage_constraint() 使用
-
-PLANNING_CONSTRAINT = """
-🕒 当前系统时间：{current_time}
-
-🔒 【当前阶段强制约束 - 规划阶段】
-你现在 **ONLY 只允许** 做任务拆解和方案设计。
-**ABSOLUTELY 禁止** 写任何实现代码，禁止使用 edit/bash/delete 工具修改代码文件！
-
-你的任务：
-1. 扫描项目理解现状
-2. 将任务拆解为步骤，每个步骤格式：
-   - [ ] [步骤 N] <描述> | <文件> | <验证方式>
-     ✅ 需求验证：<这个步骤必须满足什么需求？输出什么结果？>
-3. 将完整计划写入 SHARED_TASK_NOTES.md
-4. 输出 PLANNING_COMPLETE
-5. STOP！到此为止
-
-记住：你现在只规划，不实现。代码一根都不能写！
-""".strip()
-
-EXECUTING_CONSTRAINT = """
-🕒 当前系统时间：{current_time}
-
-🔒 【当前阶段强制约束 - 执行阶段】
-你现在 **ONLY 只允许** 处理 **当前步骤 {current}/{total}**。
-**ABSOLUTELY 禁止** 提前执行后续步骤，禁止一次性做完多个步骤！
-
-你必须严格遵循：
-1. 读取 SHARED_TASK_NOTES.md 确认当前步骤要求和需求验证点
-2. 只完成当前这一个步骤，不要碰后续步骤
-3. 按照步骤要求运行验证（必须真的运行验证命令，不能假设成功）
-4. 验证必须通过两层检查：
-   ① 基础验证：代码能跑通吗？语法/编译/测试通过吗？
-   ② 需求验证：功能真的满足原始需求吗？每个验证点都通过吗？
-5. 两层验证都通过后，在 SHARED_TASK_NOTES.md 中将当前步骤改为 `[x]`
-6. 在文档末尾**追加**本轮操作记录（包括改动文件、验证命令、验证结果）
-7. STOP！到此为止，等待下一轮
-
-约束来源：两阶段强制约束设计 (2026-05-16)
-"""
-# ==================================
 
 
 class LoopState:
@@ -90,6 +47,47 @@ class AutoLoopEngine:
         self._verified_steps: set[int] = set()  # 已验证通过的步骤集合
         self._step_verified = False      # 当前步骤是否已验证
         self._verification_failures = 0  # 连续验证失败次数
+
+    # ========== 公共属性（只读）==========
+
+    @property
+    def current_step(self) -> int:
+        return self._current_step
+
+    @property
+    def total_steps(self) -> int:
+        return self._total_steps
+
+    @property
+    def total_tokens(self) -> int:
+        return self._total_tokens
+
+    @property
+    def consecutive_failures(self) -> int:
+        return self._consecutive_failures
+
+    @property
+    def is_planning(self) -> bool:
+        return self._is_planning_phase
+
+    # ========== 状态写入方法 ==========
+
+    def set_step_progress(self, current: int, total: int):
+        """设置步骤进度（由 Worker 调用）"""
+        self._current_step = current
+        self._total_steps = total
+
+    def add_tokens(self, tokens: int):
+        """累加 token 使用量"""
+        self._total_tokens += tokens
+
+    def increment_consecutive_failures(self):
+        """递增连续失败计数"""
+        self._consecutive_failures += 1
+
+    def reset_consecutive_failures(self):
+        """重置连续失败计数"""
+        self._consecutive_failures = 0
 
     # ========== 状态管理 ==========
 
@@ -148,7 +146,6 @@ class AutoLoopEngine:
         - [x] [步骤 1] xxx   (已完成)
         - [步骤 1] xxx
         """
-        import re
         # 匹配各种格式的步骤号：
         patterns = [
             r'- \[.?\]?\s*\[步骤\s*(\d+)\]',  # - [ ] [步骤 1] 或 - [x] [步骤 1] 或 - [步骤 1]
@@ -175,7 +172,6 @@ class AutoLoopEngine:
             - max_verified_step: 已勾选 [x] 的最大步骤号
             - total_steps: 总步骤数
         """
-        import re
         # 匹配所有步骤号（包括 [ ] 和 [x]）
         all_step_pattern = r'- \[.?\]?\s*\[步骤\s*(\d+)\]'
         all_steps = re.findall(all_step_pattern, notes, re.IGNORECASE)
@@ -201,7 +197,6 @@ class AutoLoopEngine:
         - - [x] [步骤 1] xxx
         - - [x] 步骤 1 xxx
         """
-        import re
         # 匹配已勾选完成的步骤
         patterns = [
             r'- \[x\]\s*\[步骤\s*(\d+)\]',   # - [x] [步骤 1]
@@ -251,28 +246,6 @@ class AutoLoopEngine:
             "",
         ]
         return "\n".join(summary)
-
-    def get_current_system_time(self) -> str:
-        """获取当前系统时间字符串，用于注入prompt"""
-        import time
-        return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-
-    def get_stage_constraint(self) -> str:
-        """获取当前阶段的强制约束提示（注入到prompt最开头）
-
-        Returns:
-            阶段约束文本，从 PLANNING_CONSTRAINT 或 EXECUTING_CONSTRAINT 格式化而来
-        """
-        current_time = self.get_current_system_time()
-
-        if self._is_planning_phase:
-            return PLANNING_CONSTRAINT.format(current_time=current_time)
-        else:
-            return EXECUTING_CONSTRAINT.format(
-                current_time=current_time,
-                current=self._current_step,
-                total=self._total_steps,
-            )
 
     # ========== 执行阶段管理 ==========
 
@@ -424,3 +397,84 @@ class AutoLoopEngine:
         if h > 0:
             return f"{h}时{m}分{s}秒"
         return f"{m}分{s}秒"
+
+    # ========== 步骤完成检测（统一收归 Engine）==========
+
+    def check_step_completed(self, response: str, notes: str, step_num: int) -> bool:
+        """检测当前步骤是否完成
+        
+        完成条件（满足任一即可）：
+        1. 响应中包含 "步骤 N 完成" / "step N complete" / "完成验证"
+        2. 笔记中该步骤标记为完成（如 [x] 或 ✓）
+        3. 响应末尾包含 DONE
+        4. 笔记中有"步骤 N 结果"或"当前状态"更新
+        """
+        # 条件1：响应中明确提到步骤完成
+        patterns = [
+            rf'步骤\s*{step_num}\s*(完成|已验证|验证成功)',
+            rf'step\s*{step_num}\s*(complete|verified|done)',
+            rf'验证.*?成功|verify.*?success',
+        ]
+        for p in patterns:
+            if re.search(p, response, re.IGNORECASE):
+                return True
+
+        # 条件2：笔记中该步骤已标记完成
+        if notes:
+            pattern = rf'- \[(x|✓)\]\s*步骤\s*{step_num}'
+            if re.search(pattern, notes, re.IGNORECASE):
+                return True
+            if re.search(rf'步骤\s*{step_num}\s+结果', notes):
+                return True
+            if re.search(rf'步骤\s*{step_num}.*完成', notes, re.DOTALL):
+                return True
+
+        # 条件3：响应末尾有 DONE
+        if response.strip().endswith("DONE"):
+            return True
+
+        return False
+
+    def get_next_step_preview(self, notes: str, step_num: int) -> str:
+        """获取下一步骤的预览文本"""
+        pattern = rf'- \[.?\]?\s*\[步骤\s*{step_num}\].*?(?=\n-|\Z)'
+        match = re.search(pattern, notes, re.DOTALL)
+        if match:
+            step_text = match.group(0)
+            preview = re.sub(r'^-\s*\[.?\]?\s*\[步骤\s*\d+\]\s*', '', step_text)
+            if '|' in preview:
+                preview = preview.split('|')[0].strip()
+            return preview[:60].strip() + ('...' if len(preview) > 60 else '')
+        return f"步骤 {step_num}"
+
+    def check_relay_doc_updated(self, iteration: int) -> bool:
+        """检查接力文档是否已更新
+        
+        Returns:
+            True: 已更新，可以继续
+            False: 未更新，需要强制要求更新
+        """
+        notes = self.read_shared_notes()
+
+        if not notes or len(notes.strip()) < 50:
+            logger.warning(f"[AutoLoop] Iteration {iteration}: relay doc is empty or too short")
+            return False
+
+        if self._is_planning_phase:
+            if "## 执行计划" not in notes and "- [步骤" not in notes:
+                logger.warning(f"[AutoLoop] Iteration {iteration}: no execution plan in relay doc")
+                return False
+            return True
+
+        # 执行阶段
+        current_step = self._current_step
+        total_steps = self._total_steps
+
+        if total_steps > 0:
+            result_pattern = rf'步骤\s*{current_step}\s+结果|## 步骤\s*{current_step}\s+结果'
+            if not re.search(result_pattern, notes, re.IGNORECASE):
+                if "## 当前状态" not in notes and "当前状态" not in notes:
+                    logger.warning(f"[AutoLoop] Iteration {iteration}: no step {current_step} result recorded")
+                    return False
+
+        return True
