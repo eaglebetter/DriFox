@@ -28,12 +28,12 @@ from app.core.workers import OpenAIChatWorker
 
 
 # ========== 规划阶段受限工具集 ==========
-PLANNING_TOOLS = {
-    # 扫描工具
-    "scan_repo", "glob", "grep", "list", "read", "websearch", "webfetch"
-    # 笔记写入工具
-    "write",
-}
+# PLANNING_TOOLS = {
+#     # 扫描工具
+#     "scan_repo", "glob", "grep", "list", "read", "websearch", "webfetch", ""
+#     # 笔记写入工具
+#     "write",
+# }
 
 
 class AutoLoopWorker(QThread):
@@ -87,15 +87,7 @@ class AutoLoopWorker(QThread):
 
     def _configure_tools_for_phase(self, tools_schema: List[Dict]) -> List[Dict]:
         """根据当前阶段配置工具集"""
-        if self._engine and self._engine.is_planning_phase():
-            # 规划阶段：只允许受限工具
-            allowed = set(PLANNING_TOOLS)
-            filtered = [t for t in tools_schema if t.get("function", {}).get("name", "") in allowed]
-            logger.info(f"[AutoLoop] Planning phase: restricting to {len(filtered)} tools")
-            return filtered
-        else:
-            # 执行阶段：使用完整工具集
-            return self._all_tools_schema or tools_schema
+        return self._all_tools_schema or tools_schema
 
     def configure(
             self,
