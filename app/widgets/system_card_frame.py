@@ -211,8 +211,8 @@ class SystemCardFrame(QFrame):
         self._tab_buttons = {}
 
         for tab_id, tab_name in tabs:
-            btn = QLabel(f" {tab_name} ", self)
-            btn.setFont(get_unified_font(11))
+            btn = QLabel(f"{tab_name}", self)
+            btn.setFont(get_unified_font(12))
             btn.setStyleSheet(TabStyles.inactive())
             btn.setCursor(Qt.PointingHandCursor)
             btn.mousePressEvent = lambda e, tid=tab_id: self._on_tab_clicked(tid)
@@ -223,9 +223,17 @@ class SystemCardFrame(QFrame):
 
     def _on_tab_clicked(self, tab_id: str):
         if self._current_tab != tab_id:
-            self._current_tab = tab_id
-            self._update_tab_styles()
-            self.tabChanged.emit(tab_id)
+            self._set_current_tab(tab_id)
+
+    def set_current_tab(self, tab_id: str):
+        """程序化切换当前标签（同时更新头部按钮状态并触发信号）"""
+        if tab_id in self._tab_buttons and self._current_tab != tab_id:
+            self._set_current_tab(tab_id)
+
+    def _set_current_tab(self, tab_id: str):
+        self._current_tab = tab_id
+        self._update_tab_styles()
+        self.tabChanged.emit(tab_id)
 
     def _update_tab_styles(self):
         for tab_id, btn in self._tab_buttons.items():

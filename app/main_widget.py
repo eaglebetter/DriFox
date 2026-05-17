@@ -5285,8 +5285,8 @@ class OpenAIChatToolWindow(ToolWindow):
         # 刷新记忆卡片的项目
         if hasattr(self, '_memory_card_popup') and self._memory_card_popup:
             self._memory_card_popup.set_project(project)
-            # 自动切换到项目笔记tab
-            self._memory_card_popup.switch_tab(TAB_PROJECT_NOTES)
+            # 自动切换到项目笔记tab（触发头部标签和内容同步切换）
+            self._memory_card.set_current_tab(TAB_PROJECT_NOTES)
         # 刷新历史面板
         self._history_popup_card.refreshRequested.emit()
         # 自动弹出长期记忆卡片
