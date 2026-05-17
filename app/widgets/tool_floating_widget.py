@@ -82,7 +82,7 @@ class ToolFloatingWidget(SimpleCardWidget):
 
     def _setup_ui(self):
         self.setSizePolicy(1, 0)
-        self.setFixedHeight(80)
+        self.setFixedHeight(75)
         self._update_style(False)
 
         main_layout = QVBoxLayout(self)

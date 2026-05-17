@@ -101,7 +101,7 @@ class OpenAIChatWorker(QThread):
         # 等待完整参数的 tool_calls（用于处理超长 arguments 流式传输场景）
         self._waiting_tool_params: Dict[str, dict] = {}  # tool_call_id -> {buffer, attempt_count}
         self._max_param_retry_count = 10  # 最多重试10次（每收到一个 chunk 重试一次）
-        self._last_progress_len = 0  # 上一次推送长度进度时的字符数，用于超大参数流式进度
+        self._last_progress_len: Dict[str, int] = {}  # tc_id -> 上一次推送进度时的字符数
         self._last_compaction_state = {
             "active": False,
             "source": "worker",
@@ -1226,6 +1226,19 @@ class OpenAIChatWorker(QThread):
                                 )
                             except json.JSONDecodeError:
                                 # 短参数的 JSON 解析失败，记录到等待队列
+                                # 同时也发射长度进度，避免 UI 一直卡在"正在准备参数..."
+                                prev = self._last_progress_len.get(tc_id, 0)
+                                if not prev or args_len - prev >= 200:
+                                    self._last_progress_len[tc_id] = args_len
+                                    tail = buffer["function"]["arguments"][-40:].replace('\n', ' ')
+                                    progress_args = {
+                                        "_status": "loading",
+                                        "_preview_hint": f"接收参数中 ({args_len} 字符) …{tail}",
+                                    }
+                                    self._emit_with_callback(
+                                        "tool_args_updated", self.tool_args_updated,
+                                        tc_id, tool_name, progress_args
+                                    )
                                 if tc_id not in self._waiting_tool_params:
                                     self._waiting_tool_params[tc_id] = {
                                         "buffer": buffer,
@@ -1235,16 +1248,15 @@ class OpenAIChatWorker(QThread):
                                 self._waiting_tool_params[tc_id]["attempt_count"] += 1
                         else:
                             # 参数已超过 1000 字符，跳过逐块 JSON 解析以节省开销
-                            # 但仍推送长度进度 + 原始参数预览片段，让 UI 显示接收进度
-                            if not getattr(self, '_last_progress_len', 0) or args_len - self._last_progress_len >= 500:
-                                self._last_progress_len = args_len
-                                # 取原始参数字符串前 50 字符作为预览（不解析 JSON，避免开销）
-                                raw_preview = buffer["function"]["arguments"][:50].replace('\n', ' ')
-                                if len(buffer["function"]["arguments"]) > 50:
-                                    raw_preview += "..."
+                            # 但仍推送长度进度 + 累积尾部预览，让 UI 显示接收进度
+                            prev = self._last_progress_len.get(tc_id, 0)
+                            if not prev or args_len - prev >= 500:
+                                self._last_progress_len[tc_id] = args_len
+                                # 取累积参数末尾 50 字符作为实时预览（最新到达的内容）
+                                tail = buffer["function"]["arguments"][-50:].replace('\n', ' ')
                                 progress_args = {
                                     "_status": "loading",
-                                    "_preview_hint": f"接收参数中 ({args_len} 字符): {raw_preview}",
+                                    "_preview_hint": f"接收参数中 ({args_len} 字符) …{tail}",
                                 }
                                 self._emit_with_callback(
                                     "tool_args_updated", self.tool_args_updated,
