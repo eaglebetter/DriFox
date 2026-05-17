@@ -310,6 +310,7 @@ class OpenAIChatToolWindow(ToolWindow):
             "reasoning_content_received": self._on_reasoning_content_received,
             "thinking_started": self._on_thinking_started,
             "tool_call_started": self._on_tool_call_started,
+            "tool_args_updated": self._on_tool_args_updated,
             "tool_call_sync_requested": self._request_tool_start_ui_sync,
             "tool_result_received": self._on_tool_result_received,
             "stream_started": self._on_stream_started,
@@ -596,6 +597,8 @@ class OpenAIChatToolWindow(ToolWindow):
             QTimer.singleShot(0, self._create_new_session)
 
         QTimer.singleShot(100, self._load_model_configs)
+        # 初始化当前项目的工作目录
+        QTimer.singleShot(200, self._sync_working_directory)
         self._connect_opacity_signal()
         super().showEvent(event)
 
@@ -821,6 +824,7 @@ class OpenAIChatToolWindow(ToolWindow):
 
         self._tool_floating_widget = ToolFloatingWidget(self)
         self._tool_floating_widget.setVisible(False)
+        self._tool_floating_widget.cancelled.connect(self._on_tool_cancelled)
 
         layout.addWidget(self._settings_popup)
 
@@ -849,7 +853,7 @@ class OpenAIChatToolWindow(ToolWindow):
         self.chat_container = QWidget()
         self.chat_container.setStyleSheet("background: transparent;")
         self.chat_layout = QVBoxLayout(self.chat_container)
-        self.chat_layout.setContentsMargins(8, 8, 8, 8)
+        self.chat_layout.setContentsMargins(6, 6, 6, 6)
         self.chat_layout.setSpacing(8)
         self.chat_layout.setAlignment(Qt.AlignBottom)
         self.chat_scroll_area.setWidget(self.chat_container)
@@ -901,13 +905,32 @@ class OpenAIChatToolWindow(ToolWindow):
         self._history_card.content_layout.addWidget(self._history_popup_card)
         self._history_card.setVisible(False)
         self._history_card.closed.connect(self._restore_after_system_close)
+        # 搜索框（历史会话和归档标签都显示）
+        self._history_card.set_search_handler(
+            "🔍 搜索会话...",
+            lambda text: self._history_popup_card.set_search_filter(text)
+        )
         layout.addWidget(self._history_card)
 
         # 记忆管理卡片 - 和历史会话卡片同位置
         self._memory_card = BaseSettingsCard("记忆管理", "🧠", self)
-        self._memory_card.setFixedHeight(400)
+        self._memory_card.setFixedHeight(350)
+        # 设置记忆管理标签（条目记忆/项目笔记/关键文档）
+        self._memory_card.setup_tabs([
+            ("entries", "条目记忆"),
+            ("notes", "项目笔记"),
+            ("docs", "关键文档"),
+        ], "entries")
+        self._memory_card.tabChanged.connect(self._on_memory_tab_changed)
+        # 搜索框（三个tab都显示）
+        self._memory_card.set_search_handler(
+            "🔍 搜索条目记忆...",
+            lambda text: self._memory_card_popup.set_search_filter(text)
+        )
         self._memory_card_popup = MemoryCardContent(self.backend.memory_manager, self)
         self._memory_card_popup.memorySaved.connect(self._on_memory_card_saved)
+        # 工作目录变更 → 同步到工具执行器
+        self._memory_card_popup.workingDirChanged.connect(self._on_working_dir_changed)
         self._memory_card_popup.set_project(self._current_project)  # 初始化时设置当前项目
         self._memory_card.content_layout.addWidget(self._memory_card_popup)
         self._memory_card.setVisible(False)
@@ -1614,8 +1637,22 @@ class OpenAIChatToolWindow(ToolWindow):
         else:
             self._hide_main_popups()  # 隐藏其他主面板
             self._history_card.show()
-            # 刷新数据
-            self._refresh_history_toggle_panel()
+            # 同步搜索框可见性（根据当前标签）
+            self._sync_search_box_visibility()
+            # 延迟刷新数据，让弹窗先显示出来再填充内容（提升流畅度）
+            QTimer.singleShot(0, self._refresh_history_toggle_panel)
+
+    def _sync_search_box_visibility(self):
+        """同步搜索框：两个标签页都显示搜索框"""
+        search_input = getattr(self._history_card, '_search_input', None)
+        if not search_input:
+            return
+        search_input.setVisible(True)
+        search_input.setFocus()
+
+        # 根据当前标签更新占位文本
+        current_tab = self._history_card._current_tab if hasattr(self._history_card, '_current_tab') else "history"
+        search_input.setPlaceholderText("🔍 搜索历史会话..." if current_tab == "history" else "🔍 搜索归档会话...")
 
     def _refresh_history_toggle_panel(self, is_archived: bool = False):
         """刷新历史面板数据"""
@@ -1694,7 +1731,15 @@ class OpenAIChatToolWindow(ToolWindow):
 
     def _on_history_tab_changed(self, tab_id: str):
         """处理历史/归档标签切换"""
+        self._sync_search_box_visibility()
+
+        # 切换标签时清空搜索
+        search_input = getattr(self._history_card, '_search_input', None)
+        if search_input:
+            search_input.clear()
+
         self._history_popup_card.switch_tab(tab_id)
+
         if tab_id == "archived":
             self._refresh_archived_sessions()
         else:
@@ -4472,6 +4517,26 @@ class OpenAIChatToolWindow(ToolWindow):
             card.start_streaming_anim()
             card.start_new_thinking_block()
 
+    def _on_tool_args_updated(self, tool_call_id: str, tool_name: str, partial_args: dict):
+        """工具参数流式更新 — 流式接收过程中，参数逐块解析完成后触发"""
+        if not self._tool_floating_widget:
+            return
+        # 如果是内部进度消息（带 _preview_hint），显示友好文字
+        hint = partial_args.get("_preview_hint")
+        if hint:
+            self._tool_floating_widget.update_progress(hint)
+            return
+        # 过滤掉内部字段，只显示实际参数
+        display_args = {k: v for k, v in partial_args.items() if not k.startswith("_")}
+        if display_args:
+            args_str = json.dumps(display_args).decode('utf-8')
+            if len(args_str) > 80:
+                args_str = args_str[:80] + "..."
+            self._tool_floating_widget.update_progress(f"参数: {args_str}")
+        else:
+            # 全是内部字段，显示友好消息
+            self._tool_floating_widget.update_progress("正在准备参数...")
+
     def _on_tool_call_started(
             self, tool_call_id: str, tool_name: str, arguments: dict, round_id: str = None
     ):
@@ -4594,11 +4659,20 @@ class OpenAIChatToolWindow(ToolWindow):
         self._sub_agent_manager.task_finished.emit(task_id, result)
 
     def _on_tool_cancelled(self):
-        """工具执行被用户中止"""
+        """工具执行被用户中止 — 连接自 tool_floating_widget.cancelled 信号"""
         logger.info("[ToolFloatingWidget] Tool execution cancelled by user")
 
         self._tool_cancelled_by_user = True
         self._cancelled_tool_call_id = getattr(self, "_current_tool_call_id", None)
+
+        # 不停止流式接收，只标记 worker 跳过工具执行
+        # worker 收到标记后，在 _execute_all_tools 中会跳过剩余工具
+        # 并自动发送 "用户中止" 的 tool_result 给模型继续迭代
+        if self.backend and self.backend._chat_engine and self.backend._chat_engine._current_worker:
+            worker = self.backend._chat_engine._current_worker
+            worker._is_cancelled = True
+            worker._tool_execution_cancelled = True
+
         self._tool_floating_widget.finish_tool("用户中止", success=False)
 
         tool_call_id = getattr(self, "_current_tool_call_id", None)
@@ -5197,6 +5271,8 @@ class OpenAIChatToolWindow(ToolWindow):
             from loguru import logger
             logger.info(f"[MainWidget] Calling set_project({project}) on memory_card_popup")
             self._memory_card_popup.set_project(project)
+            # 切换项目时自动同步工作目录
+            self._sync_working_directory()
         # 刷新历史面板（切换项目过滤）
         self._current_history_project = project
         self._history_popup_card.set_current_project(project)
@@ -5215,9 +5291,10 @@ class OpenAIChatToolWindow(ToolWindow):
         # 刷新记忆卡片的项目
         if hasattr(self, '_memory_card_popup') and self._memory_card_popup:
             self._memory_card_popup.set_project(project)
-            # 自动切换到项目笔记tab
-            self._memory_card_popup.tab_widget.setCurrentItem(TAB_PROJECT_NOTES)
-            self._memory_card_popup._on_tab_changed(TAB_PROJECT_NOTES)
+            # 自动切换到项目笔记tab（触发头部标签和内容同步切换）
+            self._memory_card.set_current_tab(TAB_PROJECT_NOTES)
+            # 切换项目时自动同步工作目录
+            self._sync_working_directory()
         # 刷新历史面板
         self._history_popup_card.refreshRequested.emit()
         # 自动弹出长期记忆卡片
@@ -5270,6 +5347,38 @@ class OpenAIChatToolWindow(ToolWindow):
                 position=InfoBarPosition.BOTTOM
             )
 
+    def _on_memory_tab_changed(self, tab_id: str):
+        """处理记忆管理标签切换"""
+        # 清空搜索
+        search_input = getattr(self._memory_card, '_search_input', None)
+        if search_input:
+            search_input.clear()
+        # 更新占位文本
+        placeholders = {"entries": "🔍 搜索条目记忆...", "notes": "🔍 搜索项目笔记...", "docs": "🔍 搜索关键文档..."}
+        if search_input:
+            search_input.setPlaceholderText(placeholders.get(tab_id, "🔍 搜索..."))
+        # 切换内容
+        self._memory_card_popup.switch_tab(tab_id)
+
+    def _on_working_dir_changed(self, file_path: str):
+        """工作目录变更 → 同步到工具执行器"""
+        if self.backend and self.backend.tool_executor:
+            self.backend.tool_executor.set_workdir(file_path or None)
+            from loguru import logger
+            logger.info(f"[MainWidget] Working directory synced to tool executor: {file_path or 'default'}")
+
+    def _sync_working_directory(self):
+        """切换项目时自动加载并同步工作目录"""
+        if not self.backend or not self.backend.tool_executor:
+            return
+        project = self._current_project
+        workdir = None
+        if self.backend.memory_manager:
+            workdir = self.backend.memory_manager.get_working_directory(project)
+        self.backend.tool_executor.set_workdir(workdir)
+        from loguru import logger
+        logger.info(f"[MainWidget] Synced working directory for project '{project}': {workdir or 'default'}")
+
     def _show_soul_memory(self):
         """切换记忆管理卡片的显示"""
         self._toggle_memory_card()
@@ -5282,6 +5391,11 @@ class OpenAIChatToolWindow(ToolWindow):
         else:
             self._hide_main_popups()  # 隐藏其他主面板
             self._memory_card.show()
+            # 同步搜索框可见性
+            search_input = getattr(self._memory_card, '_search_input', None)
+            if search_input:
+                search_input.setVisible(True)
+                search_input.setFocus()
             # 从数据库刷新记忆
             self._memory_card_popup.refresh_from_db()
 

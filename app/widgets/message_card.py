@@ -888,6 +888,11 @@ WELCOME_TIPS = [
     "💡 历史会话自动保存，关闭窗口也不丢失",
     "💡 长对话会自动启用「上下文压缩」优化 Token",
 
+    # ===== 项目功能 =====
+    "💡 点击顶部项目名称可切换/新建/归档项目，不同项目数据隔离",
+    "💡 项目笔记自动关联当前项目，切换项目自动切换笔记内容",
+    "💡 关键文档中添加文件夹可作为工具的工作目录，相对路径以此为准",
+
     # ===== 模型与参数 =====
     "💡 点击模型名称可快速切换大模型",
     "💡 模型参数影响回复风格（温度/最大Token），多试试找到你的风格",
@@ -2335,7 +2340,7 @@ class PlainTextViewer(QWidget):
 
     def _init_ui(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 8, 12, 8)
+        layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(0)
 
         self.text_edit = QTextEdit(self)
@@ -2559,9 +2564,10 @@ class MessageCard(SimpleCardWidget):
 
     def _setup_ui(self):
         main = QVBoxLayout(self)
-        main.setContentsMargins(10, 10, 10, 10)
+        main.setContentsMargins(6, 6, 6, 6)
         main.setSpacing(8)
         top = QHBoxLayout()
+        top.setContentsMargins(8, 2, 8, 2)
         top.setSpacing(10)
 
         av = QLabel(self)

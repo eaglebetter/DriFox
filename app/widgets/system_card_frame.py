@@ -10,7 +10,7 @@ SystemCardFrame — QFrame 基类 + 标准头部布局 + 固定边框
 
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea, QFrame,
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea, QFrame, QLineEdit,
 )
 from qfluentwidgets import (
     StrongBodyLabel, TransparentToolButton, FluentIcon, PrimaryToolButton)
@@ -45,10 +45,10 @@ class SystemCardFrame(QFrame):
         self._header_layout.setSpacing(4)
 
         self.icon_label = QLabel(self)
-        self.icon_label.setFont(get_unified_font(11))
+        self.icon_label.setFont(get_unified_font(12))
 
         self.title_label = StrongBodyLabel(self)
-        self.title_label.setFont(get_unified_font(10, True))
+        self.title_label.setFont(get_unified_font(12, True))
         self.title_label.setStyleSheet("color: #C9A85C;")
 
         self._header_layout.addWidget(self.icon_label)
@@ -63,10 +63,15 @@ class SystemCardFrame(QFrame):
 
         # 标签按钮容器
         self._tab_buttons_container = QHBoxLayout()
-        self._tab_buttons_container.setSpacing(4)
+        self._tab_buttons_container.setSpacing(1)
         self._header_layout.addLayout(self._tab_buttons_container)
 
         self._header_layout.addStretch()
+
+        # 搜索框容器（默认隐藏）
+        self._search_container = QHBoxLayout()
+        self._search_container.setSpacing(0)
+        self._header_layout.addLayout(self._search_container)
 
         # 额外按钮容器
         self._extra_buttons_container = QHBoxLayout()
@@ -160,6 +165,36 @@ class SystemCardFrame(QFrame):
             self._count_label.setText("")
         self._count_label.setVisible(count > 0 or (limit and limit > 0))
 
+    def set_search_handler(self, placeholder: str, callback):
+        """设置头部搜索框（在标签按钮右侧、额外按钮左侧）
+        placeholder: 占位文本
+        callback(text): 文本变化回调
+        """
+        self._search_input = QLineEdit(self)
+        self._search_input.setPlaceholderText(placeholder)
+        self._search_input.setMaximumWidth(160)
+        self._search_input.setMinimumWidth(100)
+        self._search_input.setFixedHeight(24)
+        self._search_input.setStyleSheet("""
+            QLineEdit {
+                background: rgba(255,255,255,0.08);
+                border: 1px solid rgba(255,255,255,0.15);
+                border-radius: 4px;
+                color: rgba(255,255,255,0.8);
+                padding: 2px 8px;
+                font-size: 11px;
+            }
+            QLineEdit:focus {
+                border: 1px solid rgba(102, 198, 255, 0.5);
+            }
+            QLineEdit::placeholder {
+                color: rgba(255,255,255,0.35);
+            }
+        """)
+        self._search_input.textChanged.connect(callback)
+        self._search_input.setVisible(False)
+        self._search_container.addWidget(self._search_input)
+
     def set_count_label(self, text: str):
         self._count_label.setText(f"({text})" if text else "")
         self._count_label.setVisible(bool(text))
@@ -176,8 +211,8 @@ class SystemCardFrame(QFrame):
         self._tab_buttons = {}
 
         for tab_id, tab_name in tabs:
-            btn = QLabel(f" {tab_name} ", self)
-            btn.setFont(get_unified_font(11))
+            btn = QLabel(f"{tab_name}", self)
+            btn.setFont(get_unified_font(12))
             btn.setStyleSheet(TabStyles.inactive())
             btn.setCursor(Qt.PointingHandCursor)
             btn.mousePressEvent = lambda e, tid=tab_id: self._on_tab_clicked(tid)
@@ -188,14 +223,22 @@ class SystemCardFrame(QFrame):
 
     def _on_tab_clicked(self, tab_id: str):
         if self._current_tab != tab_id:
-            self._current_tab = tab_id
-            self._update_tab_styles()
-            self.tabChanged.emit(tab_id)
+            self._set_current_tab(tab_id)
+
+    def set_current_tab(self, tab_id: str):
+        """程序化切换当前标签（同时更新头部按钮状态并触发信号）"""
+        if tab_id in self._tab_buttons and self._current_tab != tab_id:
+            self._set_current_tab(tab_id)
+
+    def _set_current_tab(self, tab_id: str):
+        self._current_tab = tab_id
+        self._update_tab_styles()
+        self.tabChanged.emit(tab_id)
 
     def _update_tab_styles(self):
         for tab_id, btn in self._tab_buttons.items():
             btn.setStyleSheet(TabStyles.active() if tab_id == self._current_tab else TabStyles.inactive())
-            btn.setFont(get_unified_font(11))
+            btn.setFont(get_unified_font(12))
 
     def set_extra_button_handler(self, handler):
         while self._extra_buttons_container.count():

@@ -31,7 +31,7 @@ class UpdateChecker(QWidget):
 
         # --- 修复报错：初始化 AsyncUpdateChecker 依赖的属性 ---
         self.platform = self.cfg.patch_platform.value
-        self.repo = self.cfg.github_repo.value
+        self.repo = self.cfg.github_repo
         self.token = self.cfg.github_token.value
         self.current_version = self.cfg.current_version
         # -----------------------------------------------

@@ -168,6 +168,18 @@ class MemoryManagerCore:
             return 0
         return self._key_documents_repo.clear_by_project(project)
 
+    def set_working_directory(self, project: str, file_path: str) -> bool:
+        """设置项目的工作目录（互斥）"""
+        if not self._key_documents_repo:
+            return False
+        return self._key_documents_repo.set_working_directory(project, file_path)
+
+    def get_working_directory(self, project: str) -> Optional[str]:
+        """获取项目的工作目录"""
+        if not self._key_documents_repo:
+            return None
+        return self._key_documents_repo.get_working_directory(project)
+
     # ==================== 上下文格式化 ====================
 
     def format_memories_for_prompt(
@@ -213,11 +225,17 @@ class MemoryManagerCore:
         # 3. 关键文档
         lines.append("### 关键文档")
         docs = self.get_key_documents(project)[:doc_limit]
+        # 获取当前项目的工作目录
+        wd_path = self.get_working_directory(project)
         if docs:
             for doc in docs:
                 file_name = doc.get("file_name", "")
                 file_path = doc.get("file_path", "")
-                lines.append(f"- {file_name} ({file_path})")
+                prefix = "（项目根目录）" if file_path == wd_path else ""
+                if prefix:
+                    lines.append(f"- {file_name} ({prefix} {file_path})")
+                else:
+                    lines.append(f"- {file_name} ({file_path})")
         else:
             lines.append("- 暂无关键文档")
         lines.append("")

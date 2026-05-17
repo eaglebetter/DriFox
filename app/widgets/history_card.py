@@ -5,6 +5,8 @@
 import datetime
 from typing import List, Dict, Optional
 
+from pypinyin import lazy_pinyin
+
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QDragEnterEvent
 from PyQt5.QtWidgets import (
@@ -69,6 +71,39 @@ def get_message_preview(messages: List[Dict], max_len: int = 50) -> str:
                 )
             return content[:max_len].strip() + ("..." if len(content) > max_len else "")
     return ""
+
+
+def _matches_search(session: Dict, search_text: str) -> bool:
+    """检查会话是否匹配搜索文本（支持拼音搜索）"""
+    if not search_text:
+        return True
+    search_lower = search_text.lower().replace(" ", "")
+    if not search_lower:
+        return True
+
+    title = (session.get("title", "") or "")
+    preview = (session.get("preview", "") or "")
+
+    # 1. 直接子串匹配
+    if search_lower in title.lower() or search_lower in preview.lower():
+        return True
+
+    # 2. 拼音匹配（标题和预览转拼音）
+    try:
+        title_pinyin = "".join(lazy_pinyin(title)).lower()
+        preview_pinyin = "".join(lazy_pinyin(preview)).lower()
+        if search_lower in title_pinyin or search_lower in preview_pinyin:
+            return True
+
+        # 3. 拼音首字母匹配
+        title_initials = "".join(p[0] for p in lazy_pinyin(title) if p).lower()
+        preview_initials = "".join(p[0] for p in lazy_pinyin(preview) if p).lower()
+        if search_lower in title_initials or search_lower in preview_initials:
+            return True
+    except Exception:
+        pass
+
+    return False
 
 
 class _HistoryItemCard(SimpleCardWidget):
@@ -429,6 +464,7 @@ class HistoryCard(QWidget):
         self._item_cards = []
         self._current_tab = "history"  # "history" or "archived"
         self._current_project: Optional[str] = None  # 当前过滤的项目
+        self._search_filter: str = ""  # 搜索过滤文本
         self._setup_ui()
         # 启用拖放支持
         self.setAcceptDrops(True)
@@ -440,6 +476,11 @@ class HistoryCard(QWidget):
     def set_current_project(self, project: str):
         """设置当前过滤项目"""
         self._current_project = project
+
+    def set_search_filter(self, text: str):
+        """设置搜索过滤文本（同时支持历史会话和归档）"""
+        self._search_filter = text.strip()
+        self._update_display()
 
     def get_content_layout(self) -> QVBoxLayout:
         """返回内容布局，供外部使用"""
@@ -519,6 +560,12 @@ class HistoryCard(QWidget):
     def _update_display(self):
         """更新显示内容"""
         layout = self.get_content_layout()
+
+        # 性能优化：批量更新，避免每加一个 widget 就重绘一次
+        content_widget = layout.parentWidget() if layout else None
+        if content_widget:
+            content_widget.setUpdatesEnabled(False)
+
         self._clear_content()
 
         if self._current_tab == "history":
@@ -527,6 +574,10 @@ class HistoryCard(QWidget):
             self._update_archived_display(layout)
 
         layout.addStretch(1)
+
+        if content_widget:
+            content_widget.setUpdatesEnabled(True)
+            content_widget.repaint()
 
     def _update_history_display(self, layout: QVBoxLayout):
         """更新历史会话显示"""
@@ -539,23 +590,29 @@ class HistoryCard(QWidget):
 
         # 先显示当前会话
         current_session_widget = None
+        current_matches_search = True
         if self._current_index is not None and 0 <= self._current_index < len(self._all_history):
             current_session = self._all_history[self._current_index]
-            current_preview = get_message_preview(current_session.get("messages", []))
-            current_session_widget = _HistoryItemCard(
-                index=self._current_index,
-                title=current_session.get("title", "当前对话"),
-                last_time=current_session.get("last_time", "未知"),
-                message_count=current_session.get("message_count", 0),
-                is_current=True,
-                preview=current_preview,
-            )
-            current_session_widget.sessionClicked.connect(self._on_card_clicked)
-            current_session_widget.deleteRequested.connect(self._on_card_deleted)
-            current_session_widget.renameRequested.connect(self._on_card_renamed)
+            current_matches_search = not self._search_filter or _matches_search(current_session, self._search_filter)
+            if current_matches_search:
+                current_preview = get_message_preview(current_session.get("messages", []))
+                current_session_widget = _HistoryItemCard(
+                    index=self._current_index,
+                    title=current_session.get("title", "当前对话"),
+                    last_time=current_session.get("last_time", "未知"),
+                    message_count=current_session.get("message_count", 0),
+                    is_current=True,
+                    preview=current_preview,
+                )
+                current_session_widget.sessionClicked.connect(self._on_card_clicked)
+                current_session_widget.deleteRequested.connect(self._on_card_deleted)
+                current_session_widget.renameRequested.connect(self._on_card_renamed)
 
         # 分离当前会话和其他会话（保存原始索引，避免后续O(n²)查找）
         other_sessions = [(i, s) for i, s in enumerate(self._all_history) if i != self._current_index]
+        # 搜索过滤
+        if self._search_filter:
+            other_sessions = [(i, s) for i, s in other_sessions if _matches_search(s, self._search_filter)]
         grouped = {}
         for original_index, session in other_sessions:
             category = self._get_date_category(session.get("last_time", ""))
@@ -634,7 +691,10 @@ class HistoryCard(QWidget):
             layout.addWidget(spacer)
 
         if not has_items:
-            empty_label = QLabel("暂无历史对话记录")
+            if self._search_filter:
+                empty_label = QLabel(f"没有找到匹配「{self._search_filter}」的会话")
+            else:
+                empty_label = QLabel("暂无历史对话记录")
             empty_label.setAlignment(Qt.AlignCenter)
             empty_label.setStyleSheet("color: rgba(255, 255, 255, 0.6); padding: 16px;")
             layout.addWidget(empty_label)
@@ -648,9 +708,24 @@ class HistoryCard(QWidget):
             layout.addWidget(empty_label)
             return
 
+        # 搜索过滤
+        sessions_to_show = self._archived_sessions
+        if self._search_filter:
+            sessions_to_show = [
+                s for s in self._archived_sessions
+                if _matches_search(s, self._search_filter)
+            ]
+
+        if not sessions_to_show:
+            empty_label = QLabel(f"没有找到匹配「{self._search_filter}」的会话")
+            empty_label.setAlignment(Qt.AlignCenter)
+            empty_label.setStyleSheet("color: rgba(255, 255, 255, 0.6); padding: 16px;")
+            layout.addWidget(empty_label)
+            return
+
         # 按日期分组
         grouped = {}
-        for session in self._archived_sessions:
+        for session in sessions_to_show:
             last_time = session.get("last_time", session.get("saved_at", ""))
             category = self._get_date_category(last_time)
             if category not in grouped:

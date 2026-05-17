@@ -40,6 +40,7 @@ class OpenAIChatWorker(QThread):
     finished_with_messages = pyqtSignal(list)
     compaction_status_changed = pyqtSignal(dict)
     tool_call_started = pyqtSignal(str, str, dict, str)
+    tool_args_updated = pyqtSignal(str, str, dict)  # 工具参数流式更新 (tool_call_id, tool_name, partial_args)
     tool_result_received = pyqtSignal(str, str, dict, object)
     question_asked = pyqtSignal(str, str, list, bool)
     permission_approval_requested = pyqtSignal(str, str, dict)
@@ -100,6 +101,7 @@ class OpenAIChatWorker(QThread):
         # 等待完整参数的 tool_calls（用于处理超长 arguments 流式传输场景）
         self._waiting_tool_params: Dict[str, dict] = {}  # tool_call_id -> {buffer, attempt_count}
         self._max_param_retry_count = 10  # 最多重试10次（每收到一个 chunk 重试一次）
+        self._last_progress_len: Dict[str, int] = {}  # tc_id -> 上一次推送进度时的字符数
         self._last_compaction_state = {
             "active": False,
             "source": "worker",
@@ -215,6 +217,7 @@ class OpenAIChatWorker(QThread):
             "finished_with_messages": WorkerEvent.FINISHED_WITH_MESSAGES,
             "compaction_status_changed": WorkerEvent.COMPACTION_STATUS,
             "tool_call_started": WorkerEvent.TOOL_CALL_STARTED,
+            "tool_args_updated": WorkerEvent.TOOL_CALL_STREAM,
             "tool_result_received": WorkerEvent.TOOL_RESULT_RECEIVED,
             "question_asked": WorkerEvent.QUESTION_ASKED,
             "permission_approval_requested": WorkerEvent.PERMISSION_REQUESTED,
@@ -821,7 +824,10 @@ class OpenAIChatWorker(QThread):
                 for msg in messages:
                     if msg.get("role") == "assistant":
                         if msg.get("tool_calls"):
-                            msg["tool_calls"] = []
+                            msg.pop("tool_calls", None)
+                            # 确保 content 不为 None，避免 API 报 "content or tool_calls must be set"
+                            if msg.get("content") is None:
+                                msg["content"] = ""
                             modified = True
                             logger.info("[ToolCall修复] 已移除中断时的 tool_calls")
                 return messages, modified
@@ -871,6 +877,9 @@ class OpenAIChatWorker(QThread):
             else:
                 # 所有 tool_call 都没有对应结果，移除 tool_calls 字段
                 fixed_msg.pop("tool_calls", None)
+                # 确保 content 不为 None，避免 API 报 "content or tool_calls must be set"
+                if fixed_msg.get("content") is None:
+                    fixed_msg["content"] = ""
                 logger.info("[ToolCall修复] 所有 tool_call 均无对应结果，已移除 tool_calls 字段")
 
             fixed_messages.append(fixed_msg)
@@ -1216,8 +1225,26 @@ class OpenAIChatWorker(QThread):
                                 # 标记已完成解析（用于决定是否发送 tool_call_started）
                                 self._current_tool_calls[tc_id]["_args_parsed"] = True
                                 self._tool_calls_buffer.pop(tc_id, None)
+                                # 流式中间状态：推送实际参数到 UI 更新预览
+                                self._emit_with_callback(
+                                    "tool_args_updated", self.tool_args_updated,
+                                    tc_id, tool_name, parsed_args
+                                )
                             except json.JSONDecodeError:
                                 # 短参数的 JSON 解析失败，记录到等待队列
+                                # 同时也发射长度进度，避免 UI 一直卡在"正在准备参数..."
+                                prev = self._last_progress_len.get(tc_id, 0)
+                                if not prev or args_len - prev >= 200:
+                                    self._last_progress_len[tc_id] = args_len
+                                    tail = buffer["function"]["arguments"][-40:].replace('\n', ' ')
+                                    progress_args = {
+                                        "_status": "loading",
+                                        "_preview_hint": f"接收参数中 ({args_len} 字符) …{tail}",
+                                    }
+                                    self._emit_with_callback(
+                                        "tool_args_updated", self.tool_args_updated,
+                                        tc_id, tool_name, progress_args
+                                    )
                                 if tc_id not in self._waiting_tool_params:
                                     self._waiting_tool_params[tc_id] = {
                                         "buffer": buffer,
@@ -1226,7 +1253,21 @@ class OpenAIChatWorker(QThread):
                                     }
                                 self._waiting_tool_params[tc_id]["attempt_count"] += 1
                         else:
-                            # 参数已超过 1000 字符，跳过逐块解析以节省开销
+                            # 参数已超过 1000 字符，跳过逐块 JSON 解析以节省开销
+                            # 但仍推送长度进度 + 累积尾部预览，让 UI 显示接收进度
+                            prev = self._last_progress_len.get(tc_id, 0)
+                            if not prev or args_len - prev >= 500:
+                                self._last_progress_len[tc_id] = args_len
+                                # 取累积参数末尾 50 字符作为实时预览（最新到达的内容）
+                                tail = buffer["function"]["arguments"][-50:].replace('\n', ' ')
+                                progress_args = {
+                                    "_status": "loading",
+                                    "_preview_hint": f"接收参数中 ({args_len} 字符) …{tail}",
+                                }
+                                self._emit_with_callback(
+                                    "tool_args_updated", self.tool_args_updated,
+                                    tc_id, tool_name, progress_args
+                                )
                             # 放入等待队列，等流结束后一次性解析
                             if tc_id not in self._waiting_tool_params:
                                 self._waiting_tool_params[tc_id] = {
@@ -1421,8 +1462,9 @@ class OpenAIChatWorker(QThread):
                 )
                 if not self._legacy_direct_callbacks:
                     QApplication.processEvents()
-                self._is_cancelled = True
-                return None
+                # 不设置 _is_cancelled = True，让 worker 继续下次迭代
+                # 返回空列表而非 None，避免进入问答等待逻辑
+                return []
 
             tool_name = tc["function"]["name"]
             arguments = tc["function"]["arguments"]

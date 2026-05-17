@@ -552,6 +552,7 @@ class HistoryCompactor:
         self._last_summary_error: Optional[str] = None  # 上次摘要失败的错误
         self._compression_count: int = 0  # 压缩次数统计
         self._last_compression_savings_pct: float = 100.0  # 上次压缩节省比例
+        self._ineffective_compression_count: int = 0  # 无效压缩连续计数（反抖动）
         self._summary_failure_cooldown_until: float = 0.0  # 摘要失败冷却时间
 
     def on_session_reset(self) -> None:

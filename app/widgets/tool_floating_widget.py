@@ -74,11 +74,15 @@ class ToolFloatingWidget(SimpleCardWidget):
         self._rotation_timer.timeout.connect(self._update_rotation)
         self._rotating = False
         self._svg_renderer = _RotatingIcon(":/icons/执行中.svg", size=18)
+        self._hide_timer = QTimer(self)
+        self._hide_timer.setSingleShot(True)
+        self._hide_timer.setInterval(2000)
+        self._hide_timer.timeout.connect(self.hide)
         self._setup_ui()
 
     def _setup_ui(self):
         self.setSizePolicy(1, 0)
-        self.setFixedHeight(80)
+        self.setFixedHeight(75)
         self._update_style(False)
 
         main_layout = QVBoxLayout(self)
@@ -170,6 +174,7 @@ class ToolFloatingWidget(SimpleCardWidget):
         self.title_label.setStyleSheet("color: #ef5350;")
         self._update_style(False)
         self.cancelled.emit()
+        self._hide_timer.start()
 
     def set_suppress_visible(self, suppressed: bool):
         """设置压制状态：系统卡片打开时压制工具卡片显示"""
@@ -195,6 +200,8 @@ class ToolFloatingWidget(SimpleCardWidget):
 
     def start_tool(self, tool_name: str, args: dict = None):
         """开始执行工具"""
+        # 取消之前的自动隐藏定时器，防止上一个工具的隐藏影响当前工具
+        self._hide_timer.stop()
 
         self._task_start_time = time.time()
         self._is_running = True
@@ -211,11 +218,17 @@ class ToolFloatingWidget(SimpleCardWidget):
 
         args_preview = ""
         if args:
-            args_str = json.dumps(args).decode('utf-8')
-            if len(args_str) > 60:
-                args_preview = f"{args_str[:60]}..."
+            # 过滤掉内部字段（_status、_preview_hint 等），只显示实际参数
+            display_args = {k: v for k, v in args.items() if not k.startswith("_")}
+            if display_args:
+                args_str = json.dumps(display_args).decode('utf-8')
+                if len(args_str) > 60:
+                    args_preview = f"{args_str[:60]}..."
+                else:
+                    args_preview = f"{args_str}"
             else:
-                args_preview = f"{args_str}"
+                # 只有内部字段（预览阶段），显示友好的等待消息
+                args_preview = "正在准备参数..."
 
         self.task_label.setText(f"⏳ {args_preview}")
 
@@ -265,6 +278,7 @@ class ToolFloatingWidget(SimpleCardWidget):
             self.title_label.setText("执行完成")
             self.title_label.setStyleSheet("color: #81c784;")
             self.task_label.setText("✓ 工具执行成功")
+            self.cancel_btn.setVisible(False)  # 成功时立即隐藏中止按钮
         else:
             self.title_label.setText("执行失败")
             self.title_label.setStyleSheet("color: #ef5350;")
@@ -280,7 +294,9 @@ class ToolFloatingWidget(SimpleCardWidget):
         else:
             self.setVisible(True)
             self.raise_()
-            QTimer.singleShot(2000, self.hide)
+            # 工具完成后 2 秒自动隐藏，但 start_tool 时会取消正在等待的定时器
+            self._hide_timer.start()
+            #（clear 在新建会话、停止对话、出错时触发）
 
     def is_cancelled(self) -> bool:
         """检查是否已被中止"""
@@ -288,6 +304,7 @@ class ToolFloatingWidget(SimpleCardWidget):
 
     def clear(self):
         """清空显示"""
+        self._hide_timer.stop()
         self._task_start_time = None
         self._is_running = False
         self._current_tool = None

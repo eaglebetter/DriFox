@@ -2,8 +2,10 @@
 """
 工具执行器模块 - 统一处理各种工具调用
 """
+import os
 import orjson
 import re
+from pathlib import Path
 
 from loguru import logger
 from typing import Dict, Optional, Callable
@@ -259,6 +261,22 @@ class ToolExecutor:
         if self._builtin_tools:
             self._builtin_tools.set_current_project(project)
             logger.info("[ToolExecutor] AgentManager attached to BuiltinTools")
+
+    def set_workdir(self, workdir: Optional[str]):
+        """设置工作目录（None 或 "" 表示恢复默认）"""
+        self._workdir = workdir
+        if self._builtin_tools:
+            if workdir:
+                self._builtin_tools.set_workdir(workdir)
+            else:
+                # 恢复默认：用 resource_path
+                try:
+                    from app.utils.utils import resource_path
+                    default_wd = resource_path("")
+                except Exception:
+                    default_wd = str(Path(__file__).parent.parent.parent)
+                self._builtin_tools.workdir = Path(default_wd)
+            logger.info(f"[ToolExecutor] Workdir updated: {workdir or 'default'}")
 
     def set_key_documents_repo(self, repo, project: str = "默认项目"):
         """设置关键文档仓储和当前项目"""

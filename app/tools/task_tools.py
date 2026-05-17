@@ -42,10 +42,12 @@ class TaskTools:
             lower_item = {str(k).lower(): v for k, v in item.items()}
             status = str(lower_item.get("status", "")).lower()
             priority = str(lower_item.get("priority", "medium")).lower()
+            # content 字段兼容 description/text/name 等常见别名
+            content = lower_item.get("content") or lower_item.get("description") or ""
             normalized.append(
                 {
                     "id": lower_item.get("id"),
-                    "content": lower_item.get("content", ""),
+                    "content": content,
                     "status": status or "pending",
                     "priority": priority or "medium",
                 }
