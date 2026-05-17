@@ -19,7 +19,7 @@ import time
 import threading
 from pathlib import Path
 from dataclasses import dataclass, field, asdict
-from typing import Dict, List, Optional, Any, Callable
+from typing import Dict, List, Optional, Any, Callable, Union
 from enum import Enum
 from PyQt5.QtCore import QThreadPool, QRunnable, pyqtSignal, QObject
 from loguru import logger

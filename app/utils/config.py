@@ -10,11 +10,10 @@
 配置持久化到 JSON 文件。
 """
 import orjson as json
-import sys
+
 from copy import deepcopy
 from enum import Enum
 from uuid import uuid4
-
 from loguru import logger
 from qfluentwidgets import (
     ConfigSerializer,
@@ -27,7 +26,6 @@ from qfluentwidgets import (
     ConfigValidator,
     RangeConfigItem,
 )
-
 
 
 class PatchPlatform(Enum):

@@ -9,10 +9,6 @@ from PyQt5.QtWidgets import (
     QSizePolicy,
     QVBoxLayout,
     QPushButton,
-    QDialog,
-    QLineEdit,
-    QDoubleSpinBox,
-    QFrame,
 )
 from qfluentwidgets import (
     ToolButton,
@@ -21,22 +17,15 @@ from qfluentwidgets import (
     qconfig,
     ExpandSettingCard,
     ConfigItem,
-    LineEdit,
     Dialog,
-    PrimaryPushButton,
-    StrongBodyLabel,
     IconWidget,
-    BodyLabel,
 )
 
-from app.widgets.searchable_editable_combobox import SearchableEditableComboBox
-from app.utils.design_tokens import CardStyles, ItemStyles, Colors, Sizes
-from app.utils.utils import get_icon, get_unified_font
 from app.constants import (
     PROVIDER_ICONS,
-    PROVIDER_MODELS,
-    FREE_PROVIDERS,
 )
+from app.utils.design_tokens import Colors
+from app.utils.utils import get_icon, get_unified_font
 
 
 def _is_text_chat_model(model_id: str) -> bool:

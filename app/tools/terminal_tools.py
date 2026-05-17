@@ -9,7 +9,9 @@
 提供同步和后台两种执行模式。
 """
 import subprocess
+import sys
 import threading
+import time
 import uuid
 from pathlib import Path
 from typing import Callable, Optional

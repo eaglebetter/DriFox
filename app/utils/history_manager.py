@@ -8,21 +8,19 @@
 - 损坏隔离
 - 增量更新
 """
-
-import orjson as json
-import uuid
+import os
 import re
+import uuid
+import orjson as json
+
 from datetime import datetime
 from typing import List, Dict, Optional
-from pathlib import Path
-
-from loguru import logger
 from PyQt5.QtCore import QTimer
+from loguru import logger
 
 from app.core.message_content import consolidate_messages, content_to_text
 from app.core.store import SessionStore
-from app.utils.utils import get_app_data_dir, resource_path, serialize_for_json, deserialize_from_json
-
+from app.utils.utils import get_app_data_dir, serialize_for_json, deserialize_from_json
 
 # 预编译文件名清理正则
 _SANITIZE_FILENAME_PATTERN = re.compile(r'[<>:"/\\|?*]')

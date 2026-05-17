@@ -11,6 +11,8 @@
 - JSON 序列化/反序列化
 """
 import asyncio  # 用于 AsyncUpdateChecker
+import os
+import sys
 
 import httpx
 import orjson as json

@@ -4,7 +4,6 @@
 所有 UI 组件应引用此模块以保持视觉一致性
 """
 
-from enum import Enum
 from PyQt5.QtCore import QSize
 
 

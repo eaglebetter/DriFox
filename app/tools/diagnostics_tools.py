@@ -113,7 +113,7 @@ class DiagnosticsTools:
 
         if lang == "python":
             # 优先使用 pyright Python 模块
-            if HAS_PYRIGHT_MODULE:
+            if _HAS_PYRIGHT:
                 rc, out = self._run_pyright_module(abs_path)
                 if rc != -1:
                     parsed = self._parse_pyright_json(out)

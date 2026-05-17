@@ -6,25 +6,21 @@
 3. 关键文档 - 列表 + 拖拽添加
 """
 import os
-from PyQt5.QtCore import pyqtSignal, Qt, QSize, QTimer
+
+from PyQt5.QtCore import pyqtSignal, Qt
+from PyQt5.QtGui import QDropEvent, QDragEnterEvent, QDragMoveEvent
 from PyQt5.QtWidgets import (
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
     QListWidgetItem,
     QFileDialog,
-    QMenu,
-    QAction,
-    QTextEdit,
     QSizePolicy,
 )
-from PyQt5.QtGui import QDropEvent, QDragEnterEvent, QDragMoveEvent
-from loguru import logger
 from qfluentwidgets import (
     BodyLabel,
     LineEdit,
     PrimaryPushButton,
-    PushButton,
     SwitchButton,
     FluentIcon,
     TransparentToolButton,
@@ -32,10 +28,8 @@ from qfluentwidgets import (
     SegmentedWidget,
     TextEdit,
 )
-from qfluentwidgets.components.widgets.card_widget import CardSeparator
 
 from app.utils.utils import get_font_family_css
-
 
 # Tab 标识
 TAB_ENTRY_MEMORIES = "entries"

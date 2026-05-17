@@ -5,13 +5,13 @@ Git Diff 差异对比模块
 提供生成 HTML diff 报告和在 PyQt WebEngine 中显示的功能
 样式 100% 复刻 GitHub 网页合并差异审核界面
 """
-
 import orjson as json
 import difflib
 import re
-from pathlib import Path
-from typing import List, Dict, Optional
+
 from datetime import datetime
+from pathlib import Path
+from typing import List, Dict
 
 from loguru import logger
 

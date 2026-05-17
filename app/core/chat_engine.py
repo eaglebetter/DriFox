@@ -2,7 +2,7 @@
 """
 聊天引擎模块 - 处理 LLM 对话的核心逻辑
 """
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Callable, Any
 
 from loguru import logger
 
