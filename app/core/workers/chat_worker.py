@@ -824,7 +824,10 @@ class OpenAIChatWorker(QThread):
                 for msg in messages:
                     if msg.get("role") == "assistant":
                         if msg.get("tool_calls"):
-                            msg["tool_calls"] = []
+                            msg.pop("tool_calls", None)
+                            # 确保 content 不为 None，避免 API 报 "content or tool_calls must be set"
+                            if msg.get("content") is None:
+                                msg["content"] = ""
                             modified = True
                             logger.info("[ToolCall修复] 已移除中断时的 tool_calls")
                 return messages, modified
@@ -874,6 +877,9 @@ class OpenAIChatWorker(QThread):
             else:
                 # 所有 tool_call 都没有对应结果，移除 tool_calls 字段
                 fixed_msg.pop("tool_calls", None)
+                # 确保 content 不为 None，避免 API 报 "content or tool_calls must be set"
+                if fixed_msg.get("content") is None:
+                    fixed_msg["content"] = ""
                 logger.info("[ToolCall修复] 所有 tool_call 均无对应结果，已移除 tool_calls 字段")
 
             fixed_messages.append(fixed_msg)
