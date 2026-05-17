@@ -715,7 +715,20 @@ TOOL_SCHEMAS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "todos": {"type": "array", "description": "待办列表"},
+                    "todos": {
+                        "type": "array",
+                        "description": "待办列表",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": {"type": "string", "description": "序号"},
+                                "content": {"type": "string", "description": "待办事项内容"},
+                                "status": {"type": "string", "description": "状态: pending/in_progress/completed"},
+                                "priority": {"type": "string", "description": "优先级: high/medium/low"},
+                            },
+                            "required": ["content"],
+                        },
+                    },
                 },
                 "required": ["todos"],
             },
