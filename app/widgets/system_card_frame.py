@@ -10,7 +10,7 @@ SystemCardFrame — QFrame 基类 + 标准头部布局 + 固定边框
 
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea, QFrame,
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea, QFrame, QLineEdit,
 )
 from qfluentwidgets import (
     StrongBodyLabel, TransparentToolButton, FluentIcon, PrimaryToolButton)
@@ -67,6 +67,11 @@ class SystemCardFrame(QFrame):
         self._header_layout.addLayout(self._tab_buttons_container)
 
         self._header_layout.addStretch()
+
+        # 搜索框容器（默认隐藏）
+        self._search_container = QHBoxLayout()
+        self._search_container.setSpacing(0)
+        self._header_layout.addLayout(self._search_container)
 
         # 额外按钮容器
         self._extra_buttons_container = QHBoxLayout()
@@ -159,6 +164,35 @@ class SystemCardFrame(QFrame):
         else:
             self._count_label.setText("")
         self._count_label.setVisible(count > 0 or (limit and limit > 0))
+
+    def set_search_handler(self, placeholder: str, callback):
+        """设置头部搜索框（在标签按钮右侧、额外按钮左侧）
+        placeholder: 占位文本
+        callback(text): 文本变化回调
+        """
+        self._search_input = QLineEdit(self)
+        self._search_input.setPlaceholderText(placeholder)
+        self._search_input.setFixedWidth(160)
+        self._search_input.setFixedHeight(24)
+        self._search_input.setStyleSheet("""
+            QLineEdit {
+                background: rgba(255,255,255,0.08);
+                border: 1px solid rgba(255,255,255,0.15);
+                border-radius: 4px;
+                color: rgba(255,255,255,0.8);
+                padding: 2px 8px;
+                font-size: 11px;
+            }
+            QLineEdit:focus {
+                border: 1px solid rgba(102, 198, 255, 0.5);
+            }
+            QLineEdit::placeholder {
+                color: rgba(255,255,255,0.35);
+            }
+        """)
+        self._search_input.textChanged.connect(callback)
+        self._search_input.setVisible(False)
+        self._search_container.addWidget(self._search_input)
 
     def set_count_label(self, text: str):
         self._count_label.setText(f"({text})" if text else "")

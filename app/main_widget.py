@@ -903,6 +903,11 @@ class OpenAIChatToolWindow(ToolWindow):
         self._history_card.content_layout.addWidget(self._history_popup_card)
         self._history_card.setVisible(False)
         self._history_card.closed.connect(self._restore_after_system_close)
+        # 搜索框（历史会话和归档标签都显示）
+        self._history_card.set_search_handler(
+            "🔍 搜索会话...",
+            lambda text: self._history_popup_card.set_search_filter(text)
+        )
         layout.addWidget(self._history_card)
 
         # 记忆管理卡片 - 和历史会话卡片同位置
@@ -1616,8 +1621,22 @@ class OpenAIChatToolWindow(ToolWindow):
         else:
             self._hide_main_popups()  # 隐藏其他主面板
             self._history_card.show()
-            # 刷新数据
-            self._refresh_history_toggle_panel()
+            # 同步搜索框可见性（根据当前标签）
+            self._sync_search_box_visibility()
+            # 延迟刷新数据，让弹窗先显示出来再填充内容（提升流畅度）
+            QTimer.singleShot(0, self._refresh_history_toggle_panel)
+
+    def _sync_search_box_visibility(self):
+        """同步搜索框：两个标签页都显示搜索框"""
+        search_input = getattr(self._history_card, '_search_input', None)
+        if not search_input:
+            return
+        search_input.setVisible(True)
+        search_input.setFocus()
+
+        # 根据当前标签更新占位文本
+        current_tab = self._history_card._current_tab if hasattr(self._history_card, '_current_tab') else "history"
+        search_input.setPlaceholderText("🔍 搜索历史会话..." if current_tab == "history" else "🔍 搜索归档会话...")
 
     def _refresh_history_toggle_panel(self, is_archived: bool = False):
         """刷新历史面板数据"""
@@ -1696,7 +1715,15 @@ class OpenAIChatToolWindow(ToolWindow):
 
     def _on_history_tab_changed(self, tab_id: str):
         """处理历史/归档标签切换"""
+        self._sync_search_box_visibility()
+
+        # 切换标签时清空搜索
+        search_input = getattr(self._history_card, '_search_input', None)
+        if search_input:
+            search_input.clear()
+
         self._history_popup_card.switch_tab(tab_id)
+
         if tab_id == "archived":
             self._refresh_archived_sessions()
         else:
