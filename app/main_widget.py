@@ -4477,10 +4477,21 @@ class OpenAIChatToolWindow(ToolWindow):
         """工具参数流式更新 — 流式接收过程中，参数逐块解析完成后触发"""
         if not self._tool_floating_widget:
             return
-        args_str = json.dumps(partial_args).decode('utf-8') if isinstance(json.dumps(partial_args), bytes) else str(json.dumps(partial_args))
-        if len(args_str) > 80:
-            args_str = args_str[:80] + "..."
-        self._tool_floating_widget.update_progress(f"参数: {args_str}")
+        # 如果是内部进度消息（带 _preview_hint），显示友好文字
+        hint = partial_args.get("_preview_hint")
+        if hint:
+            self._tool_floating_widget.update_progress(hint)
+            return
+        # 过滤掉内部字段，只显示实际参数
+        display_args = {k: v for k, v in partial_args.items() if not k.startswith("_")}
+        if display_args:
+            args_str = json.dumps(display_args).decode('utf-8')
+            if len(args_str) > 80:
+                args_str = args_str[:80] + "..."
+            self._tool_floating_widget.update_progress(f"参数: {args_str}")
+        else:
+            # 全是内部字段，显示友好消息
+            self._tool_floating_widget.update_progress("正在准备参数...")
 
     def _on_tool_call_started(
             self, tool_call_id: str, tool_name: str, arguments: dict, round_id: str = None

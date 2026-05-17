@@ -101,6 +101,7 @@ class OpenAIChatWorker(QThread):
         # 等待完整参数的 tool_calls（用于处理超长 arguments 流式传输场景）
         self._waiting_tool_params: Dict[str, dict] = {}  # tool_call_id -> {buffer, attempt_count}
         self._max_param_retry_count = 10  # 最多重试10次（每收到一个 chunk 重试一次）
+        self._last_progress_len = 0  # 上一次推送长度进度时的字符数，用于超大参数流式进度
         self._last_compaction_state = {
             "active": False,
             "source": "worker",
@@ -1233,7 +1234,22 @@ class OpenAIChatWorker(QThread):
                                     }
                                 self._waiting_tool_params[tc_id]["attempt_count"] += 1
                         else:
-                            # 参数已超过 1000 字符，跳过逐块解析以节省开销
+                            # 参数已超过 1000 字符，跳过逐块 JSON 解析以节省开销
+                            # 但仍推送长度进度 + 原始参数预览片段，让 UI 显示接收进度
+                            if not getattr(self, '_last_progress_len', 0) or args_len - self._last_progress_len >= 500:
+                                self._last_progress_len = args_len
+                                # 取原始参数字符串前 50 字符作为预览（不解析 JSON，避免开销）
+                                raw_preview = buffer["function"]["arguments"][:50].replace('\n', ' ')
+                                if len(buffer["function"]["arguments"]) > 50:
+                                    raw_preview += "..."
+                                progress_args = {
+                                    "_status": "loading",
+                                    "_preview_hint": f"接收参数中 ({args_len} 字符): {raw_preview}",
+                                }
+                                self._emit_with_callback(
+                                    "tool_args_updated", self.tool_args_updated,
+                                    tc_id, tool_name, progress_args
+                                )
                             # 放入等待队列，等流结束后一次性解析
                             if tc_id not in self._waiting_tool_params:
                                 self._waiting_tool_params[tc_id] = {

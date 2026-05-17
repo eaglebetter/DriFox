@@ -218,11 +218,17 @@ class ToolFloatingWidget(SimpleCardWidget):
 
         args_preview = ""
         if args:
-            args_str = json.dumps(args).decode('utf-8')
-            if len(args_str) > 60:
-                args_preview = f"{args_str[:60]}..."
+            # 过滤掉内部字段（_status、_preview_hint 等），只显示实际参数
+            display_args = {k: v for k, v in args.items() if not k.startswith("_")}
+            if display_args:
+                args_str = json.dumps(display_args).decode('utf-8')
+                if len(args_str) > 60:
+                    args_preview = f"{args_str[:60]}..."
+                else:
+                    args_preview = f"{args_str}"
             else:
-                args_preview = f"{args_str}"
+                # 只有内部字段（预览阶段），显示友好的等待消息
+                args_preview = "正在准备参数..."
 
         self.task_label.setText(f"⏳ {args_preview}")
 
