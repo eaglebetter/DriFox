@@ -301,8 +301,6 @@ class ToolExecutor:
         "skill": ["name"],
         "list_skills": [],
         "question": ["question"],
-        "list_webhooks": [],
-        "trigger_webhook": ["endpoint"],
     }
 
     def execute(self, tool_name: str, args: dict, cancelled_ref: list = None) -> ToolResult:
