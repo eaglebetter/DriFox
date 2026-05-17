@@ -36,7 +36,7 @@ to_remove = [
     "PyQt5/Qt5/qml/QtQuick.2",
     "PyQt5/Qt5/qml/QtQuick3D",
     "watchfiles",
-    "PyQt5/Qt5/bin/opengl32sw.dll",
+    # "PyQt5/Qt5/bin/opengl32sw.dll",
     "PyQt5/Qt5/bin/libGLESv2.dll",
     "PyQt5/Qt5/bin/d3dcompiler_47.dll",
     "PyQt5/Qt5/bin/Qt5Quick3D.dll",

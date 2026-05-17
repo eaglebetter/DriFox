@@ -171,6 +171,24 @@ class ToolFloatingWidget(SimpleCardWidget):
         self._update_style(False)
         self.cancelled.emit()
 
+    def set_suppress_visible(self, suppressed: bool):
+        """设置压制状态：系统卡片打开时压制工具卡片显示"""
+        old_suppressed = self._suppress_visible
+        self._suppress_visible = suppressed
+        if suppressed and not old_suppressed:
+            # 开始压制：如果卡片当前可见或有活跃任务，标记为待恢复
+            # 这覆盖两种场景：
+            #   1. 工具已完成且卡片正显示完成状态 → isVisible()=True
+            #   2. 工具正在执行中 → _is_running=True
+            if self.isVisible() or self._is_running:
+                self._needs_show_after_unsuppress = True
+        elif old_suppressed and not suppressed:
+            # 压制解除：如果有活跃任务或已完成任务等待显示，恢复显示
+            if self._needs_show_after_unsuppress or self._is_running:
+                self.setVisible(True)
+                self.raise_()
+                self._needs_show_after_unsuppress = False
+
     def set_process(self, process):
         """设置当前进程以便中止"""
         self._current_process = process
@@ -205,8 +223,12 @@ class ToolFloatingWidget(SimpleCardWidget):
         self.cancel_btn.setText("中止")
         self.cancel_btn.setVisible(True)
 
-        self.setVisible(True)  # 正常流程直接显示，压制逻辑在 start_tool 之前处理
-        self.raise_()
+        if self._suppress_visible:
+            # 压制状态下记录任务但不显示
+            self.setVisible(False)
+        else:
+            self.setVisible(True)
+            self.raise_()
         QApplication.processEvents()
 
     def _append_progress(self, text: str):
@@ -253,12 +275,12 @@ class ToolFloatingWidget(SimpleCardWidget):
         # 工具完成时根据压制状态决定是否显示
         if self._suppress_visible:
             # 压制状态下先隐藏，等系统卡片关闭后由 set_suppress_visible(False) 显示
+            self._needs_show_after_unsuppress = True
             self.setVisible(False)
         else:
             self.setVisible(True)
-        self.raise_()
-
-        QTimer.singleShot(2000, self.hide)
+            self.raise_()
+            QTimer.singleShot(2000, self.hide)
 
     def is_cancelled(self) -> bool:
         """检查是否已被中止"""
