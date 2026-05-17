@@ -186,7 +186,7 @@ class TabStyles:
             QLabel {
                 color: rgba(255, 255, 255, 0.5);
                 font-size: 11px;
-                padding: 3px 8px;
+                padding: 3px 3px;
                 border-radius: 4px;
                 cursor: pointer;
             }

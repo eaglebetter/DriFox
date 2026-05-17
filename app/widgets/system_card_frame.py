@@ -63,7 +63,7 @@ class SystemCardFrame(QFrame):
 
         # 标签按钮容器
         self._tab_buttons_container = QHBoxLayout()
-        self._tab_buttons_container.setSpacing(4)
+        self._tab_buttons_container.setSpacing(1)
         self._header_layout.addLayout(self._tab_buttons_container)
 
         self._header_layout.addStretch()
@@ -172,7 +172,8 @@ class SystemCardFrame(QFrame):
         """
         self._search_input = QLineEdit(self)
         self._search_input.setPlaceholderText(placeholder)
-        self._search_input.setFixedWidth(160)
+        self._search_input.setMaximumWidth(160)
+        self._search_input.setMinimumWidth(100)
         self._search_input.setFixedHeight(24)
         self._search_input.setStyleSheet("""
             QLineEdit {

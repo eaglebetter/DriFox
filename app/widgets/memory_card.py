@@ -25,7 +25,6 @@ from qfluentwidgets import (
     FluentIcon,
     TransparentToolButton,
     ListWidget,
-    SegmentedWidget,
     TextEdit,
 )
 
@@ -446,6 +445,7 @@ class MemoryCardContent(QWidget):
         self._memory_manager = memory_manager
         self._current_project = "默认项目"
         self._current_tab = TAB_ENTRY_MEMORIES
+        self._search_filter = ""  # 搜索过滤文本
         self._init_ui()
 
     def _get_memory_manager(self):
@@ -503,15 +503,6 @@ class MemoryCardContent(QWidget):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(6)
 
-        # Tab 切换
-        self.tab_widget = SegmentedWidget(self)
-        self.tab_widget.addItem(TAB_ENTRY_MEMORIES, "条目记忆")
-        self.tab_widget.addItem(TAB_PROJECT_NOTES, "项目笔记")
-        self.tab_widget.addItem(TAB_KEY_DOCUMENTS, "关键文档")
-        self.tab_widget.setCurrentItem(TAB_ENTRY_MEMORIES)
-        self.tab_widget.currentItemChanged.connect(self._on_tab_changed)
-        main_layout.addWidget(self.tab_widget)
-
         # 内容区域容器
         self.content_stack = QWidget(self)
         stack_layout = QVBoxLayout(self.content_stack)
@@ -535,28 +526,11 @@ class MemoryCardContent(QWidget):
         main_layout.addWidget(self.content_stack, 1)
 
     def _create_entries_tab(self) -> QWidget:
-        """创建条目记忆 Tab"""
+        """创建条目记忆 Tab（搜索移到了头部）"""
         widget = QWidget()
         layout = QVBoxLayout(widget)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
-
-        # 搜索框
-        self.search_edit = LineEdit(self)
-        self.search_edit.setFixedHeight(28)
-        self.search_edit.setPlaceholderText("🔍 搜索条目记忆...")
-        self.search_edit.setStyleSheet(f"""
-            QLineEdit {{
-                background-color: rgba(37, 37, 38, 180);
-                border: 1px solid rgba(62, 62, 66, 150);
-                color: #e0e0e0;
-                padding: 4px 8px;
-                border-radius: 4px;
-                {get_font_family_css()} font-size: 12px;
-            }}
-        """)
-        self.search_edit.textChanged.connect(self._on_search_changed)
-        layout.addWidget(self.search_edit)
 
         # 记忆列表
         self.entries_list = ListWidget(self)
@@ -793,14 +767,14 @@ class MemoryCardContent(QWidget):
 
     # ==================== 条目记忆操作 ====================
 
-    def _load_entries(self, query: str = ""):
-        """加载条目记忆"""
+    def _load_entries(self):
+        """加载条目记忆（使用 self._search_filter 过滤）"""
         self.entries_list.clear()
         memory_mgr = self._get_memory_manager()
         if not memory_mgr:
             return
 
-        entries = memory_mgr.get_entry_memories(query)
+        entries = memory_mgr.get_entry_memories(self._search_filter)
         for entry in entries:
             memory_id = entry.get("id", "")
             content = entry.get("content", "")
@@ -833,9 +807,36 @@ class MemoryCardContent(QWidget):
         height = max(48, int(20 * lines) + 20)
         return QSize(width, height)
 
-    def _on_search_changed(self, text: str):
-        """搜索变化"""
-        self._load_entries(text)
+    def set_search_filter(self, text: str):
+        """设置搜索过滤文本"""
+        self._search_filter = text.strip()
+        if self._current_tab == TAB_ENTRY_MEMORIES:
+            self._load_entries()
+        elif self._current_tab == TAB_PROJECT_NOTES:
+            self._search_in_notes()
+        elif self._current_tab == TAB_KEY_DOCUMENTS:
+            self._load_key_documents()
+
+    def _search_in_notes(self):
+        """在笔记编辑器内搜索文本"""
+        if not self._search_filter:
+            return
+        from PyQt5.QtGui import QTextCursor
+        # 查找文本并选中
+        cursor = self.notes_editor.textCursor()
+        cursor.movePosition(QTextCursor.Start)
+        self.notes_editor.setTextCursor(cursor)
+        found = self.notes_editor.find(self._search_filter)
+        if not found:
+            # 未找到时重置光标位置
+            cursor.movePosition(QTextCursor.Start)
+            self.notes_editor.setTextCursor(cursor)
+
+    def switch_tab(self, tab_id: str):
+        """切换标签（由头部标签按钮触发）"""
+        if self._current_tab != tab_id:
+            self._current_tab = tab_id
+            self._on_tab_changed(tab_id)
 
     def _add_entry(self):
         """添加条目"""
@@ -848,14 +849,14 @@ class MemoryCardContent(QWidget):
             memory_mgr.add_entry_memory(content)
 
         self.entry_input.clear()
-        self._load_entries(self.search_edit.text())
+        self._load_entries()
 
     def _delete_entry(self, memory_id: str):
         """删除条目"""
         memory_mgr = self._get_memory_manager()
         if memory_mgr:
             memory_mgr.delete_entry_memory(memory_id)
-        self._load_entries(self.search_edit.text())
+        self._load_entries()
 
     def _toggle_entry(self, memory_id: str, enabled: bool):
         """切换条目"""
@@ -894,7 +895,7 @@ class MemoryCardContent(QWidget):
     # ==================== 关键文档操作 ====================
 
     def _load_key_documents(self):
-        """加载关键文档"""
+        """加载关键文档（支持搜索过滤）"""
         self.docs_list.clear()
         memory_mgr = self._get_memory_manager()
         if not memory_mgr:
@@ -906,6 +907,12 @@ class MemoryCardContent(QWidget):
             file_name = doc.get("file_name", "")
             file_path = doc.get("file_path", "")
             added_by = doc.get("added_by", "manual")
+
+            # 搜索过滤（按文件名/路径匹配，忽略大小写）
+            if self._search_filter:
+                keyword = self._search_filter.lower()
+                if keyword not in file_name.lower() and keyword not in file_path.lower():
+                    continue
 
             item = QListWidgetItem()
             item.setSizeHint(self._get_doc_item_size())

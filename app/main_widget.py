@@ -912,7 +912,19 @@ class OpenAIChatToolWindow(ToolWindow):
 
         # 记忆管理卡片 - 和历史会话卡片同位置
         self._memory_card = BaseSettingsCard("记忆管理", "🧠", self)
-        self._memory_card.setFixedHeight(400)
+        self._memory_card.setFixedHeight(350)
+        # 设置记忆管理标签（条目记忆/项目笔记/关键文档）
+        self._memory_card.setup_tabs([
+            ("entries", "条目记忆"),
+            ("notes", "项目笔记"),
+            ("docs", "关键文档"),
+        ], "entries")
+        self._memory_card.tabChanged.connect(self._on_memory_tab_changed)
+        # 搜索框（三个tab都显示）
+        self._memory_card.set_search_handler(
+            "🔍 搜索条目记忆...",
+            lambda text: self._memory_card_popup.set_search_filter(text)
+        )
         self._memory_card_popup = MemoryCardContent(self.backend.memory_manager, self)
         self._memory_card_popup.memorySaved.connect(self._on_memory_card_saved)
         self._memory_card_popup.set_project(self._current_project)  # 初始化时设置当前项目
@@ -5274,8 +5286,7 @@ class OpenAIChatToolWindow(ToolWindow):
         if hasattr(self, '_memory_card_popup') and self._memory_card_popup:
             self._memory_card_popup.set_project(project)
             # 自动切换到项目笔记tab
-            self._memory_card_popup.tab_widget.setCurrentItem(TAB_PROJECT_NOTES)
-            self._memory_card_popup._on_tab_changed(TAB_PROJECT_NOTES)
+            self._memory_card_popup.switch_tab(TAB_PROJECT_NOTES)
         # 刷新历史面板
         self._history_popup_card.refreshRequested.emit()
         # 自动弹出长期记忆卡片
@@ -5328,6 +5339,19 @@ class OpenAIChatToolWindow(ToolWindow):
                 position=InfoBarPosition.BOTTOM
             )
 
+    def _on_memory_tab_changed(self, tab_id: str):
+        """处理记忆管理标签切换"""
+        # 清空搜索
+        search_input = getattr(self._memory_card, '_search_input', None)
+        if search_input:
+            search_input.clear()
+        # 更新占位文本
+        placeholders = {"entries": "🔍 搜索条目记忆...", "notes": "🔍 搜索项目笔记...", "docs": "🔍 搜索关键文档..."}
+        if search_input:
+            search_input.setPlaceholderText(placeholders.get(tab_id, "🔍 搜索..."))
+        # 切换内容
+        self._memory_card_popup.switch_tab(tab_id)
+
     def _show_soul_memory(self):
         """切换记忆管理卡片的显示"""
         self._toggle_memory_card()
@@ -5340,6 +5364,11 @@ class OpenAIChatToolWindow(ToolWindow):
         else:
             self._hide_main_popups()  # 隐藏其他主面板
             self._memory_card.show()
+            # 同步搜索框可见性
+            search_input = getattr(self._memory_card, '_search_input', None)
+            if search_input:
+                search_input.setVisible(True)
+                search_input.setFocus()
             # 从数据库刷新记忆
             self._memory_card_popup.refresh_from_db()
 
