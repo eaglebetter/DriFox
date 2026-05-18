@@ -33,7 +33,6 @@ from app.utils.config import Settings
 from app.utils.utils import get_icon, get_unified_font
 from app.utils.design_tokens import (
     ButtonStyles,
-    SwitchStyles,
     ComboBoxStyles,
     FONT_SIZE_OPTIONS,
     THEME_STYLE_OPTIONS,
@@ -266,7 +265,7 @@ class LLMSettingsCard(SystemCardFrame):
                         parent._on_config_changed()
 
         self.uiFontSizeCard = AppearanceComboCard(
-            FluentIcon.FONT,
+            get_icon("字体大小"),
             "界面字号",
             "统一调整界面与对话内容字号",
             self.cfg,
@@ -275,7 +274,7 @@ class LLMSettingsCard(SystemCardFrame):
             self,
         )
         self.uiThemeStyleCard = AppearanceComboCard(
-            FluentIcon.SETTING,
+            get_icon("主题风格"),
             "主题风格",
             "选择一套深色界面卡片配色",
             self.cfg,

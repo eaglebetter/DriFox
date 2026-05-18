@@ -1337,6 +1337,9 @@ class CodeWebViewer(QWebEngineView):
         except Exception:
             pass
 
+        self._viewer_font_family = font_family
+        self._viewer_font_css = f"{get_font_family_css()} font-family: {font_family}, sans-serif; font-size: {scale_font_size(14)}px;"
+
         tag_css = []
         for act, col in ACTION_COLOR_MAP.items():
             tag_css.append(
@@ -1417,7 +1420,7 @@ class CodeWebViewer(QWebEngineView):
                 body {{
                     background: var(--bg) !important;
                     color: var(--text);
-                    font-family: "{font_family}", "Segoe UI", sans-serif; font-size: {body_font_size}px; line-height: 1.5;
+                    {self._viewer_font_css}
                     margin: 0; 
                     padding: 6px 14px; 
                     max-height: {self.MAX_HEIGHT}px;
@@ -2122,6 +2125,9 @@ class CodeWebViewer(QWebEngineView):
         reasoning 现在作为 <think> 标签嵌入在 raw_md 中（由 content_to_markdown 生成），
         与文本、工具结果按实际顺序交错排列，不再需要单独的 _reasoning_blocks 逻辑。
         """
+        # 刷新字体（响应系统字体设置变化）
+        self._refresh_viewer_font_css()
+        
         if not self._streaming:
             # 非流式模式：直接渲染，所有 <think> 都是已完成的
             return _render_markdown_to_html_cached(
@@ -2178,6 +2184,22 @@ class CodeWebViewer(QWebEngineView):
             return
         self._render_timer.start(interval)
 
+    def _refresh_viewer_font(self):
+        """刷新 viewer 字体样式，响应系统字体设置变化"""
+        if not hasattr(self, '_viewer_font_family'):
+            return
+        self._refresh_viewer_font_css()
+        self._schedule_render(immediate=True)
+
+    def _refresh_viewer_font_css(self):
+        """刷新字体 CSS 变量，供 render 使用"""
+        if not hasattr(self, '_viewer_font_family'):
+            return
+        font_family = self._viewer_font_family
+        font_css = get_font_family_css()
+        body_font_size = scale_font_size(14)
+        self._viewer_font_css = f"{font_css} font-family: {font_family}, sans-serif; font-size: {body_font_size}px;"
+
     def _perform_update(self):
         try:
             if not self.page():
@@ -2201,6 +2223,9 @@ class CodeWebViewer(QWebEngineView):
                     self._height_report_pending = True
                     self._resize_timer.start()
                 return
+
+            # 刷新字体 CSS var
+            self._refresh_viewer_font_css()
 
             _tr0 = _t.time()
             html_content = self._render_markdown_to_html(self._markdown_text)
@@ -2608,6 +2633,9 @@ class MessageCard(SimpleCardWidget):
                 }}
                 """
             )
+        # 刷新富文本视图字体
+        if hasattr(self, 'viewer') and self.viewer and hasattr(self.viewer, '_refresh_viewer_font'):
+            self.viewer._refresh_viewer_font()
 
     def _build_avatar_style(self):
         font_css = get_font_family_css()

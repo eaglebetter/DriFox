@@ -2045,6 +2045,11 @@ class OpenAIChatToolWindow(ToolWindow):
                 card.refresh_style()
         if self._settings_popup and hasattr(self._settings_popup, "refresh_style"):
             self._settings_popup.refresh_style()
+        # 刷新 AutoLoop 卡片主题
+        if self._auto_loop_config_card and hasattr(self._auto_loop_config_card, '_refresh_theme_style'):
+            self._auto_loop_config_card._refresh_theme_style()
+        if self._auto_loop_running_card and hasattr(self._auto_loop_running_card, '_refresh_theme_style'):
+            self._auto_loop_running_card._refresh_theme_style()
         # 刷新消息卡片主题
         for card in self.findChildren(MessageCard):
             if hasattr(card, "refresh_theme"):
