@@ -1495,11 +1495,15 @@ class OpenAIChatToolWindow(ToolWindow):
                 self._settings_popup.mcpListCard.update_server(name, server_data)
             else:
                 self._settings_popup.mcpListCard.add_server(server_data)
+            # 确保连接状态同步
+            QTimer.singleShot(500, self._settings_popup.mcpListCard.refresh_connections)
 
     def _on_mcp_edit_closed(self):
         """MCP 编辑关闭回调"""
         self._mcp_edit_card.hide()
         self._settings_popup.show()
+        if hasattr(self._settings_popup, 'mcpListCard'):
+            self._settings_popup.mcpListCard.refresh_connections()
         self._restore_after_system_close()
 
     def _on_hook_edit_card_closed(self):

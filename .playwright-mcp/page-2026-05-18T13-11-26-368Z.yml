@@ -1,0 +1,410 @@
+- generic [active] [ref=e1]:
+  - link "欢迎进入 百度新闻——海量中文资讯平台,盲人用户进入智能盲道请按快捷键Ctrl+Alt+R；阅读详细操作说明请按快捷键Ctrl+Alt+问号键。":
+    - /url: javascript:void(0)
+  - generic [ref=e2]:
+    - generic [ref=e3]:
+      - list:
+        - listitem [ref=e4]:
+          - link "注册" [ref=e5] [cursor=pointer]:
+            - /url: http://passport.baidu.com/v2/?reg&tpl=xw&regType=1&u=https%3A%2F%2Fnews.baidu.com%2F
+        - listitem [ref=e6]:
+          - link "登录" [ref=e7] [cursor=pointer]:
+            - /url: http://passport.baidu.com/v2/?login&tpl=xw&u=https%3A%2F%2Fnews.baidu.com%2F
+        - listitem [ref=e8]:
+          - link "百度首页" [ref=e9] [cursor=pointer]:
+            - /url: http://www.baidu.com
+    - list [ref=e10]:
+      - listitem [ref=e11]:
+        - link "网页" [ref=e12] [cursor=pointer]:
+          - /url: https://www.baidu.com/
+      - listitem [ref=e13]: 新闻
+      - listitem [ref=e14]:
+        - link "贴吧" [ref=e15] [cursor=pointer]:
+          - /url: http://tieba.baidu.com/
+      - listitem [ref=e16]:
+        - link "知道" [ref=e17] [cursor=pointer]:
+          - /url: https://zhidao.baidu.com/
+      - listitem [ref=e18]:
+        - link "音乐" [ref=e19] [cursor=pointer]:
+          - /url: https://music.taihe.com
+      - listitem [ref=e20]:
+        - link "图片" [ref=e21] [cursor=pointer]:
+          - /url: http://image.baidu.com/
+      - listitem [ref=e22]:
+        - link "视频" [ref=e23] [cursor=pointer]:
+          - /url: http://v.baidu.com/
+      - listitem [ref=e24]:
+        - link "地图" [ref=e25] [cursor=pointer]:
+          - /url: http://map.baidu.com/
+      - listitem [ref=e26]:
+        - link "文库" [ref=e27] [cursor=pointer]:
+          - /url: http://wenku.baidu.com/
+  - table [ref=e31]:
+    - rowgroup [ref=e32]:
+      - row "百度新闻 百度一下 帮助" [ref=e33]:
+        - cell "百度新闻" [ref=e34]:
+          - link "百度新闻" [ref=e36] [cursor=pointer]:
+            - /url: http://news.baidu.com/
+            - img "百度新闻" [ref=e37]
+        - cell "百度一下 帮助" [ref=e38]:
+          - table [ref=e39]:
+            - rowgroup [ref=e40]:
+              - row "百度一下 帮助" [ref=e41]:
+                - cell "百度一下" [ref=e42]:
+                  - generic [ref=e43]:
+                    - textbox [ref=e45]
+                    - button "百度一下" [ref=e47] [cursor=pointer]
+                - cell "帮助" [ref=e48]:
+                  - link "帮助" [ref=e49] [cursor=pointer]:
+                    - /url: //help.baidu.com
+  - generic [ref=e50]:
+    - generic [ref=e51]:
+      - generic [ref=e53]:
+        - list [ref=e55]:
+          - listitem [ref=e56]:
+            - link "热点要闻" [ref=e57] [cursor=pointer]:
+              - /url: javascript:void(0);
+        - generic [ref=e59]:
+          - list [ref=e61]:
+            - listitem [ref=e62]:
+              - strong [ref=e64]:
+                - link "学习新语｜国际博物馆日，听总书记讲文物故事" [ref=e65] [cursor=pointer]:
+                  - /url: http://baijiahao.baidu.com/s?id=1865448524812486037
+            - listitem [ref=e66]:
+              - strong [ref=e68]:
+                - link "文脉华章｜泱泱中华 文脉不息" [ref=e69] [cursor=pointer]:
+                  - /url: http://baijiahao.baidu.com/s?id=1865493315402048783
+                - link "微视频｜在文化遗存前 总书记驻足凝视" [ref=e70] [cursor=pointer]:
+                  - /url: http://baijiahao.baidu.com/s?id=1865427258761865536
+                - link "新华社评论员：树立正确的战略认知" [ref=e71] [cursor=pointer]:
+                  - /url: http://baijiahao.baidu.com/s?id=1865452773519466862
+            - listitem [ref=e72]:
+              - strong [ref=e74]:
+                - link "文脉华章|草原文脉汇青城 多元文明耀中华——主会场解码“美美与共”的中国叙事" [ref=e75] [cursor=pointer]:
+                  - /url: http://baijiahao.baidu.com/s?id=1865530602847796080
+            - listitem [ref=e76]:
+              - strong [ref=e78]:
+                - link "我国加力优化离境退税措施扩大入境消费" [ref=e79] [cursor=pointer]:
+                  - /url: https://h.xinhuaxmt.com/vh512/share/13106229?docid=13106229&newstype=1001&d=13526a6
+            - listitem [ref=e80]:
+              - strong [ref=e82]:
+                - link "一批水利重点工程有序推进" [ref=e83] [cursor=pointer]:
+                  - /url: http://baijiahao.baidu.com/s?id=1865530488820012846
+            - listitem [ref=e84]:
+              - strong [ref=e86]:
+                - link "黄土之下，藏着多少文明密码？" [ref=e87] [cursor=pointer]:
+                  - /url: http://baijiahao.baidu.com/s?id=1865416500808299244
+          - list [ref=e88]:
+            - listitem [ref=e89]:
+              - link "从“看乡村”到“玩乡村” 激活乡村发展的澎湃动能" [ref=e91] [cursor=pointer]:
+                - /url: http://baijiahao.baidu.com/s?id=1865530856566286272
+            - listitem [ref=e92]:
+              - link "全球瞭望" [ref=e94] [cursor=pointer]:
+                - /url: https://www.news.cn/world/20260518/0ce611d61a8f486f987b3201f9a92549/c.html
+              - link "中俄博览会展风采 河北南皮五金“智造”闯海外" [ref=e95] [cursor=pointer]:
+                - /url: https://hebei.cri.cn/n/20260518/b98118cd-383e-ffb6-546d-8f7ab4766c10.html
+            - listitem [ref=e96]:
+              - link "外交部：日方最应当做的是尽早纠正涉台错误言行" [ref=e98] [cursor=pointer]:
+                - /url: http://baijiahao.baidu.com/s?id=1865511630722375806
+            - listitem [ref=e99]:
+              - link "大变样！藏草+葡萄 山南荒滩变身生态富民宝地" [ref=e101] [cursor=pointer]:
+                - /url: http://baijiahao.baidu.com/s?id=1865530359258650194
+            - listitem [ref=e102]:
+              - link "专题｜2026年中国网络文明大会" [ref=e104] [cursor=pointer]:
+                - /url: https://mbd.baidu.com/newspage/data/mdpage?tag=8&id=18378
+              - link "全国防灾减灾日" [ref=e105] [cursor=pointer]:
+                - /url: https://china.qianlong.com/zt/qgfzjzr20260512/index.shtml
+            - listitem [ref=e106]:
+              - link "今日辟谣" [ref=e108] [cursor=pointer]:
+                - /url: http://baijiahao.baidu.com/s?id=1865523990924066729
+              - link "北京网站辟谣平台" [ref=e109] [cursor=pointer]:
+                - /url: http://www.bjjubao.org.cn/node_1606.html
+              - link "互联网联合辟谣平台" [ref=e110] [cursor=pointer]:
+                - /url: https://www.piyao.org.cn/
+          - list [ref=e111]:
+            - listitem [ref=e112]:
+              - link "外交部介绍俄罗斯总统普京访华安排" [ref=e114] [cursor=pointer]:
+                - /url: http://flp.baidu.com/feedland/video/?entry=default&id=15222975296580388550
+            - listitem [ref=e115]:
+              - link "中国人均GDP已超1万美元" [ref=e117] [cursor=pointer]:
+                - /url: https://baijiahao.baidu.com/s?id=1865496786380525983
+            - listitem [ref=e118]:
+              - link "武汉票价最贵火车今日发车：20999元起，17天新疆全景游，吃住行游一价全包" [ref=e120] [cursor=pointer]:
+                - /url: https://mbd.baidu.com/newspage/data/videolanding?nid=sv_3969895528566538506
+      - generic [ref=e121]:
+        - generic [ref=e122]:
+          - generic [ref=e123]:
+            - generic:
+              - link [ref=e124] [cursor=pointer]:
+                - /url: javascript:void(0);
+              - link [ref=e126] [cursor=pointer]:
+                - /url: javascript:void(0);
+            - link [ref=e129] [cursor=pointer]:
+              - /url: http://baijiahao.baidu.com/s?id=1865491863934602991
+              - img [ref=e130]
+            - generic [ref=e132]:
+              - link "8" [ref=e133] [cursor=pointer]:
+                - /url: javascript:void(0);
+              - link "7" [ref=e134] [cursor=pointer]:
+                - /url: javascript:void(0);
+              - link "6" [ref=e135] [cursor=pointer]:
+                - /url: javascript:void(0);
+              - link "5" [ref=e136] [cursor=pointer]:
+                - /url: javascript:void(0);
+              - link "4" [ref=e137] [cursor=pointer]:
+                - /url: javascript:void(0);
+              - link "3" [ref=e138] [cursor=pointer]:
+                - /url: javascript:void(0);
+              - link "2" [ref=e139] [cursor=pointer]:
+                - /url: javascript:void(0);
+              - link "1" [ref=e140] [cursor=pointer]:
+                - /url: javascript:void(0);
+            - link "四川广安万春桥瀑布" [ref=e142] [cursor=pointer]:
+              - /url: http://baijiahao.baidu.com/s?id=1865491863934602991
+              - strong [ref=e143]: 四川广安万春桥瀑布
+          - list [ref=e144]:
+            - link [ref=e145] [cursor=pointer]:
+              - /url: http://www.qstheory.cn/zt2020/llxjj/index.htm
+        - generic [ref=e148]:
+          - generic [ref=e149]:
+            - heading "热搜新闻词HOT WORDS" [level=3] [ref=e150]
+            - text: .
+          - list [ref=e152]:
+            - listitem [ref=e153]:
+              - link "“计划有变 准备夺冠！”" [ref=e154] [cursor=pointer]:
+                - /url: https://www.baidu.com/s?wd=%E2%80%9C%E8%AE%A1%E5%88%92%E6%9C%89%E5%8F%98%20%E5%87%86%E5%A4%87%E5%A4%BA%E5%86%A0%EF%BC%81%E2%80%9D
+            - listitem [ref=e155]:
+              - link "武汉票价最贵火车发车：20999元起" [ref=e156] [cursor=pointer]:
+                - /url: https://www.baidu.com/s?wd=%E6%AD%A6%E6%B1%89%E7%A5%A8%E4%BB%B7%E6%9C%80%E8%B4%B5%E7%81%AB%E8%BD%A6%E5%8F%91%E8%BD%A6%EF%BC%9A20999%E5%85%83%E8%B5%B7
+            - listitem [ref=e157]:
+              - link "中国“逐日工程”研究取得重大进展" [ref=e158] [cursor=pointer]:
+                - /url: https://www.baidu.com/s?wd=%E4%B8%AD%E5%9B%BD%E2%80%9C%E9%80%90%E6%97%A5%E5%B7%A5%E7%A8%8B%E2%80%9D%E7%A0%94%E7%A9%B6%E5%8F%96%E5%BE%97%E9%87%8D%E5%A4%A7%E8%BF%9B%E5%B1%95
+            - listitem [ref=e159]:
+              - link "洁丽雅已报警" [ref=e160] [cursor=pointer]:
+                - /url: https://www.baidu.com/s?wd=%E6%B4%81%E4%B8%BD%E9%9B%85%E5%B7%B2%E6%8A%A5%E8%AD%A6
+            - listitem [ref=e161]:
+              - link "长白头发不是因为老 是你太累了" [ref=e162] [cursor=pointer]:
+                - /url: https://www.baidu.com/s?wd=%E9%95%BF%E7%99%BD%E5%A4%B4%E5%8F%91%E4%B8%8D%E6%98%AF%E5%9B%A0%E4%B8%BA%E8%80%81%20%E6%98%AF%E4%BD%A0%E5%A4%AA%E7%B4%AF%E4%BA%86
+            - listitem [ref=e163]:
+              - link "公安部通报非法破解无人机典型案例" [ref=e164] [cursor=pointer]:
+                - /url: https://www.baidu.com/s?wd=%E5%85%AC%E5%AE%89%E9%83%A8%E9%80%9A%E6%8A%A5%E9%9D%9E%E6%B3%95%E7%A0%B4%E8%A7%A3%E6%97%A0%E4%BA%BA%E6%9C%BA%E5%85%B8%E5%9E%8B%E6%A1%88%E4%BE%8B
+            - listitem [ref=e165]:
+              - link "中国人均GDP已超1万美元" [ref=e166] [cursor=pointer]:
+                - /url: https://www.baidu.com/s?wd=%E4%B8%AD%E5%9B%BD%E4%BA%BA%E5%9D%87GDP%E5%B7%B2%E8%B6%851%E4%B8%87%E7%BE%8E%E5%85%83
+            - listitem [ref=e167]:
+              - link "天津高空跳伞基地发生事故 两人遇难" [ref=e168] [cursor=pointer]:
+                - /url: https://www.baidu.com/s?wd=%E5%A4%A9%E6%B4%A5%E9%AB%98%E7%A9%BA%E8%B7%B3%E4%BC%9E%E5%9F%BA%E5%9C%B0%E5%8F%91%E7%94%9F%E4%BA%8B%E6%95%85%20%E4%B8%A4%E4%BA%BA%E9%81%87%E9%9A%BE
+            - listitem [ref=e169]:
+              - link "人民日报：别让科研人员困在填表里" [ref=e170] [cursor=pointer]:
+                - /url: https://www.baidu.com/s?wd=%E4%BA%BA%E6%B0%91%E6%97%A5%E6%8A%A5%EF%BC%9A%E5%88%AB%E8%AE%A9%E7%A7%91%E7%A0%94%E4%BA%BA%E5%91%98%E5%9B%B0%E5%9C%A8%E5%A1%AB%E8%A1%A8%E9%87%8C
+            - listitem [ref=e171]:
+              - link "边吃饭边喝水的人胃可能已经受伤了" [ref=e172] [cursor=pointer]:
+                - /url: https://www.baidu.com/s?wd=%E8%BE%B9%E5%90%83%E9%A5%AD%E8%BE%B9%E5%96%9D%E6%B0%B4%E7%9A%84%E4%BA%BA%E8%83%83%E5%8F%AF%E8%83%BD%E5%B7%B2%E7%BB%8F%E5%8F%97%E4%BC%A4%E4%BA%86
+    - generic [ref=e173]:
+      - generic [ref=e175]:
+        - heading "南京新闻LOCAL NEWS" [level=2] [ref=e176]:
+          - generic [ref=e177]: 南京新闻
+          - text: LOCAL NEWS
+        - generic [ref=e178] [cursor=pointer]: 切换城市
+      - list [ref=e180]:
+        - listitem [ref=e181]:
+          - link "数读中国开局新活力｜入境游客破426万人次 “..." [ref=e183] [cursor=pointer]:
+            - /url: http://baijiahao.baidu.com/s?id=1863946251358250047
+        - listitem [ref=e184]:
+          - link "「开局之年看中国·遇见不一样的江苏」江苏南京：..." [ref=e186] [cursor=pointer]:
+            - /url: http://baijiahao.baidu.com/s?id=1864191401747361842
+        - listitem [ref=e187]:
+          - link "跟着课本读北岸，“北岸读城 骑YUE金陵”沉浸..." [ref=e189] [cursor=pointer]:
+            - /url: http://baijiahao.baidu.com/s?id=1864247360244799083
+        - listitem [ref=e190]:
+          - link "茉莉花开·艺润溧水丨南京溧水和凤镇骆山村：书香..." [ref=e192] [cursor=pointer]:
+            - /url: http://baijiahao.baidu.com/s?id=1864125525134721476
+        - listitem [ref=e193]:
+          - link "视频｜这场实景音乐快闪活动 将思政教育与实景体..." [ref=e195] [cursor=pointer]:
+            - /url: http://baijiahao.baidu.com/s?id=1864031592931672576
+        - listitem [ref=e196]:
+          - link "深度报道：风雨不动安如山——6万球迷雨中见证“..." [ref=e198] [cursor=pointer]:
+            - /url: http://baijiahao.baidu.com/s?id=1864146759034413175
+        - listitem [ref=e199]:
+          - link "校园足球长达二十多年的坚守 解锁南京队阵容里的..." [ref=e201] [cursor=pointer]:
+            - /url: http://baijiahao.baidu.com/s?id=1863978274196747936
+        - listitem [ref=e202]:
+          - link "带“毛孩子”畅玩无忧！八卦洲“宠物友好岛”官宣..." [ref=e204] [cursor=pointer]:
+            - /url: http://baijiahao.baidu.com/s?id=1864167647610854743
+      - generic [ref=e206]:
+        - heading "新闻图片" [level=3] [ref=e208]
+        - generic [ref=e212]:
+          - link [ref=e213] [cursor=pointer]:
+            - /url: http://baijiahao.baidu.com/s?id=1863985887202847797
+            - img [ref=e214]
+          - link "宁马一家亲 金陵公交行——南京公交第三客运分公..." [ref=e215] [cursor=pointer]:
+            - /url: http://baijiahao.baidu.com/s?id=1863985887202847797
+      - generic [ref=e217]:
+        - generic [ref=e218]:
+          - heading "新闻资讯" [level=3] [ref=e219]
+          - text: .
+        - list [ref=e221]:
+          - listitem [ref=e222]:
+            - link "假日图集｜汉堡节上有人晕倒，民警火速救助" [ref=e223] [cursor=pointer]:
+              - /url: http://baijiahao.baidu.com/s?id=1863995482305478153
+          - listitem [ref=e224]:
+            - link "假期遇非遗，有戏熙南里" [ref=e225] [cursor=pointer]:
+              - /url: http://baijiahao.baidu.com/s?id=1863989694196905096
+          - listitem [ref=e226]:
+            - link "视频｜“茉莉花开”绽芳华 戏聚青春传文脉" [ref=e227] [cursor=pointer]:
+              - /url: http://baijiahao.baidu.com/s?id=1864065881449748470
+          - listitem [ref=e228]:
+            - link "“妈妈，我今天挣了157块8毛” 南京高淳桠溪..." [ref=e229] [cursor=pointer]:
+              - /url: http://baijiahao.baidu.com/s?id=1864031592929797547
+          - listitem [ref=e230]:
+            - link "玄武湖700条游船全出动了！今天，南京鸭子一半..." [ref=e231] [cursor=pointer]:
+              - /url: http://baijiahao.baidu.com/s?id=1863979079058254677
+          - listitem [ref=e232]:
+            - link "当“苏超”遇上“李白”！南京上秦淮“第二现场”..." [ref=e233] [cursor=pointer]:
+              - /url: http://baijiahao.baidu.com/s?id=1864123545681214510
+          - listitem [ref=e234]:
+            - link "江苏省第三届青少年总体国家安全观知识视觉作品大..." [ref=e235] [cursor=pointer]:
+              - /url: http://baijiahao.baidu.com/s?id=1864212127558723778
+    - list [ref=e236]:
+      - listitem [ref=e237] [cursor=pointer]:
+        - link:
+          - /url: javascript:void(0);
+      - listitem [ref=e238] [cursor=pointer]:
+        - link "辟谣" [ref=e239]:
+          - /url: http://www.piyao.org.cn/yybgt/index.htm
+      - listitem [ref=e240] [cursor=pointer]:
+        - link "举报" [ref=e241]:
+          - /url: http://www.12377.cn
+      - listitem [ref=e242] [cursor=pointer]:
+        - link "收藏本站" [ref=e243]:
+          - /url: javascript:void(0);
+      - listitem [ref=e244] [cursor=pointer]:
+        - link "搜索" [ref=e245]:
+          - /url: javascript:void(0);
+      - listitem [ref=e246] [cursor=pointer]:
+        - link "用户反馈" [ref=e247]:
+          - /url: javascript:void(0);
+      - listitem:
+        - paragraph:
+          - textbox [ref=e249]: 输入搜索词
+    - generic [ref=e251]:
+      - heading "国内China" [level=2] [ref=e254]:
+        - link "国内" [ref=e255] [cursor=pointer]:
+          - /url: /guonei
+        - text: China
+      - generic [ref=e256]:
+        - list [ref=e257]:
+          - listitem [ref=e258]:
+            - link "燃爆上海！“音律联觉”盛况空前，这个从嘉定出发的I.." [ref=e260] [cursor=pointer]:
+              - /url: http://baijiahao.baidu.com/s?id=1864245945008919459
+          - listitem [ref=e261]:
+            - link "魔都眼｜五五购物：上海国际芝士节带你“一口环游世界.." [ref=e263] [cursor=pointer]:
+              - /url: http://baijiahao.baidu.com/s?id=1864036753512437003
+          - listitem [ref=e264]:
+            - link "五一笑在申城，脱友生活节带来一张“快乐地图”" [ref=e266] [cursor=pointer]:
+              - /url: http://baijiahao.baidu.com/s?id=1864147106563458864
+          - listitem [ref=e267]:
+            - link "礼盒、套装齐亮相，“渝伴礼”焕新升级" [ref=e269] [cursor=pointer]:
+              - /url: http://baijiahao.baidu.com/s?id=1863957230350005560
+          - listitem [ref=e270]:
+            - link "巴山渝水 山茶绽芳华（一朵花读懂一座城）" [ref=e272] [cursor=pointer]:
+              - /url: http://baijiahao.baidu.com/s?id=1863038171874515774
+          - listitem [ref=e273]:
+            - link "广西龙胜千年传统“耦耕”再现龙脊梯田开耕节" [ref=e275] [cursor=pointer]:
+              - /url: http://baijiahao.baidu.com/s?id=1864126910905078654
+        - list [ref=e276]:
+          - listitem [ref=e277]:
+            - link "静安国际光影展开启，来张园“追光”不迷路" [ref=e279] [cursor=pointer]:
+              - /url: http://baijiahao.baidu.com/s?id=1864085858042138759
+          - listitem [ref=e280]:
+            - link "在春天，跟着达人们打卡“魔都后花园”" [ref=e282] [cursor=pointer]:
+              - /url: http://baijiahao.baidu.com/s?id=1864063649863133696
+          - listitem [ref=e283]:
+            - link "经济大省调研行丨福建一张蓝图绘到底勇挑大梁" [ref=e285] [cursor=pointer]:
+              - /url: http://baijiahao.baidu.com/s?id=1864134836642107303
+          - listitem [ref=e286]:
+            - link "贵州荔波“五一”首日游人如织 共赏山水非遗融合之美" [ref=e288] [cursor=pointer]:
+              - /url: http://baijiahao.baidu.com/s?id=1864144935360845433
+          - listitem [ref=e289]:
+            - link "贵州贵阳：甲秀楼景区“五一”假期人气旺" [ref=e291] [cursor=pointer]:
+              - /url: http://baijiahao.baidu.com/s?id=1864039207163463699
+          - listitem [ref=e292]:
+            - link "一件“黑科技”服装背后的新质生产力" [ref=e294] [cursor=pointer]:
+              - /url: http://baijiahao.baidu.com/s?id=1864051600778176198
+      - generic [ref=e296]:
+        - heading "国内图片" [level=3] [ref=e298]
+        - generic [ref=e300]:
+          - generic [ref=e302]:
+            - link "膝盖打过两次“补丁”的四川女特警邱宇 从迪拜赛场创.." [ref=e303] [cursor=pointer]:
+              - /url: http://baijiahao.baidu.com/s?id=1864244625088985949
+              - img "膝盖打过两次“补丁”的四川女特警邱宇 从迪拜赛场创.." [ref=e304]
+            - link "膝盖打过两次“补丁”的四川女特警邱宇 从迪拜赛场创.." [ref=e305] [cursor=pointer]:
+              - /url: http://baijiahao.baidu.com/s?id=1864244625088985949
+          - generic [ref=e306]:
+            - generic [ref=e307]:
+              - link "奔跑吧，在这跨界融合的广阔天地间" [ref=e308] [cursor=pointer]:
+                - /url: http://baijiahao.baidu.com/s?id=1864204924094049739
+                - img [ref=e309]
+              - link "奔跑吧，在这跨界融合的广阔天地间" [ref=e310] [cursor=pointer]:
+                - /url: http://baijiahao.baidu.com/s?id=1864204924094049739
+            - generic [ref=e311]:
+              - link "锦州市委大院免费开放335个车位：早8点至晚10点.." [ref=e312] [cursor=pointer]:
+                - /url: http://baijiahao.baidu.com/s?id=1864063744666175582
+                - img [ref=e313]
+              - link "锦州市委大院免费开放335个车位：早8点至晚10点.." [ref=e314] [cursor=pointer]:
+                - /url: http://baijiahao.baidu.com/s?id=1864063744666175582
+      - generic [ref=e315]:
+        - generic [ref=e316]:
+          - heading "图文资讯" [level=3] [ref=e318]
+          - generic [ref=e320]:
+            - generic:
+              - generic [ref=e321]:
+                - link "车尾流行挂“毛绒尾巴”？律师提醒！" [ref=e322] [cursor=pointer]:
+                  - /url: http://baijiahao.baidu.com/s?id=1863957637144854251
+                  - img [ref=e323]
+                - link "车尾流行挂“毛绒尾巴”？律师提醒！" [ref=e324] [cursor=pointer]:
+                  - /url: http://baijiahao.baidu.com/s?id=1863957637144854251
+              - generic [ref=e325]:
+                - link "平陆运河进入有水调试阶段 预计9月建成通航" [ref=e326] [cursor=pointer]:
+                  - /url: http://baijiahao.baidu.com/s?id=1864158933673410374
+                  - img [ref=e327]
+                - link "平陆运河进入有水调试阶段 预计9月建成通航" [ref=e328] [cursor=pointer]:
+                  - /url: http://baijiahao.baidu.com/s?id=1864158933673410374
+        - generic [ref=e329]:
+          - heading "热门点击" [level=3] [ref=e331]
+          - list [ref=e333]:
+            - listitem [ref=e334]:
+              - link "奋战环保一线15年！爱写诗的“理工男”荣获全国五一.." [ref=e336] [cursor=pointer]:
+                - /url: http://baijiahao.baidu.com/s?id=1864213795704734177
+            - listitem [ref=e337]:
+              - link "高环保等级板材需求持续提升，卢卡尔曼以功能型品牌路.." [ref=e339] [cursor=pointer]:
+                - /url: http://baijiahao.baidu.com/s?id=1863345070079245782
+            - listitem [ref=e340]:
+              - link "张家界宠游客｜张家界环保客运 “宠客服务” 暖心护.." [ref=e342] [cursor=pointer]:
+                - /url: http://baijiahao.baidu.com/s?id=1864152515857412297
+            - listitem [ref=e343]:
+              - link "“环保部门打电话和我沟通，几小时后隔壁乡镇工作人员.." [ref=e345] [cursor=pointer]:
+                - /url: http://baijiahao.baidu.com/s?id=1863591762030200097
+            - listitem [ref=e346]:
+              - link "瓶藏春意，指尖植绿！萌娃巧手种下环保初心" [ref=e348] [cursor=pointer]:
+                - /url: http://baijiahao.baidu.com/s?id=1863804359087527984
+  - generic [ref=e350]:
+    - link "用户协议" [ref=e351] [cursor=pointer]:
+      - /url: //news-bos.cdn.bcebos.com/mvideo/baidu_news_protocol.html
+    - link "隐私策略" [ref=e352] [cursor=pointer]:
+      - /url: https://news-bos.cdn.bcebos.com/mvideo/privacy.html
+    - link "企业推广" [ref=e353] [cursor=pointer]:
+      - /url: http://e.baidu.com/?refer=1268
+    - link "投诉中心" [ref=e354] [cursor=pointer]:
+      - /url: //help.baidu.com/newadd?prod_id=5&category=1
+    - link "营业执照" [ref=e355] [cursor=pointer]:
+      - /url: //b.bdstatic.com/searchbox/image/gcp/20230526/3812451844.jpg
+    - text: 京ICP证030173号 京公网安备11000002000001号 《互联网新闻信息服务许可》编号：11220180008 《互联网宗教信息服务许可证》编号：京（2022）0000043 ©2026Baidu
+    - link "使用百度前必读" [ref=e356] [cursor=pointer]:
+      - /url: //www.baidu.com/duty/
+    - link [ref=e357] [cursor=pointer]:
+      - /url: https://cn.china.cn/
+    - link [ref=e358] [cursor=pointer]:
+      - /url: http://cyberpolice.mps.gov.cn/wfjb/
+    - link [ref=e359] [cursor=pointer]:
+      - /url: http://www.bjjubao.org/
