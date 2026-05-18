@@ -285,7 +285,8 @@ class MCPEditCard(QWidget):
             '  "command": "npx",\n'
             '  "args": ["-y", "some-package"],\n'
             '  "env": {"KEY": "value"}\n'
-            '}'
+            '}\n\n'
+            '💡 提示: args 含 "--transport http/sse" 时，系统会自动设置连接类型为 http'
         )
         json_data = self._build_json_from_data() if self._server_data else ""
         if json_data:
@@ -374,6 +375,9 @@ class MCPEditCard(QWidget):
         - 标准 mcpServers 格式: {"mcpServers": {"name": {...}}}
         - 简化格式: {"name": "...", "command": "...", ...}
         返回: {"name": "...", "type": "...", "command": "...", ...}
+
+        自动检测：
+        - args 含 --transport http → 自动设 type=http 并提示
         """
         # 格式一：mcpServers 包裹格式
         if "mcpServers" in parsed:
@@ -387,28 +391,33 @@ class MCPEditCard(QWidget):
                 raise ValueError(f"服务器 '{server_name}' 配置格式错误")
             result = {"name": server_name}
             result.update(server_cfg)
-            # 检测 type（标准 mcpServers 格式无 type 字段）
-            if "type" not in result:
-                if "url" in result:
-                    result["type"] = "sse"  # 有 url 默认为 sse
-                else:
-                    result["type"] = "stdio"  # 默认为 stdio
-            if "enabled" not in result:
-                result["enabled"] = True
-            return result
+            return self._normalize_server_data(result)
 
         # 格式二：简化格式（平铺键值）
         if "name" not in parsed:
             raise ValueError("缺少 'name' 字段或 'mcpServers' 包裹")
-        result = dict(parsed)
-        if "type" not in result:
-            if "url" in result:
-                result["type"] = "sse"
+        return self._normalize_server_data(dict(parsed))
+
+    def _normalize_server_data(self, data: dict) -> dict:
+        """规范化 server_data，补充缺失字段、检测类型"""
+        if "enabled" not in data:
+            data["enabled"] = True
+
+        # 自动检测类型
+        if "type" not in data:
+            args = data.get("args", [])
+            has_http_transport = any(
+                isinstance(a, str) and "--transport" in a and
+                i + 1 < len(args) and args[i + 1] in ("http", "sse")
+                for i, a in enumerate(args)
+            )
+            if has_http_transport:
+                data["type"] = "http"
+            elif "url" in data:
+                data["type"] = "sse"
             else:
-                result["type"] = "stdio"
-        if "enabled" not in result:
-            result["enabled"] = True
-        return result
+                data["type"] = "stdio"
+        return data
 
     def _apply_json_to_form(self, parsed: dict):
         """将解析后的 JSON dict 写回表单字段"""
@@ -603,7 +612,7 @@ class MCPListSettingCard(ExpandSettingCard):
     showEditCard = pyqtSignal(str, dict)
 
     # 内部信号（从后台线程桥接到主线程 UI 更新）
-    _hotConnectResult = pyqtSignal(str, bool)
+    _hotConnectResult = pyqtSignal(str, bool, str)
 
     def __init__(self, icon, title: str, content: str = None, parent=None):
         self.cfg = Settings.get_instance()
@@ -664,24 +673,49 @@ class MCPListSettingCard(ExpandSettingCard):
         if not self.cfg.mcp_enabled.value:
             return
 
-        def on_done(n, success):
-            self._hotConnectResult.emit(n, success)
+        def on_done(n, success, error_msg=""):
+            self._hotConnectResult.emit(n, success, error_msg)
 
         mgr.connect_server_background(name, config, on_done=on_done)
 
-    def _on_hot_connect_result(self, name: str, success: bool):
+    def _on_hot_connect_result(self, name: str, success: bool, error_msg: str = ""):
         """连接结果回调（主线程，可安全操作 UI）"""
         if success:
             logger.info(f"[MCP] '{name}' 热连接成功")
         else:
-            logger.warning(f"[MCP] '{name}' 热连接失败")
-            InfoBar.error(
-                title=f"MCP 连接失败",
-                content=f"'{name}' 连接失败，请检查配置是否正确",
-                parent=self.window(),
-                duration=5000,
-                position=InfoBarPosition.BOTTOM,
-            )
+            # 提取友好提示
+            hint = error_msg or "未知错误"
+            if "请检查配置类型是否正确" in hint:
+                # 拆分为标题和内容
+                parts = hint.split("（", 1)
+                display_msg = parts[0]
+                detail = "（" + parts[1] if len(parts) > 1 else ""
+                logger.warning(f"[MCP] '{name}' 热连接失败: {display_msg}")
+                InfoBar.error(
+                    title=f"MCP 连接失败: {name}",
+                    content=f"{display_msg}\n{detail}" if detail else display_msg,
+                    parent=self.window(),
+                    duration=8000,
+                    position=InfoBarPosition.BOTTOM,
+                )
+            elif hint != "未知错误":
+                logger.warning(f"[MCP] '{name}' 热连接失败: {hint}")
+                InfoBar.error(
+                    title=f"MCP 连接失败: {name}",
+                    content=hint,
+                    parent=self.window(),
+                    duration=6000,
+                    position=InfoBarPosition.BOTTOM,
+                )
+            else:
+                logger.warning(f"[MCP] '{name}' 热连接失败")
+                InfoBar.error(
+                    title=f"MCP 连接失败",
+                    content=f"'{name}' 连接失败，请检查配置是否正确",
+                    parent=self.window(),
+                    duration=5000,
+                    position=InfoBarPosition.BOTTOM,
+                )
         self.serversChanged.emit()
 
     def _hot_disconnect(self, name: str):

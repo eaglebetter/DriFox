@@ -230,7 +230,10 @@ class MCPClientManager:
     def connect_server_sync(self, name: str, config: dict) -> bool:
         """同步连接单个 MCP 服务器（热添加）"""
         try:
-            return self._run_async(self._connect_single(name, config))
+            success, err = self._run_async(self._connect_single(name, config))
+            if not success and err:
+                logger.error(f"[MCP] 热添加服务器 '{name}' 失败: {err}")
+            return success
         except Exception as e:
             logger.error(f"[MCP] 热添加服务器 '{name}' 失败: {e}")
             return False
@@ -239,21 +242,26 @@ class MCPClientManager:
         """后台连接单个 MCP 服务器（不阻塞 UI）"""
         def _worker():
             success = False
+            error_msg = ""
             try:
-                success = self._run_async(self._connect_single(name, config))
+                success, error_msg = self._run_async(self._connect_single(name, config))
             except Exception as e:
+                error_msg = str(e)
                 logger.error(f"[MCP] 热添加服务器 '{name}' 失败: {e}")
             finally:
                 if on_done:
                     try:
-                        on_done(name, success)
+                        on_done(name, success, error_msg)
                     except Exception as e:
                         logger.warning(f"[MCP] on_done 回调异常: {e}")
 
         threading.Thread(target=_worker, name="mcp-hot-add", daemon=True).start()
 
-    async def _connect_single(self, name: str, config: dict) -> bool:
-        """连接单个服务器：启动生命周期 Task 并等待就绪"""
+    async def _connect_single(self, name: str, config: dict) -> tuple:
+        """
+        连接单个服务器：启动生命周期 Task 并等待就绪
+        返回: (success: bool, error_msg: str)
+        """
         # 如果已存在，先断开
         if name in self._connections:
             await self._disconnect_single(name)
@@ -271,17 +279,25 @@ class MCPClientManager:
             await asyncio.wait_for(conn._ready_event.wait(), timeout=30)
         except asyncio.TimeoutError:
             conn._task.cancel()
-            logger.error(f"[MCP] 连接服务器 '{name}' 超时")
-            return False
+            msg = f"连接服务器 '{name}' 超时（30秒）"
+            logger.error(f"[MCP] {msg}")
+            return False, msg
 
         if conn._connect_error:
-            logger.error(f"[MCP] 连接服务器 '{name}' 失败: {conn._connect_error}")
-            return False
+            err = conn._connect_error
+            # 尝试提取更友好的错误信息
+            err_str = str(err)
+            if "JSONRPC" in err_str and "Invalid JSON" in err_str:
+                # 服务器 stdout 输出了非 JSON 内容 → 可能是 http/sse 服务器却用了 stdio 类型
+                err_str += "（服务器输出了非 JSON 内容到 stdout，请检查配置类型是否正确）"
+            msg = f"连接服务器 '{name}' 失败: {err_str}"
+            logger.error(f"[MCP] {msg}")
+            return False, msg
 
         self._connections[name] = conn
         self._connected = True
         logger.info(f"[MCP] 已连接服务器 '{name}'，发现 {len(conn.tools)} 个工具")
-        return True
+        return True, ""
 
     # ── 断开连接 ──────────────────────────────────────
 
