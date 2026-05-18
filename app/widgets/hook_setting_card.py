@@ -1,26 +1,21 @@
 # -*- coding: utf-8 -*-
 """Hook 管理设置卡片"""
 
+import json
+from pathlib import Path
+
 from PyQt5.QtCore import pyqtSignal, Qt
 from PyQt5.QtGui import QIcon
-from PyQt5.QtWidgets import QWidget, QHBoxLayout, QLabel, QVBoxLayout, QMenu
+from PyQt5.QtWidgets import QWidget, QHBoxLayout, QLabel, QVBoxLayout, QMenu, QLineEdit
 from qfluentwidgets import (
     ExpandSettingCard,
     PushButton,
     FluentIcon,
     SwitchButton,
-    MessageBoxBase,
-    LineEdit,
-    ComboBox,
-    PrimaryPushButton,
-    BodyLabel,
-    VerticalSeparator,
-    CheckBox,
 )
-from app.utils.design_tokens import ItemStyles
+
 from app.utils.utils import get_app_data_dir
-import json
-from pathlib import Path
+from app.widgets.searchable_editable_combobox import SearchableEditableComboBox
 
 
 class HookItem(QWidget):
@@ -81,73 +76,11 @@ class HookItem(QWidget):
         menu.addAction("删除", lambda: self.removed.emit(self.index))
         menu.exec_(self.mapToGlobal(pos))
 
-class AddHookDialog(MessageBoxBase):
-    """添加 Hook 对话框"""
-    
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setup_ui()
-    
-    def setup_ui(self):
-        self.titleLabel = BodyLabel("添加 Hook（弹窗模式）", self)
-        self.resize(400, 360)
-        self.eventLabel = QLabel("事件:", self)
-        self.eventCombo = ComboBox(self)
-        self.eventCombo.addItems([
-            "SessionStart", "PreUserMessage", "PostUserMessage",
-            "PreAssistantMessage", "PostAssistantMessage",
-            "PreToolUse", "PostToolUse"
-        ])
-        self.typeLabel = QLabel("类型:", self)
-        self.typeCombo = ComboBox(self)
-        self.typeCombo.addItems(["command", "http", "python"])
-        self.commandLabel = QLabel("命令:", self)
-        self.commandEdit = LineEdit(self)
-        self.matcherLabel = QLabel("Matcher (可选):", self)
-        self.matcherEdit = LineEdit(self)
-        self.matcherEdit.setPlaceholderText("如: tool:bash 或 .*帮助.*")
-        self.enabledCheck = CheckBox("启用", self)
-        self.enabledCheck.setChecked(True)
-        
-        self.viewLayout.addWidget(self.titleLabel)
-        self.viewLayout.addSpacing(4)
-        self.viewLayout.addWidget(self.eventLabel)
-        self.viewLayout.addWidget(self.eventCombo)
-        self.viewLayout.addWidget(self.typeLabel)
-        self.viewLayout.addWidget(self.typeCombo)
-        self.viewLayout.addWidget(self.commandLabel)
-        self.viewLayout.addWidget(self.commandEdit)
-        self.viewLayout.addWidget(self.matcherLabel)
-        self.viewLayout.addWidget(self.matcherEdit)
-        self.viewLayout.addSpacing(8)
-        self.viewLayout.addWidget(self.enabledCheck)
-        
-        self.yesButton = PrimaryPushButton("添加", self)
-        self.cancelButton = PushButton("取消", self)
-        self.yesButton.clicked.connect(self._on_yes)
-        self.cancelButton.clicked.connect(self.reject)
-    
-    def _on_yes(self):
-        event = self.eventCombo.currentText()
-        command = self.commandEdit.text().strip()
-        if not event or not command:
-            return
-        self.accept()
-    
-    def get_values(self):
-        return {
-            "event": self.eventCombo.currentText(),
-            "type": self.typeCombo.currentText(),
-            "command": self.commandEdit.text().strip(),
-            "matcher": self.matcherEdit.text().strip(),
-            "enabled": self.enabledCheck.isChecked()
-        }
-
 
 class HookEditCard(QWidget):
     """
     Hook 编辑卡片（卡片形态）
-    类似 ProviderEditCard，放在 BaseSettingsCard 中使用
+    类似 MCPEditCard，放在 BaseSettingsCard 中使用
     """
     
     saved = pyqtSignal(dict)
@@ -162,47 +95,64 @@ class HookEditCard(QWidget):
             self._load_data()
     
     def _setup_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setSpacing(8)
-        layout.setContentsMargins(6, 0, 6, 0)
-        
-        layout.addWidget(BodyLabel("事件:"))
-        self.eventCombo = ComboBox(self)
+        from app.widgets.mcp_setting_card import EDIT_CARD_STYLE, _make_row
+        self.setStyleSheet(EDIT_CARD_STYLE)
+
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(4, 2, 4, 2)
+        main_layout.setSpacing(6)
+
+        # ── 事件 ──
+        self.eventCombo = SearchableEditableComboBox()
         self.eventCombo.addItems([
             "SessionStart", "PreUserMessage", "PostUserMessage",
             "PreAssistantMessage", "PostAssistantMessage",
             "PreToolUse", "PostToolUse"
         ])
-        layout.addWidget(self.eventCombo)
-        
-        layout.addWidget(BodyLabel("类型:"))
-        self.typeCombo = ComboBox(self)
+        row, _ = _make_row("事件:", self.eventCombo)
+        main_layout.addLayout(row)
+
+        # ── 类型 ──
+        self.typeCombo = SearchableEditableComboBox()
         self.typeCombo.addItems(["command", "http", "python"])
-        layout.addWidget(self.typeCombo)
-        
-        layout.addWidget(BodyLabel("命令:"))
-        self.commandEdit = LineEdit(self)
+        self.typeCombo.currentTextChanged.connect(self._on_type_changed)
+        row, _ = _make_row("类型:", self.typeCombo)
+        main_layout.addLayout(row)
+
+        # ── 命令 ──
+        self.commandEdit = QLineEdit()
         self.commandEdit.setPlaceholderText('如: echo "Hello" 或 python script.py')
-        layout.addWidget(self.commandEdit)
-        
-        layout.addWidget(BodyLabel("Matcher (可选):"))
-        self.matcherEdit = LineEdit(self)
+        self._cmd_row, self._cmd_label = _make_row("命令:", self.commandEdit)
+        main_layout.addLayout(self._cmd_row)
+
+        # ── Matcher（可选） ──
+        self.matcherEdit = QLineEdit()
         self.matcherEdit.setPlaceholderText("如: tool:bash 或 .*帮助.*")
-        layout.addWidget(self.matcherEdit)
-        
-        self.enabledCheck = CheckBox("添加后启用", self)
-        self.enabledCheck.setChecked(True)
-        layout.addWidget(self.enabledCheck)
+        row, _ = _make_row("Matcher:", self.matcherEdit)
+        main_layout.addLayout(row)
+
+        # 初始类型
+        self._on_type_changed(self.typeCombo.currentText())
     
+    def _on_type_changed(self, hook_type: str):
+        """根据类型切换标签文本"""
+        if hook_type == "http":
+            self._cmd_label.setText("URL:")
+            self.commandEdit.setPlaceholderText("如: https://example.com/hook")
+        elif hook_type == "python":
+            self._cmd_label.setText("脚本:")
+            self.commandEdit.setPlaceholderText("如: my_module.hook_handler")
+        else:
+            self._cmd_label.setText("命令:")
+            self.commandEdit.setPlaceholderText('如: echo "Hello" 或 python script.py')
+
     def _load_data(self):
         d = self._hook_data
         hook_type = d.get("type", "command")
-        for i in range(self.typeCombo.count()):
-            if self.typeCombo.itemText(i) == hook_type:
-                self.typeCombo.setCurrentIndex(i)
-                break
+        self.typeCombo.setCurrentText(hook_type)
+        self.eventCombo.setCurrentText(d.get("event", "PreToolUse"))
         self.commandEdit.setText(d.get("command", d.get("url", "")))
-        self.enabledCheck.setChecked(d.get("enabled", True))
+        self.matcherEdit.setText(d.get("matcher", ""))
     
     def get_values(self) -> dict:
         return {
@@ -210,7 +160,7 @@ class HookEditCard(QWidget):
             "type": self.typeCombo.currentText(),
             "command": self.commandEdit.text().strip(),
             "matcher": self.matcherEdit.text().strip(),
-            "enabled": self.enabledCheck.isChecked(),
+            "enabled": True
         }
     
     def _on_save(self):

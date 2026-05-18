@@ -796,7 +796,7 @@ class OpenAIChatToolWindow(ToolWindow):
 
         # Hook 编辑卡片
         self._hook_edit_card = BaseSettingsCard("Hook 配置", "⚙️", parent=self)
-        self._hook_edit_card.setFixedHeight(380)
+        self._hook_edit_card.setFixedHeight(300)
         self._hook_edit_popup = HookEditCard(parent=self)
         self._hook_edit_popup.saved.connect(self._on_hook_edit_saved)
         self._hook_edit_popup.closed.connect(self._on_hook_edit_closed)
