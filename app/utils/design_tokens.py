@@ -7,6 +7,142 @@
 from PyQt5.QtCore import QSize
 
 
+FONT_SIZE_OPTIONS = {
+    "small": {"label": "小", "delta": -1, "base": 13},
+    "medium": {"label": "中", "delta": 0, "base": 14},
+    "large": {"label": "大", "delta": 2, "base": 16},
+}
+
+THEME_STYLE_OPTIONS = {
+    "midnight": {
+        "label": "深海蓝黑",
+        "window_start": "rgba(10, 14, 22, 255)",
+        "window_end": "rgba(15, 20, 30, 255)",
+        "card_bg": "rgba(22, 30, 45, 230)",
+        "card_bg_solid": "rgba(22, 30, 45, 250)",
+        "content_bg": "#1d2533",
+        "border": "#3d4a60",
+        "border_accent": "#66c6ff",
+        "text_primary": "#f3f6fc",
+        "text_secondary": "rgba(226, 235, 249, 0.72)",
+        "text_muted": "#8b98ad",
+        "accent": "#66c6ff",
+        "accent_warm": "#f59e0b",
+        "hover_bg": "rgba(102, 198, 255, 0.12)",
+        "selected_bg": "rgba(102, 198, 255, 0.32)",
+        "capsule_bg": "rgba(27, 35, 50, 180)",
+        "capsule_border": "rgba(43, 56, 80, 200)",
+    },
+    "obsidian": {
+        "label": "曜石紫",
+        "window_start": "rgba(14, 11, 24, 255)",
+        "window_end": "rgba(25, 15, 37, 255)",
+        "card_bg": "rgba(37, 27, 53, 232)",
+        "card_bg_solid": "rgba(37, 27, 53, 250)",
+        "content_bg": "#2b2139",
+        "border": "#5a476f",
+        "border_accent": "#b792ff",
+        "text_primary": "#f7f2ff",
+        "text_secondary": "rgba(238, 228, 255, 0.74)",
+        "text_muted": "#a99ab9",
+        "accent": "#b792ff",
+        "accent_warm": "#ffb86b",
+        "hover_bg": "rgba(183, 146, 255, 0.13)",
+        "selected_bg": "rgba(183, 146, 255, 0.34)",
+        "capsule_bg": "rgba(38, 27, 55, 185)",
+        "capsule_border": "rgba(88, 68, 110, 205)",
+    },
+    "forest": {
+        "label": "松林暗绿",
+        "window_start": "rgba(8, 19, 17, 255)",
+        "window_end": "rgba(13, 29, 25, 255)",
+        "card_bg": "rgba(18, 42, 36, 232)",
+        "card_bg_solid": "rgba(18, 42, 36, 250)",
+        "content_bg": "#18362f",
+        "border": "#31594f",
+        "border_accent": "#57d29a",
+        "text_primary": "#effcf6",
+        "text_secondary": "rgba(222, 246, 236, 0.74)",
+        "text_muted": "#8eb0a5",
+        "accent": "#57d29a",
+        "accent_warm": "#d6b45d",
+        "hover_bg": "rgba(87, 210, 154, 0.12)",
+        "selected_bg": "rgba(87, 210, 154, 0.32)",
+        "capsule_bg": "rgba(20, 43, 38, 185)",
+        "capsule_border": "rgba(51, 92, 82, 205)",
+    },
+    "graphite": {
+        "label": "石墨铜",
+        "window_start": "rgba(18, 18, 19, 255)",
+        "window_end": "rgba(31, 29, 27, 255)",
+        "card_bg": "rgba(43, 40, 37, 232)",
+        "card_bg_solid": "rgba(43, 40, 37, 250)",
+        "content_bg": "#302d2a",
+        "border": "#5d554d",
+        "border_accent": "#d69a5b",
+        "text_primary": "#f7f4ef",
+        "text_secondary": "rgba(241, 233, 222, 0.74)",
+        "text_muted": "#a99f93",
+        "accent": "#d69a5b",
+        "accent_warm": "#7fc7ff",
+        "hover_bg": "rgba(214, 154, 91, 0.13)",
+        "selected_bg": "rgba(214, 154, 91, 0.32)",
+        "capsule_bg": "rgba(48, 44, 40, 185)",
+        "capsule_border": "rgba(93, 80, 68, 205)",
+    },
+}
+
+
+def get_ui_font_size_key() -> str:
+    try:
+        from app.utils.config import Settings
+        key = Settings.get_instance().ui_font_size.value
+    except Exception:
+        key = "medium"
+    return key if key in FONT_SIZE_OPTIONS else "medium"
+
+
+def scale_font_size(size: int) -> int:
+    return max(8, int(size) + FONT_SIZE_OPTIONS[get_ui_font_size_key()]["delta"])
+
+
+def font_size_css(size: int) -> str:
+    return f"font-size: {scale_font_size(size)}px;"
+
+
+def get_theme_style_key() -> str:
+    try:
+        from app.utils.config import Settings
+        key = Settings.get_instance().ui_theme_style.value
+    except Exception:
+        key = "midnight"
+    return key if key in THEME_STYLE_OPTIONS else "midnight"
+
+
+def current_theme() -> dict:
+    return THEME_STYLE_OPTIONS[get_theme_style_key()]
+
+
+def get_window_style() -> str:
+    theme = current_theme()
+    return f"""
+    OpenAIChatToolWindow {{
+        background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+            stop:0 {theme["window_start"]},
+            stop:1 {theme["window_end"]});
+    }}
+"""
+
+
+def get_capsule_style() -> str:
+    theme = current_theme()
+    return f"""
+        background: {theme["capsule_bg"]};
+        border: 1px solid {theme["capsule_border"]};
+        border-radius: 12px;
+    """
+
+
 # ============ 颜色系统 ============
 class Colors:
     """颜色 Token"""
@@ -43,8 +179,33 @@ class Colors:
     ERROR = "#ef4444"
     INFO = "#3b82f6"
 
+    @classmethod
+    def refresh(cls) -> None:
+        theme = current_theme()
+        cls.CARD_BG = (
+            theme["card_bg"].rsplit(",", 1)[0] + ", {alpha})"
+            if theme["card_bg"].startswith("rgba(")
+            else theme["card_bg"]
+        )
+        cls.CARD_BG_SOLID = theme["card_bg_solid"]
+        cls.CONTENT_BG = theme["content_bg"]
+        cls.BORDER = theme["border"]
+        cls.BORDER_ACCENT = theme["border_accent"]
+        cls.TEXT_PRIMARY = theme["text_primary"]
+        cls.TEXT_SECONDARY = theme["text_secondary"]
+        cls.TEXT_SECONDARY_HOVER = theme["text_primary"]
+        cls.TEXT_ACCENT = theme["accent"]
+        cls.TEXT_MUTED = theme["text_muted"]
+        cls.TAB_ACTIVE_BG = theme["selected_bg"]
+        cls.TAB_HOVER_BG = theme["hover_bg"]
+        cls.HOVER_BG = theme["hover_bg"]
+        cls.SELECTED_BG = theme["selected_bg"]
+
 
 # ============ 圆角系统 ============
+Colors.refresh()
+
+
 class BorderRadius:
     """圆角 Token"""
     SM = "4px"   # 小标签、小按钮
@@ -105,10 +266,11 @@ class CardStyles:
     @staticmethod
     def card(alpha: int = 250) -> str:
         """标准卡片样式"""
+        Colors.refresh()
         return f"""
             CardWidget, SimpleCardWidget {{
-                background-color: rgba(33, 33, 38, {alpha});
-                border: 1px solid #3d3d3d;
+                background-color: {Colors.CARD_BG.format(alpha=alpha)};
+                border: 1px solid {Colors.BORDER};
                 border-radius: 8px;
             }}
         """
@@ -116,8 +278,9 @@ class CardStyles:
     @staticmethod
     def card_content() -> str:
         """卡片内容区样式"""
-        return """
-            background-color: #2a2a2e;
+        Colors.refresh()
+        return f"""
+            background-color: {Colors.CONTENT_BG};
             border-radius: 6px;
         """
     
@@ -161,7 +324,8 @@ class CardStyles:
     @staticmethod
     def title_label() -> str:
         """标题文字样式"""
-        return "color: #f59e0b;"
+        Colors.refresh()
+        return f"color: {Colors.TEXT_ACCENT};"
     
     @staticmethod
     def close_button() -> str:
@@ -174,31 +338,33 @@ class TabStyles:
     
     @staticmethod
     def active() -> str:
-        return """
-            QLabel {
-                color: #fff;
-                font-size: 11px;
+        Colors.refresh()
+        return f"""
+            QLabel {{
+                color: {Colors.TEXT_PRIMARY};
+                {font_size_css(11)}
                 font-weight: bold;
                 padding: 3px 8px;
                 border-radius: 4px;
-                background-color: rgba(102, 198, 255, 0.3);
-            }
+                background-color: {Colors.TAB_ACTIVE_BG};
+            }}
         """
     
     @staticmethod
     def inactive() -> str:
-        return """
-            QLabel {
-                color: rgba(255, 255, 255, 0.5);
-                font-size: 11px;
+        Colors.refresh()
+        return f"""
+            QLabel {{
+                color: {Colors.TEXT_SECONDARY};
+                {font_size_css(11)}
                 padding: 3px 8px;
                 border-radius: 4px;
                 cursor: pointer;
-            }
-            QLabel:hover {
-                color: rgba(255, 255, 255, 0.8);
-                background-color: rgba(255, 255, 255, 0.1);
-            }
+            }}
+            QLabel:hover {{
+                color: {Colors.TEXT_PRIMARY};
+                background-color: {Colors.TAB_HOVER_BG};
+            }}
         """
 
 
@@ -252,14 +418,14 @@ class ButtonStyles:
                 border: none;
                 border-radius: 5px;
                 padding: 5px 16px;
-                font-size: 13px;
+                {font_size_css(13)}
                 font-weight: bold;
             }}
             PrimaryPushButton:hover {{
-                background-color: #1a86d9;
+                background-color: {Colors.BORDER_ACCENT};
             }}
             PrimaryPushButton:pressed {{
-                background-color: #006cbd;
+                background-color: {Colors.SELECTED_BG};
             }}
             PrimaryPushButton:disabled {{
                 background-color: #444;
@@ -287,19 +453,20 @@ class ComboBoxStyles:
         """深色主题下拉框样式"""
         return f"""
             QComboBox {{
-                color: #e8e8e8;
+                color: {Colors.TEXT_PRIMARY};
                 background-color: {Colors.CONTENT_BG};
-                border: 1px solid #4a4a4e;
+                border: 1px solid {Colors.BORDER};
                 border-radius: 5px;
                 padding: 5px 12px 5px 10px;
                 min-height: 28px;
+                {font_size_css(12)}
             }}
             QComboBox:hover {{
-                border: 1px solid #0078d4;
-                background-color: #333338;
+                border: 1px solid {Colors.TEXT_ACCENT};
+                background-color: {Colors.HOVER_BG};
             }}
             QComboBox:focus {{
-                border: 1px solid #0078d4;
+                border: 1px solid {Colors.TEXT_ACCENT};
             }}
             QComboBox::drop-down {{
                 border: none;
@@ -317,7 +484,7 @@ class ComboBoxStyles:
                 margin-right: 4px;
             }}
             QComboBox::down-arrow:hover {{
-                border-top-color: #0078d4;
+                border-top-color: {Colors.TEXT_ACCENT};
             }}
         """
 
@@ -326,9 +493,9 @@ class ComboBoxStyles:
         """深色主题下拉框弹出列表样式"""
         return f"""
             QAbstractItemView {{
-                color: #e8e8e8;
+                color: {Colors.TEXT_PRIMARY};
                 background-color: {Colors.CONTENT_BG};
-                border: 1px solid #4a4a4e;
+                border: 1px solid {Colors.BORDER};
                 border-radius: 6px;
                 padding: 4px;
                 outline: none;
@@ -340,10 +507,10 @@ class ComboBoxStyles:
                 border-radius: 3px;
             }}
             QAbstractItemView::item:hover {{
-                background-color: #3a3a3e;
+                background-color: {Colors.HOVER_BG};
             }}
             QAbstractItemView::item:selected {{
-                background-color: #0078d4;
+                background-color: {Colors.TEXT_ACCENT};
                 color: white;
             }}
             QScrollBar:vertical {{

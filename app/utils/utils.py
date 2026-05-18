@@ -351,6 +351,7 @@ def list_skills_with_intro() -> str:
 
 
 def get_canvas_font(size=10, bold=False):
+    from app.utils.design_tokens import scale_font_size
     try:
         font_family = Settings.get_instance().llm_font_family.value
     except Exception:
@@ -359,7 +360,7 @@ def get_canvas_font(size=10, bold=False):
         except Exception:
             font_family = "Segoe UI"
 
-    font = QFont(font_family, size)
+    font = QFont(font_family, scale_font_size(size))
     if bold:
         font.setBold(True)
     return font
@@ -367,6 +368,7 @@ def get_canvas_font(size=10, bold=False):
 
 def get_unified_font(size=10, bold=False):
     """Get font with unified font family configured by user"""
+    from app.utils.design_tokens import scale_font_size
     try:
         font_family = Settings.get_instance().llm_font_family.value
     except Exception:
@@ -374,7 +376,7 @@ def get_unified_font(size=10, bold=False):
             font_family = Settings.get_instance().canvas_font_selected.value
         except Exception:
             font_family = "Segoe UI"
-    font = QFont(font_family, size)
+    font = QFont(font_family, scale_font_size(size))
     if bold:
         font.setBold(True)
     return font

@@ -58,6 +58,13 @@ from app.utils.diff_viewer import (
 )
 from app.utils.file_operation_recorder import FileOperationRecorder
 from app.utils.utils import get_icon, get_font_family_css
+from app.utils.design_tokens import (
+    Colors,
+    font_size_css,
+    get_capsule_style,
+    get_window_style,
+    scale_font_size,
+)
 from app.widgets.auto_loop_card import AutoLoopConfigCard, AutoLoopRunningCard
 from app.widgets.balance_display import BalanceDisplay
 from app.widgets.base_settings_card import (
@@ -767,11 +774,12 @@ class OpenAIChatToolWindow(ToolWindow):
         QTimer.singleShot(150, self._scroll_to_bottom)
 
     def setup_ui(self):
+        Colors.refresh()
         layout = QVBoxLayout(self)
         layout.setContentsMargins(1, 1, 4, 1)
         layout.setSpacing(1)
 
-        self.setStyleSheet(WINDOW_STYLE)
+        self.setStyleSheet(get_window_style())
 
         session_bar_layout = QHBoxLayout()
         session_bar_layout.setContentsMargins(0, 0, 0, 0)
@@ -781,16 +789,16 @@ class OpenAIChatToolWindow(ToolWindow):
         self._project_label = QLabel(self._current_project, self)
         self._project_label.setStyleSheet(f"""
             QLabel {{
-                color: #f59e0b;
+                color: {Colors.TEXT_ACCENT};
                 {get_font_family_css()}
-                font-size: 13px;
+                {font_size_css(13)}
                 font-weight: bold;
                 padding: 2px 6px;
                 border-radius: 4px;
-                background: rgba(245, 158, 11, 0.1);
+                background: {Colors.HOVER_BG};
             }}
             QLabel:hover {{
-                background: rgba(245, 158, 11, 0.2);
+                background: {Colors.SELECTED_BG};
             }}
         """)
         self._project_label.setCursor(Qt.PointingHandCursor)
@@ -804,6 +812,7 @@ class OpenAIChatToolWindow(ToolWindow):
         self.title_edit = QLabel("新对话", self)
         font_css = get_font_family_css()
         title_style = TITLE_STYLE.replace("    QLabel {", f"    QLabel {{\n        {font_css}")
+        title_style = title_style.replace("font-size: 15px;", font_size_css(15))
         self.title_edit.setStyleSheet(title_style)
         self.title_edit.setCursor(Qt.PointingHandCursor)
         self.title_edit.mouseDoubleClickEvent = self._on_title_double_click
@@ -838,7 +847,7 @@ class OpenAIChatToolWindow(ToolWindow):
 
         self._settings_popup = LLMSettingsCard(self)
         self._settings_popup.setVisible(False)
-        self._settings_popup.configChanged.connect(self._load_model_configs)
+        self._settings_popup.configChanged.connect(self._on_settings_config_changed)
         self._settings_popup.closed.connect(self._restore_after_system_close)
 
         # 连接服务商添加/编辑信号
@@ -1042,11 +1051,7 @@ class OpenAIChatToolWindow(ToolWindow):
         # 模型选择 + 配置按钮组 - 紧凑式设计
         self._model_btn_container = QWidget(self)
         self._model_btn_container.setFixedHeight(30)
-        self._model_btn_container.setStyleSheet("""
-            background: rgba(27, 35, 50, 180);
-            border: 1px solid rgba(43, 56, 80, 200);
-            border-radius: 12px;
-        """)
+        self._model_btn_container.setStyleSheet(get_capsule_style())
         model_layout = QHBoxLayout(self._model_btn_container)
         model_layout.setContentsMargins(0, 0, 0, 0)
         model_layout.setSpacing(0)
@@ -1065,7 +1070,7 @@ class OpenAIChatToolWindow(ToolWindow):
         self._model_btn_icon.setFixedSize(18, 18)
         btn_layout.addWidget(self._model_btn_icon)
         self._model_btn_text = QLabel("正在加载...", self.current_model_btn)
-        self._model_btn_text.setStyleSheet(MODEL_BTN_TEXT_STYLE)
+        self._model_btn_text.setStyleSheet(MODEL_BTN_TEXT_STYLE.replace("font-size: 13px;", font_size_css(13)))
         btn_layout.addWidget(self._model_btn_text)
         model_layout.addWidget(self.current_model_btn, 1)
         # 配置按钮（点击弹出配置卡片）
@@ -1090,11 +1095,7 @@ class OpenAIChatToolWindow(ToolWindow):
         # 工具栏右侧按钮组 - 胶囊包裹，无分隔线
         self._toolbar_capsule = QWidget(self)
         self._toolbar_capsule.setFixedHeight(30)
-        self._toolbar_capsule.setStyleSheet("""
-            background: rgba(27, 35, 50, 180);
-            border: 1px solid rgba(43, 56, 80, 200);
-            border-radius: 12px;
-        """)
+        self._toolbar_capsule.setStyleSheet(get_capsule_style())
         capsule_layout = QHBoxLayout(self._toolbar_capsule)
         capsule_layout.setContentsMargins(4, 2, 4, 2)
         capsule_layout.setSpacing(0)
@@ -1148,7 +1149,7 @@ class OpenAIChatToolWindow(ToolWindow):
         self.input_area = SendableTextEdit(self)
         self.input_area._agent_combo.hide()  # 隐藏输入框内部的下拉框，用工具栏的按钮组代替
         self.input_area._initializing = False  # 初始化完成后启用高度调整
-        setFont(self.input_area, 15)
+        setFont(self.input_area, scale_font_size(15))
         self.input_area.sendMessageRequested.connect(self._on_send_clicked)
         self.input_area.stopMessageRequested.connect(self._on_stop_clicked)
         self.input_area.clearRequested.connect(self._on_clear_shortcut)
@@ -1966,6 +1967,50 @@ class OpenAIChatToolWindow(ToolWindow):
         self.cfg.set(self.cfg.llm_saved_providers, saved_providers, save=True)
         self._load_model_configs()
         InfoBar.success("已保存", "配置已保存到本地。", parent=self, duration=1500, position=InfoBarPosition.BOTTOM)
+
+    def _on_settings_config_changed(self):
+        self._load_model_configs()
+        self._apply_runtime_ui_settings()
+
+    def _apply_runtime_ui_settings(self):
+        Colors.refresh()
+        self.setStyleSheet(get_window_style())
+        if hasattr(self, "_project_label"):
+            self._project_label.setStyleSheet(f"""
+                QLabel {{
+                    color: {Colors.TEXT_ACCENT};
+                    {get_font_family_css()}
+                    {font_size_css(13)}
+                    font-weight: bold;
+                    padding: 2px 6px;
+                    border-radius: 4px;
+                    background: {Colors.HOVER_BG};
+                }}
+                QLabel:hover {{
+                    background: {Colors.SELECTED_BG};
+                }}
+            """)
+        if hasattr(self, "title_edit"):
+            title_style = TITLE_STYLE.replace("    QLabel {", f"    QLabel {{\n        {get_font_family_css()}")
+            title_style = title_style.replace("font-size: 15px;", font_size_css(15))
+            self.title_edit.setStyleSheet(title_style)
+        if hasattr(self, "_model_btn_container"):
+            self._model_btn_container.setStyleSheet(get_capsule_style())
+        if hasattr(self, "_model_btn_text"):
+            self._model_btn_text.setStyleSheet(MODEL_BTN_TEXT_STYLE.replace("font-size: 13px;", font_size_css(13)))
+        if hasattr(self, "_toolbar_capsule"):
+            self._toolbar_capsule.setStyleSheet(get_capsule_style())
+        if hasattr(self, "input_area"):
+            setFont(self.input_area, scale_font_size(15))
+        for card in self.findChildren(BaseSettingsCard):
+            if hasattr(card, "refresh_style"):
+                card.refresh_style()
+        if self._settings_popup and hasattr(self._settings_popup, "refresh_style"):
+            self._settings_popup.refresh_style()
+        for card in self.findChildren(MessageCard):
+            viewer = getattr(card, "viewer", None)
+            if viewer and hasattr(viewer, "_schedule_render"):
+                viewer._schedule_render(immediate=True)
 
     def _load_model_configs(self):
         # 检查窗口是否仍然有效，防止在初始化期间窗口被关闭后继续执行

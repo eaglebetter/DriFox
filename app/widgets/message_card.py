@@ -78,6 +78,7 @@ from app.core import (
 )
 from app.core.message_content import make_tool_result_block
 from app.utils.utils import get_font_family_css, get_icon
+from app.utils.design_tokens import current_theme, scale_font_size
 from app.widgets.render_helpers import (
     render_tool_block,
 )
@@ -1383,6 +1384,9 @@ class CodeWebViewer(QWebEngineView):
                 scrollbar-color: #3a3f50 #1a1f2e;
             }
         """
+        theme = current_theme()
+        body_font_size = scale_font_size(14)
+        code_font_size = scale_font_size(13)
 
         html = f"""
         <!DOCTYPE html>
@@ -1393,16 +1397,16 @@ class CodeWebViewer(QWebEngineView):
             <style>
                 :root {{
                     --bg: transparent;
-                    --panel: #121722;
-                    --panel-elevated: #171d2a;
-                    --panel-soft: #1d2533;
-                    --border: #253044;
-                    --border-strong: #32425e;
-                    --text: #e8edf7;
-                    --text-secondary: #b2bfd6;
-                    --text-muted: #7f8ca3;
-                    --accent: #66c6ff;
-                    --accent-warm: #ffb65c;
+                    --panel: {theme["card_bg_solid"]};
+                    --panel-elevated: {theme["card_bg_solid"]};
+                    --panel-soft: {theme["content_bg"]};
+                    --border: {theme["border"]};
+                    --border-strong: {theme["border_accent"]};
+                    --text: {theme["text_primary"]};
+                    --text-secondary: {theme["text_secondary"]};
+                    --text-muted: {theme["text_muted"]};
+                    --accent: {theme["accent"]};
+                    --accent-warm: {theme["accent_warm"]};
                     --code-bg: rgba(15, 20, 29, 0.85);
                     --code-toolbar: rgba(28, 28, 36, 0.7);
                     --code-border: #2a3447;
@@ -1413,7 +1417,7 @@ class CodeWebViewer(QWebEngineView):
                 body {{
                     background: var(--bg) !important;
                     color: var(--text);
-                    font-family: "{font_family}", "Segoe UI", sans-serif; font-size: 14px; line-height: 1.5;
+                    font-family: "{font_family}", "Segoe UI", sans-serif; font-size: {body_font_size}px; line-height: 1.5;
                     margin: 0; 
                     padding: 6px 14px; 
                     max-height: {self.MAX_HEIGHT}px;
@@ -1548,7 +1552,7 @@ class CodeWebViewer(QWebEngineView):
                     overflow-y: hidden;
                     background: rgba(20, 25, 35, 0.7);
                     font-family: Consolas, monospace;
-                    font-size: 13px;
+                    font-size: {code_font_size}px;
                     line-height: 1.5;
                     padding: 0 10px 8px 0;
                     margin: 0;
@@ -1577,7 +1581,7 @@ class CodeWebViewer(QWebEngineView):
                     overflow: visible;
                     background: transparent !important;
                     font-family: Consolas, monospace !important;
-                    font-size: 13px !important;
+                    font-size: {code_font_size}px !important;
                     line-height: 1.5 !important;
                 }}
                 .code-line {{ padding-left: 12px !important; white-space: pre; font-family: Consolas, monospace; }}
@@ -2359,7 +2363,7 @@ class PlainTextViewer(QWidget):
                 border: none;
                 {font_css}
                 color: #F5F7FB;
-                font-size: 14px;
+                font-size: {scale_font_size(14)}px;
                 line-height: 1.5;
                 selection-background-color: rgba(102, 198, 255, 0.28);
             }}
