@@ -243,6 +243,9 @@ class ChatBackend(QObject):
 
         self._history_manager = HistoryManager()
         
+        # 7. 自动发现并合并其他来源的 MCP 服务器配置（仅首次）
+        self._discover_mcp_servers()
+
         # 8. 初始化 MCP 连接
         self._init_mcp_connections()
         
@@ -260,8 +263,30 @@ class ChatBackend(QObject):
             for name, callback in callbacks.items():
                 self._chat_engine.set_callback(name, callback)
 
+    # ========== MCP 自动发现 ==========
+
+    def _discover_mcp_servers(self):
+        """自动发现其他工具的 MCP 配置并合并（仅首次运行生效）"""
+        from app.utils.config import Settings
+
+        cfg = Settings.get_instance()
+
+        # 已处理过则跳过
+        if cfg.mcp_discovered.value:
+            return
+
+        from app.tools.mcp_tools import discover_and_merge
+
+        merged, new_ones = discover_and_merge()
+        if new_ones:
+            cfg.set(cfg.mcp_servers, merged, save=True)
+            logger.info(f"[ChatBackend] MCP 自动发现完成，导入 {len(new_ones)} 个新服务器")
+
+        # 标记已处理
+        cfg.set(cfg.mcp_discovered, True, save=True)
+
     # ========== ChatEngine 代理方法 ==========
-    
+
     def _init_mcp_connections(self):
         """初始化 MCP 服务器连接（后台异步，不阻塞 UI）"""
         from app.utils.config import Settings

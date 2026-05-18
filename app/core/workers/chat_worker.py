@@ -568,7 +568,8 @@ class OpenAIChatWorker(QThread):
                     # 修复：重新插入 system_message，否则下一轮 API 调用会丢失系统提示
                     current_messages.insert(0, system_message)
                     # 修复：始终更新 API 缓存以匹配 current_messages（含 system）
-                    self._api_messages_cache = current_messages
+                    # 注意：需要通过 messages_to_api() 转换格式，否则后续 API 调用读到内部格式对象
+                    self._api_messages_cache = messages_to_api(current_messages)
                     # 注意：current_session_messages 故意不做同步压缩。
                     # 它的增长会在 worker 结束时由 _on_messages_updated 的
                     # preserve_compaction=False 清空缓存，下轮发送时由 ContextBudgetAllocator 统一压缩。

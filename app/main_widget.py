@@ -2597,23 +2597,11 @@ class OpenAIChatToolWindow(ToolWindow):
         在发送新消息后调用，因为 _append_user_message / _append_assistant_message
         不设置 _message_index（渲染路径 _render_message_to_card 才设置）。
 
-        修复：当新 assistant card 找不到对应 batch slot 时（session 中尚无 assistant 消息），
-        为其在 _message_batch / _batch_cards 末尾追加新的 slot，避免与其他卡片共享 slot
-        导致批量回收时误删卡片。
+        关键：必须处理所有无 _message_index 的卡片，而非只处理第一个。
         """
-        # 找到 _message_batch 中最后一个 user batch 和最后一个 non-user batch
-        last_user_batch = -1
-        last_non_user_batch = -1
-        for batch_idx, batch in enumerate(self._message_batch):
-            if not batch:
-                continue
-            if batch[0].get("role") == "user":
-                last_user_batch = batch_idx
-            else:
-                last_non_user_batch = batch_idx
-
-        # 从布局末尾向前扫描，给无 _message_index 的卡片分配 batch index
-        for i in range(self.chat_layout.count() - 1, -1, -1):
+        # 收集所有无 _message_index 的卡片（按布局顺序，即时间顺序）
+        unassigned = []
+        for i in range(self.chat_layout.count()):
             item = self.chat_layout.itemAt(i)
             if not item or not item.widget():
                 continue
@@ -2623,28 +2611,54 @@ class OpenAIChatToolWindow(ToolWindow):
             if getattr(widget, '_is_welcome', False):
                 continue
             if getattr(widget, '_message_index', None) is not None:
-                continue  # 已有正确索引，跳过
+                continue
+            unassigned.append(widget)
 
-            # 按角色匹配最后一个 batch
-            if widget.role == "user" and last_user_batch >= 0:
-                widget._message_index = last_user_batch
-                if last_user_batch < len(self._batch_cards):
-                    if self._batch_cards[last_user_batch] is None:
-                        self._batch_cards[last_user_batch] = []
-                    if widget not in self._batch_cards[last_user_batch]:
-                        self._batch_cards[last_user_batch].append(widget)
-                break
-            elif widget.role != "user":
-                # 修复：新的 assistant card 在 session 中尚无对应 assistant batch，
-                # 此时 last_non_user_batch 指向已有的旧 assistant batch。
-                # 直接复用该 slot 会与旧卡片共享引用，回收时误伤旧卡片。
-                # 改为在末尾追加独占的批量槽位。
+        if not unassigned:
+            return
+
+        # 构建 _message_batch 中每个 batch 的分配状态：
+        # 已有 _batch_cards 引用且非 None 的 batch 表示已被占用
+        assigned_batch_indices = set()
+        for batch_idx, cards in enumerate(self._batch_cards):
+            if cards is not None and len(cards) > 0:
+                # 检查 cards 中是否有存活的 widget
+                for c in cards:
+                    if self._is_widget_alive(c):
+                        assigned_batch_indices.add(batch_idx)
+                        break
+
+        # 对每个未分配的卡片，按角色从后向前在 _message_batch 中找到
+        # 未被占用的同角色 batch
+        for widget in unassigned:
+            target_batch_idx = -1
+            for batch_idx in range(len(self._message_batch) - 1, -1, -1):
+                if batch_idx in assigned_batch_indices:
+                    continue
+                batch = self._message_batch[batch_idx]
+                if not batch:
+                    continue
+                if batch[0].get("role") == widget.role:
+                    target_batch_idx = batch_idx
+                    break
+
+            if target_batch_idx >= 0:
+                # 找到了未被占用的同角色 batch
+                widget._message_index = target_batch_idx
+                assigned_batch_indices.add(target_batch_idx)
+                if target_batch_idx < len(self._batch_cards):
+                    if self._batch_cards[target_batch_idx] is None:
+                        self._batch_cards[target_batch_idx] = []
+                    if widget not in self._batch_cards[target_batch_idx]:
+                        self._batch_cards[target_batch_idx].append(widget)
+            else:
+                # 没有可匹配的 batch，在末尾追加独占槽位
                 new_batch_idx = len(self._message_batch)
-                self._message_batch.append([])  # 追加空 batch 占位
-                self._batch_cards.append([])    # 追加空引用列表
+                self._message_batch.append([])
+                self._batch_cards.append([])
                 widget._message_index = new_batch_idx
                 self._batch_cards[new_batch_idx].append(widget)
-                break
+                assigned_batch_indices.add(new_batch_idx)
 
     def _render_message_to_card(
             self,
@@ -4554,6 +4568,8 @@ class OpenAIChatToolWindow(ToolWindow):
         self._sync_batch_structures()
         # 给新创建的用户卡片设置正确的 _message_index（_append_user_message 中未设置）
         self._fix_new_card_message_index(user_text=user_text)
+        # 修复：扩展可见范围以覆盖新增的 batch，否则回收机制会误删新卡片
+        self._visible_batch_end = len(self._message_batch)
 
         self._maybe_generate_topic_summary()
 
@@ -4921,6 +4937,8 @@ class OpenAIChatToolWindow(ToolWindow):
             self._save_current_session_to_history()
             # 流式完成后同步 batch 结构，确保 _message_batch 包含完整的 assistant batch
             self._sync_batch_structures()
+            # 修复：同步可见范围，避免回收机制误删当前轮次的卡片
+            self._visible_batch_end = len(self._message_batch)
 
         if self.input_area:
             self.input_area.setFocus()
