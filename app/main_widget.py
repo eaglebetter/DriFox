@@ -1609,11 +1609,12 @@ class OpenAIChatToolWindow(ToolWindow):
 
     def _create_agent_switch_buttons(self) -> QWidget:
         """创建智能体切换按钮 - 单胶囊设计，中间用分隔线"""
+        Colors.refresh()
         container = QWidget()
         container.setFixedHeight(30)
-        container.setStyleSheet("""
-            background: rgba(27, 35, 50, 180);
-            border: 1px solid rgba(43, 56, 80, 200);
+        container.setStyleSheet(f"""
+            background: {Colors.CAPSULE_BG};
+            border: 1px solid {Colors.CAPSULE_BORDER};
             border-radius: 12px;
         """)
         layout = QHBoxLayout(container)
@@ -1645,39 +1646,10 @@ class OpenAIChatToolWindow(ToolWindow):
         self._agent_btn_group.buttonClicked[int].connect(self._on_agent_btn_clicked)
 
         # 默认样式
-        default_style = f"""
-            QPushButton {{
-                background: transparent;
-                color: #8FA4C2;
-                border: none;
-                border-radius: 8px;
-                padding: 4px 12px;
-                font-size: 12px;
-                font-weight: 500;
-                {get_font_family_css()}
-            }}
-            QPushButton:hover {{
-                background: rgba(255, 255, 255, 0.05);
-                color: #B4C2D9;
-            }}
-        """
+        default_style = self._build_agent_btn_style(active=False)
 
         # 选中样式
-        selected_style = f"""
-            QPushButton {{
-                background: rgba(201, 168, 92, 0.2);
-                color: #C9A85C;
-                border: none;
-                border-radius: 8px;
-                padding: 4px 12px;
-                font-size: 12px;
-                font-weight: 600;
-                {get_font_family_css()}
-            }}
-            QPushButton:hover {{
-                background: rgba(201, 168, 92, 0.25);
-            }}
-        """
+        selected_style = self._build_agent_btn_style(active=True)
 
         for i, agent in enumerate(agents):
             # 添加分隔线（在按钮之前，除了第一个）
@@ -1685,7 +1657,8 @@ class OpenAIChatToolWindow(ToolWindow):
                 sep = QFrame()
                 sep.setFrameShape(QFrame.VLine)
                 sep.setFixedWidth(1)
-                sep.setStyleSheet("background: rgba(60, 75, 95, 150); margin: 4px 0;")
+                Colors.refresh()
+                sep.setStyleSheet(f"background: {Colors.AGENT_BTN_SEPARATOR}; margin: 4px 0;")
                 layout.addWidget(sep)
 
             btn = QPushButton(agent.name)
@@ -1735,6 +1708,56 @@ class OpenAIChatToolWindow(ToolWindow):
 
         # 触发智能体切换
         self._on_agent_changed(agent_name)
+
+    def _build_agent_btn_style(self, active: bool = False) -> str:
+        """构建智能体按钮样式（动态从 Colors 读取）"""
+        Colors.refresh()
+        if active:
+            return f"""
+                QPushButton {{
+                    background: {Colors.AGENT_BTN_BG_ACTIVE};
+                    color: {Colors.AGENT_BTN_TEXT_ACTIVE};
+                    border: none;
+                    border-radius: 8px;
+                    padding: 4px 12px;
+                    font-size: 12px;
+                    font-weight: 600;
+                    {get_font_family_css()}
+                }}
+                QPushButton:hover {{
+                    background: {Colors.AGENT_BTN_BG_ACTIVE};
+                }}
+            """
+        return f"""
+            QPushButton {{
+                background: transparent;
+                color: {Colors.AGENT_BTN_TEXT};
+                border: none;
+                border-radius: 8px;
+                padding: 4px 12px;
+                font-size: 12px;
+                font-weight: 500;
+                {get_font_family_css()}
+            }}
+            QPushButton:hover {{
+                background: rgba(255, 255, 255, 0.05);
+                color: {Colors.TEXT_PRIMARY};
+            }}
+        """
+
+    def _refresh_agent_button_styles(self):
+        """刷新所有智能体按钮样式（响应主题切换）"""
+        if not hasattr(self, "_agent_buttons"):
+            return
+        Colors.refresh()
+        for name, data in self._agent_buttons.items():
+            is_active = name == self._current_agent
+            new_style = self._build_agent_btn_style(active=is_active)
+            if is_active:
+                data["selected_style"] = new_style
+            else:
+                data["style"] = new_style
+            data["btn"].setStyleSheet(new_style)
 
     def _toggle_history_card(self):
         """切换历史会话卡片的显示"""
@@ -1993,21 +2016,39 @@ class OpenAIChatToolWindow(ToolWindow):
         if hasattr(self, "title_edit"):
             title_style = TITLE_STYLE.replace("    QLabel {", f"    QLabel {{\n        {get_font_family_css()}")
             title_style = title_style.replace("font-size: 15px;", font_size_css(15))
+            title_style = title_style.replace("#f3f6fc", Colors.TEXT_PRIMARY)
             self.title_edit.setStyleSheet(title_style)
         if hasattr(self, "_model_btn_container"):
             self._model_btn_container.setStyleSheet(get_capsule_style())
         if hasattr(self, "_model_btn_text"):
-            self._model_btn_text.setStyleSheet(MODEL_BTN_TEXT_STYLE.replace("font-size: 13px;", font_size_css(13)))
+            btn_text_style = MODEL_BTN_TEXT_STYLE.replace("font-size: 13px;", font_size_css(13))
+            btn_text_style = btn_text_style.replace("#f3f6fc", Colors.TEXT_PRIMARY)
+            self._model_btn_text.setStyleSheet(btn_text_style)
         if hasattr(self, "_toolbar_capsule"):
             self._toolbar_capsule.setStyleSheet(get_capsule_style())
         if hasattr(self, "input_area"):
             setFont(self.input_area, scale_font_size(15))
+            if hasattr(self.input_area, "refresh_style"):
+                self.input_area.refresh_style()
+        # 刷新智能体切换按钮样式
+        if hasattr(self, "_agent_switch_widget"):
+            Colors.refresh()
+            self._agent_switch_widget.setStyleSheet(f"""
+                background: {Colors.CAPSULE_BG};
+                border: 1px solid {Colors.CAPSULE_BORDER};
+                border-radius: 12px;
+            """)
+        self._refresh_agent_button_styles()
+        # 刷新设置卡片
         for card in self.findChildren(BaseSettingsCard):
             if hasattr(card, "refresh_style"):
                 card.refresh_style()
         if self._settings_popup and hasattr(self._settings_popup, "refresh_style"):
             self._settings_popup.refresh_style()
+        # 刷新消息卡片主题
         for card in self.findChildren(MessageCard):
+            if hasattr(card, "refresh_theme"):
+                card.refresh_theme()
             viewer = getattr(card, "viewer", None)
             if viewer and hasattr(viewer, "_schedule_render"):
                 viewer._schedule_render(immediate=True)
