@@ -95,6 +95,9 @@ from app.widgets.project_selector_popup import ProjectSelectorPopup
 from app.widgets.provider_edit_card import (
     ProviderEditCard,
 )
+from app.widgets.mcp_setting_card import (
+    MCPEditCard,
+)
 from app.widgets.question_floating_widget import (
     QuestionFloatingWidget,
 )
@@ -787,6 +790,10 @@ class OpenAIChatToolWindow(ToolWindow):
         # 连接 Hook 添加/编辑信号
         self._settings_popup.hookListCard.showAddHookCard.connect(self._show_hook_add_card)
 
+        # 连接 MCP 添加/编辑信号
+        self._settings_popup.mcpListCard.showAddCard.connect(self._show_mcp_add_card)
+        self._settings_popup.mcpListCard.showEditCard.connect(self._show_mcp_edit_card)
+
         # Hook 编辑卡片
         self._hook_edit_card = BaseSettingsCard("Hook 配置", "⚙️", parent=self)
         self._hook_edit_card.setFixedHeight(380)
@@ -813,6 +820,14 @@ class OpenAIChatToolWindow(ToolWindow):
         self._provider_edit_card.setVisible(False)
         self._provider_edit_card.closed.connect(self._restore_after_system_close)
         layout.addWidget(self._provider_edit_card)
+
+        # MCP 编辑卡片
+        self._mcp_edit_card = BaseSettingsCard("MCP 服务器", "🔌", parent=self)
+        self._mcp_edit_card.setFixedHeight(350)
+        self._mcp_edit_popup = None
+        self._mcp_edit_card.setVisible(False)
+        self._mcp_edit_card.closed.connect(self._restore_after_system_close)
+        layout.addWidget(self._mcp_edit_card)
 
         self._todo_floating_widget = TodoFloatingWidget(self)
         self._todo_floating_widget.setVisible(False)
@@ -1407,6 +1422,60 @@ class OpenAIChatToolWindow(ToolWindow):
     def _on_hook_edit_closed(self):
         """Hook 编辑关闭回调"""
         self._hook_edit_card.hide()
+        self._settings_popup.show()
+
+    # ========== MCP 编辑卡片 ==========
+
+    def _show_mcp_add_card(self):
+        """显示添加 MCP 服务器卡片"""
+        self._settings_popup.hide()
+        self._mcp_edit_card.set_title("🔌 添加 MCP 服务器")
+        self._mcp_edit_popup = MCPEditCard(server_data=None, parent=self)
+        self._mcp_edit_popup.saved.connect(self._on_mcp_edit_saved)
+        self._mcp_edit_popup.closed.connect(self._on_mcp_edit_closed)
+        while self._mcp_edit_card.content_layout.count():
+            item = self._mcp_edit_card.content_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        self._mcp_edit_card.content_layout.addWidget(self._mcp_edit_popup)
+        self._mcp_edit_card.set_save_button_handler(
+            lambda: self._mcp_edit_popup._on_save()
+        )
+        self._mcp_edit_card.show()
+
+    def _show_mcp_edit_card(self, name: str, server_data: dict):
+        """显示编辑 MCP 服务器卡片"""
+        self._settings_popup.hide()
+        self._mcp_edit_card.set_title(f"🔌 编辑: {name}")
+        self._mcp_edit_popup = MCPEditCard(server_data=server_data, parent=self)
+        self._mcp_edit_popup.saved.connect(self._on_mcp_edit_saved)
+        self._mcp_edit_popup.closed.connect(self._on_mcp_edit_closed)
+        while self._mcp_edit_card.content_layout.count():
+            item = self._mcp_edit_card.content_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        self._mcp_edit_card.content_layout.addWidget(self._mcp_edit_popup)
+        self._mcp_edit_card.set_save_button_handler(
+            lambda: self._mcp_edit_popup._on_save()
+        )
+        self._mcp_edit_card.show()
+
+    def _on_mcp_edit_saved(self, server_data: dict):
+        """MCP 编辑保存回调"""
+        self._mcp_edit_card.hide()
+        self._settings_popup.show()
+        if hasattr(self._settings_popup, 'mcpListCard'):
+            name = server_data.get("name", "")
+            servers = list(self._settings_popup.mcpListCard.cfg.mcp_servers.value or [])
+            is_edit = any(s.get("name") == name for s in servers)
+            if is_edit:
+                self._settings_popup.mcpListCard.update_server(name, server_data)
+            else:
+                self._settings_popup.mcpListCard.add_server(server_data)
+
+    def _on_mcp_edit_closed(self):
+        """MCP 编辑关闭回调"""
+        self._mcp_edit_card.hide()
         self._settings_popup.show()
 
     def _hide_main_popups(self):
@@ -5635,7 +5704,10 @@ class OpenAIChatToolWindow(ToolWindow):
             if val in ("deny", False)
         }
 
-        all_tools = get_builtin_tools_schema(agent_manager=agent_manager)
+        all_tools = get_builtin_tools_schema(
+            agent_manager=agent_manager,
+            builtin_tools=self.backend.tool_executor._builtin_tools if hasattr(self.backend, 'tool_executor') else None,
+        )
         tools_schema = [
             t for t in all_tools
             if t.get("function", {}).get("name", "") not in denied_tools

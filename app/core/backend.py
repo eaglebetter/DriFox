@@ -218,6 +218,8 @@ class ChatBackend(QObject):
         self._tool_executor.set_memory_manager(self._memory_manager)
         self._tool_executor.set_llm_config_getter(get_model_config)
         self._tool_executor.set_agent_manager(self._agent_manager)
+        # 设置 AgentManager 的 builtin_tools 引用（用于获取 MCP 工具 schema）
+        self._agent_manager._builtin_tools = self._tool_executor._builtin_tools
         # 设置关键文档仓储
         if self._memory_manager and self._memory_manager.key_documents:
             self._tool_executor.set_key_documents_repo(
@@ -241,6 +243,9 @@ class ChatBackend(QObject):
 
         self._history_manager = HistoryManager()
         
+        # 8. 初始化 MCP 连接
+        self._init_mcp_connections()
+        
         self._initialized = True
         logger.info("[ChatBackend] 初始化完成")
     
@@ -256,6 +261,38 @@ class ChatBackend(QObject):
                 self._chat_engine.set_callback(name, callback)
 
     # ========== ChatEngine 代理方法 ==========
+    
+    def _init_mcp_connections(self):
+        """初始化 MCP 服务器连接（单例，多窗口共享）"""
+        from app.utils.config import Settings
+        import asyncio
+
+        mcp_manager = self._tool_executor._builtin_tools._mcp_manager
+
+        # 已连接则复用，无需重复连接
+        if mcp_manager.is_connected:
+            logger.info("[ChatBackend] MCP 已连接，复用现有连接")
+            return
+
+        cfg = Settings.get_instance()
+        if not cfg.mcp_enabled.value:
+            logger.info("[ChatBackend] MCP 全局开关已关闭，跳过连接")
+            return
+
+        servers = cfg.mcp_servers.value
+        if not servers:
+            logger.info("[ChatBackend] 无 MCP 服务器配置，跳过连接")
+            return
+
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.ensure_future(mcp_manager.connect_all(servers))
+            else:
+                loop.run_until_complete(mcp_manager.connect_all(servers))
+            logger.info(f"[ChatBackend] MCP 初始化完成，已连接 {len(mcp_manager._connections)} 个服务器")
+        except Exception as e:
+            logger.error(f"[ChatBackend] MCP 初始化失败: {e}")
     
     def stop_streaming(self):
         """停止流式输出"""

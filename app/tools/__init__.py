@@ -18,6 +18,7 @@ from app.tools.result import ToolResult
 # Import all tool modules
 from app.tools.diagnostics_tools import DiagnosticsTools
 from app.tools.file_tools import FileTools
+from app.tools.mcp_tools import MCPClientManager
 from app.tools.task_tools import TaskTools
 from app.tools.terminal_tools import TerminalTools
 from app.tools.web_tools import WebTools
@@ -55,6 +56,10 @@ class BuiltinTools(QObject):
         self._todo_list = []
         self._loaded_skills = {}
         self._skill_workspaces = {}
+        
+        # MCP 客户端管理器（全局单例，多窗口共享连接）
+        self._mcp_manager = MCPClientManager.get_instance()
+        self._mcp_manager.acquire()
         
         # Dependencies injected later
         self._sub_agent_manager = None
@@ -103,6 +108,10 @@ class BuiltinTools(QObject):
     @property
     def diagnostics_tools(self):
         return self._diagnostics_tools
+
+    @property
+    def mcp_manager(self):
+        return self._mcp_manager
 
     def __getattr__(self, name: str):
         """
@@ -179,6 +188,9 @@ class BuiltinTools(QObject):
         # 清理文件工具的缓存
         if hasattr(self._file_tools, 'cleanup'):
             self._file_tools.cleanup()
+
+        # 释放 MCP 引用（引用计数归零时才真正断开）
+        self._mcp_manager.release()
 
     def summarize_changes(self, text: str = "", limit: int = 1200) -> ToolResult:
         text = (text or "").strip()
@@ -844,14 +856,23 @@ TOOL_SCHEMAS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "mcp_list_servers",
+            "description": "列出所有 MCP 服务器的连接状态和可用工具。当需要了解当前有哪些 MCP 服务器可用时可调用此工具。",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
 ]
 
 
-def get_builtin_tools_schema(agent_manager=None) -> List[Dict]:
+def get_builtin_tools_schema(agent_manager=None, builtin_tools=None) -> List[Dict]:
     """获取内置工具的 schema 定义（用于给 LLM 调用）
 
     Args:
         agent_manager: AgentManager 实例，用于动态注入可用子智能体列表
+        builtin_tools: BuiltinTools 实例，用于动态注入 MCP 工具 schema
     """
     # 动态获取子智能体名称列表
     subagent_names = []
@@ -882,5 +903,12 @@ def get_builtin_tools_schema(agent_manager=None) -> List[Dict]:
                     'description'
                 ] += f" (可选：{', '.join(subagent_names)})"
             break
+    
+    # 动态注入 MCP 工具 schema
+    if builtin_tools and hasattr(builtin_tools, '_mcp_manager'):
+        mcp_schemas = builtin_tools._mcp_manager.get_tool_schemas()
+        if mcp_schemas:
+            schemas.extend(mcp_schemas)
+            logger.info(f"[BuiltinTools] 注入 {len(mcp_schemas)} 个 MCP 工具 schema")
     
     return schemas

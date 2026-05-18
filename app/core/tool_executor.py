@@ -427,6 +427,10 @@ class ToolExecutor:
             except Exception as e:
                 return ToolResult(False, error=f"Custom tool error: {str(e)}")
 
+        # MCP 工具调用：工具名以 "mcp__" 开头
+        if tool_name.startswith("mcp__") and self._builtin_tools:
+            return self._execute_mcp_tool(tool_name, args)
+
         tool_map = {
             "read": lambda: self._builtin_tools.read_file(
                 path=args.get("path"),  # 统一使用 path
@@ -529,7 +533,11 @@ class ToolExecutor:
                 args.get("question", ""),
                 args.get("options"),
                 args.get("multiple", False),
-            )
+            ),
+            "mcp_list_servers": lambda: ToolResult(
+                True,
+                content=self._builtin_tools._mcp_manager.get_status()
+            ),
         }
 
         executor = tool_map.get(tool_name)
@@ -574,6 +582,32 @@ class ToolExecutor:
                 return ToolResult(False, error=f"Execution error: {str(e)}")
 
         return ToolResult(False, error=f"Unknown tool: {tool_name}")
+
+    def _execute_mcp_tool(self, tool_name: str, args: dict) -> ToolResult:
+        """执行 MCP 工具调用（异步转同步）"""
+        import asyncio
+
+        mcp_manager = self._builtin_tools._mcp_manager
+
+        if not mcp_manager.is_connected:
+            return ToolResult(False, error="MCP 未连接，请先配置并连接 MCP 服务器")
+
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # 在已有事件循环中（如 Qt 事件循环），使用 run_coroutine_threadsafe
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    future = pool.submit(
+                        asyncio.run,
+                        mcp_manager.call_tool(tool_name, args)
+                    )
+                    return future.result(timeout=60)
+            else:
+                return loop.run_until_complete(mcp_manager.call_tool(tool_name, args))
+        except Exception as e:
+            logger.error(f"[ToolExecutor] MCP 工具 '{tool_name}' 执行失败: {e}")
+            return ToolResult(False, error=f"MCP 工具执行失败: {e}")
 
     def _execute_grep_async(self, args: dict, cancelled_ref: list = None) -> ToolResult:
         """

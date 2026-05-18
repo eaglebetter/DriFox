@@ -287,7 +287,10 @@ class ChatEngine:
                 self._current_agent
             )
         else:
-            available_tools = get_builtin_tools_schema(self._get_agent_manager())
+            available_tools = get_builtin_tools_schema(
+                self._get_agent_manager(),
+                builtin_tools=self._tool_executor._builtin_tools if self._tool_executor else None,
+            )
 
         self._start_worker(messages, llm_config, available_tools)
         return True

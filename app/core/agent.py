@@ -118,6 +118,8 @@ class PermissionResolver:
         "websearch": "allow",
         "todoread": "allow",
         "todowrite": "allow",
+        "mcp_list_servers": "allow",
+        "mcp": "allow",  # MCP 工具前缀匹配
         "external_directory": "ask",
         "doom_loop": "ask",
     }
@@ -229,6 +231,7 @@ class AgentManager:
         self._hidden_agents: Dict[str, Agent] = {}
         self._hook_manager = hook_manager
         self._global_permission: Dict[str, Any] = {}
+        self._builtin_tools = None  # BuiltinTools 实例，用于获取 MCP schema
         self._load_agents()
 
     def _load_agents(self):
@@ -518,7 +521,7 @@ class AgentManager:
         if not agent:
             return []
 
-        all_tools = get_builtin_tools_schema(self)  # 传递 agent_manager 用于动态生成
+        all_tools = get_builtin_tools_schema(self, builtin_tools=self._builtin_tools)
 
         # 【新增】子智能体禁止使用交互和嵌套子智能体工具（需要用户交互或发布子智能体，不支持）
         forbidden_tools = {"question", "task_batch", "task_status"}
