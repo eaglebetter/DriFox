@@ -402,14 +402,15 @@ class DiffHtmlGenerator:
         }
 
         .word-add {
-            background: rgba(63, 185, 80, 0.35);
+            background: rgba(63, 185, 80, 0.2);
             border-radius: 2px;
+            border-bottom: 1px solid rgba(63, 185, 80, 0.5);
         }
 
         .word-del {
-            background: rgba(248, 81, 73, 0.35);
+            background: rgba(248, 81, 73, 0.2);
             border-radius: 2px;
-            text-decoration: line-through;
+            border-bottom: 1px solid rgba(248, 81, 73, 0.5);
         }
 
         .diff-expand {
@@ -442,14 +443,6 @@ class DiffHtmlGenerator:
             font-family: var(--gh-font-mono);
             font-size: 11px;
             opacity: 0.9;
-        }
-
-        .diff-collapsed-context {
-            display: none;
-        }
-
-        .diff-collapsed-context.expanded {
-            display: block;
         }
 
         .no-diff {
@@ -665,7 +658,8 @@ class DiffHtmlGenerator:
             return div.innerHTML;
         }}
 
-        // 字符级差异高亮（JS 端，与 Python _word_diff 保持一致）
+        // 快速行内差异高亮（JS 端）
+        // 使用公共前缀/后缀算法，O(min(m,n)) 代替 LCS 的 O(m×n)
         function wordDiff(oldText, newText) {{
             // 安全限制：行太长时跳过 word diff
             if (oldText.length + newText.length > 2000) {{
@@ -677,78 +671,32 @@ class DiffHtmlGenerator:
             const m = oldChars.length;
             const n = newChars.length;
 
-            // LCS 动态规划
-            const dp = [];
-            for (let i = 0; i <= m; i++) {{
-                dp[i] = new Uint16Array(n + 1);
-            }}
-            for (let i = 1; i <= m; i++) {{
-                for (let j = 1; j <= n; j++) {{
-                    if (oldChars[i-1] === newChars[j-1]) {{
-                        dp[i][j] = dp[i-1][j-1] + 1;
-                    }} else {{
-                        dp[i][j] = Math.max(dp[i-1][j], dp[i][j-1]);
-                    }}
-                }}
+            // 找公共前缀
+            let prefixLen = 0;
+            while (prefixLen < m && prefixLen < n && oldChars[prefixLen] === newChars[prefixLen]) {{
+                prefixLen++;
             }}
 
-            // 回溯获取操作序列
-            const ops = [];
-            let i = m, j = n;
-            while (i > 0 || j > 0) {{
-                if (i > 0 && j > 0 && oldChars[i-1] === newChars[j-1]) {{
-                    ops.unshift({{ tag: 'equal', oi: i-1, nj: j-1 }});
-                    i--; j--;
-                }} else if (j > 0 && (i === 0 || dp[i][j-1] >= dp[i-1][j])) {{
-                    ops.unshift({{ tag: 'insert', nj: j-1 }});
-                    j--;
-                }} else {{
-                    ops.unshift({{ tag: 'delete', oi: i-1 }});
-                    i--;
-                }}
+            // 找公共后缀（减去已匹配的前缀）
+            let suffixLen = 0;
+            while (suffixLen < m - prefixLen && suffixLen < n - prefixLen &&
+                   oldChars[m - 1 - suffixLen] === newChars[n - 1 - suffixLen]) {{
+                suffixLen++;
             }}
 
-            // 合并连续相同 tag 的片段，生成 HTML
-            const segments = [];
-            for (const op of ops) {{
-                const lastSeg = segments[segments.length - 1];
-                if (lastSeg && lastSeg.tag === op.tag) {{
-                    if (op.tag === 'equal') {{
-                        lastSeg.oldEnd = op.oi + 1;
-                        lastSeg.newEnd = op.nj + 1;
-                    }} else if (op.tag === 'delete') {{
-                        lastSeg.oldEnd = op.oi + 1;
-                    }} else {{
-                        lastSeg.newEnd = op.nj + 1;
-                    }}
-                }} else {{
-                    if (op.tag === 'equal') {{
-                        segments.push({{ tag: 'equal', oldStart: op.oi, oldEnd: op.oi + 1, newStart: op.nj, newEnd: op.nj + 1 }});
-                    }} else if (op.tag === 'delete') {{
-                        segments.push({{ tag: 'delete', oldStart: op.oi, oldEnd: op.oi + 1 }});
-                    }} else {{
-                        segments.push({{ tag: 'insert', newStart: op.nj, newEnd: op.nj + 1 }});
-                    }}
-                }}
-            }}
+            const oldMid = oldChars.slice(prefixLen, m - suffixLen).join('');
+            const newMid = newChars.slice(prefixLen, n - suffixLen).join('');
+            const prefix = oldChars.slice(0, prefixLen).join('');
+            const suffix = oldChars.slice(m - suffixLen).join('');
 
-            let oldParts = [];
-            let newParts = [];
-            for (const seg of segments) {{
-                if (seg.tag === 'equal') {{
-                    const text = oldChars.slice(seg.oldStart, seg.oldEnd).join('');
-                    oldParts.push(escapeHtml(text));
-                    newParts.push(escapeHtml(text));
-                }} else if (seg.tag === 'delete') {{
-                    const text = oldChars.slice(seg.oldStart, seg.oldEnd).join('');
-                    oldParts.push('<span class="word-del">' + escapeHtml(text) + '</span>');
-                }} else {{
-                    const text = newChars.slice(seg.newStart, seg.newEnd).join('');
-                    newParts.push('<span class="word-add">' + escapeHtml(text) + '</span>');
-                }}
-            }}
+            const oldHtml = escapeHtml(prefix) +
+                (oldMid ? '<span class="word-del">' + escapeHtml(oldMid) + '</span>' : '') +
+                escapeHtml(suffix);
+            const newHtml = escapeHtml(prefix) +
+                (newMid ? '<span class="word-add">' + escapeHtml(newMid) + '</span>' : '') +
+                escapeHtml(suffix);
 
-            return {{ oldHtml: oldParts.join(''), newHtml: newParts.join('') }};
+            return {{ oldHtml, newHtml }};
         }}
 
         // 从diff行数据生成HTML行（支持行内差异高亮 + data-type 属性）
@@ -930,40 +878,32 @@ class DiffHtmlGenerator:
                     const foldStart = range.start + KEEP_HEAD;
                     const foldEnd = range.end - KEEP_TAIL;
 
-                    // 将中间行包裹在折叠容器中
-                    const foldedDiv = document.createElement('div');
-                    foldedDiv.className = 'diff-collapsed-context';
-
                     // 展开按钮
                     const expandBtn = document.createElement('div');
                     expandBtn.className = 'diff-expand';
                     expandBtn.innerHTML = `<span class="expand-icon">&#9662;</span> <span class="expand-lines">${{foldCount}} 行未更改</span>`;
-                    expandBtn.addEventListener('click', function() {{
-                        // 展开：显示折叠的行，隐藏按钮
-                        foldedDiv.classList.add('expanded');
-                        this.style.display = 'none';
-                        // 显示被折叠的行
-                        const hiddenRows = foldedDiv.querySelectorAll('.diff-line');
-                        hiddenRows.forEach(row => row.style.display = '');
-                    }});
 
-                    // 将中间行移入折叠容器
-                    const rows = Array.from(allRows);
-                    // 锚点：第一个 KEEP_TAIL 行（折叠区之后、keep_tail 保留行之前）
-                    // 注意不能拿 range.end+1（整个context区之后），否则折叠容器会插在 keep_tail 行后面
-                    const anchorRow = (foldEnd + 1 < rows.length) ? rows[foldEnd + 1] : null;
-                    for (let i = foldEnd; i >= foldStart; i--) {{
-                        rows[i].style.display = 'none';
-                        foldedDiv.insertBefore(rows[i], foldedDiv.firstChild);
+                    // 折叠：将中间行设为 display:none，展开时恢复
+                    const hiddenRows = [];
+                    for (let i = foldStart; i <= foldEnd; i++) {{
+                        allRows[i].style.display = 'none';
+                        hiddenRows.push(allRows[i]);
                     }}
 
-                    // 在折叠区域起始位置插入按钮和容器
+                    // 将 hiddenRows 存在按钮上供 toggleAllFolding 使用
+                    expandBtn._hiddenRows = hiddenRows;
+
+                    expandBtn.addEventListener('click', function() {{
+                        this._hiddenRows.forEach(row => row.style.display = '');
+                        this.style.display = 'none';
+                    }});
+
+                    // 在第一个 KEEP_TAIL 行之前插入展开按钮
+                    const anchorRow = (foldEnd + 1 < allRows.length) ? allRows[foldEnd + 1] : null;
                     if (anchorRow && anchorRow.parentNode === table) {{
-                        table.insertBefore(foldedDiv, anchorRow);
-                        table.insertBefore(expandBtn, foldedDiv);
+                        table.insertBefore(expandBtn, anchorRow);
                     }} else {{
                         table.appendChild(expandBtn);
-                        table.appendChild(foldedDiv);
                     }}
                 }}
             }});
@@ -1009,16 +949,24 @@ class DiffHtmlGenerator:
             }}
         }});
 
-        // 文件搜索过滤
+        // 文件搜索过滤（带防抖）
+        let _searchTimer = null;
         function filterFiles(query) {{
-            query = query.toLowerCase();
-            document.querySelectorAll('.file-item').forEach(item => {{
-                const name = (item.querySelector('.file-name')?.textContent || '').toLowerCase();
-                const dir = (item.querySelector('.file-dir')?.textContent || '').toLowerCase();
-                const title = (item.getAttribute('title') || '').toLowerCase();
-                const match = title.includes(query) || name.includes(query) || dir.includes(query);
-                item.style.display = match ? '' : 'none';
-            }});
+            clearTimeout(_searchTimer);
+            _searchTimer = setTimeout(() => {{
+                query = query.toLowerCase();
+                document.querySelectorAll('.file-item').forEach(item => {{
+                    const name = (item.querySelector('.file-name')?.textContent || '').toLowerCase();
+                    const dir = (item.querySelector('.file-dir')?.textContent || '').toLowerCase();
+                    const title = (item.getAttribute('title') || '').toLowerCase();
+                    const match = title.includes(query) || name.includes(query) || dir.includes(query);
+                    item.style.display = match ? '' : 'none';
+                }});
+                // 搜索时自动展开全部折叠，方便查看匹配结果
+                if (query.length > 0 && !window._allExpanded) {{
+                    toggleAllFolding();
+                }}
+            }}, query.length > 0 ? 150 : 0);
         }}
 
         // 全部展开/折叠
@@ -1026,16 +974,14 @@ class DiffHtmlGenerator:
         function toggleAllFolding() {{
             _allExpanded = !_allExpanded;
             document.querySelectorAll('.diff-expand').forEach(btn => {{
-                const foldedDiv = btn.nextElementSibling;
-                if (!foldedDiv || !foldedDiv.classList.contains('diff-collapsed-context')) return;
+                const hiddenRows = btn._hiddenRows;
+                if (!hiddenRows || hiddenRows.length === 0) return;
                 if (_allExpanded) {{
-                    foldedDiv.classList.add('expanded');
+                    hiddenRows.forEach(row => row.style.display = '');
                     btn.style.display = 'none';
-                    foldedDiv.querySelectorAll('.diff-line').forEach(row => row.style.display = '');
                 }} else {{
-                    foldedDiv.classList.remove('expanded');
+                    hiddenRows.forEach(row => row.style.display = 'none');
                     btn.style.display = '';
-                    foldedDiv.querySelectorAll('.diff-line').forEach(row => row.style.display = 'none');
                 }}
             }});
             document.querySelector('.btn-collapse-all').textContent = _allExpanded ? '全部折叠' : '全部展开';
@@ -1064,14 +1010,15 @@ class DiffHtmlGenerator:
             window._diffObserver.observe(block);
         }});
 
-        // 对预渲染的文件块执行上下文折叠
-        document.querySelectorAll('.file-block').forEach(block => {{
-            applyContextFolding(block);
+        // 对预渲染的文件块执行上下文折叠（延迟到下一帧，避免阻塞首屏渲染）
+        requestAnimationFrame(() => {{
+            document.querySelectorAll('.file-block').forEach(block => {{
+                applyContextFolding(block);
+            }});
+            // 激活第一个文件
+            const firstItem = document.querySelector('.file-item');
+            if (firstItem) firstItem.classList.add('active');
         }});
-
-        // 激活第一个文件
-        const firstItem = document.querySelector('.file-item');
-        if (firstItem) firstItem.classList.add('active');
     </script>
 </body>
 </html>"""
