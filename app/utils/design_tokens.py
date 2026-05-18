@@ -74,14 +74,14 @@ THEME_STYLE_OPTIONS = {
         "capsule_bg": "rgba(38, 27, 55, 185)",
         "capsule_border": "rgba(88, 68, 110, 205)",
         # === 组件级颜色 ===
-        "user_card_bg": "rgba(45, 30, 65, 150)",
-        "user_card_accent": "#b792ff",
+        "user_card_bg": "rgba(40, 22, 68, 170)",
+        "user_card_accent": "#c9a8ff",
         "user_card_text": "#f7f2ff",
         "user_card_muted": "#a99ab9",
-        "assistant_card_bg": "rgba(30, 25, 45, 150)",
-        "assistant_card_accent": "#cba0ff",
-        "assistant_card_text": "#e8dcff",
-        "assistant_card_muted": "#9a8ab0",
+        "assistant_card_bg": "rgba(55, 28, 22, 170)",
+        "assistant_card_accent": "#ff9a5c",
+        "assistant_card_text": "#ffe6d4",
+        "assistant_card_muted": "#b89888",
         "agent_btn_text": "#a99ab9",
         "agent_btn_text_active": "#d4b8ff",
         "agent_btn_bg_active": "rgba(183, 146, 255, 0.22)",
@@ -115,14 +115,14 @@ THEME_STYLE_OPTIONS = {
         "capsule_bg": "rgba(20, 43, 38, 185)",
         "capsule_border": "rgba(51, 92, 82, 205)",
         # === 组件级颜色 ===
-        "user_card_bg": "rgba(18, 52, 40, 150)",
-        "user_card_accent": "#57d29a",
+        "user_card_bg": "rgba(12, 55, 48, 170)",
+        "user_card_accent": "#5ee8ab",
         "user_card_text": "#effcf6",
         "user_card_muted": "#8eb0a5",
-        "assistant_card_bg": "rgba(30, 50, 30, 150)",
-        "assistant_card_accent": "#6ddb9a",
-        "assistant_card_text": "#d4f5e8",
-        "assistant_card_muted": "#7ea898",
+        "assistant_card_bg": "rgba(55, 42, 18, 170)",
+        "assistant_card_accent": "#e8a94d",
+        "assistant_card_text": "#f5e8d0",
+        "assistant_card_muted": "#a89878",
         "agent_btn_text": "#8eb0a5",
         "agent_btn_text_active": "#57d29a",
         "agent_btn_bg_active": "rgba(87, 210, 154, 0.2)",
@@ -156,14 +156,14 @@ THEME_STYLE_OPTIONS = {
         "capsule_bg": "rgba(48, 44, 40, 185)",
         "capsule_border": "rgba(93, 80, 68, 205)",
         # === 组件级颜色 ===
-        "user_card_bg": "rgba(50, 42, 35, 150)",
-        "user_card_accent": "#d69a5b",
-        "user_card_text": "#f7f4ef",
-        "user_card_muted": "#a99f93",
-        "assistant_card_bg": "rgba(35, 40, 50, 150)",
-        "assistant_card_accent": "#e0b070",
-        "assistant_card_text": "#e8e0d8",
-        "assistant_card_muted": "#959088",
+        "user_card_bg": "rgba(35, 38, 55, 170)",
+        "user_card_accent": "#8cb4e0",
+        "user_card_text": "#eef2fa",
+        "user_card_muted": "#99a3b5",
+        "assistant_card_bg": "rgba(55, 38, 22, 170)",
+        "assistant_card_accent": "#e0a050",
+        "assistant_card_text": "#f5ead8",
+        "assistant_card_muted": "#b0a090",
         "agent_btn_text": "#a99f93",
         "agent_btn_text_active": "#d69a5b",
         "agent_btn_bg_active": "rgba(214, 154, 91, 0.2)",
@@ -196,6 +196,24 @@ def scale_font_size(size: int) -> int:
 
 def font_size_css(size: int) -> str:
     return f"font-size: {scale_font_size(size)}px;"
+
+
+def apply_font_size_to_widget(widget, base_size: int = 14):
+    """递归设置 widget 及其所有子控件的字体像素大小
+    
+    用于解决 qfluentwidgets 组件字体不随配置变化的问题。
+    qfluentwidgets 的 setFont 只设置单个 widget，不递归子控件。
+    
+    Args:
+        widget: 要设置字体的 widget
+        base_size: 基础字体大小（会经过 scale_font_size 缩放）
+    """
+    from PyQt5.QtWidgets import QWidget
+    scaled = scale_font_size(base_size)
+    for child in widget.findChildren(QWidget):
+        child_font = child.font()
+        child_font.setPixelSize(scaled)
+        child.setFont(child_font)
 
 
 def get_theme_style_key() -> str:

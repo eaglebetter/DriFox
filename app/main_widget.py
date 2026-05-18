@@ -64,6 +64,7 @@ from app.utils.design_tokens import (
     get_capsule_style,
     get_window_style,
     scale_font_size,
+    apply_font_size_to_widget,
 )
 from app.widgets.auto_loop_card import AutoLoopConfigCard, AutoLoopRunningCard
 from app.widgets.balance_display import BalanceDisplay
@@ -2031,10 +2032,9 @@ class OpenAIChatToolWindow(ToolWindow):
             setFont(self.input_area, scale_font_size(15))
             if hasattr(self.input_area, "refresh_style"):
                 self.input_area.refresh_style()
-        # 刷新设置弹出层 — 递归调用 qfluentwidgets setFont 刷新字号
+        # 刷新设置弹出层 — 递归刷新 qfluentwidgets 组件字体大小
         if self._settings_popup:
-            from qfluentwidgets import setFont as qfw_setFont
-            qfw_setFont(self._settings_popup)
+            apply_font_size_to_widget(self._settings_popup, 14)
             # 同时刷新所有子设置卡片的主题样式
             for frame in self._settings_popup.findChildren(SystemCardFrame):
                 if hasattr(frame, 'refresh_style'):
@@ -2066,6 +2066,13 @@ class OpenAIChatToolWindow(ToolWindow):
             viewer = getattr(card, "viewer", None)
             if viewer and hasattr(viewer, "_schedule_render"):
                 viewer._schedule_render(immediate=True)
+        # 递归刷新所有 qfluentwidgets 组件字体大小
+        apply_font_size_to_widget(self, 14)
+        # 刷新模型选择弹窗和项目弹窗主题
+        if hasattr(self, '_model_selector_popup') and self._model_selector_popup:
+            self._model_selector_popup.refresh_style()
+        if hasattr(self, '_project_selector_popup') and self._project_selector_popup:
+            self._project_selector_popup.refresh_style()
 
     def _load_model_configs(self):
         # 检查窗口是否仍然有效，防止在初始化期间窗口被关闭后继续执行

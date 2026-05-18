@@ -23,6 +23,7 @@ from qfluentwidgets import FluentIcon, TransparentToolButton
 from app.widgets.provider_setting_card import ProviderIconWidget
 
 from app.utils.utils import get_font_family_css, get_icon
+from app.utils.design_tokens import Colors, font_size_css
 
 
 # item 高度常量
@@ -66,10 +67,14 @@ class ProviderHeader(QWidget):
 
         # 服务商名称
         self.name_label = QLabel(provider_name, self)
-        self.name_label.setStyleSheet(f"color: #e0e0e0; {get_font_family_css()} font-size: 12px; font-weight: bold;")
+        self._apply_name_style()
         layout.addWidget(self.name_label)
 
         layout.addStretch(1)
+
+    def _apply_name_style(self):
+        Colors.refresh()
+        self.name_label.setStyleSheet(f"color: {Colors.TEXT_SECONDARY}; {get_font_family_css()} {font_size_css(12)}; font-weight: bold;")
 
 
 class ModelItem(QWidget):
@@ -94,28 +99,29 @@ class ModelItem(QWidget):
         # 选中状态指示点
         self.dot = QLabel("●", self)
         self.dot.setStyleSheet(
-            f"color: #0078d4; {get_font_family_css()} font-size: 10px;" if self.is_active else f"color: transparent; {get_font_family_css()} font-size: 10px;"
+            f"color: {Colors.BORDER_ACCENT}; {get_font_family_css()} {font_size_css(10)};" if self.is_active else f"color: transparent; {get_font_family_css()} {font_size_css(10)};"
         )
         self.dot.setFixedWidth(14)
         layout.addWidget(self.dot)
 
         # 模型名
         self.name_label = QLabel(self.model_name, self)
-        if self.is_active:
-            self.name_label.setStyleSheet(f"color: #ffffff; font-weight: bold; {get_font_family_css()} font-size: 13px;")
-        else:
-            self.name_label.setStyleSheet(f"color: #cccccc; {get_font_family_css()} font-size: 13px;")
+        self._apply_name_style()
         layout.addWidget(self.name_label, 1)
+
+    def _apply_name_style(self):
+        Colors.refresh()
+        if self.is_active:
+            self.name_label.setStyleSheet(f"color: {Colors.TEXT_PRIMARY}; font-weight: bold; {get_font_family_css()} {font_size_css(13)};")
+        else:
+            self.name_label.setStyleSheet(f"color: {Colors.TEXT_SECONDARY}; {get_font_family_css()} {font_size_css(13)};")
 
     def set_active(self, active: bool):
         self.is_active = active
         self.dot.setStyleSheet(
-            f"color: #0078d4; {get_font_family_css()} font-size: 10px;" if active else f"color: transparent; {get_font_family_css()} font-size: 10px;"
+            f"color: {Colors.BORDER_ACCENT}; {get_font_family_css()} {font_size_css(10)};" if active else f"color: transparent; {get_font_family_css()} {font_size_css(10)};"
         )
-        if active:
-            self.name_label.setStyleSheet(f"color: #ffffff; font-weight: bold; {get_font_family_css()} font-size: 13px;")
-        else:
-            self.name_label.setStyleSheet(f"color: #cccccc; {get_font_family_css()} font-size: 13px;")
+        self._apply_name_style()
 
     def mousePressEvent(self, event):
         self.clicked.emit(self.provider_name, self.model_name)
@@ -123,12 +129,11 @@ class ModelItem(QWidget):
 
     def enterEvent(self, event):
         if not self.is_active:
-            self.name_label.setStyleSheet(f"color: #ffffff; {get_font_family_css()} font-size: 13px;")
+            self.name_label.setStyleSheet(f"color: {Colors.TEXT_PRIMARY}; {get_font_family_css()} {font_size_css(13)};")
         super().enterEvent(event)
 
     def leaveEvent(self, event):
-        if not self.is_active:
-            self.name_label.setStyleSheet(f"color: #cccccc; {get_font_family_css()} font-size: 13px;")
+        self._apply_name_style()
         super().leaveEvent(event)
 
 
@@ -160,14 +165,15 @@ class ModelSelectorPopup(QWidget):
         self._setup_ui()
 
     def _setup_ui(self):
+        Colors.refresh()
         self.main_frame = QFrame(self)
         self.main_frame.setObjectName("popupFrame")
-        self.main_frame.setStyleSheet("""
-            QFrame#popupFrame {
-                background-color: #2d2d2d;
-                border: 1px solid #444444;
+        self.main_frame.setStyleSheet(f"""
+            QFrame#popupFrame {{
+                background-color: {Colors.CONTENT_BG};
+                border: 1px solid {Colors.BORDER};
                 border-radius: 8px;
-            }
+            }}
         """)
 
         layout = QVBoxLayout(self.main_frame)
@@ -182,41 +188,7 @@ class ModelSelectorPopup(QWidget):
         self.search_edit = QLineEdit(self)
         self.search_edit.setPlaceholderText("搜索模型...")
         self.search_edit.setClearButtonEnabled(True)
-        self.search_edit.setStyleSheet(f"""
-            QLineEdit {{
-                background-color: #3d3d3d;
-                color: #ffffff;
-                border: 1px solid #555555;
-                border-radius: 6px;
-                padding: 6px 10px;
-                selection-background-color: #0078d4;
-                selection-color: #ffffff;
-                {get_font_family_css()} font-size: 13px;
-            }}
-            QLineEdit:focus {{
-                border-color: #0078d4;
-                background-color: #404040;
-            }}
-            QLineEdit::placeholder {{
-                color: #888888;
-            }}
-            QLineEdit::text {{
-                background-color: transparent;
-            }}
-            /* 清除按钮样式 */
-            QLineEdit QToolButton {{
-                background-color: transparent;
-                border: none;
-                padding: 2px;
-            }}
-            QLineEdit QToolButton:hover {{
-                background-color: #555555;
-                border-radius: 3px;
-            }}
-            QLineEdit QToolButton:pressed {{
-                background-color: #666666;
-            }}
-        """)
+        self._apply_search_style()
         self.search_edit.textChanged.connect(self._on_search_changed)
         search_layout.addWidget(self.search_edit, 1)
 
@@ -239,7 +211,7 @@ class ModelSelectorPopup(QWidget):
         # 分隔线
         separator = QFrame(self)
         separator.setFrameShape(QFrame.HLine)
-        separator.setStyleSheet("background-color: #3d3d3d; max-height: 1px; margin: 6px 0;")
+        separator.setStyleSheet(f"background-color: {Colors.BORDER}; max-height: 1px; margin: 6px 0;")
         layout.addWidget(separator)
 
         # 滚动区域
@@ -247,34 +219,34 @@ class ModelSelectorPopup(QWidget):
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.scroll_area.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.MinimumExpanding)
-        self.scroll_area.setStyleSheet("""
-            QScrollArea {
+        self.scroll_area.setStyleSheet(f"""
+            QScrollArea {{
                 border: none;
                 background: transparent;
-            }
-            QScrollArea > QWidget > QWidget {
+            }}
+            QScrollArea > QWidget > QWidget {{
                 background: transparent;
-            }
-            QScrollBar:vertical {
+            }}
+            QScrollBar:vertical {{
                 border: none;
                 background: transparent;
                 width: 12px;
                 margin: 4px;
-            }
-            QScrollBar::handle:vertical {
-                background: #555555;
+            }}
+            QScrollBar::handle:vertical {{
+                background: {Colors.BORDER};
                 border-radius: 6px;
                 min-height: 30px;
-            }
-            QScrollBar::handle:vertical:hover {
-                background: #888888;
-            }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+            }}
+            QScrollBar::handle:vertical:hover {{
+                background: {Colors.TEXT_MUTED};
+            }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
                 height: 0px;
-            }
-            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+            }}
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{
                 background: none;
-            }
+            }}
         """)
 
         self.content_widget = QWidget()
@@ -350,7 +322,7 @@ class ModelSelectorPopup(QWidget):
         if not self._all_model_items and search_text:
             no_result = QLabel(f"未找到匹配 \"{search_text}\" 的模型", self)
             no_result.setAlignment(Qt.AlignCenter)
-            no_result.setStyleSheet(f"color: #888888; {get_font_family_css()} font-size: 12px; padding: 20px;")
+            no_result.setStyleSheet(f"color: {Colors.TEXT_MUTED}; {get_font_family_css()} {font_size_css(12)}; padding: 20px;")
             self.content_layout.addWidget(no_result)
 
         # 底部弹性空间
@@ -414,6 +386,54 @@ class ModelSelectorPopup(QWidget):
         target_scroll = item_y + item_half - view_half
         target_scroll = max(0, min(target_scroll, scrollbar.maximum()))
         scrollbar.setValue(target_scroll)
+
+    def _apply_search_style(self):
+        """应用搜索框样式（动态从 Colors 读取）"""
+        Colors.refresh()
+        self.search_edit.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: {Colors.CONTENT_BG};
+                color: {Colors.TEXT_PRIMARY};
+                border: 1px solid {Colors.BORDER};
+                border-radius: 6px;
+                padding: 6px 10px;
+                selection-background-color: {Colors.BORDER_ACCENT};
+                selection-color: {Colors.TEXT_PRIMARY};
+                {get_font_family_css()} {font_size_css(13)};
+            }}
+            QLineEdit:focus {{
+                border-color: {Colors.BORDER_ACCENT};
+                background-color: {Colors.CONTENT_BG};
+            }}
+            QLineEdit::placeholder {{
+                color: {Colors.TEXT_MUTED};
+            }}
+            QLineEdit::text {{
+                background-color: transparent;
+            }}
+            QLineEdit QToolButton {{
+                background-color: transparent;
+                border: none;
+                padding: 2px;
+            }}
+            QLineEdit QToolButton:hover {{
+                background-color: {Colors.HOVER_BG};
+                border-radius: 3px;
+            }}
+        """)
+
+    def refresh_style(self):
+        """刷新弹窗主题样式"""
+        Colors.refresh()
+        self.main_frame.setStyleSheet(f"""
+            QFrame#popupFrame {{
+                background-color: {Colors.CONTENT_BG};
+                border: 1px solid {Colors.BORDER};
+                border-radius: 8px;
+            }}
+        """)
+        self._apply_search_style()
+        self.content_widget.setStyleSheet("background: transparent;")
 
     def _on_search_changed(self, text: str):
         """搜索文本变化时刷新列表"""
@@ -534,14 +554,15 @@ class ProviderConfigListDialog(QDialog):
         self._setup_ui()
 
     def _setup_ui(self):
-        self.setStyleSheet("""
-            QDialog {
-                background-color: #2b2b2b;
-            }
-            QLabel {
-                color: #cccccc;
+        Colors.refresh()
+        self.setStyleSheet(f"""
+            QDialog {{
+                background-color: {Colors.CONTENT_BG};
+            }}
+            QLabel {{
+                color: {Colors.TEXT_SECONDARY};
                 background: transparent;
-            }
+            }}
         """)
 
         layout = QVBoxLayout(self)
@@ -550,50 +571,50 @@ class ProviderConfigListDialog(QDialog):
 
         # 标题
         title = QLabel("已配置的服务商")
-        title.setStyleSheet(f"color: #ffffff; font-size: 16px; font-weight: bold; {get_font_family_css()}")
+        title.setStyleSheet(f"color: {Colors.TEXT_PRIMARY}; {font_size_css(16)}; font-weight: bold; {get_font_family_css()}")
         layout.addWidget(title)
 
         # 提示文字
         hint = QLabel("点击编辑按钮可修改服务商配置，点击删除按钮可移除服务商。")
-        hint.setStyleSheet(f"color: #888888; font-size: 12px; {get_font_family_css()}")
+        hint.setStyleSheet(f"color: {Colors.TEXT_MUTED}; {font_size_css(12)}; {get_font_family_css()}")
         hint.setWordWrap(True)
         layout.addWidget(hint)
 
         # 分隔线
         sep = QFrame(self)
         sep.setFrameShape(QFrame.HLine)
-        sep.setStyleSheet("background-color: #3d3d3d; max-height: 1px;")
+        sep.setStyleSheet(f"background-color: {Colors.BORDER}; max-height: 1px;")
         layout.addWidget(sep)
 
         # 滚动区域
         scroll = QScrollArea(self)
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        scroll.setStyleSheet("""
-            QScrollArea {
+        scroll.setStyleSheet(f"""
+            QScrollArea {{
                 border: none;
                 background: transparent;
-            }
-            QScrollArea > QWidget > QWidget {
+            }}
+            QScrollArea > QWidget > QWidget {{
                 background: transparent;
-            }
-            QScrollBar:vertical {
+            }}
+            QScrollBar:vertical {{
                 border: none;
                 background: transparent;
                 width: 12px;
                 margin: 4px;
-            }
-            QScrollBar::handle:vertical {
-                background: #555555;
+            }}
+            QScrollBar::handle:vertical {{
+                background: {Colors.BORDER};
                 border-radius: 6px;
                 min-height: 30px;
-            }
-            QScrollBar::handle:vertical:hover {
-                background: #888888;
-            }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+            }}
+            QScrollBar::handle:vertical:hover {{
+                background: {Colors.TEXT_MUTED};
+            }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
                 height: 0px;
-            }
+            }}
         """)
 
         content_widget = QWidget()
@@ -605,7 +626,7 @@ class ProviderConfigListDialog(QDialog):
         if not self._providers:
             empty_label = QLabel("暂无已配置的服务商，请点击「添加」按钮添加。")
             empty_label.setAlignment(Qt.AlignCenter)
-            empty_label.setStyleSheet(f"color: #888888; {get_font_family_css()} font-size: 13px; padding: 30px;")
+            empty_label.setStyleSheet(f"color: {Colors.TEXT_MUTED}; {get_font_family_css()} {font_size_css(13)}; padding: 30px;")
             content_layout.addWidget(empty_label)
         else:
             for provider_name, config in self._providers.items():
@@ -623,15 +644,15 @@ class ProviderConfigListDialog(QDialog):
         close_btn.setFixedSize(100, 36)
         close_btn.setStyleSheet(f"""
             QPushButton {{
-                background-color: #3d3d3d;
-                color: #cccccc;
-                border: 1px solid #555555;
+                background-color: {Colors.CONTENT_BG};
+                color: {Colors.TEXT_SECONDARY};
+                border: 1px solid {Colors.BORDER};
                 border-radius: 6px;
-                {get_font_family_css()} font-size: 13px;
+                {get_font_family_css()} {font_size_css(13)};
             }}
             QPushButton:hover {{
-                background-color: #4d4d4d;
-                color: #ffffff;
+                background-color: {Colors.HOVER_BG};
+                color: {Colors.TEXT_PRIMARY};
             }}
         """)
         close_btn.clicked.connect(self.accept)
@@ -645,12 +666,12 @@ class ProviderConfigListDialog(QDialog):
         is_current = provider_name == self._current_provider
         widget.setStyleSheet(f"""
             QWidget#provider_item_{provider_name} {{
-                background-color: {'#383838' if is_current else '#333333'};
+                background-color: {Colors.SELECTED_BG if is_current else Colors.HOVER_BG};
                 border-radius: 6px;
-                border: {'1px solid #0078d4' if is_current else '1px solid transparent'};
+                border: {'1px solid ' + Colors.BORDER_ACCENT if is_current else '1px solid transparent'};
             }}
             QWidget#provider_item_{provider_name}:hover {{
-                background-color: #3d3d3d;
+                background-color: {Colors.HOVER_BG};
             }}
         """)
         widget.setObjectName(f"provider_item_{provider_name}")
@@ -668,12 +689,12 @@ class ProviderConfigListDialog(QDialog):
         info_layout.setSpacing(1)
 
         name_label = QLabel(provider_name)
-        name_label.setStyleSheet(f"color: #ffffff; {get_font_family_css()} font-size: 13px; font-weight: bold; background: transparent;")
+        name_label.setStyleSheet(f"color: {Colors.TEXT_PRIMARY}; {get_font_family_css()} {font_size_css(13)}; font-weight: bold; background: transparent;")
         info_layout.addWidget(name_label)
 
         model_name = config.get("模型名称", "")
         model_label = QLabel(f"模型: {model_name}" if model_name else "未设置模型")
-        model_label.setStyleSheet(f"color: #888888; {get_font_family_css()} font-size: 11px; background: transparent;")
+        model_label.setStyleSheet(f"color: {Colors.TEXT_MUTED}; {get_font_family_css()} {font_size_css(11)}; background: transparent;")
         info_layout.addWidget(model_label)
 
         hlayout.addLayout(info_layout, 1)
@@ -682,11 +703,11 @@ class ProviderConfigListDialog(QDialog):
             current_tag = QLabel("当前")
             current_tag.setStyleSheet(f"""
                 QLabel {{
-                    color: #0078d4;
-                    {get_font_family_css()} font-size: 11px;
+                    color: {Colors.BORDER_ACCENT};
+                    {get_font_family_css()} {font_size_css(11)};
                     font-weight: bold;
-                    background: rgba(0, 120, 212, 0.15);
-                    border: 1px solid rgba(0, 120, 212, 0.3);
+                    background: {Colors.HOVER_BG};
+                    border: 1px solid {Colors.BORDER};
                     border-radius: 4px;
                     padding: 2px 6px;
                 }}

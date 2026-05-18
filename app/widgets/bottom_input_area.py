@@ -10,7 +10,7 @@ from qfluentwidgets import FluentIcon, ComboBox
 from qfluentwidgets import TextEdit, TransparentToolButton
 
 from app.utils.utils import get_font_family_css, get_local_skills
-from app.utils.design_tokens import Colors
+from app.utils.design_tokens import Colors, font_size_css
 
 # 预编译正则表达式
 _FILE_PREFIX_PATTERN = re.compile(r'^file:/{1,3}')
@@ -723,7 +723,7 @@ class SendableTextEdit(TextEdit):
                 border-radius: 18px;
                 padding: 14px 50px 18px 16px;
                 selection-background-color: rgba(201, 168, 92, 0.28);
-                {get_font_family_css()} font-size: 14px;
+                {get_font_family_css()} {font_size_css(14)};
             }}
             QTextEdit:focus {{
                 border: 2px solid {Colors.INPUT_FOCUS_BORDER};
@@ -732,6 +732,7 @@ class SendableTextEdit(TextEdit):
                     stop:0 {Colors.INPUT_FOCUS_BG_START},
                     stop:1 {Colors.INPUT_FOCUS_BG_END});
                 color: {Colors.INPUT_FOCUS_TEXT};
+                {font_size_css(14)};
             }}
             QTextEdit QScrollBar:vertical {{
                 background: rgba(255, 255, 255, 0.05);
@@ -767,7 +768,7 @@ class SendableTextEdit(TextEdit):
                 border: 1px solid {Colors.INPUT_BORDER};
                 border-radius: 10px;
                 padding: 3px 10px;
-                {get_font_family_css()} font-size: 12px;
+                {get_font_family_css()} {font_size_css(12)};
             }}
             ComboBox:hover {{
                 background-color: rgba(255, 255, 255, 0.08);
