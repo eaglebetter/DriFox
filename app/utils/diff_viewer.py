@@ -871,16 +871,18 @@ class DiffHtmlGenerator:
 
                     // 将中间行移入折叠容器
                     const rows = Array.from(allRows);
+                    // 在移动行之前，先保存锚点：折叠区域之后的那一行（未移动的行）
+                    // 因为折叠区域尾部之后的行不会被移动，它的位置是稳定的
+                    const anchorRow = (range.end + 1 < rows.length) ? rows[range.end + 1] : null;
                     for (let i = foldEnd; i >= foldStart; i--) {{
                         rows[i].style.display = 'none';
                         foldedDiv.insertBefore(rows[i], foldedDiv.firstChild);
                     }}
 
                     // 在折叠区域起始位置插入按钮和容器
-                    const insertBefore = rows[foldStart] ? rows[foldStart] : null;
-                    if (insertBefore && insertBefore.parentNode === table) {{
-                        table.insertBefore(expandBtn, insertBefore);
-                        table.insertBefore(foldedDiv, insertBefore);
+                    if (anchorRow && anchorRow.parentNode === table) {{
+                        table.insertBefore(foldedDiv, anchorRow);
+                        table.insertBefore(expandBtn, foldedDiv);
                     }} else {{
                         table.appendChild(expandBtn);
                         table.appendChild(foldedDiv);
