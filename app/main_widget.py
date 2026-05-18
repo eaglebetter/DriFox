@@ -1406,8 +1406,7 @@ class OpenAIChatToolWindow(ToolWindow):
     def _on_hook_edit_saved(self, values: dict):
         """Hook 保存回调"""
         self._hook_edit_card.hide()
-        self._settings_popup.show()
-        # 通过 HookListSettingCard 添加 hook
+        # 先刷新再显示弹窗，避免布局异步计算导致内容不可见
         if hasattr(self._settings_popup, 'hookListCard'):
             self._settings_popup.hookListCard._add_hook(
                 event=values["event"],
@@ -1416,6 +1415,7 @@ class OpenAIChatToolWindow(ToolWindow):
                 hook_type=values["type"],
                 enabled=values["enabled"]
             )
+        self._settings_popup.show()
 
     def _on_hook_edit_closed(self):
         """Hook 编辑关闭回调"""
