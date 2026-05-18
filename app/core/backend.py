@@ -265,11 +265,9 @@ class ChatBackend(QObject):
     def _init_mcp_connections(self):
         """初始化 MCP 服务器连接（单例，多窗口共享）"""
         from app.utils.config import Settings
-        import asyncio
 
         mcp_manager = self._tool_executor._builtin_tools._mcp_manager
 
-        # 已连接则复用，无需重复连接
         if mcp_manager.is_connected:
             logger.info("[ChatBackend] MCP 已连接，复用现有连接")
             return
@@ -285,11 +283,7 @@ class ChatBackend(QObject):
             return
 
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                asyncio.ensure_future(mcp_manager.connect_all(servers))
-            else:
-                loop.run_until_complete(mcp_manager.connect_all(servers))
+            mcp_manager.connect_all_sync(servers)
             logger.info(f"[ChatBackend] MCP 初始化完成，已连接 {len(mcp_manager._connections)} 个服务器")
         except Exception as e:
             logger.error(f"[ChatBackend] MCP 初始化失败: {e}")

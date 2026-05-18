@@ -584,30 +584,13 @@ class ToolExecutor:
         return ToolResult(False, error=f"Unknown tool: {tool_name}")
 
     def _execute_mcp_tool(self, tool_name: str, args: dict) -> ToolResult:
-        """执行 MCP 工具调用（异步转同步）"""
-        import asyncio
-
+        """执行 MCP 工具调用"""
         mcp_manager = self._builtin_tools._mcp_manager
 
         if not mcp_manager.is_connected:
             return ToolResult(False, error="MCP 未连接，请先配置并连接 MCP 服务器")
 
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                # 在已有事件循环中（如 Qt 事件循环），使用 run_coroutine_threadsafe
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as pool:
-                    future = pool.submit(
-                        asyncio.run,
-                        mcp_manager.call_tool(tool_name, args)
-                    )
-                    return future.result(timeout=60)
-            else:
-                return loop.run_until_complete(mcp_manager.call_tool(tool_name, args))
-        except Exception as e:
-            logger.error(f"[ToolExecutor] MCP 工具 '{tool_name}' 执行失败: {e}")
-            return ToolResult(False, error=f"MCP 工具执行失败: {e}")
+        return mcp_manager.call_tool_sync(tool_name, args)
 
     def _execute_grep_async(self, args: dict, cancelled_ref: list = None) -> ToolResult:
         """
