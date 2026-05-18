@@ -283,13 +283,9 @@ class SystemCardFrame(QFrame):
 
         for i, btn_data in enumerate(buttons):
             btn = QLabel(btn_data["label"], self)
-            btn.setFont(get_unified_font(11))
             btn.setCursor(Qt.PointingHandCursor)
             active = btn_data.get("active", False)
-            btn.setStyleSheet(
-                f"color: {Colors.TEXT_ACCENT if active else Colors.TEXT_SECONDARY}; "
-                f"font-weight: {'bold' if active else 'normal'};"
-            )
+            btn.setStyleSheet(TabStyles.active() if active else TabStyles.inactive())
             btn.mousePressEvent = lambda e, h=btn_data["handler"]: h()
             self._mode_buttons_container.addWidget(btn)
 
