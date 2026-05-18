@@ -113,6 +113,7 @@ from app.widgets.question_floating_widget import (
 from app.widgets.sub_agent_floating_widget import (
     SubAgentFloatingWidget,
 )
+from app.widgets.system_card_frame import SystemCardFrame
 from app.widgets.todo_floating_widget import (
     TodoFloatingWidget,
 )
@@ -2030,10 +2031,14 @@ class OpenAIChatToolWindow(ToolWindow):
             setFont(self.input_area, scale_font_size(15))
             if hasattr(self.input_area, "refresh_style"):
                 self.input_area.refresh_style()
-        # 刷新设置弹出层的字体大小
+        # 刷新设置弹出层 — 递归调用 qfluentwidgets setFont 刷新字号
         if self._settings_popup:
             from qfluentwidgets import setFont as qfw_setFont
             qfw_setFont(self._settings_popup)
+            # 同时刷新所有子设置卡片的主题样式
+            for frame in self._settings_popup.findChildren(SystemCardFrame):
+                if hasattr(frame, 'refresh_style'):
+                    frame.refresh_style()
         # 刷新智能体切换按钮样式
         if hasattr(self, "_agent_switch_widget"):
             Colors.refresh()
