@@ -3,8 +3,8 @@ import ctypes
 import gc
 import os
 import time
-import orjson as json
 import sip
+import orjson as json
 
 from datetime import datetime
 from pathlib import Path
@@ -31,8 +31,7 @@ from qfluentwidgets import (
     setFont,
     FluentIcon,
     SingleDirectionScrollArea,
-    TransparentToolButton, StrongBodyLabel, InfoBar, InfoBarPosition, PushButton,
-)
+    TransparentToolButton, StrongBodyLabel, InfoBar, InfoBarPosition, )
 
 from app.constants import (
     FREE_PROVIDERS,
@@ -48,6 +47,8 @@ from app.core import (
     get_user_round_ranges,
     TopicSummaryTask,
 )
+from app.core.auto_loop_config import AutoLoopConfig
+from app.core.workers.auto_loop_worker import AutoLoopWorker
 from app.tool_window import ToolWindow
 from app.tools import get_builtin_tools_schema
 from app.utils.config import Settings
@@ -57,6 +58,7 @@ from app.utils.diff_viewer import (
 )
 from app.utils.file_operation_recorder import FileOperationRecorder
 from app.utils.utils import get_icon, get_font_family_css
+from app.widgets.auto_loop_card import AutoLoopConfigCard, AutoLoopRunningCard
 from app.widgets.balance_display import BalanceDisplay
 from app.widgets.base_settings_card import (
     BaseSettingsCard,
@@ -81,6 +83,9 @@ from app.widgets.hook_setting_card import HookEditCard
 from app.widgets.llm_settings_card import (
     LLMSettingsCard,
 )
+from app.widgets.mcp_setting_card import (
+    MCPEditCard,
+)
 from app.widgets.memory_card import (
     MemoryCardContent, TAB_PROJECT_NOTES,
 )
@@ -94,9 +99,6 @@ from app.widgets.model_config_card import (
 from app.widgets.project_selector_popup import ProjectSelectorPopup
 from app.widgets.provider_edit_card import (
     ProviderEditCard,
-)
-from app.widgets.mcp_setting_card import (
-    MCPEditCard,
 )
 from app.widgets.question_floating_widget import (
     QuestionFloatingWidget,
@@ -115,14 +117,9 @@ from app.widgets.ui_helpers import add_message_to_layout, refresh_history_card_i
     init_new_session_after_archive, clear_and_show_welcome, refresh_session_view, save_or_archive_session, \
     invalidate_session_card_cache, delete_widgets_from_layout, init_after_loading_session, setup_user_card_signals, \
     post_append_user_message, create_assistant_card_widget, scroll_to_bottom_if_streaming, \
-    build_node_preview_from_session, find_user_card_at_index, truncate_and_remove_round, \
+    build_node_preview_from_session, truncate_and_remove_round, \
     log_deletion_stats, restore_input_from_card, find_last_tool_call_id_after_round, get_first_file_operation, \
     show_diff_viewer, render_batch_to_assistant_card, find_user_round_index
-
-from app.core.auto_loop_config import AutoLoopConfig
-from app.core.auto_loop_engine import AutoLoopEngine, LoopState
-from app.core.workers.auto_loop_worker import AutoLoopWorker
-from app.widgets.auto_loop_card import AutoLoopConfigCard, AutoLoopRunningCard
 
 
 class OpenAIChatToolWindow(ToolWindow):
@@ -364,7 +361,6 @@ class OpenAIChatToolWindow(ToolWindow):
 
     def _init_llm_api_service(self):
         """初始化 LLM API 服务"""
-        from app.utils.config import Settings
         from app.api import (
             LLMAPIService,
             APISessionHandler,
