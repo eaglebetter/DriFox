@@ -33,7 +33,7 @@ from qfluentwidgets import (
 )
 
 from app.utils.config import Settings
-from app.utils.design_tokens import Colors
+from app.utils.design_tokens import Colors, Sizes, ButtonStyles, SwitchStyles
 from app.utils.utils import get_icon, get_font_family_css
 from app.widgets.searchable_editable_combobox import SearchableEditableComboBox
 
@@ -307,22 +307,20 @@ class MCPServerRow(CardWidget):
         layout.addWidget(desc_label, 1)
 
         self.switch = SwitchButton()
+        SwitchStyles.configure(self.switch)
         self.switch.setChecked(data.get("enabled", True))
-        self.switch.setOnText("")
-        self.switch.setOffText("")
-        self.switch.setFixedWidth(50)
         self.switch.checkedChanged.connect(lambda v: self.enabledChanged.emit(self._name, v))
         layout.addWidget(self.switch)
 
         edit_btn = ToolButton(FluentIcon.EDIT)
-        edit_btn.setFixedSize(28, 28)
-        edit_btn.setStyleSheet("background-color: transparent; border-radius: 4px;")
+        edit_btn.setFixedSize(Sizes.TOOL_BUTTON_SZ)
+        edit_btn.setStyleSheet(ButtonStyles.tool_button())
         edit_btn.clicked.connect(lambda: self.editRequested.emit(self._name))
         layout.addWidget(edit_btn)
 
         del_btn = ToolButton(FluentIcon.CLOSE)
-        del_btn.setFixedSize(28, 28)
-        del_btn.setStyleSheet("background-color: transparent; border-radius: 4px;")
+        del_btn.setFixedSize(Sizes.TOOL_BUTTON_SZ)
+        del_btn.setStyleSheet(ButtonStyles.tool_button())
         del_btn.clicked.connect(lambda: self.removeRequested.emit(self._name))
         layout.addWidget(del_btn)
 
@@ -360,29 +358,37 @@ class MCPListSettingCard(ExpandSettingCard):
         self.viewLayout.setContentsMargins(8, 0, 8, 0)
         self.view.setStyleSheet("background-color: transparent;")
 
+        self.addButton = PushButton("添加", self, FluentIcon.ADD)
+        self.addButton.clicked.connect(self.showAddCard.emit)
+        self.addWidget(self.addButton)
+
         self.globalSwitch = SwitchButton()
         self.globalSwitch.setChecked(self.cfg.mcp_enabled.value)
-        self.globalSwitch.setOnText("")
-        self.globalSwitch.setOffText("")
+        SwitchStyles.configure(self.globalSwitch)
         self.globalSwitch.checkedChanged.connect(self._on_global_switch)
         self.addWidget(self.globalSwitch)
 
-        self.addButton = PushButton("添加服务器", self, FluentIcon.ADD)
-        self.addButton.clicked.connect(self.showAddCard.emit)
-        self.addWidget(self.addButton)
         self._update_button_position()
 
     def _update_button_position(self):
+        """将 addButton + globalSwitch 移到卡片头部 expandButton 左侧"""
         card = self.card
-        if hasattr(card, 'hBoxLayout'):
-            self.card.hBoxLayout.removeWidget(self.addButton)
-            for i in range(card.hBoxLayout.count()):
-                item = card.hBoxLayout.itemAt(i)
-                if item.widget() == card.expandButton:
-                    card.hBoxLayout.removeItem(card.hBoxLayout.itemAt(i - 1))
-                    card.hBoxLayout.insertWidget(i - 1, self.addButton, 0, Qt.AlignRight)
-                    card.hBoxLayout.insertSpacing(i, 4)
-                    break
+        if not hasattr(card, 'hBoxLayout'):
+            return
+        # 先从原始位置移除
+        card.hBoxLayout.removeWidget(self.addButton)
+        card.hBoxLayout.removeWidget(self.globalSwitch)
+        # 找到 expandButton 位置，在其前面插入
+        for i in range(card.hBoxLayout.count()):
+            item = card.hBoxLayout.itemAt(i)
+            if item.widget() == card.expandButton:
+                card.hBoxLayout.removeItem(card.hBoxLayout.itemAt(i - 1))
+                card.hBoxLayout.insertWidget(i - 1, self.globalSwitch, 0, Qt.AlignRight)
+                card.hBoxLayout.insertSpacing(i - 1, 4)
+                card.hBoxLayout.insertWidget(i - 1, self.addButton, 0, Qt.AlignRight)
+                card.hBoxLayout.insertSpacing(i - 1, 4)
+                card.hBoxLayout.insertSpacing(i + 3, 4)
+                break
 
     # ── 热更新操作（全部后台，不阻塞 UI）────────────
 

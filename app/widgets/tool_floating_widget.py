@@ -205,7 +205,7 @@ class ToolFloatingWidget(SimpleCardWidget):
         """开始执行工具"""
         # mcp工具去除mcp头
         if tool_name.startswith("mcp__"):
-            tool_name = "__".join(tool_name.split("__", 1)[2:])
+            tool_name = "__".join(tool_name.split("__")[2:])
         # 取消之前的自动隐藏定时器，防止上一个工具的隐藏影响当前工具
         self._hide_timer.stop()
 

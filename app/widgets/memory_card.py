@@ -168,12 +168,11 @@ class EntryMemoryItemWidget(QWidget):
 
         self.switch = SwitchButton(self)
         self.switch.setChecked(enabled)
-        self.switch.setOnText("")
-        self.switch.setOffText("")
+        from app.utils.design_tokens import SwitchStyles
+        SwitchStyles.configure(self.switch)
         self.switch.checkedChanged.connect(
             lambda checked: self.toggled.emit(self.memory_id, checked)
         )
-        self.switch.setFixedWidth(40)
 
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(2)

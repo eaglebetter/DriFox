@@ -31,6 +31,7 @@ from qfluentwidgets import (
 
 from app.utils.config import Settings
 from app.utils.utils import get_icon, get_unified_font
+from app.utils.design_tokens import ButtonStyles, SwitchStyles, ComboBoxStyles
 
 
 class ManualUpdateCard(SettingCard):
@@ -40,6 +41,7 @@ class ManualUpdateCard(SettingCard):
 
         self.updateBtn = PrimaryPushButton("检查更新", self)
         self.updateBtn.setFixedWidth(100)
+        self.updateBtn.setStyleSheet(ButtonStyles.primary_action())
         self.updateBtn.clicked.connect(self._on_check_update)
         self.hBoxLayout.addWidget(self.updateBtn, 0, Qt.AlignRight)
 
@@ -239,85 +241,15 @@ class LLMSettingsCard(SystemCardFrame):
                 self.hBoxLayout.addSpacing(16)
 
             def _apply_font_combo_style(self):
+                self.fontCombo.setStyleSheet(ComboBoxStyles.dark_combo().replace("QComboBox", "QFontComboBox"))
+                self.fontCombo.view().setStyleSheet(ComboBoxStyles.dark_combo_dropdown())
+
                 view = self.fontCombo.view()
-
-                self.fontCombo.setStyleSheet("""
-                    QFontComboBox {
-                        color: #e8e8e8;
-                        background-color: #2a2a2e;
-                        border: 1px solid #4a4a4e;
-                        border-radius: 5px;
-                        padding: 5px 12px 5px 10px;
-                        min-height: 28px;
-                    }
-                    QFontComboBox:hover {
-                        border: 1px solid #0078d4;
-                        background-color: #333338;
-                    }
-                    QFontComboBox:focus {
-                        border: 1px solid #0078d4;
-                    }
-                    QFontComboBox::drop-down {
-                        border: none;
-                        width: 20px;
-                        subcontrol-origin: padding;
-                        subcontrol-position: right center;
-                    }
-                    QFontComboBox::down-arrow {
-                        image: none;
-                        border-left: 5px solid transparent;
-                        border-right: 5px solid transparent;
-                        border-top: 5px solid #888888;
-                        width: 0px;
-                        height: 0px;
-                        margin-right: 4px;
-                    }
-                    QFontComboBox::down-arrow:hover {
-                        border-top-color: #0078d4;
-                    }
-                """)
-
-                view.setStyleSheet("""
-                    QAbstractItemView {
-                        color: #e8e8e8;
-                        background-color: #2a2a2e;
-                        border: 1px solid #4a4a4e;
-                        border-radius: 6px;
-                        padding: 4px;
-                        outline: none;
-                        show-decoration-selected: 1;
-                    }
-                    QAbstractItemView::item {
-                        padding: 6px 14px 6px 12px;
-                        min-height: 36px;
-                        border-radius: 3px;
-                    }
-                    QAbstractItemView::item:hover {
-                        background-color: #3a3a3e;
-                    }
-                    QAbstractItemView::item:selected {
-                        background-color: #0078d4;
-                        color: white;
-                    }
-                    QScrollBar:vertical {
-                        background: #2a2a2e;
-                        border: none;
-                        width: 14px;
-                        margin: 4px 2px 4px 2px;
-                    }
-                    QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
-                        height: 0px;
-                    }
-                    QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
-                        background: none;
-                    }
-                """)
-
                 palette = view.palette()
                 palette.setColor(view.backgroundRole(), QColor(42, 42, 46))
                 view.setPalette(palette)
                 view.setAutoFillBackground(True)
-                self.fontCombo.view().setTextElideMode(Qt.ElideRight)
+                view.setTextElideMode(Qt.ElideRight)
 
             def _on_font_changed(self, font):
                 self.cfg.set(self.cfg.llm_font_family, font.family(), save=True)

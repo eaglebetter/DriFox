@@ -158,15 +158,33 @@ class DiffHtmlGenerator:
             margin-right: 10px;
             font-size: 14px;
             opacity: 0.8;
+            flex-shrink: 0;
+        }
+
+        .file-info {
+            flex: 1;
+            min-width: 0;
+            margin-right: 8px;
+        }
+
+        .file-info .file-dir {
+            font-size: 10px;
+            color: var(--gh-text-secondary);
+            display: block;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            line-height: 1.3;
+            margin-top: 1px;
         }
 
         .file-item .file-name {
-            flex: 1;
             font-family: var(--gh-font-mono);
             font-size: 12px;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
+            display: block;
         }
 
         .file-item .file-badge {
@@ -384,14 +402,47 @@ class DiffHtmlGenerator:
         }
 
         .word-add {
-            background: rgba(63, 185, 80, 0.35);
+            background: rgba(63, 185, 80, 0.2);
             border-radius: 2px;
+            border-bottom: 1px solid rgba(63, 185, 80, 0.5);
         }
 
         .word-del {
-            background: rgba(248, 81, 73, 0.35);
+            background: rgba(248, 81, 73, 0.2);
             border-radius: 2px;
-            text-decoration: line-through;
+            border-bottom: 1px solid rgba(248, 81, 73, 0.5);
+        }
+
+        .diff-expand {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 4px 16px;
+            background: var(--gh-blue-bg);
+            border-top: 1px dashed var(--gh-blue-border);
+            border-bottom: 1px dashed var(--gh-blue-border);
+            color: var(--gh-blue-text);
+            cursor: pointer;
+            font-family: var(--gh-font-sans);
+            font-size: 11px;
+            user-select: none;
+            transition: background 0.15s;
+            gap: 6px;
+        }
+
+        .diff-expand:hover {
+            background: rgba(31, 111, 235, 0.25);
+        }
+
+        .diff-expand .expand-icon {
+            font-size: 12px;
+            opacity: 0.8;
+        }
+
+        .diff-expand .expand-lines {
+            font-family: var(--gh-font-mono);
+            font-size: 11px;
+            opacity: 0.9;
         }
 
         .no-diff {
@@ -411,6 +462,55 @@ class DiffHtmlGenerator:
             font-weight: 600;
             margin-bottom: 8px;
             color: var(--gh-text-primary);
+        }
+
+        /* === 文件搜索框 === */
+        .file-search-box {
+            padding: 6px 12px;
+            border-bottom: 1px solid var(--gh-border);
+            flex-shrink: 0;
+        }
+        .file-search-input {
+            width: 100%;
+            padding: 5px 8px;
+            background: var(--gh-bg-primary);
+            border: 1px solid var(--gh-border);
+            border-radius: 6px;
+            color: var(--gh-text-primary);
+            font-size: 12px;
+            outline: none;
+            font-family: var(--gh-font-sans);
+        }
+        .file-search-input:focus {
+            border-color: var(--gh-blue-text);
+        }
+        .file-search-input::placeholder {
+            color: var(--gh-text-secondary);
+            opacity: 0.6;
+        }
+
+        /* === 差异操作按钮 === */
+        .diff-actions {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-left: auto;
+        }
+        .btn-collapse-all {
+            padding: 2px 8px;
+            background: transparent;
+            border: 1px solid var(--gh-border);
+            border-radius: 4px;
+            color: var(--gh-text-secondary);
+            font-size: 11px;
+            cursor: pointer;
+            font-family: var(--gh-font-sans);
+            white-space: nowrap;
+            transition: border-color 0.15s, color 0.15s;
+        }
+        .btn-collapse-all:hover {
+            border-color: var(--gh-blue-text);
+            color: var(--gh-blue-text);
         }
 
         ::-webkit-scrollbar {
@@ -488,6 +588,12 @@ class DiffHtmlGenerator:
             if i < preload_count:
                 file_blocks_html += cls._generate_file_block(file_info, file_id, i)
 
+        # 为懒加载文件创建占位块（用于 IntersectionObserver 触发自动加载）
+        if lazy_load:
+            for i in range(preload_count, total_files):
+                file_id = f"file-{i}"
+                file_blocks_html += f'<div class="file-block" id="{file_id}" data-placeholder="true"></div>'
+
         # 如果没有差异
         if not files:
             file_blocks_html = """
@@ -514,6 +620,9 @@ class DiffHtmlGenerator:
                 已修改的文件
                 <span class="file-count">({total_files})</span>
             </div>
+            <div class="file-search-box">
+                <input type="text" class="file-search-input" placeholder="搜索文件..." oninput="filterFiles(this.value)">
+            </div>
             <div class="diff-summary">
                 <span class="summary-item additions">
                     <span>+{total_additions}</span>
@@ -522,8 +631,8 @@ class DiffHtmlGenerator:
                 <span class="summary-item deletions">
                     <span>-{total_deletions}</span>
                 </span>
-                <span class="separator" style="margin-left: auto; opacity: 0.5;">
-                    {datetime.now().strftime("%H:%M")}
+                <span class="diff-actions">
+                    <button class="btn-collapse-all" onclick="toggleAllFolding()">全部展开</button>
                 </span>
             </div>
             <div class="file-list">
@@ -549,13 +658,57 @@ class DiffHtmlGenerator:
             return div.innerHTML;
         }}
 
-        // 从diff行数据生成HTML行
+        // 快速行内差异高亮（JS 端）
+        // 使用公共前缀/后缀算法，O(min(m,n)) 代替 LCS 的 O(m×n)
+        function wordDiff(oldText, newText) {{
+            // 安全限制：行太长时跳过 word diff
+            if (oldText.length + newText.length > 2000) {{
+                return {{ oldHtml: escapeHtml(oldText), newHtml: escapeHtml(newText) }};
+            }}
+
+            const oldChars = Array.from(oldText);
+            const newChars = Array.from(newText);
+            const m = oldChars.length;
+            const n = newChars.length;
+
+            // 找公共前缀
+            let prefixLen = 0;
+            while (prefixLen < m && prefixLen < n && oldChars[prefixLen] === newChars[prefixLen]) {{
+                prefixLen++;
+            }}
+
+            // 找公共后缀（减去已匹配的前缀）
+            let suffixLen = 0;
+            while (suffixLen < m - prefixLen && suffixLen < n - prefixLen &&
+                   oldChars[m - 1 - suffixLen] === newChars[n - 1 - suffixLen]) {{
+                suffixLen++;
+            }}
+
+            const oldMid = oldChars.slice(prefixLen, m - suffixLen).join('');
+            const newMid = newChars.slice(prefixLen, n - suffixLen).join('');
+            const prefix = oldChars.slice(0, prefixLen).join('');
+            const suffix = oldChars.slice(m - suffixLen).join('');
+
+            const oldHtml = escapeHtml(prefix) +
+                (oldMid ? '<span class="word-del">' + escapeHtml(oldMid) + '</span>' : '') +
+                escapeHtml(suffix);
+            const newHtml = escapeHtml(prefix) +
+                (newMid ? '<span class="word-add">' + escapeHtml(newMid) + '</span>' : '') +
+                escapeHtml(suffix);
+
+            return {{ oldHtml, newHtml }};
+        }}
+
+        // 从diff行数据生成HTML行（支持行内差异高亮 + data-type 属性）
         function generateDiffRowsHtml(lines) {{
             let html = '';
             let oldLineNum = 1;
             let newLineNum = 1;
+            let i = 0;
 
-            for (const line of lines) {{
+            while (i < lines.length) {{
+                const line = lines[i];
+
                 // @@ hunk header
                 if (line.startsWith('@@')) {{
                     const match = line.match(/@@ -(\\d+),?\\d* \\+(\\d+),?\\d* @@/);
@@ -563,37 +716,76 @@ class DiffHtmlGenerator:
                         oldLineNum = parseInt(match[1]);
                         newLineNum = parseInt(match[2]);
                     }}
-                    html += `<div class="diff-line hunk-header">
+                    html += `<div class="diff-line hunk-header" data-type="hunk-header">
                         <span class="line-num"></span>
                         <span class="line-num"></span>
                         <span class="line-sign"></span>
                         <span class="line-code">${{escapeHtml(line)}}</span>
                     </div>`;
+                    i++;
                 }}
-                // deleted line
-                else if (line.startsWith('-')) {{
-                    html += `<div class="diff-line deleted">
-                        <span class="line-num old">${{oldLineNum}}</span>
-                        <span class="line-num"></span>
-                        <span class="line-sign">-</span>
-                        <span class="line-code">${{escapeHtml(line.substring(1))}}</span>
-                    </div>`;
-                    oldLineNum++;
+                // deleted 行 → 收集连续的 -/+ 块做 word diff
+                else if (line.startsWith('-') && !line.startsWith('---')) {{
+                    const delStart = i;
+                    while (i < lines.length && lines[i].startsWith('-') && !lines[i].startsWith('---')) i++;
+                    const delCount = i - delStart;
+
+                    const addStart = i;
+                    while (i < lines.length && lines[i].startsWith('+') && !lines[i].startsWith('+++')) i++;
+                    const addCount = i - addStart;
+
+                    const pairCount = Math.min(delCount, addCount);
+                    for (let k = 0; k < pairCount; k++) {{
+                        const diff = wordDiff(lines[delStart + k].substring(1), lines[addStart + k].substring(1));
+                        html += `<div class="diff-line deleted" data-type="deleted">
+                            <span class="line-num old">${{oldLineNum}}</span>
+                            <span class="line-num"></span>
+                            <span class="line-sign">-</span>
+                            <span class="line-code">${{diff.oldHtml}}</span>
+                        </div>`;
+                        html += `<div class="diff-line added" data-type="added">
+                            <span class="line-num"></span>
+                            <span class="line-num new">${{newLineNum}}</span>
+                            <span class="line-sign">+</span>
+                            <span class="line-code">${{diff.newHtml}}</span>
+                        </div>`;
+                        oldLineNum++;
+                        newLineNum++;
+                    }}
+                    for (let k = pairCount; k < delCount; k++) {{
+                        html += `<div class="diff-line deleted" data-type="deleted">
+                            <span class="line-num old">${{oldLineNum}}</span>
+                            <span class="line-num"></span>
+                            <span class="line-sign">-</span>
+                            <span class="line-code">${{escapeHtml(lines[delStart + k].substring(1))}}</span>
+                        </div>`;
+                        oldLineNum++;
+                    }}
+                    for (let k = pairCount; k < addCount; k++) {{
+                        html += `<div class="diff-line added" data-type="added">
+                            <span class="line-num"></span>
+                            <span class="line-num new">${{newLineNum}}</span>
+                            <span class="line-sign">+</span>
+                            <span class="line-code">${{escapeHtml(lines[addStart + k].substring(1))}}</span>
+                        </div>`;
+                        newLineNum++;
+                    }}
                 }}
-                // added line
-                else if (line.startsWith('+')) {{
-                    html += `<div class="diff-line added">
+                // 独立的 added 行
+                else if (line.startsWith('+') && !line.startsWith('+++')) {{
+                    html += `<div class="diff-line added" data-type="added">
                         <span class="line-num"></span>
                         <span class="line-num new">${{newLineNum}}</span>
                         <span class="line-sign">+</span>
                         <span class="line-code">${{escapeHtml(line.substring(1))}}</span>
                     </div>`;
                     newLineNum++;
+                    i++;
                 }}
-                // context line
+                // context 行
                 else {{
                     const content = line.startsWith(' ') ? line.substring(1) : line;
-                    html += `<div class="diff-line context">
+                    html += `<div class="diff-line context" data-type="context">
                         <span class="line-num">${{oldLineNum}}</span>
                         <span class="line-num">${{newLineNum}}</span>
                         <span class="line-sign"></span>
@@ -601,6 +793,7 @@ class DiffHtmlGenerator:
                     </div>`;
                     oldLineNum++;
                     newLineNum++;
+                    i++;
                 }}
             }}
             return html;
@@ -626,19 +819,94 @@ class DiffHtmlGenerator:
             const fileInfo = window._diffFiles[index];
             if (!fileInfo) return;
 
-            const container = document.getElementById('diff-content');
-            const placeholder = document.getElementById('placeholder-' + fileId);
             const blockHtml = generateFileBlockHtml(fileInfo);
+            const existing = document.getElementById(fileId);
 
-            if (placeholder) {{
-                placeholder.outerHTML = `<div class="file-block" id="${{fileId}}">${{blockHtml}}</div>`;
+            if (existing) {{
+                existing.innerHTML = blockHtml;
             }} else {{
                 const div = document.createElement('div');
                 div.id = fileId;
                 div.className = 'file-block';
                 div.innerHTML = blockHtml;
-                container.appendChild(div);
+                document.getElementById('diff-content').appendChild(div);
             }}
+
+            // 懒加载后对新生成的文件块执行折叠，并注册到 IntersectionObserver
+            const block = document.getElementById(fileId);
+            if (block) {{
+                applyContextFolding(block);
+                if (window._diffObserver) window._diffObserver.observe(block);
+            }}
+        }}
+
+        // 上下文折叠：对连续超过阈值的 context 行，折叠中间部分
+        function applyContextFolding(container) {{
+            const CONTEXT_THRESHOLD = 3;  // 连续 context 行超过此值时折叠中间部分
+            const KEEP_HEAD = 1;           // 折叠区域前部保留的行数
+            const KEEP_TAIL = 1;           // 折叠区域后部保留的行数
+
+            const diffTables = container.querySelectorAll('.diff-table');
+            diffTables.forEach(table => {{
+                const allRows = table.querySelectorAll('.diff-line');
+                if (allRows.length === 0) return;
+
+                // 找出连续 context 行的区间
+                const ranges = [];
+                let rangeStart = -1;
+                for (let i = 0; i < allRows.length; i++) {{
+                    if (allRows[i].getAttribute('data-type') === 'context') {{
+                        if (rangeStart === -1) rangeStart = i;
+                    }} else {{
+                        if (rangeStart !== -1) {{
+                            ranges.push({{ start: rangeStart, end: i - 1 }});
+                            rangeStart = -1;
+                        }}
+                    }}
+                }}
+                if (rangeStart !== -1) ranges.push({{ start: rangeStart, end: allRows.length - 1 }});
+
+                // 对每个连续区间，如果行数超过阈值，折叠中间部分
+                // 需要从后往前处理，避免索引偏移
+                for (let r = ranges.length - 1; r >= 0; r--) {{
+                    const range = ranges[r];
+                    const count = range.end - range.start + 1;
+                    const foldCount = count - KEEP_HEAD - KEEP_TAIL;
+
+                    if (foldCount <= 0) continue;  // 不需要折叠
+
+                    const foldStart = range.start + KEEP_HEAD;
+                    const foldEnd = range.end - KEEP_TAIL;
+
+                    // 展开按钮
+                    const expandBtn = document.createElement('div');
+                    expandBtn.className = 'diff-expand';
+                    expandBtn.innerHTML = `<span class="expand-icon">&#9662;</span> <span class="expand-lines">${{foldCount}} 行未更改</span>`;
+
+                    // 折叠：将中间行设为 display:none，展开时恢复
+                    const hiddenRows = [];
+                    for (let i = foldStart; i <= foldEnd; i++) {{
+                        allRows[i].style.display = 'none';
+                        hiddenRows.push(allRows[i]);
+                    }}
+
+                    // 将 hiddenRows 存在按钮上供 toggleAllFolding 使用
+                    expandBtn._hiddenRows = hiddenRows;
+
+                    expandBtn.addEventListener('click', function() {{
+                        this._hiddenRows.forEach(row => row.style.display = '');
+                        this.style.display = 'none';
+                    }});
+
+                    // 在第一个 KEEP_TAIL 行之前插入展开按钮
+                    const anchorRow = (foldEnd + 1 < allRows.length) ? allRows[foldEnd + 1] : null;
+                    if (anchorRow && anchorRow.parentNode === table) {{
+                        table.insertBefore(expandBtn, anchorRow);
+                    }} else {{
+                        table.appendChild(expandBtn);
+                    }}
+                }}
+            }});
         }}
 
         // 点击文件列表项时加载并滚动
@@ -663,8 +931,64 @@ class DiffHtmlGenerator:
             }});
         }});
 
+        // 键盘导航：j/k 上下切换文件
+        document.addEventListener('keydown', function(e) {{
+            if (e.key === 'j' || e.key === 'ArrowDown' || e.key === 'k' || e.key === 'ArrowUp') {{
+                const items = Array.from(document.querySelectorAll('.file-item:not([style*=\"display: none\"])'));
+                if (items.length === 0) return;
+                const active = document.querySelector('.file-item.active');
+                let idx = items.indexOf(active);
+                if (idx === -1) idx = 0;
+                if (e.key === 'j' || e.key === 'ArrowDown') {{
+                    idx = Math.min(idx + 1, items.length - 1);
+                }} else {{
+                    idx = Math.max(idx - 1, 0);
+                }}
+                items[idx].click();
+                e.preventDefault();
+            }}
+        }});
+
+        // 文件搜索过滤（带防抖）
+        let _searchTimer = null;
+        function filterFiles(query) {{
+            clearTimeout(_searchTimer);
+            _searchTimer = setTimeout(() => {{
+                query = query.toLowerCase();
+                document.querySelectorAll('.file-item').forEach(item => {{
+                    const name = (item.querySelector('.file-name')?.textContent || '').toLowerCase();
+                    const dir = (item.querySelector('.file-dir')?.textContent || '').toLowerCase();
+                    const title = (item.getAttribute('title') || '').toLowerCase();
+                    const match = title.includes(query) || name.includes(query) || dir.includes(query);
+                    item.style.display = match ? '' : 'none';
+                }});
+                // 搜索时自动展开全部折叠，方便查看匹配结果
+                if (query.length > 0 && !window._allExpanded) {{
+                    toggleAllFolding();
+                }}
+            }}, query.length > 0 ? 150 : 0);
+        }}
+
+        // 全部展开/折叠
+        let _allExpanded = false;
+        function toggleAllFolding() {{
+            _allExpanded = !_allExpanded;
+            document.querySelectorAll('.diff-expand').forEach(btn => {{
+                const hiddenRows = btn._hiddenRows;
+                if (!hiddenRows || hiddenRows.length === 0) return;
+                if (_allExpanded) {{
+                    hiddenRows.forEach(row => row.style.display = '');
+                    btn.style.display = 'none';
+                }} else {{
+                    hiddenRows.forEach(row => row.style.display = 'none');
+                    btn.style.display = '';
+                }}
+            }});
+            document.querySelector('.btn-collapse-all').textContent = _allExpanded ? '全部折叠' : '全部展开';
+        }}
+
         // 滚动时懒加载可见区域的文件
-        const observer = new IntersectionObserver((entries) => {{
+        window._diffObserver = new IntersectionObserver((entries) => {{
             entries.forEach(entry => {{
                 if (entry.isIntersecting) {{
                     const id = entry.target.id;
@@ -683,12 +1007,18 @@ class DiffHtmlGenerator:
 
         // 观察已加载的文件块
         document.querySelectorAll('.file-block').forEach(block => {{
-            observer.observe(block);
+            window._diffObserver.observe(block);
         }});
 
-        // 激活第一个文件
-        const firstItem = document.querySelector('.file-item');
-        if (firstItem) firstItem.classList.add('active');
+        // 对预渲染的文件块执行上下文折叠（延迟到下一帧，避免阻塞首屏渲染）
+        requestAnimationFrame(() => {{
+            document.querySelectorAll('.file-block').forEach(block => {{
+                applyContextFolding(block);
+            }});
+            // 激活第一个文件
+            const firstItem = document.querySelector('.file-item');
+            if (firstItem) firstItem.classList.add('active');
+        }});
     </script>
 </body>
 </html>"""
@@ -705,6 +1035,7 @@ class DiffHtmlGenerator:
         current_file = None
         current_lines = []
         current_stats = {"additions": 0, "deletions": 0}
+        current_status = "modified"
 
         for line in diff_output.split("\n"):
             # 检测新文件开始
@@ -716,12 +1047,18 @@ class DiffHtmlGenerator:
                             "path": current_file,
                             "additions": current_stats["additions"],
                             "deletions": current_stats["deletions"],
+                            "status": current_status,
                             "lines": current_lines,
                         }
                     )
 
-                # 提取文件名
+                # 判断文件状态：--- /dev/null 表示新增
                 parts = line[4:].strip()
+                if parts == "/dev/null":
+                    current_status = "added"
+                else:
+                    current_status = "modified"
+
                 if parts.startswith("a/") or parts.startswith("b/"):
                     current_file = parts[2:]
                 else:
@@ -729,6 +1066,13 @@ class DiffHtmlGenerator:
 
                 current_lines = []
                 current_stats = {"additions": 0, "deletions": 0}
+                continue
+
+            # 跳过 +++ 行（标记新文件的临时文件路径，不参与差异显示）
+            if line.startswith("+++ "):
+                # +++ /dev/null 表示文件被删除
+                if line[4:].strip() == "/dev/null" and current_status != "added":
+                    current_status = "deleted"
                 continue
 
             if current_file is None:
@@ -749,6 +1093,7 @@ class DiffHtmlGenerator:
                     "path": current_file,
                     "additions": current_stats["additions"],
                     "deletions": current_stats["deletions"],
+                    "status": current_status,
                     "lines": current_lines,
                 }
             )
@@ -761,20 +1106,34 @@ class DiffHtmlGenerator:
         path = file_info["path"]
         additions = file_info["additions"]
         deletions = file_info["deletions"]
+        status = file_info.get("status", "modified")
 
         icon = cls._get_file_icon(path)
         file_name = Path(path).name
+        file_dir = str(Path(path).parent).replace("\\", "/")
+        if file_dir == ".":
+            file_dir = ""
 
         badges = ""
-        if additions > 0:
-            badges += f'<span class="file-badge added">+{additions}</span>'
-        if deletions > 0:
-            badges += f'<span class="file-badge deleted">-{deletions}</span>'
+        if status == "added":
+            badges += '<span class="file-badge added">新增</span>'
+        elif status == "deleted":
+            badges += '<span class="file-badge deleted">删除</span>'
+        else:
+            if additions > 0:
+                badges += f'<span class="file-badge added">+{additions}</span>'
+            if deletions > 0:
+                badges += f'<span class="file-badge deleted">-{deletions}</span>'
+
+        dir_html = f'<span class="file-dir">{cls.escape_html(file_dir)}</span>' if file_dir else ''
 
         return f'''
         <a href="#{file_id}" class="file-item" data-target="{file_id}">
             <span class="file-icon">{icon}</span>
-            <span class="file-name" title="{cls.escape_html(path)}">{cls.escape_html(file_name)}</span>
+            <div class="file-info">
+                <span class="file-name" title="{cls.escape_html(path)}">{cls.escape_html(file_name)}</span>
+                {dir_html}
+            </div>
             {badges}
         </a>
         '''
@@ -797,6 +1156,7 @@ class DiffHtmlGenerator:
                 "icon": icon,
                 "additions": additions,
                 "deletions": deletions,
+                "status": file_info.get("status", "modified"),
                 "lines": file_info["lines"]
             })
 
@@ -806,6 +1166,37 @@ class DiffHtmlGenerator:
         # 浏览器 HTML 解析器会误将 JSON 字符串中的 </ 识别为脚本结束标记
         result = result.replace('</', '\\u003C/')
         return result
+
+    @classmethod
+    def _word_diff(cls, old_text: str, new_text: str) -> tuple:
+        """对两行文本做字符级差异高亮，返回 (old_html, new_html)"""
+        # 安全限制：行太长时跳过 word diff，避免性能问题
+        if len(old_text) + len(new_text) > 2000:
+            return cls.escape_html(old_text), cls.escape_html(new_text)
+
+        matcher = difflib.SequenceMatcher(None, old_text, new_text, autojunk=False)
+        old_parts = []
+        new_parts = []
+        for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+            if tag == 'equal':
+                old_parts.append(cls.escape_html(old_text[i1:i2]))
+                new_parts.append(cls.escape_html(new_text[j1:j2]))
+            elif tag == 'delete':
+                old_parts.append(
+                    f'<span class="word-del">{cls.escape_html(old_text[i1:i2])}</span>'
+                )
+            elif tag == 'insert':
+                new_parts.append(
+                    f'<span class="word-add">{cls.escape_html(new_text[j1:j2])}</span>'
+                )
+            elif tag == 'replace':
+                old_parts.append(
+                    f'<span class="word-del">{cls.escape_html(old_text[i1:i2])}</span>'
+                )
+                new_parts.append(
+                    f'<span class="word-add">{cls.escape_html(new_text[j1:j2])}</span>'
+                )
+        return ''.join(old_parts), ''.join(new_parts)
 
     @classmethod
     def _generate_file_block_header(cls, file_info: Dict, file_id: str) -> str:
@@ -826,40 +1217,101 @@ class DiffHtmlGenerator:
 
     @classmethod
     def _generate_file_block_rows(cls, file_info: Dict) -> str:
-        """生成文件块的行内容 HTML（不含外层容器）"""
+        """生成文件块的行内容 HTML（不含外层容器）
+
+        支持行内差异高亮：连续的 -/+ 行对会做字符级 diff
+        每行添加 data-type 属性，供 JS 端折叠逻辑使用
+        """
         lines = file_info["lines"]
         diff_rows_html = ""
         old_line_num = 1
         new_line_num = 1
+        i = 0
 
-        for line in lines:
+        while i < len(lines):
+            line = lines[i]
+
             if line.startswith("@@"):
                 match = _HUNK_HEADER_PATTERN.search(line)
                 if match:
                     old_line_num = int(match.group(1))
                     new_line_num = int(match.group(2))
-
                 diff_rows_html += f"""
-                <div class="diff-line hunk-header">
+                <div class="diff-line hunk-header" data-type="hunk-header">
                     <span class="line-num"></span>
                     <span class="line-num"></span>
                     <span class="line-sign"></span>
                     <span class="line-code">{cls.escape_html(line)}</span>
                 </div>
                 """
-            elif line.startswith("-"):
+                i += 1
+
+            elif line.startswith("-") and not line.startswith("---"):
+                # 收集连续的 deleted 行
+                del_start = i
+                while i < len(lines) and lines[i].startswith("-") and not lines[i].startswith("---"):
+                    i += 1
+                del_count = i - del_start
+
+                # 收集紧随的连续 added 行
+                add_start = i
+                while i < len(lines) and lines[i].startswith("+") and not lines[i].startswith("+++"):
+                    i += 1
+                add_count = i - add_start
+
+                # 配对处理：做 word diff
+                pair_count = min(del_count, add_count)
+                for k in range(pair_count):
+                    old_text = lines[del_start + k][1:]
+                    new_text = lines[add_start + k][1:]
+                    old_html, new_html = cls._word_diff(old_text, new_text)
+                    diff_rows_html += f"""
+                    <div class="diff-line deleted" data-type="deleted">
+                        <span class="line-num old">{old_line_num}</span>
+                        <span class="line-num"></span>
+                        <span class="line-sign">-</span>
+                        <span class="line-code">{old_html}</span>
+                    </div>
+                    """
+                    diff_rows_html += f"""
+                    <div class="diff-line added" data-type="added">
+                        <span class="line-num"></span>
+                        <span class="line-num new">{new_line_num}</span>
+                        <span class="line-sign">+</span>
+                        <span class="line-code">{new_html}</span>
+                    </div>
+                    """
+                    old_line_num += 1
+                    new_line_num += 1
+
+                # 未配对的 deleted 行
+                for k in range(pair_count, del_count):
+                    diff_rows_html += f"""
+                    <div class="diff-line deleted" data-type="deleted">
+                        <span class="line-num old">{old_line_num}</span>
+                        <span class="line-num"></span>
+                        <span class="line-sign">-</span>
+                        <span class="line-code">{cls.escape_html(lines[del_start + k][1:])}</span>
+                    </div>
+                    """
+                    old_line_num += 1
+
+                # 未配对的 added 行
+                for k in range(pair_count, add_count):
+                    diff_rows_html += f"""
+                    <div class="diff-line added" data-type="added">
+                        <span class="line-num"></span>
+                        <span class="line-num new">{new_line_num}</span>
+                        <span class="line-sign">+</span>
+                        <span class="line-code">{cls.escape_html(lines[add_start + k][1:])}</span>
+                    </div>
+                    """
+                    new_line_num += 1
+
+            elif line.startswith("+") and not line.startswith("+++"):
+                # 独立的 added 行（前面没有 deleted 行）
                 diff_rows_html += f"""
-                <div class="diff-line deleted">
-                    <span class="line-num old">{old_line_num}</span>
-                    <span class="line-num"></span>
-                    <span class="line-sign">-</span>
-                    <span class="line-code">{cls.escape_html(line[1:])}</span>
-                </div>
-                """
-                old_line_num += 1
-            elif line.startswith("+"):
-                diff_rows_html += f"""
-                <div class="diff-line added">
+                <div class="diff-line added" data-type="added">
                     <span class="line-num"></span>
                     <span class="line-num new">{new_line_num}</span>
                     <span class="line-sign">+</span>
@@ -867,26 +1319,33 @@ class DiffHtmlGenerator:
                 </div>
                 """
                 new_line_num += 1
+                i += 1
+
             elif line.startswith(" "):
+                content = line[1:] if line else ""
                 diff_rows_html += f"""
-                <div class="diff-line context">
+                <div class="diff-line context" data-type="context">
                     <span class="line-num">{old_line_num}</span>
                     <span class="line-num">{new_line_num}</span>
                     <span class="line-sign"></span>
-                    <span class="line-code">{cls.escape_html(line[1:] if line else "")}</span>
+                    <span class="line-code">{cls.escape_html(content)}</span>
                 </div>
                 """
                 old_line_num += 1
                 new_line_num += 1
+                i += 1
+
             else:
+                # 其他行（如 \ No newline at end of file）
                 diff_rows_html += f"""
-                <div class="diff-line context">
+                <div class="diff-line context" data-type="context">
                     <span class="line-num"></span>
                     <span class="line-num"></span>
                     <span class="line-sign"></span>
                     <span class="line-code">{cls.escape_html(line)}</span>
                 </div>
                 """
+                i += 1
 
         return diff_rows_html
 
@@ -986,6 +1445,7 @@ class DiffHtmlGenerator:
                         fromfile=abs_path,
                         tofile=abs_path,
                         lineterm="\n",
+                        n=5,
                     )
 
                     diff_text = "".join(diff)

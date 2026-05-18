@@ -175,6 +175,10 @@ class ChatEngine:
     def set_callback(self, event: str, callback: Callable):
         self._callbacks[event] = callback
 
+    def clear_callbacks(self):
+        """清除所有 UI 回调，防止异步回调访问已销毁的 widget"""
+        self._callbacks.clear()
+
     def _emit(self, event: str, *args, **kwargs):
         # API 模式优先使用 _worker_callbacks
         callback = self._callbacks.get(event)

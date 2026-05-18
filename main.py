@@ -22,7 +22,7 @@ sys.path.insert(0, project_root)
 def main():
     """启动 LLM Chatter"""
     import platform
-    from PyQt5.QtCore import Qt, QTimer
+    from PyQt5.QtCore import Qt
     from PyQt5.QtWidgets import QApplication
     from loguru import logger
     from app.utils import icons_rc
