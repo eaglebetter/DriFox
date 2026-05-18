@@ -38,7 +38,7 @@ from app.core.provider_profile import get_provider_profile
 # ========== 常量 ==========
 MAX_HISTORY_SNIPPET_CHARS = 1200
 RECENT_HISTORY_MIN_MESSAGES = 6
-SOFT_LIMIT_RATIO = 0.7  # 触发压缩检查
+SOFT_LIMIT_RATIO = 0.84  # 触发压缩检查（历史预算的 84% = 总体的 ~42% 时触发）
 TARGET_LIMIT_RATIO = 0.6  # 压缩目标（tail保留60% budget，留更多实际消息）
 MIN_RECENT_TOKEN_RATIO = 0.5  # 最小保留比例（tail最少30% budget）
 SUMMARY_OVERHEAD = 500  # 摘要基础开销
@@ -53,7 +53,7 @@ EMERGENCY_TARGET_RATIO = 0.7
 # 每条被压缩消息分配更多字符，保证摘要可读性
 MAX_HEURISTIC_SUMMARY_CHARS = 55000
 MAX_HEURISTIC_SUMMARY_CHARS_PER_MSG = 40  # 每条压缩消息额外允许的摘要字符
-MAX_HEURISTIC_SUMMARY_CHARS_ABS = 105000  # 摘要绝对硬上限
+MAX_HEURISTIC_SUMMARY_CHARS_ABS = 200000  # 摘要绝对硬上限（基于预算动态计算，此值为安全阀）
 # 工具结果内容最大保留字符数
 MAX_TOOL_CONTENT_CHARS = 3000
 # 工具配对保护导致tail跑飞时的硬限制倍数
@@ -761,11 +761,11 @@ class HistoryCompactor:
     # ========== 内部方法 ==========
 
     def _get_soft_limit(self, budget: int) -> int:
-        """软限制 = 70% 预算"""
+        """软限制 = 84% 历史预算（对应总体 ~42% 触发压缩）"""
         return max(1, int(budget * SOFT_LIMIT_RATIO))
 
     def _get_target_limit(self, budget: int) -> int:
-        """目标限制 = 50% 预算"""
+        """目标限制 = 60% 历史预算（对应总体 ~30%，压缩后有 ~12% 空间才再次触发）"""
         return max(1, int(budget * TARGET_LIMIT_RATIO))
 
     def _make_state(
@@ -1220,14 +1220,22 @@ class HistoryCompactor:
         # 启发式截断（遗忘曲线）
         heuristic = self._summarize_heuristic(messages, budget)
         
-        # 启发式摘要长度硬上限（无论 budget 是否有效，始终应用）
-        # 动态上限：base + 压缩消息数 * 每条额外字符
-        max_chars = MAX_HEURISTIC_SUMMARY_CHARS
-        if compacted_count > 0:
-            max_chars = min(
-                MAX_HEURISTIC_SUMMARY_CHARS_ABS,
-                MAX_HEURISTIC_SUMMARY_CHARS + compacted_count * MAX_HEURISTIC_SUMMARY_CHARS_PER_MSG
-            )
+        # ========== 动态字符上限（预算驱动）==========
+        # 目标：让压缩后的总上下文（系统提示 + 摘要 + tail + 新消息）保持在 50%-60%
+        # 通过可用预算（剩余可分配 token）反向计算摘要的合理字符上限
+        if budget and budget > 0:
+            # budget = 摘要可用的 token 预算
+            # 字符上限 = 预算 × 4 字符/token × 90%（留余量）
+            budget_based_max = int(budget * CHARS_PER_TOKEN * 0.9)
+            max_chars = min(budget_based_max, MAX_HEURISTIC_SUMMARY_CHARS_ABS)
+        else:
+            # 无预算时回退固定上限
+            max_chars = MAX_HEURISTIC_SUMMARY_CHARS
+            if compacted_count > 0:
+                max_chars = min(
+                    MAX_HEURISTIC_SUMMARY_CHARS_ABS,
+                    MAX_HEURISTIC_SUMMARY_CHARS + compacted_count * MAX_HEURISTIC_SUMMARY_CHARS_PER_MSG
+                )
         if len(heuristic) > max_chars:
             logger.warning(
                 f"[Compactor] 启发式摘要超长: {len(heuristic)} > {max_chars} "
