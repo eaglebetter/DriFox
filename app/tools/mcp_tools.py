@@ -12,6 +12,7 @@ MCP 工具模块 - 管理 MCP Server 连接、工具发现与调用
 import asyncio
 import json
 import os
+import re
 import threading
 from typing import Dict, List, Optional, Tuple
 
@@ -121,7 +122,11 @@ class MCPClientManager:
             elif server_type == "sse":
                 await self._lifespan_sse(conn)
             elif server_type == "http":
-                await self._lifespan_http(conn)
+                # 如果 http 类型但含有 command 字段(无预设 URL)，需要先启动进程获取 URL
+                if conn.config.get("command"):
+                    await self._lifespan_http_from_stdio(conn)
+                else:
+                    await self._lifespan_http(conn)
             else:
                 conn._connect_error = ValueError(f"不支持的 MCP 服务器类型: {server_type}")
                 conn._ready_event.set()
@@ -179,6 +184,102 @@ class MCPClientManager:
                 conn.tools = result.tools
                 conn._ready_event.set()
                 await conn._disconnect_event.wait()
+
+    async def _lifespan_http_from_stdio(self, conn: MCPServerConnection) -> None:
+        """
+        两阶段连接：先通过 stdio 启动服务器进程 -> 捕获 stdout 中的 URL -> 切换 HTTP 连接。
+
+        适用场景：服务器使用 --transport http 参数，启动后输出 URL 到 stdout
+        （如 @brave/brave-search-mcp-server --transport http）
+        """
+        command = conn.config.get("command", "")
+        args = conn.config.get("args", [])
+        env = conn.config.get("env")
+        merged_env = {**os.environ, **(env or {})}
+
+        logger.info(f"[MCP] '{conn.name}' 启动进程中获取 URL...")
+
+        # 阶段一：启动进程并捕获 stdout（寻找 URL）
+        process = await asyncio.create_subprocess_exec(
+            command,
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=merged_env,
+        )
+
+        found_url = None
+        try:
+            # 读取 stdout 寻找 URL（最大等待 15 秒）
+            async def _find_url():
+                nonlocal found_url
+                assert process.stdout is not None
+                url_pattern = re.compile(r'http[s]?://[^\s"\']+')
+                while True:
+                    line = await asyncio.wait_for(process.stdout.readline(), timeout=15)
+                    if not line:
+                        break
+                    decoded = line.decode("utf-8", errors="replace").strip()
+                    logger.debug(f"[MCP] '{conn.name}' stdout: {decoded}")
+                    # 尝试匹配 URL
+                    match = url_pattern.search(decoded)
+                    if match:
+                        found_url = match.group(0)
+                        return
+                    # 也检查是否为纯 URL 行
+                    if decoded.startswith("http://") or decoded.startswith("https://"):
+                        found_url = decoded
+                        return
+
+            await _find_url()
+        except asyncio.TimeoutError:
+            # 超时未找到 URL，尝试杀掉进程后回退到 stdio
+            try:
+                process.kill()
+            except Exception:
+                pass
+            raise TimeoutError(
+                f"启动服务器 '{conn.name}' 后未能在 stdout 中找到 URL（15秒超时），"
+                f"请确认服务器使用了正确的 --transport 参数"
+            )
+
+        if not found_url:
+            try:
+                process.kill()
+            except Exception:
+                pass
+            raise RuntimeError(
+                f"启动服务器 '{conn.name}' 后未能从输出中解析到 URL"
+            )
+
+        # 清理 URL 中的尾部分隔符
+        found_url = found_url.rstrip("/,.;")
+        # 如果 URL 是 0.0.0.0，替换为 localhost
+        found_url = found_url.replace("0.0.0.0", "127.0.0.1")
+        logger.info(f"[MCP] '{conn.name}' 获取到 URL: {found_url}")
+
+        # 阶段二：用获取到的 URL 建立 HTTP 连接
+        # 保持子进程运行（HTTP 服务器进程），连接关闭时杀掉进程
+        try:
+            async with streamablehttp_client(url=found_url) as (read_stream, write_stream, _):
+                async with ClientSession(read_stream, write_stream) as session:
+                    await session.initialize()
+                    result = await session.list_tools()
+                    conn.session = session
+                    conn.tools = result.tools
+                    conn._ready_event.set()
+                    logger.info(f"[MCP] '{conn.name}' HTTP 连接成功，发现 {len(conn.tools)} 个工具")
+                    await conn._disconnect_event.wait()
+        finally:
+            # 断开连接时杀掉子进程
+            try:
+                process.terminate()
+                try:
+                    await asyncio.wait_for(process.wait(), timeout=5)
+                except asyncio.TimeoutError:
+                    process.kill()
+            except Exception:
+                pass
 
     # ── 连接操作 ──────────────────────────────────────
 
