@@ -649,7 +649,7 @@ class OpenAIChatToolWindow(ToolWindow):
 
     def eventFilter(self, obj, event):
         """处理 viewport 大小变化，调整背景图片"""
-        if obj == self.chat_scroll_area.viewport() and event.type() == event.Type.Resize:
+        if hasattr(self, "chat_scroll_area") and obj == self.chat_scroll_area.viewport() and event.type() == event.Type.Resize:
             if hasattr(self, "_bg_label"):
                 self._bg_label.resize(self.chat_scroll_area.viewport().size())
         return super().eventFilter(obj, event)

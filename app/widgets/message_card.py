@@ -1973,14 +1973,7 @@ class CodeWebViewer(QWebEngineView):
                     }}
                 }}
                 function reportHeight() {{
-                    // 使用 scrollHeight 确保完整内容高度，避免 overflow:hidden 时
-                    // getBoundingClientRect() 返回 viewport 高度导致底部内容截断
-                    const h = Math.max(
-                        document.documentElement.scrollHeight,
-                        document.documentElement.offsetHeight,
-                        document.body.scrollHeight,
-                        document.body.offsetHeight
-                    );
+                    const h = document.documentElement.getBoundingClientRect().height;
                     console.log('pywebview_height:' + h);
                 }}
                 // 防抖报告高度：动画期间暂停报告，只在动画结束后报告最终值
