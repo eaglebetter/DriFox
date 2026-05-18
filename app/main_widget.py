@@ -2030,6 +2030,10 @@ class OpenAIChatToolWindow(ToolWindow):
             setFont(self.input_area, scale_font_size(15))
             if hasattr(self.input_area, "refresh_style"):
                 self.input_area.refresh_style()
+        # 刷新设置弹出层的字体大小
+        if self._settings_popup:
+            from qfluentwidgets import setFont as qfw_setFont
+            qfw_setFont(self._settings_popup)
         # 刷新智能体切换按钮样式
         if hasattr(self, "_agent_switch_widget"):
             Colors.refresh()

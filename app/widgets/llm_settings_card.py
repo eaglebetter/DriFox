@@ -30,12 +30,13 @@ from qfluentwidgets import (
 )
 
 from app.utils.config import Settings
-from app.utils.utils import get_icon, get_unified_font
+from app.utils.utils import get_icon, get_unified_font, get_font_family_css
 from app.utils.design_tokens import (
     ButtonStyles,
     ComboBoxStyles,
     FONT_SIZE_OPTIONS,
     THEME_STYLE_OPTIONS,
+    Colors,
 )
 
 
@@ -115,6 +116,17 @@ class LLMSettingsCard(SystemCardFrame):
 
         self._setup_content()
 
+    def _make_sep_label(self, text: str) -> StrongBodyLabel:
+        """创建带主题色的分隔标签"""
+        Colors.refresh()
+        sep_label = StrongBodyLabel(text, self)
+        sep_label.setFont(get_unified_font(10, True))
+        sep_label.setStyleSheet(
+            f"color: {Colors.TEXT_MUTED}; padding: 4px 0;"
+            f"{get_font_family_css()} font-weight: bold;"
+        )
+        return sep_label
+
     def _setup_content(self):
         content_layout = self.content_layout
         content_layout.setContentsMargins(0, 4, 0, 4)
@@ -170,14 +182,6 @@ class LLMSettingsCard(SystemCardFrame):
         )
         content_layout.addWidget(self.mcpListCard)
 
-        self._setup_appearance_cards()
-        content_layout.addWidget(self.uiFontSizeCard)
-        content_layout.addWidget(self.uiThemeStyleCard)
-
-        # 全局字体设置
-        self._setup_font_card()
-        content_layout.addWidget(self.llmFontCard)
-
         # 智能体完成通知
         self.llmNotifyCard = SwitchSettingCard(
             get_icon("提示"),
@@ -199,11 +203,23 @@ class LLMSettingsCard(SystemCardFrame):
         )
         content_layout.addWidget(self.llmSoundCard)
 
-        # 分隔标签
-        sep_label = StrongBodyLabel("版本更新", self)
-        sep_label.setFont(get_unified_font(10, True))
-        sep_label.setStyleSheet("color: #888; padding: 4px 0;")
-        content_layout.addWidget(sep_label)
+
+        # ---- 外观样式分隔标签 ----
+        sep_appearance_label = self._make_sep_label("外观样式")
+        content_layout.addWidget(sep_appearance_label)
+
+        # 界面字号、主题风格
+        self._setup_appearance_cards()
+        content_layout.addWidget(self.uiFontSizeCard)
+        content_layout.addWidget(self.uiThemeStyleCard)
+
+        # 全局字体设置
+        self._setup_font_card()
+        content_layout.addWidget(self.llmFontCard)
+
+        # ---- 版本更新分隔标签 ----
+        sep_update_label = self._make_sep_label("版本更新")
+        content_layout.addWidget(sep_update_label)
 
         # 自动检查更新
         self.autoUpdateCard = SwitchSettingCard(
