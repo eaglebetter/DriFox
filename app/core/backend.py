@@ -263,7 +263,7 @@ class ChatBackend(QObject):
     # ========== ChatEngine 代理方法 ==========
     
     def _init_mcp_connections(self):
-        """初始化 MCP 服务器连接（单例，多窗口共享）"""
+        """初始化 MCP 服务器连接（后台异步，不阻塞 UI）"""
         from app.utils.config import Settings
 
         mcp_manager = self._tool_executor._builtin_tools._mcp_manager
@@ -282,11 +282,13 @@ class ChatBackend(QObject):
             logger.info("[ChatBackend] 无 MCP 服务器配置，跳过连接")
             return
 
-        try:
-            mcp_manager.connect_all_sync(servers)
-            logger.info(f"[ChatBackend] MCP 初始化完成，已连接 {len(mcp_manager._connections)} 个服务器")
-        except Exception as e:
-            logger.error(f"[ChatBackend] MCP 初始化失败: {e}")
+        mcp_manager.connect_all_background(
+            servers,
+            on_done=lambda ok, total, failed: logger.info(
+                f"[ChatBackend] MCP 后台连接完成: {ok}/{total}"
+                + (f", 失败: {failed}" if failed else "")
+            ),
+        )
     
     def stop_streaming(self):
         """停止流式输出"""

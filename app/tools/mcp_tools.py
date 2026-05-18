@@ -101,8 +101,37 @@ class MCPClientManager:
     # ── 连接管理 ──────────────────────────────────────
 
     def connect_all_sync(self, servers_config: List[dict]) -> None:
-        """同步连接所有 MCP 服务器（供外部调用）"""
+        """同步连接所有 MCP 服务器（阻塞调用线程，慎用）"""
         self._run_async(self._connect_all(servers_config))
+
+    def connect_all_background(self, servers_config: List[dict], on_done=None) -> None:
+        """
+        后台连接所有 MCP 服务器（不阻塞 UI 线程）。
+
+        Args:
+            servers_config: 服务器配置列表
+            on_done: 可选回调，签名 on_done(connected_count, total_count, failed_names: list)
+                     在后台线程中执行，如需更新 UI 请用信号转发到主线程。
+        """
+        def _worker():
+            try:
+                self._run_async(self._connect_all(servers_config))
+            except Exception as e:
+                logger.error(f"[MCP] 后台连接失败: {e}")
+            finally:
+                if on_done:
+                    connected = sum(1 for c in self._connections.values() if c.session)
+                    failed = [
+                        s.get("name", "?") for s in servers_config
+                        if s.get("enabled", True) and s.get("name") not in self._connections
+                    ]
+                    try:
+                        on_done(connected, len(servers_config), failed)
+                    except Exception as e:
+                        logger.warning(f"[MCP] on_done 回调异常: {e}")
+
+        threading.Thread(target=_worker, name="mcp-connect", daemon=True).start()
+        logger.info("[MCP] 后台连接已启动")
 
     async def _connect_all(self, servers_config: List[dict]) -> None:
         if self._connected:
