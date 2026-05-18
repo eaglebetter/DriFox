@@ -1,6 +1,6 @@
 ---
 name: to-issues
-description: 快速分析项目并提交 GitHub Issues。用于代码审查、bug 报告、需求拆分。使用简单，无需用户交互，自动完成。
+description: 自动分析代码问题并提交规范化的 GitHub Issues。遵循统一格式（Summary/Environment/Description/Impact/Steps/Expected/Actual/Proposed Fix），末尾自动添加智能体生成标记。无需用户交互，直接提交。
 ---
 
 # to-issues
@@ -263,14 +263,41 @@ if __name__ == '__main__':
 ```python
 submit_issue(
     title="[Bug] 虚拟滚动内存泄漏",
-    body="""## 问题描述
-    
-长会话后内存持续增长。
+    body="""## Summary
 
-## 验收标准
+长会话后内存持续增长，消息批次数据未被清理。
 
-- [ ] 回收的消息批次数据也被清理
-- [ ] 长时间运行内存稳定
+## Environment
+- Python: 3.x
+- DriFox 版本: 最新
+- 涉及文件: `app/main_widget.py`
+
+## Description
+
+### 问题: _message_batch 未清理
+虚拟滚动回收消息卡片时，对应的批次数据仍保留在内存中。
+
+## Impact
+
+1. 长时间运行内存持续增长
+2. 可能导致 OOM 错误
+
+## Steps to Reproduce
+
+1. 启动 DriFox 进行长时间对话
+2. 观察内存占用持续增长
+
+## Expected Behavior
+
+回收的消息批次数据也被清理，长时间运行内存稳定。
+
+## Actual Behavior
+
+内存持续增长，未释放已回收消息的数据。
+
+---
+
+> 🤖 DriFox 智能体自动生成
 """,
     labels=["bug", "performance"]
 )
