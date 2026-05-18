@@ -10,8 +10,10 @@ MCP 工具模块 - 管理 MCP Server 连接、工具发现与调用
 """
 
 import asyncio
+import json
+import os
 import threading
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from loguru import logger
 from mcp import types as mcp_types
@@ -474,4 +476,217 @@ class MCPClientManager:
             self.disconnect_all_sync()
         if self._loop and not self._loop.is_closed():
             self._loop.call_soon_threadsafe(self._loop.stop)
-        logger.info("[MCP] 后台事件循环已停止")
+
+
+# ═══════════════════════════════════════════════════════════
+# MCP Server 自动发现
+# ═══════════════════════════════════════════════════════════
+
+def _discover_claude_desktop_servers() -> List[dict]:
+    """
+    扫描 Claude Desktop 配置，发现 MCP 服务器
+
+    Claude Desktop 在以下位置存储 MCP 配置：
+    - Windows: %APPDATA%/Claude/claude_desktop_config.json
+    - macOS:   ~/Library/Application Support/Claude/claude_desktop_config.json
+    - Linux:   ~/.config/Claude/claude_desktop_config.json
+
+    格式示例：
+    {
+      "mcpServers": {
+        "server-name": {
+          "command": "npx",
+          "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path"]
+        }
+      }
+    }
+    """
+    servers = []
+    config_paths = []
+
+    # 检测平台
+    if os.name == "nt" or os.environ.get("OS") == "Windows_NT":
+        appdata = os.environ.get("APPDATA", "")
+        if appdata:
+            config_paths.append(os.path.join(appdata, "Claude", "claude_desktop_config.json"))
+    elif os.uname().sysname == "Darwin":  # macOS
+        config_paths.append(os.path.expanduser("~/Library/Application Support/Claude/claude_desktop_config.json"))
+    else:  # Linux
+        config_paths.append(os.path.expanduser("~/.config/Claude/claude_desktop_config.json"))
+
+    for config_path in config_paths:
+        if not os.path.exists(config_path):
+            continue
+
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                content = f.read()
+            config = json.loads(content) if content.strip() else {}
+        except (json.JSONDecodeError, IOError, OSError) as e:
+            logger.debug(f"[MCP] 解析 Claude Desktop 配置失败 {config_path}: {e}")
+            continue
+
+        mcp_servers = config.get("mcpServers", {})
+        for name, server_cfg in mcp_servers.items():
+            if not isinstance(server_cfg, dict):
+                continue
+
+            # 跳过已是 DriFox 已配置的（按 command+args 去重）
+            command = server_cfg.get("command", "")
+            args = server_cfg.get("args", [])
+            if not command:
+                continue
+
+            servers.append({
+                "name": name,
+                "type": "stdio",
+                "command": command,
+                "args": args,
+                "env": server_cfg.get("env"),
+                "enabled": False,  # 自动发现的不自动启用
+                "_source": "claude_desktop",
+                "_source_path": config_path,
+            })
+            logger.info(f"[MCP] 发现 Claude Desktop 服务器: {name}")
+
+    return servers
+
+
+def _discover_cursor_servers() -> List[dict]:
+    """
+    扫描 Cursor IDE 配置，发现 MCP 服务器
+
+    Cursor 在以下位置存储 MCP 配置：
+    - Windows: %APPDATA%/Cursor/User/globalStorage/mcp-settings.json
+    - macOS:   ~/Library/Application Support/Cursor/User/globalStorage/mcp-settings.json
+    - Linux:   ~/.config/Cursor/User/globalStorage/mcp-settings.json
+
+    格式示例：
+    {
+      "mcpServers": {
+        "server-name": {
+          "type": "stdio",
+          "command": "npx",
+          "args": ["-y", "@modelcontextprotocol/server-filesystem"]
+        }
+      }
+    }
+    """
+    servers = []
+    config_paths = []
+
+    if os.name == "nt" or os.environ.get("OS") == "Windows_NT":
+        appdata = os.environ.get("APPDATA", "")
+        if appdata:
+            config_paths.append(os.path.join(appdata, "Cursor", "User", "globalStorage", "mcp-settings.json"))
+    elif os.uname().sysname == "Darwin":
+        config_paths.append(os.path.expanduser("~/Library/Application Support/Cursor/User/globalStorage/mcp-settings.json"))
+    else:
+        config_paths.append(os.path.expanduser("~/.config/Cursor/User/globalStorage/mcp-settings.json"))
+
+    for config_path in config_paths:
+        if not os.path.exists(config_path):
+            continue
+
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                content = f.read()
+            config = json.loads(content) if content.strip() else {}
+        except (json.JSONDecodeError, IOError, OSError) as e:
+            logger.debug(f"[MCP] 解析 Cursor 配置失败 {config_path}: {e}")
+            continue
+
+        mcp_servers = config.get("mcpServers", {})
+        for name, server_cfg in mcp_servers.items():
+            if not isinstance(server_cfg, dict):
+                continue
+
+            command = server_cfg.get("command", "")
+            args = server_cfg.get("args", [])
+            if not command:
+                continue
+
+            servers.append({
+                "name": name,
+                "type": "stdio",
+                "command": command,
+                "args": args,
+                "env": server_cfg.get("env"),
+                "enabled": False,
+                "_source": "cursor",
+                "_source_path": config_path,
+            })
+            logger.info(f"[MCP] 发现 Cursor MCP 服务器: {name}")
+
+    return servers
+
+
+def _merge_and_deduplicate(existing: List[dict], discovered: List[dict]) -> Tuple[List[dict], List[dict]]:
+    """
+    合并已有配置和自动发现的配置，去重
+
+    去重规则（按 command + args 组合判断）：
+    - 已有配置保留
+    - 新发现的如果 command+args 与已有完全相同则跳过
+    - 新发现的如果 name 相同但 command+args 不同，name 后面加后缀区分
+
+    Returns:
+        (merged_list, new_ones) — 合并后的完整列表 + 仅新发现的列表
+    """
+    # 已有的 command+args 组合
+    existing_signatures = set()
+    for s in existing:
+        cmd = s.get("command", "")
+        args = tuple(s.get("args", []) or [])
+        if cmd:
+            existing_signatures.add((cmd, args))
+
+    new_ones = []
+    for srv in discovered:
+        cmd = srv.get("command", "")
+        args = tuple(srv.get("args", []) or [])
+        if cmd and (cmd, args) not in existing_signatures:
+            new_ones.append(srv)
+            existing_signatures.add((cmd, args))  # 防止多个新发现重复
+
+    # name 冲突处理
+    existing_names = {s.get("name", "") for s in existing}
+
+    def unique_name(name: str, suffix: str) -> str:
+        if name not in existing_names:
+            return name
+        base = name
+        idx = 1
+        while f"{base}{suffix}{idx}" in existing_names:
+            idx += 1
+        return f"{base}{suffix}{idx}"
+
+    for srv in new_ones:
+        srv["name"] = unique_name(srv["name"], "_copy")
+
+    merged = list(existing) + new_ones
+    return merged, new_ones
+
+
+def discover_and_merge() -> Tuple[List[dict], List[dict]]:
+    """
+    自动发现所有已知来源的 MCP 服务器，并与现有配置合并去重
+
+    Returns:
+        (all_servers, newly_discovered) — 所有服务器（含已有的）+ 新发现的列表
+    """
+    from app.utils.config import Settings
+
+    cfg = Settings.get_instance()
+    existing = list(cfg.mcp_servers.value or [])
+
+    all_discovered = []
+    all_discovered.extend(_discover_claude_desktop_servers())
+    all_discovered.extend(_discover_cursor_servers())
+
+    merged, new_ones = _merge_and_deduplicate(existing, all_discovered)
+
+    if new_ones:
+        logger.info(f"[MCP] 自动发现 {len(new_ones)} 个新服务器，已合并到配置")
+
+    return merged, new_ones

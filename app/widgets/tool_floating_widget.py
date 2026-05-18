@@ -193,6 +193,9 @@ class ToolFloatingWidget(SimpleCardWidget):
                 self.setVisible(True)
                 self.raise_()
                 self._needs_show_after_unsuppress = False
+                # 如果是已完成任务恢复显示（工具卡片已处于完成状态），启动 2 秒自动隐藏
+                if self.title_label.text() in ("执行完成", "执行失败"):
+                    self._hide_timer.start()
 
     def set_process(self, process):
         """设置当前进程以便中止"""
@@ -200,6 +203,9 @@ class ToolFloatingWidget(SimpleCardWidget):
 
     def start_tool(self, tool_name: str, args: dict = None):
         """开始执行工具"""
+        # mcp工具去除mcp头
+        if tool_name.startswith("mcp__"):
+            tool_name = "__".join(tool_name.split("__", 1)[2:])
         # 取消之前的自动隐藏定时器，防止上一个工具的隐藏影响当前工具
         self._hide_timer.stop()
 
