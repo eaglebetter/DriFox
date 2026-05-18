@@ -26,19 +26,20 @@
 
 ### 核心特性
 
-| 特性 | 说明 |
-|------|------|
-| 🎯 **极简界面** | 仅一个悬浮置顶对话框，无项目概念，随开随用 |
-| 🔀 **分支会话** | 问题分叉，多个窗口并行探索不同答案，互不干扰 |
-| 🔄 **会话并行** | 多窗口并行处理不同任务，会话管理+历史追踪 |
-| 📊 **上下文压缩** | 智能 Token 预算控制，长对话自动摘要压缩 |
-| 🧩 **多窗口粘合** | 🔜 窗口组管理，批量拖拽（Roadmap） |
-| 🧠 **长记忆** | 越用越懂你的偏好、习惯、禁忌 |
-| 🔌 **Hook 系统** | 可扩展的事件钩子系统，支持在特定事件触发自定义脚本 |
-| 🛠️ **代码工具** | 30+ 工具：读、写、搜索、执行、diff |
-| 🔌 **多模型** | OpenAI / Claude / DeepSeek / MiniMax / 通义 等随时切换 |
-| 🛡️ **穿透模式** | 悬浮窗口可穿透点击，不阻断其他应用 |
-| 🚀 **自动更新** | 自动检查新版本，随时保持更新 |
+| 特性              | 说明                                               |
+|-----------------|--------------------------------------------------|
+| 🎯 **极简界面**     | 仅一个悬浮置顶对话框，随开随用                                  |
+| 🔀 **分支会话**     | 问题分叉，多个窗口并行探索不同答案，互不干扰                           |
+| 🔄 **会话并行**     | 多窗口并行处理不同任务，会话管理+历史追踪                            |
+| 📊 **上下文压缩**    | 智能 Token 预算控制，长对话自动摘要压缩                          |
+| 🧠 **长记忆**      | 越用越懂你的偏好、习惯、禁忌                                   |
+| 🔌 **Hook 系统**  | 可扩展的事件钩子系统，支持在特定事件触发自定义脚本                        |
+| 🌐 **MCP 系统**   | Model Context Protocol 支持，连接任意 MCP Server 扩展工具能力 |
+| 🧩 **Skill 系统** | 支持自动检测 系统.agents、.drifox文件夹下的 Skill 模块，并自带有常用技能  |
+| 🛠️ **代码工具**    | 30+ 工具：读、写、搜索、执行、diff                            |
+| 🔌 **多模型**      | OpenAI / Claude / DeepSeek / MiniMax / 通义 等随时切换  |
+| 🛡️ **穿透模式**    | 悬浮窗口可穿透点击，不阻断其他应用                                |
+| 🚀 **自动更新**     | 自动检查新版本，随时保持更新                                   |
 
 ---
 
@@ -157,6 +158,52 @@ Hook 可通过以下方式控制流程：
 
 ---
 
+### MCP 系统
+
+DriFox 支持通过 [Model Context Protocol (MCP)](https://modelcontextprotocol.github.io/) 扩展 AI 工具能力，可连接任意 MCP Server 并直接调用其提供的工具。
+
+![MCP配置](images/mcp工具连接配置.png)
+
+#### 支持的服务器类型
+
+| 类型 | 说明 |
+|------|------|
+| **stdio** | 通过标准输入/输出通信，适用于本地命令行工具（如 `npx @modelcontextprotocol/server-filesystem`）|
+| **sse** | 通过 Server-Sent Events 通信，适用于 HTTP 服务器 |
+| **http** | 通过 Streamable HTTP 通信，适用于现代 MCP HTTP 端点 |
+
+#### MCP 工具使用
+
+- 配置好 MCP Server 后，工具会自动出现在 AI 的可用工具列表中
+- MCP 工具名格式：`mcp__{server_name}__{tool_name}`，如 `mcp__github__create_issue`
+- 连接/断开服务器无需重启软件，配置变更即时生效
+- 多窗口共享同一个 MCP 连接池，高效利用系统资源
+
+#### 常用 MCP Server 推荐
+
+```bash
+# 文件系统
+npx -y @modelcontextprotocol/server-filesystem /path/to/directory
+
+# GitHub API
+npx -y @modelcontextprotocol/server-github
+
+# Playwright 浏览器自动化
+npx -y @modelcontextprotocol/server-playwright
+
+# PostgreSQL 数据库
+npx -y @modelcontextprotocol/server-postgres postgresql://localhost/mydb
+
+# Google Maps
+npx -y @modelcontextprotocol/server-google-maps
+```
+
+#### 权限控制
+
+所有 MCP 工具默认需要用户确认（`ask`），可在设置中调整权限规则。
+
+---
+
 ### 浮动窗口特性
 
 | 特性 | 说明 |
@@ -180,6 +227,7 @@ Hook 可通过以下方式控制流程：
 │  ├── DiffViewer – 代码差异对比视图                      │
 │  ├── SegmentWidget – 分段任务窗口                       │
 │  ├── HookSettingCard – Hook 设置卡片                    │
+│  ├── MCPListSettingCard – MCP Server 配置卡片            │
 │  └── BottomInputArea – 底部输入区                      │
 ├─────────────────────────────────────────────────────────┤
 │  引擎层                                                  │
@@ -245,6 +293,7 @@ permission:
 | **代码** | get_diagnostics |
 | **记忆** | memory_save, memory_search, memory_list |
 | **任务** | todowrite, todoread, task, task_batch, task_wait, skill |
+| **MCP** | `mcp__server__tool` — 连接 MCP Server 后自动出现 |
 | **其他** | scan_repo, stage_files, ask_question |
 
 ---

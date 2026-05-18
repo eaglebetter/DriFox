@@ -3,8 +3,8 @@ import ctypes
 import gc
 import os
 import time
-import orjson as json
 import sip
+import orjson as json
 
 from datetime import datetime
 from pathlib import Path
@@ -31,8 +31,7 @@ from qfluentwidgets import (
     setFont,
     FluentIcon,
     SingleDirectionScrollArea,
-    TransparentToolButton, StrongBodyLabel, InfoBar, InfoBarPosition, PushButton,
-)
+    TransparentToolButton, StrongBodyLabel, InfoBar, InfoBarPosition, )
 
 from app.constants import (
     FREE_PROVIDERS,
@@ -48,6 +47,8 @@ from app.core import (
     get_user_round_ranges,
     TopicSummaryTask,
 )
+from app.core.auto_loop_config import AutoLoopConfig
+from app.core.workers.auto_loop_worker import AutoLoopWorker
 from app.tool_window import ToolWindow
 from app.tools import get_builtin_tools_schema
 from app.utils.config import Settings
@@ -57,6 +58,14 @@ from app.utils.diff_viewer import (
 )
 from app.utils.file_operation_recorder import FileOperationRecorder
 from app.utils.utils import get_icon, get_font_family_css
+from app.utils.design_tokens import (
+    Colors,
+    font_size_css,
+    get_capsule_style,
+    get_window_style,
+    scale_font_size,
+)
+from app.widgets.auto_loop_card import AutoLoopConfigCard, AutoLoopRunningCard
 from app.widgets.balance_display import BalanceDisplay
 from app.widgets.base_settings_card import (
     BaseSettingsCard,
@@ -81,6 +90,9 @@ from app.widgets.hook_setting_card import HookEditCard
 from app.widgets.llm_settings_card import (
     LLMSettingsCard,
 )
+from app.widgets.mcp_setting_card import (
+    MCPEditCard,
+)
 from app.widgets.memory_card import (
     MemoryCardContent, TAB_PROJECT_NOTES,
 )
@@ -101,6 +113,7 @@ from app.widgets.question_floating_widget import (
 from app.widgets.sub_agent_floating_widget import (
     SubAgentFloatingWidget,
 )
+from app.widgets.system_card_frame import SystemCardFrame
 from app.widgets.todo_floating_widget import (
     TodoFloatingWidget,
 )
@@ -112,14 +125,9 @@ from app.widgets.ui_helpers import add_message_to_layout, refresh_history_card_i
     init_new_session_after_archive, clear_and_show_welcome, refresh_session_view, save_or_archive_session, \
     invalidate_session_card_cache, delete_widgets_from_layout, init_after_loading_session, setup_user_card_signals, \
     post_append_user_message, create_assistant_card_widget, scroll_to_bottom_if_streaming, \
-    build_node_preview_from_session, find_user_card_at_index, truncate_and_remove_round, \
+    build_node_preview_from_session, truncate_and_remove_round, \
     log_deletion_stats, restore_input_from_card, find_last_tool_call_id_after_round, get_first_file_operation, \
     show_diff_viewer, render_batch_to_assistant_card, find_user_round_index
-
-from app.core.auto_loop_config import AutoLoopConfig
-from app.core.auto_loop_engine import AutoLoopEngine, LoopState
-from app.core.workers.auto_loop_worker import AutoLoopWorker
-from app.widgets.auto_loop_card import AutoLoopConfigCard, AutoLoopRunningCard
 
 
 class OpenAIChatToolWindow(ToolWindow):
@@ -172,6 +180,8 @@ class OpenAIChatToolWindow(ToolWindow):
         self.cfg = Settings.get_instance()
         # 初始化当前项目（在 backend.initialize 之前）
         self._current_project = self.cfg.current_project.value or "默认项目"  # 当前项目
+        # 标记窗口是否已销毁，防止异步回调访问已销毁的 widget
+        self._is_destroyed = False
         # 自动检查更新（启动时静默检查）
         self._init_auto_update_check()
         # 创建后端（后端自己创建所有组件）- 需要在 super() 之前创建并初始化
@@ -361,7 +371,6 @@ class OpenAIChatToolWindow(ToolWindow):
 
     def _init_llm_api_service(self):
         """初始化 LLM API 服务"""
-        from app.utils.config import Settings
         from app.api import (
             LLMAPIService,
             APISessionHandler,
@@ -588,18 +597,54 @@ class OpenAIChatToolWindow(ToolWindow):
             self._connect_opacity_signal()
             return
         self._session_initialized = True
-        QTimer.singleShot(0, self._load_agent_list)
+        # 标记正在初始化，防止窗口在初始化完成前被关闭导致竞态条件
+        self._initialization_in_progress = True
+        
+        # 使用 _safe_timer_call 包装所有异步回调，在 widget 销毁后自动跳过
+        QTimer.singleShot(0, lambda: self._safe_timer_call(self._load_agent_list))
         # 如果有分支数据，延迟调用分支会话处理，避免与 _restore_latest_or_create_session 冲突
         if getattr(self, "_branch_session_data", None):
-            QTimer.singleShot(50, self._apply_branch_or_create_session)
+            QTimer.singleShot(50, lambda: self._safe_timer_call(self._apply_branch_or_create_session))
         else:
-            QTimer.singleShot(0, self._create_new_session)
+            QTimer.singleShot(0, lambda: self._safe_timer_call(self._create_new_session))
 
-        QTimer.singleShot(100, self._load_model_configs)
+        QTimer.singleShot(100, lambda: self._safe_timer_call(self._load_model_configs))
         # 初始化当前项目的工作目录
-        QTimer.singleShot(200, self._sync_working_directory)
+        QTimer.singleShot(200, lambda: self._safe_timer_call(self._sync_working_directory))
+        # 初始化完成后解除保护
+        QTimer.singleShot(300, lambda: self._safe_timer_call(self._on_initialization_complete))
         self._connect_opacity_signal()
         super().showEvent(event)
+
+    def _on_initialization_complete(self):
+        """初始化完成后调用，解除保护标志"""
+        self._initialization_in_progress = False
+        logger.debug("[OpenAIChatToolWindow] Initialization complete")
+
+    def _safe_timer_call(self, func):
+        """安全执行 QTimer.singleShot 回调，在 widget 已销毁时自动跳过
+        
+        防止 QTimer 回调在窗口关闭(deleteLater)后执行导致 segfault。
+        必须在所有通过 QTimer.singleShot 调度的回调中使用。
+        """
+        if getattr(self, '_is_destroyed', False):
+            logger.debug(f"[OpenAIChatToolWindow] Skipping timer callback {func.__name__}: widget destroyed")
+            return
+        try:
+            from PyQt5 import sip
+            if sip.isdeleted(self):
+                logger.debug(f"[OpenAIChatToolWindow] Skipping timer callback {func.__name__}: C++ object deleted")
+                return
+        except Exception:
+            pass
+        try:
+            func()
+        except RuntimeError as e:
+            # PyQt5 在访问已删除 C++ 对象时抛出 RuntimeError
+            if 'C++' in str(e) or 'wrapped C/C++' in str(e):
+                logger.debug(f"[OpenAIChatToolWindow] Skipping timer callback {func.__name__}: {e}")
+                return
+            raise
 
     def eventFilter(self, obj, event):
         """处理 viewport 大小变化，调整背景图片"""
@@ -653,6 +698,18 @@ class OpenAIChatToolWindow(ToolWindow):
 
     def _apply_branch_or_create_session(self):
         """处理分支会话或创建新会话"""
+        # 检查窗口是否仍然有效，防止在初始化期间窗口被关闭后继续执行
+        if getattr(self, '_is_destroyed', False):
+            logger.debug("[OpenAIChatToolWindow] Window destroyed before branch session creation, skipping")
+            return
+        try:
+            from PyQt5 import sip
+            if sip.isdeleted(self):
+                logger.debug("[OpenAIChatToolWindow] C++ object deleted before branch session creation, skipping")
+                return
+        except Exception:
+            pass
+        
         branch_data = getattr(self, "_branch_session_data", None)
         if branch_data:
             # 使用分支数据创建会话
@@ -666,6 +723,18 @@ class OpenAIChatToolWindow(ToolWindow):
 
     def _create_branched_session(self, messages: List[Dict], name: str):
         """创建分支会话并渲染消息"""
+        # 检查窗口是否仍然有效，防止在初始化期间窗口被关闭后继续执行
+        if getattr(self, '_is_destroyed', False):
+            logger.debug("[OpenAIChatToolWindow] Window destroyed before branched session creation, skipping")
+            return
+        try:
+            from PyQt5 import sip
+            if sip.isdeleted(self):
+                logger.debug("[OpenAIChatToolWindow] C++ object deleted before branched session creation, skipping")
+                return
+        except Exception:
+            pass
+        
         logger.info("[Branch] 开始创建分支会话")
 
         # 停止当前对话并清理
@@ -706,11 +775,12 @@ class OpenAIChatToolWindow(ToolWindow):
         QTimer.singleShot(150, self._scroll_to_bottom)
 
     def setup_ui(self):
+        Colors.refresh()
         layout = QVBoxLayout(self)
         layout.setContentsMargins(1, 1, 4, 1)
         layout.setSpacing(1)
 
-        self.setStyleSheet(WINDOW_STYLE)
+        self.setStyleSheet(get_window_style())
 
         session_bar_layout = QHBoxLayout()
         session_bar_layout.setContentsMargins(0, 0, 0, 0)
@@ -720,16 +790,16 @@ class OpenAIChatToolWindow(ToolWindow):
         self._project_label = QLabel(self._current_project, self)
         self._project_label.setStyleSheet(f"""
             QLabel {{
-                color: #f59e0b;
+                color: {Colors.TEXT_ACCENT};
                 {get_font_family_css()}
-                font-size: 13px;
+                {font_size_css(13)}
                 font-weight: bold;
                 padding: 2px 6px;
                 border-radius: 4px;
-                background: rgba(245, 158, 11, 0.1);
+                background: {Colors.HOVER_BG};
             }}
             QLabel:hover {{
-                background: rgba(245, 158, 11, 0.2);
+                background: {Colors.SELECTED_BG};
             }}
         """)
         self._project_label.setCursor(Qt.PointingHandCursor)
@@ -743,6 +813,7 @@ class OpenAIChatToolWindow(ToolWindow):
         self.title_edit = QLabel("新对话", self)
         font_css = get_font_family_css()
         title_style = TITLE_STYLE.replace("    QLabel {", f"    QLabel {{\n        {font_css}")
+        title_style = title_style.replace("font-size: 15px;", font_size_css(15))
         self.title_edit.setStyleSheet(title_style)
         self.title_edit.setCursor(Qt.PointingHandCursor)
         self.title_edit.mouseDoubleClickEvent = self._on_title_double_click
@@ -777,7 +848,7 @@ class OpenAIChatToolWindow(ToolWindow):
 
         self._settings_popup = LLMSettingsCard(self)
         self._settings_popup.setVisible(False)
-        self._settings_popup.configChanged.connect(self._load_model_configs)
+        self._settings_popup.configChanged.connect(self._on_settings_config_changed)
         self._settings_popup.closed.connect(self._restore_after_system_close)
 
         # 连接服务商添加/编辑信号
@@ -787,16 +858,20 @@ class OpenAIChatToolWindow(ToolWindow):
         # 连接 Hook 添加/编辑信号
         self._settings_popup.hookListCard.showAddHookCard.connect(self._show_hook_add_card)
 
+        # 连接 MCP 添加/编辑信号
+        self._settings_popup.mcpListCard.showAddCard.connect(self._show_mcp_add_card)
+        self._settings_popup.mcpListCard.showEditCard.connect(self._show_mcp_edit_card)
+
         # Hook 编辑卡片
         self._hook_edit_card = BaseSettingsCard("Hook 配置", "⚙️", parent=self)
-        self._hook_edit_card.setFixedHeight(380)
+        self._hook_edit_card.setFixedHeight(300)
         self._hook_edit_popup = HookEditCard(parent=self)
         self._hook_edit_popup.saved.connect(self._on_hook_edit_saved)
         self._hook_edit_popup.closed.connect(self._on_hook_edit_closed)
         self._hook_edit_card.content_layout.addWidget(self._hook_edit_popup)
         self._hook_edit_card.set_save_button_handler(self._hook_edit_popup._on_save)
         self._hook_edit_card.setVisible(False)
-        self._hook_edit_card.closed.connect(self._restore_after_system_close)
+        self._hook_edit_card.closed.connect(self._on_hook_edit_card_closed)
         layout.addWidget(self._hook_edit_card)
 
         # 服务商编辑卡片
@@ -811,8 +886,16 @@ class OpenAIChatToolWindow(ToolWindow):
         save_handler = self._provider_edit_popup._on_save
         self._provider_edit_card.set_save_button_handler(save_handler)
         self._provider_edit_card.setVisible(False)
-        self._provider_edit_card.closed.connect(self._restore_after_system_close)
+        self._provider_edit_card.closed.connect(self._on_provider_edit_card_closed)
         layout.addWidget(self._provider_edit_card)
+
+        # MCP 编辑卡片
+        self._mcp_edit_card = BaseSettingsCard("MCP 服务器", "🔌", parent=self)
+        self._mcp_edit_card.setFixedHeight(350)
+        self._mcp_edit_popup = None
+        self._mcp_edit_card.setVisible(False)
+        self._mcp_edit_card.closed.connect(self._on_mcp_edit_card_closed)
+        layout.addWidget(self._mcp_edit_card)
 
         self._todo_floating_widget = TodoFloatingWidget(self)
         self._todo_floating_widget.setVisible(False)
@@ -969,11 +1052,7 @@ class OpenAIChatToolWindow(ToolWindow):
         # 模型选择 + 配置按钮组 - 紧凑式设计
         self._model_btn_container = QWidget(self)
         self._model_btn_container.setFixedHeight(30)
-        self._model_btn_container.setStyleSheet("""
-            background: rgba(27, 35, 50, 180);
-            border: 1px solid rgba(43, 56, 80, 200);
-            border-radius: 12px;
-        """)
+        self._model_btn_container.setStyleSheet(get_capsule_style())
         model_layout = QHBoxLayout(self._model_btn_container)
         model_layout.setContentsMargins(0, 0, 0, 0)
         model_layout.setSpacing(0)
@@ -992,7 +1071,7 @@ class OpenAIChatToolWindow(ToolWindow):
         self._model_btn_icon.setFixedSize(18, 18)
         btn_layout.addWidget(self._model_btn_icon)
         self._model_btn_text = QLabel("正在加载...", self.current_model_btn)
-        self._model_btn_text.setStyleSheet(MODEL_BTN_TEXT_STYLE)
+        self._model_btn_text.setStyleSheet(MODEL_BTN_TEXT_STYLE.replace("font-size: 13px;", font_size_css(13)))
         btn_layout.addWidget(self._model_btn_text)
         model_layout.addWidget(self.current_model_btn, 1)
         # 配置按钮（点击弹出配置卡片）
@@ -1017,11 +1096,7 @@ class OpenAIChatToolWindow(ToolWindow):
         # 工具栏右侧按钮组 - 胶囊包裹，无分隔线
         self._toolbar_capsule = QWidget(self)
         self._toolbar_capsule.setFixedHeight(30)
-        self._toolbar_capsule.setStyleSheet("""
-            background: rgba(27, 35, 50, 180);
-            border: 1px solid rgba(43, 56, 80, 200);
-            border-radius: 12px;
-        """)
+        self._toolbar_capsule.setStyleSheet(get_capsule_style())
         capsule_layout = QHBoxLayout(self._toolbar_capsule)
         capsule_layout.setContentsMargins(4, 2, 4, 2)
         capsule_layout.setSpacing(0)
@@ -1075,7 +1150,7 @@ class OpenAIChatToolWindow(ToolWindow):
         self.input_area = SendableTextEdit(self)
         self.input_area._agent_combo.hide()  # 隐藏输入框内部的下拉框，用工具栏的按钮组代替
         self.input_area._initializing = False  # 初始化完成后启用高度调整
-        setFont(self.input_area, 15)
+        setFont(self.input_area, scale_font_size(15))
         self.input_area.sendMessageRequested.connect(self._on_send_clicked)
         self.input_area.stopMessageRequested.connect(self._on_stop_clicked)
         self.input_area.clearRequested.connect(self._on_clear_shortcut)
@@ -1282,6 +1357,7 @@ class OpenAIChatToolWindow(ToolWindow):
         # 关闭模型选择器popup，确保下次打开重新加载数据
         if hasattr(self, '_model_selector_popup') and self._model_selector_popup:
             self._model_selector_popup.close()
+        self._restore_after_system_close()
 
     def _show_provider_add_card(self):
         """显示添加服务商卡片"""
@@ -1344,6 +1420,7 @@ class OpenAIChatToolWindow(ToolWindow):
         """Hook 编辑关闭回调"""
         self._hook_edit_card.hide()
         self._settings_popup.show()
+        self._restore_after_system_close()
 
     def _show_provider_edit_card(self, provider_name: str, provider_info: dict):
         """显示编辑服务商卡片"""
@@ -1369,45 +1446,78 @@ class OpenAIChatToolWindow(ToolWindow):
         )
         self._provider_edit_card.show()
 
-    # ========== Hook 编辑卡片 ==========
+    # ========== MCP 编辑卡片 ==========
 
-    def _show_hook_add_card(self):
-        """显示添加 Hook 卡片"""
-        from app.widgets.hook_setting_card import HookEditCard
+    def _show_mcp_add_card(self):
+        """显示添加 MCP 服务器卡片"""
         self._settings_popup.hide()
-        self._hook_edit_card.set_title("➕ 添加 Hook")
-        # 重新创建 HookEditCard
-        self._hook_edit_popup = HookEditCard(parent=self)
-        self._hook_edit_popup.saved.connect(self._on_hook_edit_saved)
-        self._hook_edit_popup.closed.connect(self._on_hook_edit_closed)
-        while self._hook_edit_card.content_layout.count():
-            item = self._hook_edit_card.content_layout.takeAt(0)
+        self._mcp_edit_card.set_title("🔌 添加 MCP 服务器")
+        self._mcp_edit_popup = MCPEditCard(server_data=None, parent=self)
+        self._mcp_edit_popup.saved.connect(self._on_mcp_edit_saved)
+        self._mcp_edit_popup.closed.connect(self._on_mcp_edit_closed)
+        while self._mcp_edit_card.content_layout.count():
+            item = self._mcp_edit_card.content_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
-        self._hook_edit_card.content_layout.addWidget(self._hook_edit_popup)
-        self._hook_edit_card.set_save_button_handler(
-            lambda: self._hook_edit_popup._on_save()
+        self._mcp_edit_card.content_layout.addWidget(self._mcp_edit_popup)
+        self._mcp_edit_card.set_save_button_handler(
+            lambda: self._mcp_edit_popup._on_save()
         )
-        self._hook_edit_card.show()
+        self._mcp_edit_card.show()
 
-    def _on_hook_edit_saved(self, values: dict):
-        """Hook 保存回调"""
+    def _show_mcp_edit_card(self, name: str, server_data: dict):
+        """显示编辑 MCP 服务器卡片"""
+        self._settings_popup.hide()
+        self._mcp_edit_card.set_title(f"🔌 编辑: {name}")
+        self._mcp_edit_popup = MCPEditCard(server_data=server_data, parent=self)
+        self._mcp_edit_popup.saved.connect(self._on_mcp_edit_saved)
+        self._mcp_edit_popup.closed.connect(self._on_mcp_edit_closed)
+        while self._mcp_edit_card.content_layout.count():
+            item = self._mcp_edit_card.content_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        self._mcp_edit_card.content_layout.addWidget(self._mcp_edit_popup)
+        self._mcp_edit_card.set_save_button_handler(
+            lambda: self._mcp_edit_popup._on_save()
+        )
+        self._mcp_edit_card.show()
+
+    def _on_mcp_edit_saved(self, server_data: dict):
+        """MCP 编辑保存回调"""
+        self._mcp_edit_card.hide()
+        self._settings_popup.show()
+        if hasattr(self._settings_popup, 'mcpListCard'):
+            name = server_data.get("name", "")
+            servers = list(self._settings_popup.mcpListCard.cfg.mcp_servers.value or [])
+            is_edit = any(s.get("name") == name for s in servers)
+            if is_edit:
+                self._settings_popup.mcpListCard.update_server(name, server_data)
+            else:
+                self._settings_popup.mcpListCard.add_server(server_data)
+
+    def _on_mcp_edit_closed(self):
+        """MCP 编辑关闭回调"""
+        self._mcp_edit_card.hide()
+        self._settings_popup.show()
+        self._restore_after_system_close()
+
+    def _on_hook_edit_card_closed(self):
+        """Hook 编辑卡片（SystemCardFrame）关闭回调 → 回到设置面板"""
         self._hook_edit_card.hide()
         self._settings_popup.show()
-        # 通过 HookListSettingCard 添加 hook
-        if hasattr(self._settings_popup, 'hookListCard'):
-            self._settings_popup.hookListCard._add_hook(
-                event=values["event"],
-                command=values["command"],
-                matcher=values["matcher"],
-                hook_type=values["type"],
-                enabled=values["enabled"]
-            )
+        self._restore_after_system_close()
 
-    def _on_hook_edit_closed(self):
-        """Hook 编辑关闭回调"""
-        self._hook_edit_card.hide()
+    def _on_provider_edit_card_closed(self):
+        """服务商编辑卡片（SystemCardFrame）关闭回调 → 回到设置面板"""
+        self._provider_edit_card.hide()
         self._settings_popup.show()
+        self._restore_after_system_close()
+
+    def _on_mcp_edit_card_closed(self):
+        """MCP 编辑卡片（SystemCardFrame）关闭回调 → 回到设置面板"""
+        self._mcp_edit_card.hide()
+        self._settings_popup.show()
+        self._restore_after_system_close()
 
     def _hide_main_popups(self):
         """隐藏主要的悬浮面板（互斥显示）
@@ -1500,11 +1610,12 @@ class OpenAIChatToolWindow(ToolWindow):
 
     def _create_agent_switch_buttons(self) -> QWidget:
         """创建智能体切换按钮 - 单胶囊设计，中间用分隔线"""
+        Colors.refresh()
         container = QWidget()
         container.setFixedHeight(30)
-        container.setStyleSheet("""
-            background: rgba(27, 35, 50, 180);
-            border: 1px solid rgba(43, 56, 80, 200);
+        container.setStyleSheet(f"""
+            background: {Colors.CAPSULE_BG};
+            border: 1px solid {Colors.CAPSULE_BORDER};
             border-radius: 12px;
         """)
         layout = QHBoxLayout(container)
@@ -1536,39 +1647,10 @@ class OpenAIChatToolWindow(ToolWindow):
         self._agent_btn_group.buttonClicked[int].connect(self._on_agent_btn_clicked)
 
         # 默认样式
-        default_style = f"""
-            QPushButton {{
-                background: transparent;
-                color: #8FA4C2;
-                border: none;
-                border-radius: 8px;
-                padding: 4px 12px;
-                font-size: 12px;
-                font-weight: 500;
-                {get_font_family_css()}
-            }}
-            QPushButton:hover {{
-                background: rgba(255, 255, 255, 0.05);
-                color: #B4C2D9;
-            }}
-        """
+        default_style = self._build_agent_btn_style(active=False)
 
         # 选中样式
-        selected_style = f"""
-            QPushButton {{
-                background: rgba(201, 168, 92, 0.2);
-                color: #C9A85C;
-                border: none;
-                border-radius: 8px;
-                padding: 4px 12px;
-                font-size: 12px;
-                font-weight: 600;
-                {get_font_family_css()}
-            }}
-            QPushButton:hover {{
-                background: rgba(201, 168, 92, 0.25);
-            }}
-        """
+        selected_style = self._build_agent_btn_style(active=True)
 
         for i, agent in enumerate(agents):
             # 添加分隔线（在按钮之前，除了第一个）
@@ -1576,7 +1658,8 @@ class OpenAIChatToolWindow(ToolWindow):
                 sep = QFrame()
                 sep.setFrameShape(QFrame.VLine)
                 sep.setFixedWidth(1)
-                sep.setStyleSheet("background: rgba(60, 75, 95, 150); margin: 4px 0;")
+                Colors.refresh()
+                sep.setStyleSheet(f"background: {Colors.AGENT_BTN_SEPARATOR}; margin: 4px 0;")
                 layout.addWidget(sep)
 
             btn = QPushButton(agent.name)
@@ -1626,6 +1709,56 @@ class OpenAIChatToolWindow(ToolWindow):
 
         # 触发智能体切换
         self._on_agent_changed(agent_name)
+
+    def _build_agent_btn_style(self, active: bool = False) -> str:
+        """构建智能体按钮样式（动态从 Colors 读取）"""
+        Colors.refresh()
+        if active:
+            return f"""
+                QPushButton {{
+                    background: {Colors.AGENT_BTN_BG_ACTIVE};
+                    color: {Colors.AGENT_BTN_TEXT_ACTIVE};
+                    border: none;
+                    border-radius: 8px;
+                    padding: 4px 12px;
+                    font-size: 12px;
+                    font-weight: 600;
+                    {get_font_family_css()}
+                }}
+                QPushButton:hover {{
+                    background: {Colors.AGENT_BTN_BG_ACTIVE};
+                }}
+            """
+        return f"""
+            QPushButton {{
+                background: transparent;
+                color: {Colors.AGENT_BTN_TEXT};
+                border: none;
+                border-radius: 8px;
+                padding: 4px 12px;
+                font-size: 12px;
+                font-weight: 500;
+                {get_font_family_css()}
+            }}
+            QPushButton:hover {{
+                background: rgba(255, 255, 255, 0.05);
+                color: {Colors.TEXT_PRIMARY};
+            }}
+        """
+
+    def _refresh_agent_button_styles(self):
+        """刷新所有智能体按钮样式（响应主题切换）"""
+        if not hasattr(self, "_agent_buttons"):
+            return
+        Colors.refresh()
+        for name, data in self._agent_buttons.items():
+            is_active = name == self._current_agent
+            new_style = self._build_agent_btn_style(active=is_active)
+            if is_active:
+                data["selected_style"] = new_style
+            else:
+                data["style"] = new_style
+            data["btn"].setStyleSheet(new_style)
 
     def _toggle_history_card(self):
         """切换历史会话卡片的显示"""
@@ -1746,6 +1879,8 @@ class OpenAIChatToolWindow(ToolWindow):
 
     def _on_history_session_selected(self, index: int):
         """从历史面板选择会话"""
+        if getattr(self, '_is_destroyed', False):
+            return
         if index == -1:
             # 新建会话
             self._create_new_session()
@@ -1842,6 +1977,8 @@ class OpenAIChatToolWindow(ToolWindow):
             card.sync_width()
 
     def _on_config_applied(self, new_config: dict):
+        if getattr(self, '_is_destroyed', False):
+            return
         current_name = self._current_provider_name
         if not current_name:
             return
@@ -1855,7 +1992,86 @@ class OpenAIChatToolWindow(ToolWindow):
         self._load_model_configs()
         InfoBar.success("已保存", "配置已保存到本地。", parent=self, duration=1500, position=InfoBarPosition.BOTTOM)
 
+    def _on_settings_config_changed(self):
+        self._load_model_configs()
+        self._apply_runtime_ui_settings()
+
+    def _apply_runtime_ui_settings(self):
+        Colors.refresh()
+        self.setStyleSheet(get_window_style())
+        if hasattr(self, "_project_label"):
+            self._project_label.setStyleSheet(f"""
+                QLabel {{
+                    color: {Colors.TEXT_ACCENT};
+                    {get_font_family_css()}
+                    {font_size_css(13)}
+                    font-weight: bold;
+                    padding: 2px 6px;
+                    border-radius: 4px;
+                    background: {Colors.HOVER_BG};
+                }}
+                QLabel:hover {{
+                    background: {Colors.SELECTED_BG};
+                }}
+            """)
+        if hasattr(self, "title_edit"):
+            title_style = TITLE_STYLE.replace("    QLabel {", f"    QLabel {{\n        {get_font_family_css()}")
+            title_style = title_style.replace("font-size: 15px;", font_size_css(15))
+            title_style = title_style.replace("#f3f6fc", Colors.TEXT_PRIMARY)
+            self.title_edit.setStyleSheet(title_style)
+        if hasattr(self, "_model_btn_container"):
+            self._model_btn_container.setStyleSheet(get_capsule_style())
+        if hasattr(self, "_model_btn_text"):
+            btn_text_style = MODEL_BTN_TEXT_STYLE.replace("font-size: 13px;", font_size_css(13))
+            btn_text_style = btn_text_style.replace("#f3f6fc", Colors.TEXT_PRIMARY)
+            self._model_btn_text.setStyleSheet(btn_text_style)
+        if hasattr(self, "_toolbar_capsule"):
+            self._toolbar_capsule.setStyleSheet(get_capsule_style())
+        if hasattr(self, "input_area"):
+            setFont(self.input_area, scale_font_size(15))
+            if hasattr(self.input_area, "refresh_style"):
+                self.input_area.refresh_style()
+        # 刷新设置弹出层 — 递归调用 qfluentwidgets setFont 刷新字号
+        if self._settings_popup:
+            from qfluentwidgets import setFont as qfw_setFont
+            qfw_setFont(self._settings_popup)
+            # 同时刷新所有子设置卡片的主题样式
+            for frame in self._settings_popup.findChildren(SystemCardFrame):
+                if hasattr(frame, 'refresh_style'):
+                    frame.refresh_style()
+        # 刷新智能体切换按钮样式
+        if hasattr(self, "_agent_switch_widget"):
+            Colors.refresh()
+            self._agent_switch_widget.setStyleSheet(f"""
+                background: {Colors.CAPSULE_BG};
+                border: 1px solid {Colors.CAPSULE_BORDER};
+                border-radius: 12px;
+            """)
+        self._refresh_agent_button_styles()
+        # 刷新设置卡片
+        for card in self.findChildren(BaseSettingsCard):
+            if hasattr(card, "refresh_style"):
+                card.refresh_style()
+        if self._settings_popup and hasattr(self._settings_popup, "refresh_style"):
+            self._settings_popup.refresh_style()
+        # 刷新 AutoLoop 卡片主题
+        if self._auto_loop_config_card and hasattr(self._auto_loop_config_card, '_refresh_theme_style'):
+            self._auto_loop_config_card._refresh_theme_style()
+        if self._auto_loop_running_card and hasattr(self._auto_loop_running_card, '_refresh_theme_style'):
+            self._auto_loop_running_card._refresh_theme_style()
+        # 刷新消息卡片主题
+        for card in self.findChildren(MessageCard):
+            if hasattr(card, "refresh_theme"):
+                card.refresh_theme()
+            viewer = getattr(card, "viewer", None)
+            if viewer and hasattr(viewer, "_schedule_render"):
+                viewer._schedule_render(immediate=True)
+
     def _load_model_configs(self):
+        # 检查窗口是否仍然有效，防止在初始化期间窗口被关闭后继续执行
+        if getattr(self, '_is_destroyed', False):
+            return
+        
         saved_model = self.cfg.llm_selected_model.value
         old_provider = self._current_provider_name
 
@@ -1892,6 +2108,10 @@ class OpenAIChatToolWindow(ToolWindow):
 
     def _load_agent_list(self):
         """加载智能体列表到按钮组（仅显示 primary agents）"""
+        # 检查窗口是否仍然有效，防止在初始化期间窗口被关闭后继续执行
+        if getattr(self, '_is_destroyed', False):
+            return
+        
         if not self.backend.agent_manager:
             return
         if not hasattr(self, "_agent_btn_group"):
@@ -1948,6 +2168,8 @@ class OpenAIChatToolWindow(ToolWindow):
 
     def _on_agent_changed(self, agent_name: str):
         """智能体切换处理"""
+        if getattr(self, '_is_destroyed', False):
+            return
         if not agent_name or not self.backend.chat_engine:
             return
 
@@ -1979,6 +2201,8 @@ class OpenAIChatToolWindow(ToolWindow):
 
     def _update_agent_status(self, agent_name: str):
         """更新智能体状态显示（按钮组模式下主要更新按钮提示）"""
+        if getattr(self, '_is_destroyed', False):
+            return
         agent = self.backend.get_agent(agent_name)
         if agent:
             mode = agent.mode
@@ -1992,6 +2216,18 @@ class OpenAIChatToolWindow(ToolWindow):
                 self.current_model_btn.setToolTip(f"{agent.name}: {agent.description}\nMode: {mode}, {hidden}")
 
     def _create_new_session(self):
+        # 检查窗口是否仍然有效，防止在初始化期间窗口被关闭后继续执行
+        if getattr(self, '_is_destroyed', False):
+            logger.debug("[OpenAIChatToolWindow] Window destroyed before session creation, skipping")
+            return
+        try:
+            from PyQt5 import sip
+            if sip.isdeleted(self):
+                logger.debug("[OpenAIChatToolWindow] C++ object deleted before session creation, skipping")
+                return
+        except Exception:
+            pass
+        
         if self._is_auto_loop_running:
             InfoBar.warning("AutoLoop", "运行中无法新建会话，请先停止 AutoLoop", parent=self, duration=3000, position=InfoBarPosition.BOTTOM)
             return
@@ -2032,7 +2268,7 @@ class OpenAIChatToolWindow(ToolWindow):
         self._question_tool_call_id = None
         self._load_agent_list()
 
-        QTimer.singleShot(0, self._show_initial_welcome)
+        QTimer.singleShot(0, lambda: self._safe_timer_call(self._show_initial_welcome))
         self._refresh_context_usage_indicator()
 
     def _display_current_session(self):
@@ -2528,23 +2764,11 @@ class OpenAIChatToolWindow(ToolWindow):
         在发送新消息后调用，因为 _append_user_message / _append_assistant_message
         不设置 _message_index（渲染路径 _render_message_to_card 才设置）。
 
-        修复：当新 assistant card 找不到对应 batch slot 时（session 中尚无 assistant 消息），
-        为其在 _message_batch / _batch_cards 末尾追加新的 slot，避免与其他卡片共享 slot
-        导致批量回收时误删卡片。
+        关键：必须处理所有无 _message_index 的卡片，而非只处理第一个。
         """
-        # 找到 _message_batch 中最后一个 user batch 和最后一个 non-user batch
-        last_user_batch = -1
-        last_non_user_batch = -1
-        for batch_idx, batch in enumerate(self._message_batch):
-            if not batch:
-                continue
-            if batch[0].get("role") == "user":
-                last_user_batch = batch_idx
-            else:
-                last_non_user_batch = batch_idx
-
-        # 从布局末尾向前扫描，给无 _message_index 的卡片分配 batch index
-        for i in range(self.chat_layout.count() - 1, -1, -1):
+        # 收集所有无 _message_index 的卡片（按布局顺序，即时间顺序）
+        unassigned = []
+        for i in range(self.chat_layout.count()):
             item = self.chat_layout.itemAt(i)
             if not item or not item.widget():
                 continue
@@ -2554,28 +2778,54 @@ class OpenAIChatToolWindow(ToolWindow):
             if getattr(widget, '_is_welcome', False):
                 continue
             if getattr(widget, '_message_index', None) is not None:
-                continue  # 已有正确索引，跳过
+                continue
+            unassigned.append(widget)
 
-            # 按角色匹配最后一个 batch
-            if widget.role == "user" and last_user_batch >= 0:
-                widget._message_index = last_user_batch
-                if last_user_batch < len(self._batch_cards):
-                    if self._batch_cards[last_user_batch] is None:
-                        self._batch_cards[last_user_batch] = []
-                    if widget not in self._batch_cards[last_user_batch]:
-                        self._batch_cards[last_user_batch].append(widget)
-                break
-            elif widget.role != "user":
-                # 修复：新的 assistant card 在 session 中尚无对应 assistant batch，
-                # 此时 last_non_user_batch 指向已有的旧 assistant batch。
-                # 直接复用该 slot 会与旧卡片共享引用，回收时误伤旧卡片。
-                # 改为在末尾追加独占的批量槽位。
+        if not unassigned:
+            return
+
+        # 构建 _message_batch 中每个 batch 的分配状态：
+        # 已有 _batch_cards 引用且非 None 的 batch 表示已被占用
+        assigned_batch_indices = set()
+        for batch_idx, cards in enumerate(self._batch_cards):
+            if cards is not None and len(cards) > 0:
+                # 检查 cards 中是否有存活的 widget
+                for c in cards:
+                    if self._is_widget_alive(c):
+                        assigned_batch_indices.add(batch_idx)
+                        break
+
+        # 对每个未分配的卡片，按角色从后向前在 _message_batch 中找到
+        # 未被占用的同角色 batch
+        for widget in unassigned:
+            target_batch_idx = -1
+            for batch_idx in range(len(self._message_batch) - 1, -1, -1):
+                if batch_idx in assigned_batch_indices:
+                    continue
+                batch = self._message_batch[batch_idx]
+                if not batch:
+                    continue
+                if batch[0].get("role") == widget.role:
+                    target_batch_idx = batch_idx
+                    break
+
+            if target_batch_idx >= 0:
+                # 找到了未被占用的同角色 batch
+                widget._message_index = target_batch_idx
+                assigned_batch_indices.add(target_batch_idx)
+                if target_batch_idx < len(self._batch_cards):
+                    if self._batch_cards[target_batch_idx] is None:
+                        self._batch_cards[target_batch_idx] = []
+                    if widget not in self._batch_cards[target_batch_idx]:
+                        self._batch_cards[target_batch_idx].append(widget)
+            else:
+                # 没有可匹配的 batch，在末尾追加独占槽位
                 new_batch_idx = len(self._message_batch)
-                self._message_batch.append([])  # 追加空 batch 占位
-                self._batch_cards.append([])    # 追加空引用列表
+                self._message_batch.append([])
+                self._batch_cards.append([])
                 widget._message_index = new_batch_idx
                 self._batch_cards[new_batch_idx].append(widget)
-                break
+                assigned_batch_indices.add(new_batch_idx)
 
     def _render_message_to_card(
             self,
@@ -2915,6 +3165,8 @@ class OpenAIChatToolWindow(ToolWindow):
         self._sync_node_preview_to_scroll()
 
     def _on_clear_shortcut(self):
+        if getattr(self, '_is_destroyed', False):
+            return
         # 使用辅助函数清空并显示欢迎
         clear_and_show_welcome(
             session=self.session_manager.get_current_session(),
@@ -2927,6 +3179,8 @@ class OpenAIChatToolWindow(ToolWindow):
         self.title_edit.setText("新对话")
 
     def _add_chat_widget(self, widget: QWidget, insert_index: Optional[int] = None):
+        if getattr(self, '_is_destroyed', False):
+            return
         if insert_index is None:
             add_message_to_layout(widget, self.chat_layout, is_widget_alive)
         else:
@@ -4432,6 +4686,8 @@ class OpenAIChatToolWindow(ToolWindow):
         self._on_send_clicked(user_text=question.strip())
 
     def _on_send_clicked(self, user_text: str = ""):
+        if getattr(self, '_is_destroyed', False):
+            return
         if self._is_auto_loop_running:
             InfoBar.warning("AutoLoop", "运行中无法发送消息，请先停止 AutoLoop", parent=self, duration=3000, position=InfoBarPosition.BOTTOM)
             self.input_area.clear()
@@ -4485,16 +4741,22 @@ class OpenAIChatToolWindow(ToolWindow):
         self._sync_batch_structures()
         # 给新创建的用户卡片设置正确的 _message_index（_append_user_message 中未设置）
         self._fix_new_card_message_index(user_text=user_text)
+        # 修复：扩展可见范围以覆盖新增的 batch，否则回收机制会误删新卡片
+        self._visible_batch_end = len(self._message_batch)
 
         self._maybe_generate_topic_summary()
 
     def _on_stream_started(self):
+        if getattr(self, '_is_destroyed', False):
+            return
         self._is_streaming = True
         self._accumulated_content = ""
         if self._current_assistant_card:
             self._current_assistant_card.start_streaming_anim()
 
     def _on_content_received(self, content_piece: str):
+        if getattr(self, '_is_destroyed', False):
+            return
         if self._current_assistant_card:
             self._update_assistant_message(self._current_assistant_card, content_piece)
 
@@ -4504,6 +4766,8 @@ class OpenAIChatToolWindow(ToolWindow):
 
     def _on_reasoning_content_received(self, reasoning_piece: str):
         """处理 DeepSeek 思考内容（流式接收）"""
+        if getattr(self, '_is_destroyed', False):
+            return
         card = self._current_assistant_card
         if card and getattr(card, '_content_data', None) is not None:
             card.start_streaming_anim()
@@ -4511,6 +4775,8 @@ class OpenAIChatToolWindow(ToolWindow):
 
     def _on_thinking_started(self):
         """新轮次思考开始，为当前助手卡片创建新的独立思考块"""
+        if getattr(self, '_is_destroyed', False):
+            return
         card = self._current_assistant_card
         if card and getattr(card, '_content_data', None) is not None:
             card.start_streaming_anim()
@@ -4518,6 +4784,8 @@ class OpenAIChatToolWindow(ToolWindow):
 
     def _on_tool_args_updated(self, tool_call_id: str, tool_name: str, partial_args: dict):
         """工具参数流式更新 — 流式接收过程中，参数逐块解析完成后触发"""
+        if getattr(self, '_is_destroyed', False):
+            return
         if not self._tool_floating_widget:
             return
         # 如果是内部进度消息（带 _preview_hint），显示友好文字
@@ -4539,6 +4807,8 @@ class OpenAIChatToolWindow(ToolWindow):
     def _on_tool_call_started(
             self, tool_call_id: str, tool_name: str, arguments: dict, round_id: str = None
     ):
+        if getattr(self, '_is_destroyed', False):
+            return
         self._current_tool_start_time = time.time()
         self._current_tool_call_id = tool_call_id
         self._current_tool_name = tool_name
@@ -4578,6 +4848,8 @@ class OpenAIChatToolWindow(ToolWindow):
 
     def _on_sub_agent_task_started(self, task_id: str, agent_name: str, task_description: str):
         """子智能体任务启动（通过 SubAgentManager 信号触发）"""
+        if getattr(self, '_is_destroyed', False):
+            return
         widget = self._sub_agent_floating_widget
 
         # 系统卡片打开时，阻止子智能体卡片显示
@@ -4607,6 +4879,8 @@ class OpenAIChatToolWindow(ToolWindow):
 
     def _on_sub_agent_task_finished(self, task_id: str, result: str):
         """子智能体任务完成"""
+        if getattr(self, '_is_destroyed', False):
+            return
         # 从管理器获取执行器，检查是否有真实的错误状态
         sub_agent_mgr = self.backend.sub_agent_manager
         executor = sub_agent_mgr._running_tasks.get(task_id)
@@ -4655,10 +4929,14 @@ class OpenAIChatToolWindow(ToolWindow):
 
     def _on_sub_agent_finished(self, task_id: str, result: str):
         """单个子智能体执行完成"""
+        if getattr(self, '_is_destroyed', False):
+            return
         self._sub_agent_manager.task_finished.emit(task_id, result)
 
     def _on_tool_cancelled(self):
         """工具执行被用户中止 — 连接自 tool_floating_widget.cancelled 信号"""
+        if getattr(self, '_is_destroyed', False):
+            return
         logger.info("[ToolFloatingWidget] Tool execution cancelled by user")
 
         self._tool_cancelled_by_user = True
@@ -4691,6 +4969,8 @@ class OpenAIChatToolWindow(ToolWindow):
     def _on_tool_result_received(
             self, tool_call_id: str, tool_name: str, arguments: dict, result: Any
     ):
+        if getattr(self, '_is_destroyed', False):
+            return
         import time
 
         if self._is_auto_loop_running:
@@ -4841,6 +5121,8 @@ class OpenAIChatToolWindow(ToolWindow):
             window.activateWindow()
 
     def _on_stream_finished(self, response: str):
+        if getattr(self, '_is_destroyed', False):
+            return
         self._is_streaming = False
         self._tool_cancelled_by_user = False
         self._cancelled_tool_call_id = None
@@ -4852,6 +5134,8 @@ class OpenAIChatToolWindow(ToolWindow):
             self._save_current_session_to_history()
             # 流式完成后同步 batch 结构，确保 _message_batch 包含完整的 assistant batch
             self._sync_batch_structures()
+            # 修复：同步可见范围，避免回收机制误删当前轮次的卡片
+            self._visible_batch_end = len(self._message_batch)
 
         if self.input_area:
             self.input_area.setFocus()
@@ -4975,6 +5259,8 @@ class OpenAIChatToolWindow(ToolWindow):
         pass
 
     def _on_skill_requested(self, method: str, params: dict):
+        if getattr(self, '_is_destroyed', False):
+            return
         result = self.backend.execute_skill(method, params)
         content = (
             f"[Skill Result] {result}"
@@ -5016,6 +5302,8 @@ class OpenAIChatToolWindow(ToolWindow):
     def _on_question_asked(
             self, tool_call_id: str, question: str, options: list, multiple: bool = False
     ):
+        if getattr(self, '_is_destroyed', False):
+            return
         self._hide_all_cards_for_question()
         self._question_tool_call_id = tool_call_id
         if not isinstance(options, list):
@@ -5024,6 +5312,8 @@ class OpenAIChatToolWindow(ToolWindow):
         self._notify_if_inactive("需要回答问题", question[:100])
 
     def _on_question_answered(self, answer: str):
+        if getattr(self, '_is_destroyed', False):
+            return
         self._restore_after_question_close()
         if self._pending_permission_tool_call_id:
             tool_call_id = self._pending_permission_tool_call_id
@@ -5054,6 +5344,8 @@ class OpenAIChatToolWindow(ToolWindow):
 
     def _on_question_cancelled(self):
         """用户关闭问题窗口时，返回空答案让大模型继续"""
+        if getattr(self, '_is_destroyed', False):
+            return
         self._restore_after_question_close()
         if self._pending_permission_tool_call_id:
             tool_call_id = self._pending_permission_tool_call_id
@@ -5076,11 +5368,15 @@ class OpenAIChatToolWindow(ToolWindow):
 
     def _on_agent_switched(self, agent_name: str):
         """TODO: 实现智能体切换时的状态同步"""
+        if getattr(self, '_is_destroyed', False):
+            return
         pass
 
     def _on_permission_approval_requested(
             self, tool_call_id: str, tool_name: str, arguments: dict
     ):
+        if getattr(self, '_is_destroyed', False):
+            return
         self._pending_permission_tool_call_id = tool_call_id
         self._pending_permission_auto_allow = False
         self._hide_all_cards_for_question()  # question卡片最高优先级
@@ -5096,6 +5392,8 @@ class OpenAIChatToolWindow(ToolWindow):
             self._restore_after_question_close()
 
     def _on_compaction_updated(self, task_id: str, new_summary: str):
+        if getattr(self, '_is_destroyed', False):
+            return
         """
         子智能体压缩完成回调
         
@@ -5368,6 +5666,8 @@ class OpenAIChatToolWindow(ToolWindow):
 
     def _sync_working_directory(self):
         """切换项目时自动加载并同步工作目录"""
+        if getattr(self, '_is_destroyed', False):
+            return
         if not self.backend or not self.backend.tool_executor:
             return
         project = self._current_project
@@ -5489,10 +5789,38 @@ class OpenAIChatToolWindow(ToolWindow):
         return None
 
     def closeEvent(self, event):
+        # 标记窗口正在关闭，防止所有异步回调访问已销毁的 UI
+        self._is_destroyed = True
+        
+        if hasattr(self, 'backend') and self.backend:
+            try:
+                self.backend.set_ui_valid(False)
+                # 清除 ChatEngine 的所有回调，防止异步回调访问已销毁的 widget
+                if self.backend.chat_engine:
+                    self.backend.chat_engine.clear_callbacks()
+                # 停止所有正在进行的流式输出
+                self.backend.stop_streaming()
+                # 清理 worker
+                self.backend.cleanup_worker()
+            except Exception:
+                pass
+        
+        # 标记初始化已完成（防止窗口在初始化期间关闭导致竞态条件）
+        self._initialization_in_progress = False
+        
         try:
             self._auto_save_current_session()
         except Exception:
             pass
+        
+        # 断开 aboutToQuit 信号，防止退出时访问已销毁的 widget
+        try:
+            app = QApplication.instance()
+            if app is not None:
+                app.aboutToQuit.disconnect(self._auto_save_current_session)
+        except Exception:
+            pass
+        
         super().closeEvent(event)
 
     def _toggle_send_stop(self, is_sending: bool):
@@ -5504,6 +5832,8 @@ class OpenAIChatToolWindow(ToolWindow):
             self.input_area.toggle_send_button(True)
 
     def _on_stop_clicked(self):
+        if getattr(self, '_is_destroyed', False):
+            return
         self._tool_cancelled_by_user = False
         interrupted_messages: List[Dict[str, Any]] = []
 
@@ -5635,7 +5965,10 @@ class OpenAIChatToolWindow(ToolWindow):
             if val in ("deny", False)
         }
 
-        all_tools = get_builtin_tools_schema(agent_manager=agent_manager)
+        all_tools = get_builtin_tools_schema(
+            agent_manager=agent_manager,
+            builtin_tools=self.backend.tool_executor._builtin_tools if hasattr(self.backend, 'tool_executor') else None,
+        )
         tools_schema = [
             t for t in all_tools
             if t.get("function", {}).get("name", "") not in denied_tools

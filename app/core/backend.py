@@ -159,8 +159,16 @@ class ChatBackend(QObject):
         
         # 3. 创建 HookManager（必须在 create_session 之前）
         self._hook_manager = HookManager(self._thread_pool)
+        # UI 有效性标志：当 UI 窗口关闭时应设为 False，防止 hook 回调访问已销毁的 UI
+        self._ui_valid = True
+        
         # Hook 完成后，把输出添加到上下文
         def on_hook_finished(event_name: str, output: str, success: bool):
+            # 检查 UI 是否仍然有效，防止窗口关闭后 hook 回调访问已销毁的 UI
+            if not getattr(self, '_ui_valid', True):
+                logger.debug(f"[HookManager] Hook callback skipped: UI already closed")
+                return
+            
             logger.info(f"[HookManager] Hook callback: event={event_name}, success={success}，output={output[:100]}...")
             
             # 只有成功执行的 hook 才添加到消息列表
@@ -185,11 +193,12 @@ class ChatBackend(QObject):
                     # 添加新消息
                     session.add_assistant_message(hook_output)
                 
-                # 发送消息给前端显示
-                self.message_received.emit({
-                    "role": "assistant",
-                    "content": hook_output
-                })
+                # 发送消息给前端显示（仅在 UI 有效时发送，防止窗口关闭后 emit 导致 segfault）
+                if getattr(self, '_ui_valid', True):
+                    self.message_received.emit({
+                        "role": "assistant",
+                        "content": hook_output
+                    })
                 logger.info(f"[HookManager] Hook added to messages: {event_name}")
         self._hook_manager.set_on_finished_callback(on_hook_finished)
         
@@ -218,6 +227,8 @@ class ChatBackend(QObject):
         self._tool_executor.set_memory_manager(self._memory_manager)
         self._tool_executor.set_llm_config_getter(get_model_config)
         self._tool_executor.set_agent_manager(self._agent_manager)
+        # 设置 AgentManager 的 builtin_tools 引用（用于获取 MCP 工具 schema）
+        self._agent_manager._builtin_tools = self._tool_executor._builtin_tools
         # 设置关键文档仓储
         if self._memory_manager and self._memory_manager.key_documents:
             self._tool_executor.set_key_documents_repo(
@@ -241,6 +252,12 @@ class ChatBackend(QObject):
 
         self._history_manager = HistoryManager()
         
+        # 7. 自动发现并合并其他来源的 MCP 服务器配置（仅首次）
+        self._discover_mcp_servers()
+
+        # 8. 初始化 MCP 连接
+        self._init_mcp_connections()
+        
         self._initialized = True
         logger.info("[ChatBackend] 初始化完成")
     
@@ -255,7 +272,57 @@ class ChatBackend(QObject):
             for name, callback in callbacks.items():
                 self._chat_engine.set_callback(name, callback)
 
+    # ========== MCP 自动发现 ==========
+
+    def _discover_mcp_servers(self):
+        """自动发现其他工具的 MCP 配置并合并（仅首次运行生效）"""
+        from app.utils.config import Settings
+
+        cfg = Settings.get_instance()
+
+        # 已处理过则跳过
+        if cfg.mcp_discovered.value:
+            return
+
+        from app.tools.mcp_tools import discover_and_merge
+
+        merged, new_ones = discover_and_merge()
+        if new_ones:
+            cfg.set(cfg.mcp_servers, merged, save=True)
+            logger.info(f"[ChatBackend] MCP 自动发现完成，导入 {len(new_ones)} 个新服务器")
+
+        # 标记已处理
+        cfg.set(cfg.mcp_discovered, True, save=True)
+
     # ========== ChatEngine 代理方法 ==========
+
+    def _init_mcp_connections(self):
+        """初始化 MCP 服务器连接（后台异步，不阻塞 UI）"""
+        from app.utils.config import Settings
+
+        mcp_manager = self._tool_executor._builtin_tools._mcp_manager
+
+        if mcp_manager.is_connected:
+            logger.info("[ChatBackend] MCP 已连接，复用现有连接")
+            return
+
+        cfg = Settings.get_instance()
+        if not cfg.mcp_enabled.value:
+            logger.info("[ChatBackend] MCP 全局开关已关闭，跳过连接")
+            return
+
+        servers = cfg.mcp_servers.value
+        if not servers:
+            logger.info("[ChatBackend] 无 MCP 服务器配置，跳过连接")
+            return
+
+        mcp_manager.connect_all_background(
+            servers,
+            on_done=lambda ok, total, failed: logger.info(
+                f"[ChatBackend] MCP 后台连接完成: {ok}/{total}"
+                + (f", 失败: {failed}" if failed else "")
+            ),
+        )
     
     def stop_streaming(self):
         """停止流式输出"""

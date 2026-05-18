@@ -10,6 +10,7 @@ from qfluentwidgets import FluentIcon, ComboBox
 from qfluentwidgets import TextEdit, TransparentToolButton
 
 from app.utils.utils import get_font_family_css, get_local_skills
+from app.utils.design_tokens import Colors
 
 # 预编译正则表达式
 _FILE_PREFIX_PATTERN = re.compile(r'^file:/{1,3}')
@@ -314,84 +315,11 @@ class SendableTextEdit(TextEdit):
         
         # 设置发光效果
         self._setup_glow_effect()
-        self.setStyleSheet(f"""
-            QTextEdit {{
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 rgba(18, 24, 34, 150),
-                    stop:1 rgba(24, 31, 45, 150));
-                color: #F2F6FF;
-                border: 1px solid #2B3850;
-                border-radius: 18px;
-                padding: 14px 50px 18px 16px;
-                selection-background-color: rgba(201, 168, 92, 0.28);
-                {get_font_family_css()} font-size: 14px;
-            }}
-            QTextEdit:focus {{
-                border: 2px solid #C9A85C;
-                border-radius: 18px;
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 rgba(22, 29, 41, 220),
-                    stop:1 rgba(28, 36, 50, 220));
-                color: #FFFFFF;
-            }}
-            QTextEdit QScrollBar:vertical {{
-                background: rgba(255, 255, 255, 0.05);
-                width: 6px;
-                margin: 2px 0 2px 0;
-                border-radius: 3px;
-            }}
-            QTextEdit QScrollBar::handle:vertical {{
-                background: rgba(255, 255, 255, 0.15);
-                border-radius: 3px;
-                min-height: 20px;
-            }}
-            QTextEdit QScrollBar::handle:vertical:hover {{
-                background: rgba(255, 255, 255, 0.25);
-            }}
-            QTextEdit QScrollBar::add-line:vertical,
-            QTextEdit QScrollBar::sub-line:vertical {{
-                height: 0px;
-            }}
-            QTextEdit QScrollBar::add-page:vertical,
-            QTextEdit QScrollBar::sub-page:vertical {{
-                background: none;
-            }}
-        """)
+        self._apply_input_style()
 
         self._agent_combo = ComboBox(self)
         self._agent_combo.setFixedSize(75, 28)
-        self._agent_combo.setStyleSheet(f"""
-            ComboBox {{
-                background-color: rgba(255, 255, 255, 0.05);
-                color: #EAF2FF;
-                border: 1px solid rgba(255, 255, 255, 0.08);
-                border-radius: 10px;
-                padding: 3px 10px;
-                {get_font_family_css()} font-size: 12px;
-            }}
-            ComboBox:hover {{
-                background-color: rgba(255, 255, 255, 0.08);
-                border-color: rgba(201, 168, 92, 0.45);
-            }}
-            ComboBox::drop-down {{
-                border: none;
-                width: 16px;
-            }}
-            ComboBox::down-arrow {{
-                border-left: 4px solid transparent;
-                border-right: 4px solid transparent;
-                border-top: 5px solid #9BB0D3;
-                margin-right: 2px;
-            }}
-            ComboBox AbstractItemView {{
-                background-color: #192232;
-                color: #EAF2FF;
-                selection-background-color: #8B7355;
-                border: 1px solid #2B3850;
-                border-radius: 10px;
-                padding: 4px;
-            }}
-        """)
+        self._agent_combo.setStyleSheet(self._build_combo_style())
         self._agent_combo.currentTextChanged.connect(self._on_agent_changed)
 
         self.send_btn = TransparentToolButton(FluentIcon.SEND, self)
@@ -781,6 +709,95 @@ class SendableTextEdit(TextEdit):
             self.setGraphicsEffect(self._glow_effect)
         except Exception:
             self._glow_effect = None
+
+    def _apply_input_style(self):
+        """应用输入框样式（动态从 Colors 读取）"""
+        Colors.refresh()
+        self.setStyleSheet(f"""
+            QTextEdit {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 {Colors.INPUT_BG_START},
+                    stop:1 {Colors.INPUT_BG_END});
+                color: {Colors.INPUT_TEXT};
+                border: 1px solid {Colors.INPUT_BORDER};
+                border-radius: 18px;
+                padding: 14px 50px 18px 16px;
+                selection-background-color: rgba(201, 168, 92, 0.28);
+                {get_font_family_css()} font-size: 14px;
+            }}
+            QTextEdit:focus {{
+                border: 2px solid {Colors.INPUT_FOCUS_BORDER};
+                border-radius: 18px;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 {Colors.INPUT_FOCUS_BG_START},
+                    stop:1 {Colors.INPUT_FOCUS_BG_END});
+                color: {Colors.INPUT_FOCUS_TEXT};
+            }}
+            QTextEdit QScrollBar:vertical {{
+                background: rgba(255, 255, 255, 0.05);
+                width: 6px;
+                margin: 2px 0 2px 0;
+                border-radius: 3px;
+            }}
+            QTextEdit QScrollBar::handle:vertical {{
+                background: rgba(255, 255, 255, 0.15);
+                border-radius: 3px;
+                min-height: 20px;
+            }}
+            QTextEdit QScrollBar::handle:vertical:hover {{
+                background: rgba(255, 255, 255, 0.25);
+            }}
+            QTextEdit QScrollBar::add-line:vertical,
+            QTextEdit QScrollBar::sub-line:vertical {{
+                height: 0px;
+            }}
+            QTextEdit QScrollBar::add-page:vertical,
+            QTextEdit QScrollBar::sub-page:vertical {{
+                background: none;
+            }}
+        """)
+
+    def _build_combo_style(self) -> str:
+        """构建智能体下拉框样式"""
+        Colors.refresh()
+        return f"""
+            ComboBox {{
+                background-color: rgba(255, 255, 255, 0.05);
+                color: {Colors.INPUT_TEXT};
+                border: 1px solid {Colors.INPUT_BORDER};
+                border-radius: 10px;
+                padding: 3px 10px;
+                {get_font_family_css()} font-size: 12px;
+            }}
+            ComboBox:hover {{
+                background-color: rgba(255, 255, 255, 0.08);
+                border-color: {Colors.INPUT_FOCUS_BORDER};
+            }}
+            ComboBox::drop-down {{
+                border: none;
+                width: 16px;
+            }}
+            ComboBox::down-arrow {{
+                border-left: 4px solid transparent;
+                border-right: 4px solid transparent;
+                border-top: 5px solid {Colors.INPUT_TEXT};
+                margin-right: 2px;
+            }}
+            ComboBox AbstractItemView {{
+                background-color: {Colors.CONTENT_BG};
+                color: {Colors.INPUT_TEXT};
+                selection-background-color: {Colors.TEXT_ACCENT};
+                border: 1px solid {Colors.INPUT_BORDER};
+                border-radius: 10px;
+                padding: 4px;
+            }}
+        """
+
+    def refresh_style(self):
+        """刷新样式（响应主题切换）"""
+        self._apply_input_style()
+        if hasattr(self, '_agent_combo') and self._agent_combo:
+            self._agent_combo.setStyleSheet(self._build_combo_style())
         
     def _animate_glow(self, target_blur, target_alpha, duration=300):
         """动画发光效果"""

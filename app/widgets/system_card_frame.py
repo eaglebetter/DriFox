@@ -15,7 +15,7 @@ from PyQt5.QtWidgets import (
 from qfluentwidgets import (
     StrongBodyLabel, TransparentToolButton, FluentIcon, PrimaryToolButton)
 
-from app.utils.design_tokens import TabStyles
+from app.utils.design_tokens import Colors, TabStyles, font_size_css
 from app.utils.utils import get_unified_font, get_icon
 
 
@@ -49,7 +49,8 @@ class SystemCardFrame(QFrame):
 
         self.title_label = StrongBodyLabel(self)
         self.title_label.setFont(get_unified_font(12, True))
-        self.title_label.setStyleSheet("color: #C9A85C;")
+        Colors.refresh()
+        self.title_label.setStyleSheet(f"color: {Colors.TEXT_ACCENT};")
 
         self._header_layout.addWidget(self.icon_label)
         self._header_layout.addWidget(self.title_label)
@@ -57,7 +58,7 @@ class SystemCardFrame(QFrame):
         # 数量统计
         self._count_label = QLabel("", self)
         self._count_label.setFont(get_unified_font(10))
-        self._count_label.setStyleSheet("color: rgba(255,255,255,0.5); padding-left: 2px;")
+        self._count_label.setStyleSheet(f"color: {Colors.TEXT_SECONDARY}; padding-left: 2px;")
         self._count_label.setVisible(False)
         self._header_layout.addWidget(self._count_label)
 
@@ -108,13 +109,26 @@ class SystemCardFrame(QFrame):
     # ── 样式 ──────────────────────────────────────────
 
     def _apply_base_style(self):
-        self.setStyleSheet("""
-            SystemCardFrame {
-                background: rgba(22, 30, 45, 230);
-                border: 1px solid #3d4a60;
+        Colors.refresh()
+        self.setStyleSheet(f"""
+            SystemCardFrame {{
+                background: {Colors.CARD_BG.format(alpha=230)};
+                border: 1px solid {Colors.BORDER};
                 border-radius: 10px;
-            }
+            }}
         """)
+
+    def refresh_style(self):
+        Colors.refresh()
+        self._apply_base_style()
+        self.title_label.setFont(get_unified_font(12, True))
+        self.title_label.setStyleSheet(f"color: {Colors.TEXT_ACCENT};")
+        self.icon_label.setFont(get_unified_font(12))
+        self._count_label.setFont(get_unified_font(10))
+        self._count_label.setStyleSheet(f"color: {Colors.TEXT_SECONDARY}; padding-left: 2px;")
+        self.scroll_area.setStyleSheet(self._scroll_style())
+        if hasattr(self, "_tab_buttons"):
+            self._update_tab_styles()
 
     @staticmethod
     def _scroll_style() -> str:
@@ -175,21 +189,22 @@ class SystemCardFrame(QFrame):
         self._search_input.setMaximumWidth(160)
         self._search_input.setMinimumWidth(100)
         self._search_input.setFixedHeight(24)
-        self._search_input.setStyleSheet("""
-            QLineEdit {
-                background: rgba(255,255,255,0.08);
-                border: 1px solid rgba(255,255,255,0.15);
+        Colors.refresh()
+        self._search_input.setStyleSheet(f"""
+            QLineEdit {{
+                background: {Colors.HOVER_BG};
+                border: 1px solid {Colors.BORDER};
                 border-radius: 4px;
-                color: rgba(255,255,255,0.8);
+                color: {Colors.TEXT_PRIMARY};
                 padding: 2px 8px;
-                font-size: 11px;
-            }
-            QLineEdit:focus {
-                border: 1px solid rgba(102, 198, 255, 0.5);
-            }
-            QLineEdit::placeholder {
+                {font_size_css(11)}
+            }}
+            QLineEdit:focus {{
+                border: 1px solid {Colors.TEXT_ACCENT};
+            }}
+            QLineEdit::placeholder {{
                 color: rgba(255,255,255,0.35);
-            }
+            }}
         """)
         self._search_input.textChanged.connect(callback)
         self._search_input.setVisible(False)

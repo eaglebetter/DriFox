@@ -169,6 +169,20 @@ class Settings(QConfig):
     # 全局字体设置
     llm_font_family = ConfigItem("LLM", "FontFamily", "Segoe UI")
 
+    # ========== UI appearance ==========
+    ui_font_size = OptionsConfigItem(
+        "UI",
+        "FontSize",
+        "medium",
+        OptionsValidator(["small", "medium", "large"]),
+    )
+    ui_theme_style = OptionsConfigItem(
+        "UI",
+        "ThemeStyle",
+        "midnight",
+        OptionsValidator(["midnight", "obsidian", "forest", "graphite"]),
+    )
+
     # ========== 会话项目管理 ==========
     current_project = ConfigItem("Session", "CurrentProject", "默认项目")
 
@@ -177,6 +191,12 @@ class Settings(QConfig):
     llm_api_port = RangeConfigItem(
         "LLM", "APIPort", 8765, RangeValidator(1024, 65535)
     )
+
+    # ========== MCP 服务器配置 ==========
+    mcp_servers = ConfigItem("MCP", "Servers", [], ListDictValidator())
+    mcp_enabled = ConfigItem("MCP", "Enabled", True, BoolValidator())
+    # 标记是否已完成 MCP 自动发现（用于决定下次启动是否再次扫描）
+    mcp_discovered = ConfigItem("MCP", "Discovered", False, BoolValidator())
 
     # ========== 云组件库API ==========
     SERPAPI_KEY = ConfigItem(

@@ -1,6 +1,6 @@
 ---
 name: to-issues
-description: 快速分析项目并提交 GitHub Issues。用于代码审查、bug 报告、需求拆分。使用简单，无需用户交互，自动完成。
+description: 自动分析代码问题并提交规范化的 GitHub Issues。遵循统一格式（Summary/Environment/Description/Impact/Steps/Expected/Actual/Proposed Fix），末尾自动添加智能体生成标记。无需用户交互，直接提交。
 ---
 
 # to-issues
@@ -202,85 +202,60 @@ if __name__ == '__main__':
     batch_submit(issues)
 ```
 
-## 常用 Issue 模板
+## Issue 提交格式标准
 
-### Bug 模板
+所有通过本技能提交的 Issue 必须遵循以下格式规范：
+
+### 标题格式
+```
+[问题类型] 简洁描述（不超过80字符）
+```
+- 类型: `Bug`, `Enhancement`, `Performance`, `Refactoring`, `Documentation`
+- 描述: 清晰表达问题，避免缩写
+
+### Body 格式（参考 #51, #30）
+
 ```markdown
-## 问题描述
+## Summary
+一句话描述问题和影响
 
-[简洁描述问题]
+## Environment
+- Python 版本
+- DriFox 版本
+- 涉及文件: xxx, xxx
 
-## 复现步骤
+## Description
+### 问题 1: [标题]
+[详细描述]
 
+```python
+# 问题代码（可选）
+```
+
+### 问题 2: [标题]（如有多个问题）
+[详细描述]
+
+## Impact
+1. [影响1]
+2. [影响2]
+
+## Steps to Reproduce（如适用）
 1. [步骤1]
 2. [步骤2]
-3. [步骤3]
 
-## 预期行为
-
+## Expected Behavior
 [期望的正确行为]
 
-## 实际行为
-
+## Actual Behavior
 [实际发生的错误行为]
 
-## 影响范围
+## Proposed Fix（如有）
+1. [修复建议1]
+2. [修复建议2]
 
-[哪些功能/模块受影响]
+---
 
-## 优先级
-
-- [ ] 高 - 服务不可用
-- [ ] 中 - 功能受损但可 workaround
-- [ ] 低 - 体验问题
-```
-
-### Enhancement 模板
-```markdown
-## 功能描述
-
-[简洁描述要实现的功能]
-
-## 背景/动机
-
-[为什么需要这个功能]
-
-## 验收标准
-
-- [ ] 标准1
-- [ ] 标准2
-- [ ] 标准3
-
-## 技术方案
-
-[简要技术方案，如果有的话]
-
-## 风险评估
-
-- [ ] 影响范围
-- [ ] 回滚方案
-```
-
-### Question 模板
-```markdown
-## 问题
-
-[具体问题]
-
-## 上下文
-
-[相关代码片段或截图]
-
-## 已尝试的方案
-
-[已尝试的方案及结果]
-
-## 环境信息
-
-- Python: x.x.x
-- OS: Windows/Linux
-- 相关配置: xxx
-```
+> 🤖 DriFox 智能体自动生成
 
 ## 快速执行示例
 
@@ -288,14 +263,41 @@ if __name__ == '__main__':
 ```python
 submit_issue(
     title="[Bug] 虚拟滚动内存泄漏",
-    body="""## 问题描述
-    
-长会话后内存持续增长。
+    body="""## Summary
 
-## 验收标准
+长会话后内存持续增长，消息批次数据未被清理。
 
-- [ ] 回收的消息批次数据也被清理
-- [ ] 长时间运行内存稳定
+## Environment
+- Python: 3.x
+- DriFox 版本: 最新
+- 涉及文件: `app/main_widget.py`
+
+## Description
+
+### 问题: _message_batch 未清理
+虚拟滚动回收消息卡片时，对应的批次数据仍保留在内存中。
+
+## Impact
+
+1. 长时间运行内存持续增长
+2. 可能导致 OOM 错误
+
+## Steps to Reproduce
+
+1. 启动 DriFox 进行长时间对话
+2. 观察内存占用持续增长
+
+## Expected Behavior
+
+回收的消息批次数据也被清理，长时间运行内存稳定。
+
+## Actual Behavior
+
+内存持续增长，未释放已回收消息的数据。
+
+---
+
+> 🤖 DriFox 智能体自动生成
 """,
     labels=["bug", "performance"]
 )
