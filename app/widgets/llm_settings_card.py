@@ -26,12 +26,23 @@ from qfluentwidgets import (
     StrongBodyLabel,
     SwitchSettingCard,
     OptionsSettingCard,
-    FluentIcon, SettingCard, PrimaryPushButton,
+    FluentIcon, SettingCard, PrimaryPushButton, ComboBox,
 )
 
 from app.utils.config import Settings
-from app.utils.utils import get_icon, get_unified_font
-from app.utils.design_tokens import ButtonStyles, SwitchStyles, ComboBoxStyles
+from app.utils.utils import get_icon, get_unified_font, get_font_family_css
+from app.utils.design_tokens import (
+    ButtonStyles,
+    ComboBoxStyles,
+    FONT_SIZE_OPTIONS,
+    THEME_STYLE_OPTIONS,
+    Colors,
+)
+
+
+class NoWheelComboBox(ComboBox):
+    def wheelEvent(self, event):
+        event.ignore()
 
 
 class ManualUpdateCard(SettingCard):
@@ -105,6 +116,17 @@ class LLMSettingsCard(SystemCardFrame):
 
         self._setup_content()
 
+    def _make_sep_label(self, text: str) -> StrongBodyLabel:
+        """创建带主题色的分隔标签"""
+        Colors.refresh()
+        sep_label = StrongBodyLabel(text, self)
+        sep_label.setFont(get_unified_font(10, True))
+        sep_label.setStyleSheet(
+            f"color: {Colors.TEXT_MUTED}; padding: 4px 0;"
+            f"{get_font_family_css()} font-weight: bold;"
+        )
+        return sep_label
+
     def _setup_content(self):
         content_layout = self.content_layout
         content_layout.setContentsMargins(0, 4, 0, 4)
@@ -160,10 +182,6 @@ class LLMSettingsCard(SystemCardFrame):
         )
         content_layout.addWidget(self.mcpListCard)
 
-        # 全局字体设置
-        self._setup_font_card()
-        content_layout.addWidget(self.llmFontCard)
-
         # 智能体完成通知
         self.llmNotifyCard = SwitchSettingCard(
             get_icon("提示"),
@@ -185,11 +203,23 @@ class LLMSettingsCard(SystemCardFrame):
         )
         content_layout.addWidget(self.llmSoundCard)
 
-        # 分隔标签
-        sep_label = StrongBodyLabel("版本更新", self)
-        sep_label.setFont(get_unified_font(10, True))
-        sep_label.setStyleSheet("color: #888; padding: 4px 0;")
-        content_layout.addWidget(sep_label)
+
+        # ---- 外观样式分隔标签 ----
+        sep_appearance_label = self._make_sep_label("外观样式")
+        content_layout.addWidget(sep_appearance_label)
+
+        # 界面字号、主题风格
+        self._setup_appearance_cards()
+        content_layout.addWidget(self.uiFontSizeCard)
+        content_layout.addWidget(self.uiThemeStyleCard)
+
+        # 全局字体设置
+        self._setup_font_card()
+        content_layout.addWidget(self.llmFontCard)
+
+        # ---- 版本更新分隔标签 ----
+        sep_update_label = self._make_sep_label("版本更新")
+        content_layout.addWidget(sep_update_label)
 
         # 自动检查更新
         self.autoUpdateCard = SwitchSettingCard(
@@ -217,8 +247,57 @@ class LLMSettingsCard(SystemCardFrame):
         self.cfg.llm_notify_enabled.valueChanged.connect(self._on_config_changed)
         self.llmSoundCard.optionChanged.connect(self._on_config_changed)
         self.cfg.llm_font_family.valueChanged.connect(self._on_config_changed)
+        self.cfg.ui_font_size.valueChanged.connect(self._on_config_changed)
+        self.cfg.ui_theme_style.valueChanged.connect(self._on_config_changed)
         self.cfg.llm_api_enabled.valueChanged.connect(self._on_llm_api_enabled_changed)
         self.cfg.llm_api_port.valueChanged.connect(self._on_llm_api_port_changed)
+
+    def _setup_appearance_cards(self):
+        class AppearanceComboCard(SettingCard):
+            def __init__(self, icon, title, content, cfg, config_item, options, parent=None):
+                super().__init__(icon, title, content, parent)
+                self.cfg = cfg
+                self.config_item = config_item
+                self.options = options
+                self.value_by_label = {data["label"]: key for key, data in options.items()}
+                self.label_by_value = {key: data["label"] for key, data in options.items()}
+
+                self.comboBox = NoWheelComboBox(self)
+                self.comboBox.addItems([data["label"] for data in options.values()])
+                self.comboBox.setCurrentText(self.label_by_value.get(config_item.value, next(iter(self.value_by_label))))
+                self.comboBox.setMinimumWidth(130)
+                self.comboBox.setStyleSheet(ComboBoxStyles.dark_combo())
+                self.comboBox.currentTextChanged.connect(self._on_changed)
+
+                self.hBoxLayout.addWidget(self.comboBox)
+                self.hBoxLayout.addSpacing(16)
+
+            def _on_changed(self, label):
+                value = self.value_by_label.get(label)
+                if value:
+                    self.cfg.set(self.config_item, value, save=True)
+                    parent = self.parent()
+                    if parent and hasattr(parent, "_on_config_changed"):
+                        parent._on_config_changed()
+
+        self.uiFontSizeCard = AppearanceComboCard(
+            get_icon("字体大小"),
+            "界面字号",
+            "统一调整界面与对话内容字号",
+            self.cfg,
+            self.cfg.ui_font_size,
+            FONT_SIZE_OPTIONS,
+            self,
+        )
+        self.uiThemeStyleCard = AppearanceComboCard(
+            get_icon("主题风格"),
+            "主题风格",
+            "选择一套深色界面卡片配色",
+            self.cfg,
+            self.cfg.ui_theme_style,
+            THEME_STYLE_OPTIONS,
+            self,
+        )
 
     def _setup_font_card(self):
         """创建字体设置卡片"""

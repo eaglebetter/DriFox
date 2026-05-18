@@ -40,15 +40,21 @@ class AutoLoopConfigCard(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("autoLoopConfigCard")
+        self._refresh_theme_style()
+        self._build_ui()
+
+    def _refresh_theme_style(self):
+        """刷新主题色，响应全局主题切换"""
+        from app.utils.design_tokens import Colors
+        Colors.refresh()
         self.setStyleSheet(f"""
             #autoLoopConfigCard {{
-                background: rgba(22, 30, 45, 230);
-                border: 1px solid #2B3850;
+                background: {Colors.CARD_BG_SOLID};
+                border: 1px solid {Colors.BORDER};
                 border-radius: 12px;
                 {FONT_CSS}
             }}
         """)
-        self._build_ui()
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
@@ -249,13 +255,7 @@ class AutoLoopRunningCard(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("autoLoopRunningCard")
-        self.setStyleSheet(f"""
-            #autoLoopRunningCard {{
-                background: rgba(22, 30, 45, 230);
-                border-radius: 12px;
-                {FONT_CSS}
-            }}
-        """)
+        self._refresh_theme_style()
 
         # 彩虹边框动画
         self._hue_offset = 0
@@ -281,6 +281,18 @@ class AutoLoopRunningCard(QFrame):
         self._current_phase = "preparing"
 
         self._build_ui()
+
+    def _refresh_theme_style(self):
+        """刷新主题色，响应全局主题切换"""
+        from app.utils.design_tokens import Colors
+        Colors.refresh()
+        self.setStyleSheet(f"""
+            #autoLoopRunningCard {{
+                background: {Colors.CARD_BG_SOLID};
+                border-radius: 12px;
+                {FONT_CSS}
+            }}
+        """)
 
     def _build_ui(self):
         layout = QVBoxLayout(self)

@@ -25,7 +25,7 @@ from app.utils.config import Settings
 
 # 预算分配常量
 SYSTEM_PROMPT_RESERVE_RATIO = 0.15  # 预留 15% 给系统提示（含技能、记忆等）
-MIN_HISTORY_BUDGET_RATIO = 0.30  # 历史消息最少保留 30%
+MIN_HISTORY_BUDGET_RATIO = 0.60  # 历史消息分配占比 60%（配合 SOFT_LIMIT=84% → 触发于总体 ~50%）
 
 
 class ContextBudgetAllocator:

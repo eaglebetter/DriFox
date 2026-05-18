@@ -18,6 +18,7 @@ from PyQt5.QtWidgets import (
 from qfluentwidgets import TransparentToolButton, FluentIcon
 
 from app.utils.utils import get_font_family_css, get_icon
+from app.utils.design_tokens import Colors, font_size_css
 
 
 class ProjectItem(QWidget):
@@ -45,20 +46,13 @@ class ProjectItem(QWidget):
 
         # 项目名
         self._name_label = QLabel(self._name, self)
-        if self._is_current:
-            self._name_label.setStyleSheet(
-                f"color: #0078d4; font-weight: bold; {get_font_family_css()} font-size: 13px;"
-            )
-        else:
-            self._name_label.setStyleSheet(
-                f"color: #cccccc; {get_font_family_css()} font-size: 13px;"
-            )
+        self._apply_name_style()
         layout.addWidget(self._name_label, 1)
 
         # 当前项目指示
         if self._is_current:
             check_label = QLabel("✓", self)
-            check_label.setStyleSheet("color: #0078d4; font-size: 14px;")
+            check_label.setStyleSheet(f"color: {Colors.BORDER_ACCENT}; font-size: 14px;")
             layout.addWidget(check_label)
 
         # 归档按钮（默认隐藏）
@@ -80,6 +74,17 @@ class ProjectItem(QWidget):
         self._archive_btn.hide()
         layout.addWidget(self._archive_btn)
 
+    def _apply_name_style(self):
+        Colors.refresh()
+        if self._is_current:
+            self._name_label.setStyleSheet(
+                f"color: {Colors.BORDER_ACCENT}; font-weight: bold; {get_font_family_css()} {font_size_css(13)};"
+            )
+        else:
+            self._name_label.setStyleSheet(
+                f"color: {Colors.TEXT_SECONDARY}; {get_font_family_css()} {font_size_css(13)};"
+            )
+
     def _emit_archive(self):
         self.archiveClicked.emit(self._name)
 
@@ -89,20 +94,13 @@ class ProjectItem(QWidget):
 
     def enterEvent(self, event):
         self._name_label.setStyleSheet(
-            f"color: #ffffff; {get_font_family_css()} font-size: 13px;"
+            f"color: {Colors.TEXT_PRIMARY}; {get_font_family_css()} {font_size_css(13)};"
         )
         self._archive_btn.show()
         super().enterEvent(event)
 
     def leaveEvent(self, event):
-        if self._is_current:
-            self._name_label.setStyleSheet(
-                f"color: #0078d4; font-weight: bold; {get_font_family_css()} font-size: 13px;"
-            )
-        else:
-            self._name_label.setStyleSheet(
-                f"color: #cccccc; {get_font_family_css()} font-size: 13px;"
-            )
+        self._apply_name_style()
         self._archive_btn.hide()
         super().leaveEvent(event)
 
@@ -129,14 +127,15 @@ class ProjectSelectorPopup(QWidget):
         self._setup_ui()
 
     def _setup_ui(self):
+        Colors.refresh()
         self.main_frame = QFrame(self)
         self.main_frame.setObjectName("projectPopupFrame")
-        self.main_frame.setStyleSheet("""
-            QFrame#projectPopupFrame {
-                background-color: #2d2d2d;
-                border: 1px solid #444444;
+        self.main_frame.setStyleSheet(f"""
+            QFrame#projectPopupFrame {{
+                background-color: {Colors.CONTENT_BG};
+                border: 1px solid {Colors.BORDER};
                 border-radius: 8px;
-            }
+            }}
         """)
 
         layout = QVBoxLayout(self.main_frame)
@@ -146,7 +145,7 @@ class ProjectSelectorPopup(QWidget):
         # 标题
         title = QLabel("选择项目", self)
         title.setStyleSheet(
-            f"color: #ffffff; font-weight: bold; {get_font_family_css()} font-size: 13px; "
+            f"color: {Colors.TEXT_PRIMARY}; font-weight: bold; {get_font_family_css()} {font_size_css(13)}; "
             f"padding: 4px 8px;"
         )
         layout.addWidget(title)
@@ -161,25 +160,7 @@ class ProjectSelectorPopup(QWidget):
             Qt.ImhPreferLatin | Qt.ImhNoAutoUppercase | Qt.ImhSensitiveData |
             Qt.ImhNoPredictiveText | Qt.ImhMultiLine
         )
-        self._new_project_edit.setStyleSheet(f"""
-            QLineEdit {{
-                background-color: #3d3d3d;
-                color: #ffffff;
-                border: 1px solid #555555;
-                border-radius: 4px;
-                padding: 5px 8px;
-                selection-background-color: #0078d4;
-                selection-color: #ffffff;
-                {get_font_family_css()} font-size: 12px;
-            }}
-            QLineEdit:focus {{
-                border-color: #0078d4;
-                background-color: #404040;
-            }}
-            QLineEdit::placeholder {{
-                color: #888888;
-            }}
-        """)
+        self._apply_new_project_edit_style()
         self._new_project_edit.returnPressed.connect(self._on_create_project)
         new_proj_layout.addWidget(self._new_project_edit, 1)
 
@@ -194,7 +175,7 @@ class ProjectSelectorPopup(QWidget):
         # 分隔线
         sep = QFrame(self)
         sep.setFrameShape(QFrame.HLine)
-        sep.setStyleSheet("background-color: #3d3d3d; max-height: 1px; margin: 4px 0;")
+        sep.setStyleSheet(f"background-color: {Colors.BORDER}; max-height: 1px; margin: 4px 0;")
         layout.addWidget(sep)
 
         # 项目列表滚动区域
@@ -202,31 +183,31 @@ class ProjectSelectorPopup(QWidget):
         self._scroll_area.setWidgetResizable(True)
         self._scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self._scroll_area.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.MinimumExpanding)
-        self._scroll_area.setStyleSheet("""
-            QScrollArea {
+        self._scroll_area.setStyleSheet(f"""
+            QScrollArea {{
                 border: none;
                 background: transparent;
-            }
-            QScrollArea > QWidget > QWidget {
+            }}
+            QScrollArea > QWidget > QWidget {{
                 background: transparent;
-            }
-            QScrollBar:vertical {
+            }}
+            QScrollBar:vertical {{
                 border: none;
                 background: transparent;
                 width: 12px;
                 margin: 4px;
-            }
-            QScrollBar::handle:vertical {
-                background: #555555;
+            }}
+            QScrollBar::handle:vertical {{
+                background: {Colors.BORDER};
                 border-radius: 6px;
                 min-height: 30px;
-            }
-            QScrollBar::handle:vertical:hover {
-                background: #888888;
-            }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+            }}
+            QScrollBar::handle:vertical:hover {{
+                background: {Colors.TEXT_MUTED};
+            }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
                 height: 0px;
-            }
+            }}
         """)
 
         self._content_widget = QWidget()
@@ -247,6 +228,40 @@ class ProjectSelectorPopup(QWidget):
         window_layout = QVBoxLayout(self)
         window_layout.setContentsMargins(0, 0, 0, 0)
         window_layout.addWidget(self.main_frame)
+
+    def _apply_new_project_edit_style(self):
+        """应用新建项目输入框样式"""
+        Colors.refresh()
+        self._new_project_edit.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: {Colors.CONTENT_BG};
+                color: {Colors.TEXT_PRIMARY};
+                border: 1px solid {Colors.BORDER};
+                border-radius: 4px;
+                padding: 5px 8px;
+                selection-background-color: {Colors.BORDER_ACCENT};
+                selection-color: {Colors.TEXT_PRIMARY};
+                {get_font_family_css()} {font_size_css(12)};
+            }}
+            QLineEdit:focus {{
+                border-color: {Colors.BORDER_ACCENT};
+            }}
+            QLineEdit::placeholder {{
+                color: {Colors.TEXT_MUTED};
+            }}
+        """)
+
+    def refresh_style(self):
+        """刷新弹窗主题样式"""
+        Colors.refresh()
+        self.main_frame.setStyleSheet(f"""
+            QFrame#projectPopupFrame {{
+                background-color: {Colors.CONTENT_BG};
+                border: 1px solid {Colors.BORDER};
+                border-radius: 8px;
+            }}
+        """)
+        self._apply_new_project_edit_style()
 
     def _refresh_project_list(self):
         """刷新项目列表"""

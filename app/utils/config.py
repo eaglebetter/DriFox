@@ -169,6 +169,20 @@ class Settings(QConfig):
     # 全局字体设置
     llm_font_family = ConfigItem("LLM", "FontFamily", "Segoe UI")
 
+    # ========== UI appearance ==========
+    ui_font_size = OptionsConfigItem(
+        "UI",
+        "FontSize",
+        "medium",
+        OptionsValidator(["small", "medium", "large"]),
+    )
+    ui_theme_style = OptionsConfigItem(
+        "UI",
+        "ThemeStyle",
+        "midnight",
+        OptionsValidator(["midnight", "obsidian", "forest", "graphite"]),
+    )
+
     # ========== 会话项目管理 ==========
     current_project = ConfigItem("Session", "CurrentProject", "默认项目")
 

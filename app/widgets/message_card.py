@@ -78,6 +78,7 @@ from app.core import (
 )
 from app.core.message_content import make_tool_result_block
 from app.utils.utils import get_font_family_css, get_icon
+from app.utils.design_tokens import current_theme, scale_font_size, Colors
 from app.widgets.render_helpers import (
     render_tool_block,
 )
@@ -1336,6 +1337,9 @@ class CodeWebViewer(QWebEngineView):
         except Exception:
             pass
 
+        self._viewer_font_family = font_family
+        self._viewer_font_css = f"{get_font_family_css()} font-family: {font_family}, sans-serif; font-size: {scale_font_size(14)}px;"
+
         tag_css = []
         for act, col in ACTION_COLOR_MAP.items():
             tag_css.append(
@@ -1383,6 +1387,9 @@ class CodeWebViewer(QWebEngineView):
                 scrollbar-color: #3a3f50 #1a1f2e;
             }
         """
+        theme = current_theme()
+        body_font_size = scale_font_size(14)
+        code_font_size = scale_font_size(13)
 
         html = f"""
         <!DOCTYPE html>
@@ -1393,16 +1400,16 @@ class CodeWebViewer(QWebEngineView):
             <style>
                 :root {{
                     --bg: transparent;
-                    --panel: #121722;
-                    --panel-elevated: #171d2a;
-                    --panel-soft: #1d2533;
-                    --border: #253044;
-                    --border-strong: #32425e;
-                    --text: #e8edf7;
-                    --text-secondary: #b2bfd6;
-                    --text-muted: #7f8ca3;
-                    --accent: #66c6ff;
-                    --accent-warm: #ffb65c;
+                    --panel: {theme["card_bg_solid"]};
+                    --panel-elevated: {theme["card_bg_solid"]};
+                    --panel-soft: {theme["content_bg"]};
+                    --border: {theme["border"]};
+                    --border-strong: {theme["border_accent"]};
+                    --text: {theme["text_primary"]};
+                    --text-secondary: {theme["text_secondary"]};
+                    --text-muted: {theme["text_muted"]};
+                    --accent: {theme["accent"]};
+                    --accent-warm: {theme["accent_warm"]};
                     --code-bg: rgba(15, 20, 29, 0.85);
                     --code-toolbar: rgba(28, 28, 36, 0.7);
                     --code-border: #2a3447;
@@ -1413,7 +1420,7 @@ class CodeWebViewer(QWebEngineView):
                 body {{
                     background: var(--bg) !important;
                     color: var(--text);
-                    font-family: "{font_family}", "Segoe UI", sans-serif; font-size: 14px; line-height: 1.5;
+                    {self._viewer_font_css}
                     margin: 0; 
                     padding: 6px 14px; 
                     max-height: {self.MAX_HEIGHT}px;
@@ -1548,7 +1555,7 @@ class CodeWebViewer(QWebEngineView):
                     overflow-y: hidden;
                     background: rgba(20, 25, 35, 0.7);
                     font-family: Consolas, monospace;
-                    font-size: 13px;
+                    font-size: {code_font_size}px;
                     line-height: 1.5;
                     padding: 0 10px 8px 0;
                     margin: 0;
@@ -1577,7 +1584,7 @@ class CodeWebViewer(QWebEngineView):
                     overflow: visible;
                     background: transparent !important;
                     font-family: Consolas, monospace !important;
-                    font-size: 13px !important;
+                    font-size: {code_font_size}px !important;
                     line-height: 1.5 !important;
                 }}
                 .code-line {{ padding-left: 12px !important; white-space: pre; font-family: Consolas, monospace; }}
@@ -2118,6 +2125,9 @@ class CodeWebViewer(QWebEngineView):
         reasoning 现在作为 <think> 标签嵌入在 raw_md 中（由 content_to_markdown 生成），
         与文本、工具结果按实际顺序交错排列，不再需要单独的 _reasoning_blocks 逻辑。
         """
+        # 刷新字体（响应系统字体设置变化）
+        self._refresh_viewer_font_css()
+        
         if not self._streaming:
             # 非流式模式：直接渲染，所有 <think> 都是已完成的
             return _render_markdown_to_html_cached(
@@ -2174,6 +2184,22 @@ class CodeWebViewer(QWebEngineView):
             return
         self._render_timer.start(interval)
 
+    def _refresh_viewer_font(self):
+        """刷新 viewer 字体样式，响应系统字体设置变化"""
+        if not hasattr(self, '_viewer_font_family'):
+            return
+        self._refresh_viewer_font_css()
+        self._schedule_render(immediate=True)
+
+    def _refresh_viewer_font_css(self):
+        """刷新字体 CSS 变量，供 render 使用"""
+        if not hasattr(self, '_viewer_font_family'):
+            return
+        font_family = self._viewer_font_family
+        font_css = get_font_family_css()
+        body_font_size = scale_font_size(14)
+        self._viewer_font_css = f"{font_css} font-family: {font_family}, sans-serif; font-size: {body_font_size}px;"
+
     def _perform_update(self):
         try:
             if not self.page():
@@ -2197,6 +2223,9 @@ class CodeWebViewer(QWebEngineView):
                     self._height_report_pending = True
                     self._resize_timer.start()
                 return
+
+            # 刷新字体 CSS var
+            self._refresh_viewer_font_css()
 
             _tr0 = _t.time()
             html_content = self._render_markdown_to_html(self._markdown_text)
@@ -2359,7 +2388,7 @@ class PlainTextViewer(QWidget):
                 border: none;
                 {font_css}
                 color: #F5F7FB;
-                font-size: 14px;
+                font-size: {scale_font_size(14)}px;
                 line-height: 1.5;
                 selection-background-color: rgba(102, 198, 255, 0.28);
             }}
@@ -2525,47 +2554,103 @@ class MessageCard(SimpleCardWidget):
         self._setup_ui()
 
     def _build_theme(self, role: str, error: bool = False) -> Dict[str, str]:
+        Colors.refresh()
         themes = {
             "assistant": {
                 "avatar": "AI",
                 "title": "Drifox",
                 "subtitle": "Assistant",
-                "bg": "rgba(45, 30, 20, 150)",
+                "bg": Colors.ASSISTANT_CARD_BG,
                 "border": "none",
-                "accent": "#D35400",
-                "text": "#FFD4B8",
-                "muted": "#8FA4C2",
+                "accent": Colors.ASSISTANT_CARD_ACCENT,
+                "text": Colors.ASSISTANT_CARD_TEXT,
+                "muted": Colors.ASSISTANT_CARD_MUTED,
                 "side": "left",
             },
             "welcome": {
                 "avatar": "DX",
                 "title": "Drifox",
                 "subtitle": "AI Copilot",
-                "bg": "rgba(45, 30, 20, 150)",
+                "bg": Colors.ASSISTANT_CARD_BG,
                 "border": "none",
-                "accent": "#D35400",
-                "text": "#FFD4B8",
-                "muted": "#95A4BC",
+                "accent": Colors.ASSISTANT_CARD_ACCENT,
+                "text": Colors.ASSISTANT_CARD_TEXT,
+                "muted": Colors.ASSISTANT_CARD_MUTED,
                 "side": "left",
             },
             "user": {
                 "avatar": "你",
                 "title": "你",
                 "subtitle": "Prompt",
-                "bg": "rgba(27,42,67,150)",
+                "bg": Colors.USER_CARD_BG,
                 "border": "none",
-                "accent": "#9FC3FF",
-                "text": "#F4F7FD",
-                "muted": "#B4C2D9",
+                "accent": Colors.USER_CARD_ACCENT,
+                "text": Colors.USER_CARD_TEXT,
+                "muted": Colors.USER_CARD_MUTED,
                 "side": "right",
             },
         }
         theme = dict(themes.get(role, themes["assistant"]))
         if error:
+            bg = Colors.ERROR  # 使用语义色
             theme["bg"] = "#2A1F1F"
             theme["border"] = "#A94444"
             theme["accent"] = "#FF7B7B"
         return theme
+
+    def refresh_theme(self):
+        """刷新主题颜色，响应全局主题切换"""
+        self._theme = self._build_theme(self.role, self.error)
+        self._base_bg = self._theme["bg"]
+        self._base_border = self._theme["border"]
+        self._apply_card_style()
+        # 更新头像
+        if hasattr(self, '_av_label'):
+            self._av_label.setStyleSheet( self._build_avatar_style())
+        # 更新标题
+        if hasattr(self, '_name_label'):
+            font_css = get_font_family_css()
+            self._name_label.setStyleSheet(
+                f"{font_css} font-size:14px;color:{self._theme['text']};font-weight:700;"
+            )
+        # 更新副标题
+        if hasattr(self, '_subtitle_label'):
+            font_css = get_font_family_css()
+            self._subtitle_label.setStyleSheet(
+                f"{font_css} font-size:11px;color:{self._theme['muted']};font-weight:500;letter-spacing:0.02em;"
+            )
+        # 更新时间戳
+        if hasattr(self, '_ts_label'):
+            self._ts_label.setStyleSheet(
+                f"""
+                QLabel {{
+                    font-size: 11px;
+                    color: {self._theme["muted"]};
+                    background: rgba(255,255,255,0.03);
+                    border: 1px solid rgba(255,255,255,0.06);
+                    border-radius: 9px;
+                    padding: 2px 8px;
+                }}
+                """
+            )
+        # 刷新富文本视图字体
+        if hasattr(self, 'viewer') and self.viewer and hasattr(self.viewer, '_refresh_viewer_font'):
+            self.viewer._refresh_viewer_font()
+
+    def _build_avatar_style(self):
+        font_css = get_font_family_css()
+        if self.role in ("welcome", "assistant"):
+            return ""
+        return f"""
+            QLabel {{
+                {font_css} font-size: 12px;
+                color: #FFFFFF;
+                font-weight: 700;
+                background: {self._theme["accent"]};
+                border: 1px solid rgba(255,255,255,0.12);
+                border-radius: 15px;
+            }}
+        """
 
     def _setup_ui(self):
         main = QVBoxLayout(self)
@@ -2576,6 +2661,7 @@ class MessageCard(SimpleCardWidget):
         top.setSpacing(10)
 
         av = QLabel(self)
+        self._av_label = av
         if self.role in ("welcome", "assistant"):
             # 品牌图标头像
             av_icon = get_icon("drifox")
@@ -2586,19 +2672,7 @@ class MessageCard(SimpleCardWidget):
         else:
             # user 和其他：圆形文字头像
             av.setText(self._theme["avatar"])
-            font_css = get_font_family_css()
-            av.setStyleSheet(
-                f"""
-                QLabel {{
-                    {font_css} font-size: 12px;
-                    color: #FFFFFF;
-                    font-weight: 700;
-                    background: {self._theme["accent"]};
-                    border: 1px solid rgba(255,255,255,0.12);
-                    border-radius: 15px;
-                }}
-                """
-            )
+            av.setStyleSheet(self._build_avatar_style())
             av.setFixedSize(30, 30)
             av.setAlignment(Qt.AlignCenter)
 
@@ -2609,10 +2683,12 @@ class MessageCard(SimpleCardWidget):
 
         font_css = get_font_family_css()
         nm_l = QLabel(self._theme["title"], self)
+        self._name_label = nm_l
         nm_l.setStyleSheet(
             f"{font_css} font-size:14px;color:{self._theme['text']};font-weight:700;"
         )
         sub_l = QLabel(self._theme["subtitle"], self)
+        self._subtitle_label = sub_l
         sub_l.setStyleSheet(
             f"{font_css} font-size:11px;color:{self._theme['muted']};font-weight:500;letter-spacing:0.02em;"
         )
@@ -2623,6 +2699,7 @@ class MessageCard(SimpleCardWidget):
         top.addWidget(title_wrap)
         if self.role != "user":
             ts = QLabel(self.timestamp, self)
+            self._ts_label = ts
             ts.setStyleSheet(
                 f"""
                 QLabel {{
