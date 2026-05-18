@@ -24,7 +24,7 @@ from qfluentwidgets import (
 from app.constants import (
     PROVIDER_ICONS,
 )
-from app.utils.design_tokens import Colors
+from app.utils.design_tokens import Colors, Sizes, ButtonStyles
 from app.utils.utils import get_icon, get_unified_font
 
 
@@ -264,16 +264,12 @@ class ProviderItem(QWidget):
         btn_layout.setSpacing(4)
         self.editButton = ToolButton(FluentIcon.EDIT)
         self.removeButton = ToolButton(FluentIcon.CLOSE)
-        self.editButton.setFixedSize(28, 28)
-        self.removeButton.setFixedSize(28, 28)
-        self.editButton.setIconSize(QSize(14, 14))
-        self.removeButton.setIconSize(QSize(14, 14))
-        self.editButton.setStyleSheet(
-            "background-color: transparent; border-radius: 4px;"
-        )
-        self.removeButton.setStyleSheet(
-            "background-color: transparent; border-radius: 4px;"
-        )
+        self.editButton.setFixedSize(Sizes.TOOL_BUTTON_SZ)
+        self.removeButton.setFixedSize(Sizes.TOOL_BUTTON_SZ)
+        self.editButton.setIconSize(Sizes.TOOL_ICON_SZ)
+        self.removeButton.setIconSize(Sizes.TOOL_ICON_SZ)
+        self.editButton.setStyleSheet(ButtonStyles.tool_button())
+        self.removeButton.setStyleSheet(ButtonStyles.tool_button())
         btn_layout.addWidget(self.editButton)
         btn_layout.addWidget(self.removeButton)
         main_layout.addWidget(btn_widget, 0, Qt.AlignRight | Qt.AlignVCenter)
@@ -318,7 +314,7 @@ class ProviderListSettingCard(ExpandSettingCard):
         self.title = title
         self.configItem = configItem
         self.defaultProviderItem = defaultProviderItem
-        self.addProviderButton = PushButton("添加服务商", self, FluentIcon.ADD)
+        self.addProviderButton = PushButton("添加", self, FluentIcon.ADD)
         self.providers = (
             qconfig.get(configItem).copy()
             if isinstance(qconfig.get(configItem), dict)

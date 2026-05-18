@@ -28,7 +28,7 @@ from qfluentwidgets import (
     ComboBox,
     PrimaryPushButton,
 )
-from app.utils.design_tokens import ItemStyles
+from app.utils.design_tokens import ItemStyles, Sizes, ButtonStyles
 
 
 class ListValidator(ConfigValidator):
@@ -55,8 +55,8 @@ class FontItem(QWidget):
         self.fontLabel = QLabel(font, self)
         self.removeButton = ToolButton(FluentIcon.CLOSE, self)
 
-        self.removeButton.setFixedSize(39, 29)
-        self.removeButton.setIconSize(QSize(12, 12))
+        self.removeButton.setFixedSize(Sizes.TOOL_BUTTON_SZ)
+        self.removeButton.setIconSize(Sizes.TOOL_ICON_SZ)
         self.radioButton.setFixedSize(32, 29)
 
         self.setFixedHeight(53)
@@ -231,8 +231,8 @@ class PackageItem(QWidget):
         self.packageLabel = QLabel(package, self)
         self.removeButton = ToolButton(FluentIcon.CLOSE, self)
 
-        self.removeButton.setFixedSize(39, 29)
-        self.removeButton.setIconSize(QSize(12, 12))
+        self.removeButton.setFixedSize(Sizes.TOOL_BUTTON_SZ)
+        self.removeButton.setIconSize(Sizes.TOOL_ICON_SZ)
 
         self.setFixedHeight(53)
         self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
@@ -261,16 +261,16 @@ class SkillItem(QWidget):
         self.nameLabel = QLabel(name, self)
         self.descLabel = QLabel(description, self)
         from qfluentwidgets import SwitchButton
+        from app.utils.design_tokens import SwitchStyles
 
         self.switch = SwitchButton(self)
+        SwitchStyles.configure(self.switch)
+        self.switch.setChecked(is_enabled)
 
         self.nameLabel.setFixedWidth(140)
         self.nameLabel.setObjectName("titleLabel")
         self.descLabel.setStyleSheet("color: #888888; font-size: 12px;")
         self.descLabel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.switch.setOnText("")
-        self.switch.setOffText("")
-        self.switch.setChecked(is_enabled)
 
         self.setFixedHeight(53)
         self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
@@ -367,7 +367,7 @@ class SkillListSettingCard(ExpandSettingCard):
         self.viewLayout.setAlignment(Qt.AlignTop)
         self.viewLayout.setContentsMargins(8, 0, 8, 0)
 
-        self.refreshButton = PushButton("重新检测", self, FluentIcon.SYNC)
+        self.refreshButton = PushButton("刷新", self, FluentIcon.SYNC)
         self.refreshButton.setCursor(Qt.PointingHandCursor)
         self.refreshButton.clicked.connect(self._refresh_skills)
         self.addWidget(self.refreshButton)

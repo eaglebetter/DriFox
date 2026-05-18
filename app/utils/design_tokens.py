@@ -84,13 +84,18 @@ class Sizes:
     ICON_SM = QSize(12, 12)
     ICON_MD = QSize(16, 16)
     ICON_LG = QSize(20, 20)
-    
+
     BUTTON_H_SM = 29  # 小按钮高度
     BUTTON_H_MD = 36  # 中按钮高度
-    
+
     CARD_MIN_H = 53   # 列表项最小高度
-    
-    TOOL_BUTTON_SZ = QSize(39, 29)
+
+    # ToolButton 统一规格
+    TOOL_BUTTON_SZ = QSize(28, 28)
+    TOOL_ICON_SZ = QSize(14, 14)
+
+    # SwitchButton 统一规格
+    SWITCH_WIDTH = 50
 
 
 # ============ CSS 模板 ============
@@ -226,6 +231,132 @@ class ItemStyles:
             background-color: rgba(102, 198, 255, 0.35); 
             border-radius: 4px; 
             padding: 2px 8px;
+        """
+
+
+class ButtonStyles:
+    """按钮统一样式模板"""
+
+    @staticmethod
+    def tool_button() -> str:
+        """ToolButton 透明背景样式"""
+        return "background-color: transparent; border-radius: 4px;"
+
+    @staticmethod
+    def primary_action() -> str:
+        """主操作按钮样式（用于 ManualUpdateCard 等）"""
+        return f"""
+            PrimaryPushButton {{
+                background-color: #0078d4;
+                color: #ffffff;
+                border: none;
+                border-radius: 5px;
+                padding: 5px 16px;
+                font-size: 13px;
+            }}
+            PrimaryPushButton:hover {{
+                background-color: #1a86d9;
+            }}
+            PrimaryPushButton:pressed {{
+                background-color: #006cbd;
+            }}
+            PrimaryPushButton:disabled {{
+                background-color: #444;
+                color: #888;
+            }}
+        """
+
+
+class SwitchStyles:
+    """开关统一样式模板"""
+
+    @staticmethod
+    def configure(switch) -> None:
+        """统一配置 SwitchButton：无文字标签 + 固定宽度"""
+        switch.setOnText("")
+        switch.setOffText("")
+        switch.setFixedWidth(Sizes.SWITCH_WIDTH)
+
+
+class ComboBoxStyles:
+    """下拉框统一样式模板"""
+
+    @staticmethod
+    def dark_combo() -> str:
+        """深色主题下拉框样式"""
+        return f"""
+            QComboBox {{
+                color: #e8e8e8;
+                background-color: {Colors.CONTENT_BG};
+                border: 1px solid #4a4a4e;
+                border-radius: 5px;
+                padding: 5px 12px 5px 10px;
+                min-height: 28px;
+            }}
+            QComboBox:hover {{
+                border: 1px solid #0078d4;
+                background-color: #333338;
+            }}
+            QComboBox:focus {{
+                border: 1px solid #0078d4;
+            }}
+            QComboBox::drop-down {{
+                border: none;
+                width: 20px;
+                subcontrol-origin: padding;
+                subcontrol-position: right center;
+            }}
+            QComboBox::down-arrow {{
+                image: none;
+                border-left: 5px solid transparent;
+                border-right: 5px solid transparent;
+                border-top: 5px solid #888888;
+                width: 0px;
+                height: 0px;
+                margin-right: 4px;
+            }}
+            QComboBox::down-arrow:hover {{
+                border-top-color: #0078d4;
+            }}
+        """
+
+    @staticmethod
+    def dark_combo_dropdown() -> str:
+        """深色主题下拉框弹出列表样式"""
+        return f"""
+            QAbstractItemView {{
+                color: #e8e8e8;
+                background-color: {Colors.CONTENT_BG};
+                border: 1px solid #4a4a4e;
+                border-radius: 6px;
+                padding: 4px;
+                outline: none;
+                show-decoration-selected: 1;
+            }}
+            QAbstractItemView::item {{
+                padding: 6px 14px 6px 12px;
+                min-height: 36px;
+                border-radius: 3px;
+            }}
+            QAbstractItemView::item:hover {{
+                background-color: #3a3a3e;
+            }}
+            QAbstractItemView::item:selected {{
+                background-color: #0078d4;
+                color: white;
+            }}
+            QScrollBar:vertical {{
+                background: {Colors.CONTENT_BG};
+                border: none;
+                width: 14px;
+                margin: 4px 2px 4px 2px;
+            }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+                height: 0px;
+            }}
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{
+                background: none;
+            }}
         """
 
 

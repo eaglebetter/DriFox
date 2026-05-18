@@ -159,8 +159,16 @@ class ChatBackend(QObject):
         
         # 3. 创建 HookManager（必须在 create_session 之前）
         self._hook_manager = HookManager(self._thread_pool)
+        # UI 有效性标志：当 UI 窗口关闭时应设为 False，防止 hook 回调访问已销毁的 UI
+        self._ui_valid = True
+        
         # Hook 完成后，把输出添加到上下文
         def on_hook_finished(event_name: str, output: str, success: bool):
+            # 检查 UI 是否仍然有效，防止窗口关闭后 hook 回调访问已销毁的 UI
+            if not getattr(self, '_ui_valid', True):
+                logger.debug(f"[HookManager] Hook callback skipped: UI already closed")
+                return
+            
             logger.info(f"[HookManager] Hook callback: event={event_name}, success={success}，output={output[:100]}...")
             
             # 只有成功执行的 hook 才添加到消息列表

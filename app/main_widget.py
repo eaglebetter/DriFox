@@ -587,6 +587,9 @@ class OpenAIChatToolWindow(ToolWindow):
             self._connect_opacity_signal()
             return
         self._session_initialized = True
+        # 标记正在初始化，防止窗口在初始化完成前被关闭导致竞态条件
+        self._initialization_in_progress = True
+        
         QTimer.singleShot(0, self._load_agent_list)
         # 如果有分支数据，延迟调用分支会话处理，避免与 _restore_latest_or_create_session 冲突
         if getattr(self, "_branch_session_data", None):
@@ -597,8 +600,15 @@ class OpenAIChatToolWindow(ToolWindow):
         QTimer.singleShot(100, self._load_model_configs)
         # 初始化当前项目的工作目录
         QTimer.singleShot(200, self._sync_working_directory)
+        # 初始化完成后解除保护
+        QTimer.singleShot(300, self._on_initialization_complete)
         self._connect_opacity_signal()
         super().showEvent(event)
+    
+    def _on_initialization_complete(self):
+        """初始化完成后调用，解除保护标志"""
+        self._initialization_in_progress = False
+        logger.debug("[OpenAIChatToolWindow] Initialization complete")
 
     def eventFilter(self, obj, event):
         """处理 viewport 大小变化，调整背景图片"""
@@ -652,6 +662,11 @@ class OpenAIChatToolWindow(ToolWindow):
 
     def _apply_branch_or_create_session(self):
         """处理分支会话或创建新会话"""
+        # 检查窗口是否仍然有效，防止在初始化期间窗口被关闭后继续执行
+        if not self.isVisible() and getattr(self, '_initialization_in_progress', False):
+            logger.debug("[OpenAIChatToolWindow] Window closed before branch session creation, skipping")
+            return
+        
         branch_data = getattr(self, "_branch_session_data", None)
         if branch_data:
             # 使用分支数据创建会话
@@ -665,6 +680,11 @@ class OpenAIChatToolWindow(ToolWindow):
 
     def _create_branched_session(self, messages: List[Dict], name: str):
         """创建分支会话并渲染消息"""
+        # 检查窗口是否仍然有效，防止在初始化期间窗口被关闭后继续执行
+        if not self.isVisible() and getattr(self, '_initialization_in_progress', False):
+            logger.debug("[OpenAIChatToolWindow] Window closed before branched session creation, skipping")
+            return
+        
         logger.info("[Branch] 开始创建分支会话")
 
         # 停止当前对话并清理
@@ -799,7 +819,7 @@ class OpenAIChatToolWindow(ToolWindow):
         self._hook_edit_card.content_layout.addWidget(self._hook_edit_popup)
         self._hook_edit_card.set_save_button_handler(self._hook_edit_popup._on_save)
         self._hook_edit_card.setVisible(False)
-        self._hook_edit_card.closed.connect(self._restore_after_system_close)
+        self._hook_edit_card.closed.connect(self._on_hook_edit_card_closed)
         layout.addWidget(self._hook_edit_card)
 
         # 服务商编辑卡片
@@ -814,7 +834,7 @@ class OpenAIChatToolWindow(ToolWindow):
         save_handler = self._provider_edit_popup._on_save
         self._provider_edit_card.set_save_button_handler(save_handler)
         self._provider_edit_card.setVisible(False)
-        self._provider_edit_card.closed.connect(self._restore_after_system_close)
+        self._provider_edit_card.closed.connect(self._on_provider_edit_card_closed)
         layout.addWidget(self._provider_edit_card)
 
         # MCP 编辑卡片
@@ -822,7 +842,7 @@ class OpenAIChatToolWindow(ToolWindow):
         self._mcp_edit_card.setFixedHeight(350)
         self._mcp_edit_popup = None
         self._mcp_edit_card.setVisible(False)
-        self._mcp_edit_card.closed.connect(self._restore_after_system_close)
+        self._mcp_edit_card.closed.connect(self._on_mcp_edit_card_closed)
         layout.addWidget(self._mcp_edit_card)
 
         self._todo_floating_widget = TodoFloatingWidget(self)
@@ -1293,6 +1313,7 @@ class OpenAIChatToolWindow(ToolWindow):
         # 关闭模型选择器popup，确保下次打开重新加载数据
         if hasattr(self, '_model_selector_popup') and self._model_selector_popup:
             self._model_selector_popup.close()
+        self._restore_after_system_close()
 
     def _show_provider_add_card(self):
         """显示添加服务商卡片"""
@@ -1355,6 +1376,7 @@ class OpenAIChatToolWindow(ToolWindow):
         """Hook 编辑关闭回调"""
         self._hook_edit_card.hide()
         self._settings_popup.show()
+        self._restore_after_system_close()
 
     def _show_provider_edit_card(self, provider_name: str, provider_info: dict):
         """显示编辑服务商卡片"""
@@ -1379,46 +1401,6 @@ class OpenAIChatToolWindow(ToolWindow):
             lambda: self._provider_edit_popup._on_save()
         )
         self._provider_edit_card.show()
-
-    # ========== Hook 编辑卡片 ==========
-
-    def _show_hook_add_card(self):
-        """显示添加 Hook 卡片"""
-        from app.widgets.hook_setting_card import HookEditCard
-        self._settings_popup.hide()
-        self._hook_edit_card.set_title("➕ 添加 Hook")
-        # 重新创建 HookEditCard
-        self._hook_edit_popup = HookEditCard(parent=self)
-        self._hook_edit_popup.saved.connect(self._on_hook_edit_saved)
-        self._hook_edit_popup.closed.connect(self._on_hook_edit_closed)
-        while self._hook_edit_card.content_layout.count():
-            item = self._hook_edit_card.content_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
-        self._hook_edit_card.content_layout.addWidget(self._hook_edit_popup)
-        self._hook_edit_card.set_save_button_handler(
-            lambda: self._hook_edit_popup._on_save()
-        )
-        self._hook_edit_card.show()
-
-    def _on_hook_edit_saved(self, values: dict):
-        """Hook 保存回调"""
-        self._hook_edit_card.hide()
-        self._settings_popup.show()
-        # 通过 HookListSettingCard 添加 hook
-        if hasattr(self._settings_popup, 'hookListCard'):
-            self._settings_popup.hookListCard._add_hook(
-                event=values["event"],
-                command=values["command"],
-                matcher=values["matcher"],
-                hook_type=values["type"],
-                enabled=values["enabled"]
-            )
-
-    def _on_hook_edit_closed(self):
-        """Hook 编辑关闭回调"""
-        self._hook_edit_card.hide()
-        self._settings_popup.show()
 
     # ========== MCP 编辑卡片 ==========
 
@@ -1473,6 +1455,25 @@ class OpenAIChatToolWindow(ToolWindow):
         """MCP 编辑关闭回调"""
         self._mcp_edit_card.hide()
         self._settings_popup.show()
+        self._restore_after_system_close()
+
+    def _on_hook_edit_card_closed(self):
+        """Hook 编辑卡片（SystemCardFrame）关闭回调 → 回到设置面板"""
+        self._hook_edit_card.hide()
+        self._settings_popup.show()
+        self._restore_after_system_close()
+
+    def _on_provider_edit_card_closed(self):
+        """服务商编辑卡片（SystemCardFrame）关闭回调 → 回到设置面板"""
+        self._provider_edit_card.hide()
+        self._settings_popup.show()
+        self._restore_after_system_close()
+
+    def _on_mcp_edit_card_closed(self):
+        """MCP 编辑卡片（SystemCardFrame）关闭回调 → 回到设置面板"""
+        self._mcp_edit_card.hide()
+        self._settings_popup.show()
+        self._restore_after_system_close()
 
     def _hide_main_popups(self):
         """隐藏主要的悬浮面板（互斥显示）
@@ -1921,6 +1922,11 @@ class OpenAIChatToolWindow(ToolWindow):
         InfoBar.success("已保存", "配置已保存到本地。", parent=self, duration=1500, position=InfoBarPosition.BOTTOM)
 
     def _load_model_configs(self):
+        # 检查窗口是否仍然有效，防止在初始化期间窗口被关闭后继续执行
+        if getattr(self, '_initialization_in_progress', False) and not self.isVisible():
+            logger.debug("[OpenAIChatToolWindow] Window closed before loading model configs, skipping")
+            return
+        
         saved_model = self.cfg.llm_selected_model.value
         old_provider = self._current_provider_name
 
@@ -1957,6 +1963,11 @@ class OpenAIChatToolWindow(ToolWindow):
 
     def _load_agent_list(self):
         """加载智能体列表到按钮组（仅显示 primary agents）"""
+        # 检查窗口是否仍然有效，防止在初始化期间窗口被关闭后继续执行
+        if getattr(self, '_initialization_in_progress', False) and not self.isVisible():
+            logger.debug("[OpenAIChatToolWindow] Window closed before loading agent list, skipping")
+            return
+        
         if not self.backend.agent_manager:
             return
         if not hasattr(self, "_agent_btn_group"):
@@ -2057,6 +2068,11 @@ class OpenAIChatToolWindow(ToolWindow):
                 self.current_model_btn.setToolTip(f"{agent.name}: {agent.description}\nMode: {mode}, {hidden}")
 
     def _create_new_session(self):
+        # 检查窗口是否仍然有效，防止在初始化期间窗口被关闭后继续执行
+        if getattr(self, '_initialization_in_progress', False) and not self.isVisible():
+            logger.debug("[OpenAIChatToolWindow] Window closed before session creation, skipping")
+            return
+        
         if self._is_auto_loop_running:
             InfoBar.warning("AutoLoop", "运行中无法新建会话，请先停止 AutoLoop", parent=self, duration=3000, position=InfoBarPosition.BOTTOM)
             return
@@ -5572,6 +5588,16 @@ class OpenAIChatToolWindow(ToolWindow):
         return None
 
     def closeEvent(self, event):
+        # 标记窗口正在关闭，防止 hook 回调访问已销毁的 UI
+        if hasattr(self, 'backend') and self.backend:
+            try:
+                self.backend.set_ui_valid(False)
+            except Exception:
+                pass
+        
+        # 标记初始化已完成（防止窗口在初始化期间关闭导致竞态条件）
+        self._initialization_in_progress = False
+        
         try:
             self._auto_save_current_session()
         except Exception:
