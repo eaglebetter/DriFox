@@ -1464,6 +1464,7 @@ class OpenAIChatToolWindow(ToolWindow):
         self._mcp_edit_card.set_save_button_handler(
             lambda: self._mcp_edit_popup._on_save()
         )
+        self._setup_mcp_edit_mode_buttons()
         self._mcp_edit_card.show()
 
     def _show_mcp_edit_card(self, name: str, server_data: dict):
@@ -1481,7 +1482,30 @@ class OpenAIChatToolWindow(ToolWindow):
         self._mcp_edit_card.set_save_button_handler(
             lambda: self._mcp_edit_popup._on_save()
         )
+        self._setup_mcp_edit_mode_buttons()
         self._mcp_edit_card.show()
+
+    def _setup_mcp_edit_mode_buttons(self):
+        """设置 MCP 编辑卡头的模式切换按钮"""
+        self._mcp_edit_popup.modeChanged.connect(self._refresh_mcp_mode_buttons)
+        self._refresh_mcp_mode_buttons(self._mcp_edit_popup._json_mode)
+
+    def _refresh_mcp_mode_buttons(self, is_json: bool):
+        """刷新 MCP 编辑卡头的模式切换按钮状态"""
+        self._mcp_edit_card.set_mode_buttons([
+            {"label": "表单", "active": not is_json, "handler": lambda: self._try_toggle_to_form()},
+            {"label": "JSON", "active": is_json, "handler": lambda: self._try_toggle_to_json()},
+        ])
+
+    def _try_toggle_to_form(self):
+        if self._mcp_edit_popup and not self._mcp_edit_popup._json_mode:
+            return
+        self._mcp_edit_popup._toggle_mode()
+
+    def _try_toggle_to_json(self):
+        if self._mcp_edit_popup and self._mcp_edit_popup._json_mode:
+            return
+        self._mcp_edit_popup._toggle_mode()
 
     def _on_mcp_edit_saved(self, server_data: dict):
         """MCP 编辑保存回调"""

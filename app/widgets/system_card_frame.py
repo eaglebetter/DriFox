@@ -62,6 +62,11 @@ class SystemCardFrame(QFrame):
         self._count_label.setVisible(False)
         self._header_layout.addWidget(self._count_label)
 
+        # 模式切换按钮容器（如 JSON/表单）
+        self._mode_buttons_container = QHBoxLayout()
+        self._mode_buttons_container.setSpacing(4)
+        self._header_layout.addLayout(self._mode_buttons_container)
+
         # 标签按钮容器
         self._tab_buttons_container = QHBoxLayout()
         self._tab_buttons_container.setSpacing(1)
@@ -265,6 +270,28 @@ class SystemCardFrame(QFrame):
         btn.setToolTip("导入会话")
         btn.clicked.connect(handler)
         self._extra_buttons_container.addWidget(btn)
+
+    def set_mode_buttons(self, buttons: list):
+        """
+        设置头部模式切换按钮列表。
+        buttons: [{"label": "显示文本", "active": bool, "handler": callable}, ...]
+        """
+        while self._mode_buttons_container.count():
+            item = self._mode_buttons_container.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        for i, btn_data in enumerate(buttons):
+            btn = QLabel(btn_data["label"], self)
+            btn.setFont(get_unified_font(11))
+            btn.setCursor(Qt.PointingHandCursor)
+            active = btn_data.get("active", False)
+            btn.setStyleSheet(
+                f"color: {Colors.TEXT_ACCENT if active else Colors.TEXT_SECONDARY}; "
+                f"font-weight: {'bold' if active else 'normal'};"
+            )
+            btn.mousePressEvent = lambda e, h=btn_data["handler"]: h()
+            self._mode_buttons_container.addWidget(btn)
 
     def set_save_button_handler(self, handler):
         while self._extra_buttons_container.count():

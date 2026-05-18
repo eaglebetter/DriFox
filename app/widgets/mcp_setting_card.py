@@ -164,27 +164,15 @@ class MCPEditCard(QWidget):
         }
         return json.dumps(result, indent=2, ensure_ascii=False)
 
+    # 模式切换信号（通知外层更新头部按钮）
+    modeChanged = pyqtSignal(bool)  # True=JSON模式, False=表单模式
+
     def _init_ui(self):
         self.setStyleSheet(EDIT_CARD_STYLE)
 
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(4, 2, 4, 2)
         main_layout.setSpacing(6)
-
-        # ── 模式切换按钮行 ──
-        mode_row = QHBoxLayout()
-        mode_row.setSpacing(8)
-        mode_label = BodyLabel("编辑模式:")
-        self.jsonToggle = PushButton("JSON 模式", self)
-        self.jsonToggle.setFixedWidth(100)
-        self.jsonToggle.clicked.connect(self._toggle_mode)
-        self._mode_hint = QLabel("表单模式：分字段填写", self)
-        self._mode_hint.setStyleSheet("color: #888; font-size: 11px;")
-        mode_row.addWidget(mode_label)
-        mode_row.addWidget(self.jsonToggle)
-        mode_row.addWidget(self._mode_hint, 1)
-        mode_row.addStretch()
-        main_layout.addLayout(mode_row)
 
         # ── QStackedWidget：表单页(0) / JSON页(1) ──
         self._stack = QStackedWidget()
@@ -304,8 +292,6 @@ class MCPEditCard(QWidget):
         self._json_mode = not self._json_mode
         if self._json_mode:
             # 切到 JSON 模式：同步表单数据到 JSON 编辑器（标准格式）
-            self.jsonToggle.setText("表单模式")
-            self._mode_hint.setText("JSON 模式：直接编辑 JSON 配置")
             form_data = self._collect_form_data()
             if form_data:
                 preview = self._build_json_preview()
@@ -313,8 +299,6 @@ class MCPEditCard(QWidget):
             self._stack.setCurrentIndex(1)
         else:
             # 切回表单模式：从 JSON 解析回表单（支持两种格式）
-            self.jsonToggle.setText("JSON 模式")
-            self._mode_hint.setText("表单模式：分字段填写")
             json_text = self.jsonEdit.toPlainText().strip()
             if json_text:
                 try:
@@ -326,10 +310,10 @@ class MCPEditCard(QWidget):
                                     parent=self.window(), duration=3000,
                                     position=InfoBarPosition.BOTTOM)
                     self._json_mode = True  # 保持 JSON 模式
-                    self.jsonToggle.setText("JSON 模式")
-                    self._mode_hint.setText("JSON 模式：直接编辑 JSON 配置")
+                    self._stack.setCurrentIndex(1)
                     return
             self._stack.setCurrentIndex(0)
+        self.modeChanged.emit(self._json_mode)
 
     def _collect_form_data(self) -> dict:
         """收集表单当前值，返回 dict"""
@@ -671,6 +655,13 @@ class MCPListSettingCard(ExpandSettingCard):
         """后台连接单个服务器（不阻塞 UI）"""
         mgr = self._get_mcp_manager()
         if not self.cfg.mcp_enabled.value:
+            return
+
+        # 防重复：已连接的不再触发
+        status_list = mgr.get_status()
+        already = any(st["name"] == name and st["connected"] for st in status_list)
+        if already:
+            logger.debug(f"[MCP] '{name}' 已连接，跳过热连接")
             return
 
         def on_done(n, success, error_msg=""):
