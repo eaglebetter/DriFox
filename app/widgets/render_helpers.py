@@ -239,7 +239,10 @@ def render_tool_block(
     tool_call_id: str = None,
 ) -> str:
     """渲染工具块，参数横向表格展示（左列参数名，右列结果值）"""
-    
+
+    # 检测是否为 MCP 工具（mcp__server__tool）
+    is_mcp_tool = tool_name.startswith("mcp__")
+
     # 检测是否为子智能体任务（包括旧的 task 和新的 task_batch）
     is_sub_agent_task = tool_name in ("task", "task_batch")
 
@@ -253,8 +256,16 @@ def render_tool_block(
             f'margin-left: 6px;">{status_text}</span>'
         )
 
-    icon = "🤖" if is_sub_agent_task else "🔧"
-    title_color = "#9C27B0" if is_sub_agent_task else "#FFA500"
+    if is_mcp_tool:
+        icon = "🌐"
+        title_color = "#00BCD4"
+        tool_name = "__".join(tool_name.split("__")[2:])
+    elif is_sub_agent_task:
+        icon = "🤖"
+        title_color = "#9C27B0"
+    else:
+        icon = "🔧"
+        title_color = "#FFA500"
 
     # 子智能体任务特殊处理
     if is_sub_agent_task:

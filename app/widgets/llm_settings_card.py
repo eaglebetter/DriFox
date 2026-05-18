@@ -11,6 +11,7 @@ from PyQt5.QtWidgets import (
 )
 from loguru import logger
 
+from app.widgets.mcp_setting_card import MCPListSettingCard
 from app.widgets.provider_setting_card import ProviderListSettingCard
 from app.widgets.system_card_frame import SystemCardFrame
 
@@ -147,6 +148,15 @@ class LLMSettingsCard(SystemCardFrame):
             hook_manager=hook_manager,
         )
         content_layout.addWidget(self.hookListCard)
+
+        # MCP 服务器管理
+        self.mcpListCard = MCPListSettingCard(
+            icon=get_icon("MCP"),
+            title="MCP 服务器",
+            content="管理 MCP Server 连接",
+            parent=self,
+        )
+        content_layout.addWidget(self.mcpListCard)
 
         # 全局字体设置
         self._setup_font_card()

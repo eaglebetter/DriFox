@@ -178,6 +178,10 @@ class Settings(QConfig):
         "LLM", "APIPort", 8765, RangeValidator(1024, 65535)
     )
 
+    # ========== MCP 服务器配置 ==========
+    mcp_servers = ConfigItem("MCP", "Servers", [], ListDictValidator())
+    mcp_enabled = ConfigItem("MCP", "Enabled", True, BoolValidator())
+
     # ========== 云组件库API ==========
     SERPAPI_KEY = ConfigItem(
         "CloudAPI",
