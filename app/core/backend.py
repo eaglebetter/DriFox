@@ -193,11 +193,12 @@ class ChatBackend(QObject):
                     # 添加新消息
                     session.add_assistant_message(hook_output)
                 
-                # 发送消息给前端显示
-                self.message_received.emit({
-                    "role": "assistant",
-                    "content": hook_output
-                })
+                # 发送消息给前端显示（仅在 UI 有效时发送，防止窗口关闭后 emit 导致 segfault）
+                if getattr(self, '_ui_valid', True):
+                    self.message_received.emit({
+                        "role": "assistant",
+                        "content": hook_output
+                    })
                 logger.info(f"[HookManager] Hook added to messages: {event_name}")
         self._hook_manager.set_on_finished_callback(on_hook_finished)
         

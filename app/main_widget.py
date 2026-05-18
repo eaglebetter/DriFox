@@ -172,6 +172,8 @@ class OpenAIChatToolWindow(ToolWindow):
         self.cfg = Settings.get_instance()
         # 初始化当前项目（在 backend.initialize 之前）
         self._current_project = self.cfg.current_project.value or "默认项目"  # 当前项目
+        # 标记窗口是否已销毁，防止异步回调访问已销毁的 widget
+        self._is_destroyed = False
         # 自动检查更新（启动时静默检查）
         self._init_auto_update_check()
         # 创建后端（后端自己创建所有组件）- 需要在 super() 之前创建并初始化
@@ -590,25 +592,51 @@ class OpenAIChatToolWindow(ToolWindow):
         # 标记正在初始化，防止窗口在初始化完成前被关闭导致竞态条件
         self._initialization_in_progress = True
         
-        QTimer.singleShot(0, self._load_agent_list)
+        # 使用 _safe_timer_call 包装所有异步回调，在 widget 销毁后自动跳过
+        QTimer.singleShot(0, lambda: self._safe_timer_call(self._load_agent_list))
         # 如果有分支数据，延迟调用分支会话处理，避免与 _restore_latest_or_create_session 冲突
         if getattr(self, "_branch_session_data", None):
-            QTimer.singleShot(50, self._apply_branch_or_create_session)
+            QTimer.singleShot(50, lambda: self._safe_timer_call(self._apply_branch_or_create_session))
         else:
-            QTimer.singleShot(0, self._create_new_session)
+            QTimer.singleShot(0, lambda: self._safe_timer_call(self._create_new_session))
 
-        QTimer.singleShot(100, self._load_model_configs)
+        QTimer.singleShot(100, lambda: self._safe_timer_call(self._load_model_configs))
         # 初始化当前项目的工作目录
-        QTimer.singleShot(200, self._sync_working_directory)
+        QTimer.singleShot(200, lambda: self._safe_timer_call(self._sync_working_directory))
         # 初始化完成后解除保护
-        QTimer.singleShot(300, self._on_initialization_complete)
+        QTimer.singleShot(300, lambda: self._safe_timer_call(self._on_initialization_complete))
         self._connect_opacity_signal()
         super().showEvent(event)
-    
+
     def _on_initialization_complete(self):
         """初始化完成后调用，解除保护标志"""
         self._initialization_in_progress = False
         logger.debug("[OpenAIChatToolWindow] Initialization complete")
+
+    def _safe_timer_call(self, func):
+        """安全执行 QTimer.singleShot 回调，在 widget 已销毁时自动跳过
+        
+        防止 QTimer 回调在窗口关闭(deleteLater)后执行导致 segfault。
+        必须在所有通过 QTimer.singleShot 调度的回调中使用。
+        """
+        if getattr(self, '_is_destroyed', False):
+            logger.debug(f"[OpenAIChatToolWindow] Skipping timer callback {func.__name__}: widget destroyed")
+            return
+        try:
+            from PyQt5 import sip
+            if sip.isdeleted(self):
+                logger.debug(f"[OpenAIChatToolWindow] Skipping timer callback {func.__name__}: C++ object deleted")
+                return
+        except Exception:
+            pass
+        try:
+            func()
+        except RuntimeError as e:
+            # PyQt5 在访问已删除 C++ 对象时抛出 RuntimeError
+            if 'C++' in str(e) or 'wrapped C/C++' in str(e):
+                logger.debug(f"[OpenAIChatToolWindow] Skipping timer callback {func.__name__}: {e}")
+                return
+            raise
 
     def eventFilter(self, obj, event):
         """处理 viewport 大小变化，调整背景图片"""
@@ -663,9 +691,16 @@ class OpenAIChatToolWindow(ToolWindow):
     def _apply_branch_or_create_session(self):
         """处理分支会话或创建新会话"""
         # 检查窗口是否仍然有效，防止在初始化期间窗口被关闭后继续执行
-        if not self.isVisible() and getattr(self, '_initialization_in_progress', False):
-            logger.debug("[OpenAIChatToolWindow] Window closed before branch session creation, skipping")
+        if getattr(self, '_is_destroyed', False):
+            logger.debug("[OpenAIChatToolWindow] Window destroyed before branch session creation, skipping")
             return
+        try:
+            from PyQt5 import sip
+            if sip.isdeleted(self):
+                logger.debug("[OpenAIChatToolWindow] C++ object deleted before branch session creation, skipping")
+                return
+        except Exception:
+            pass
         
         branch_data = getattr(self, "_branch_session_data", None)
         if branch_data:
@@ -681,9 +716,16 @@ class OpenAIChatToolWindow(ToolWindow):
     def _create_branched_session(self, messages: List[Dict], name: str):
         """创建分支会话并渲染消息"""
         # 检查窗口是否仍然有效，防止在初始化期间窗口被关闭后继续执行
-        if not self.isVisible() and getattr(self, '_initialization_in_progress', False):
-            logger.debug("[OpenAIChatToolWindow] Window closed before branched session creation, skipping")
+        if getattr(self, '_is_destroyed', False):
+            logger.debug("[OpenAIChatToolWindow] Window destroyed before branched session creation, skipping")
             return
+        try:
+            from PyQt5 import sip
+            if sip.isdeleted(self):
+                logger.debug("[OpenAIChatToolWindow] C++ object deleted before branched session creation, skipping")
+                return
+        except Exception:
+            pass
         
         logger.info("[Branch] 开始创建分支会话")
 
@@ -1923,8 +1965,7 @@ class OpenAIChatToolWindow(ToolWindow):
 
     def _load_model_configs(self):
         # 检查窗口是否仍然有效，防止在初始化期间窗口被关闭后继续执行
-        if getattr(self, '_initialization_in_progress', False) and not self.isVisible():
-            logger.debug("[OpenAIChatToolWindow] Window closed before loading model configs, skipping")
+        if getattr(self, '_is_destroyed', False):
             return
         
         saved_model = self.cfg.llm_selected_model.value
@@ -1964,8 +2005,7 @@ class OpenAIChatToolWindow(ToolWindow):
     def _load_agent_list(self):
         """加载智能体列表到按钮组（仅显示 primary agents）"""
         # 检查窗口是否仍然有效，防止在初始化期间窗口被关闭后继续执行
-        if getattr(self, '_initialization_in_progress', False) and not self.isVisible():
-            logger.debug("[OpenAIChatToolWindow] Window closed before loading agent list, skipping")
+        if getattr(self, '_is_destroyed', False):
             return
         
         if not self.backend.agent_manager:
@@ -2069,9 +2109,16 @@ class OpenAIChatToolWindow(ToolWindow):
 
     def _create_new_session(self):
         # 检查窗口是否仍然有效，防止在初始化期间窗口被关闭后继续执行
-        if getattr(self, '_initialization_in_progress', False) and not self.isVisible():
-            logger.debug("[OpenAIChatToolWindow] Window closed before session creation, skipping")
+        if getattr(self, '_is_destroyed', False):
+            logger.debug("[OpenAIChatToolWindow] Window destroyed before session creation, skipping")
             return
+        try:
+            from PyQt5 import sip
+            if sip.isdeleted(self):
+                logger.debug("[OpenAIChatToolWindow] C++ object deleted before session creation, skipping")
+                return
+        except Exception:
+            pass
         
         if self._is_auto_loop_running:
             InfoBar.warning("AutoLoop", "运行中无法新建会话，请先停止 AutoLoop", parent=self, duration=3000, position=InfoBarPosition.BOTTOM)
@@ -2113,7 +2160,7 @@ class OpenAIChatToolWindow(ToolWindow):
         self._question_tool_call_id = None
         self._load_agent_list()
 
-        QTimer.singleShot(0, self._show_initial_welcome)
+        QTimer.singleShot(0, lambda: self._safe_timer_call(self._show_initial_welcome))
         self._refresh_context_usage_indicator()
 
     def _display_current_session(self):
@@ -5467,6 +5514,8 @@ class OpenAIChatToolWindow(ToolWindow):
 
     def _sync_working_directory(self):
         """切换项目时自动加载并同步工作目录"""
+        if getattr(self, '_is_destroyed', False):
+            return
         if not self.backend or not self.backend.tool_executor:
             return
         project = self._current_project
@@ -5588,10 +5637,19 @@ class OpenAIChatToolWindow(ToolWindow):
         return None
 
     def closeEvent(self, event):
-        # 标记窗口正在关闭，防止 hook 回调访问已销毁的 UI
+        # 标记窗口正在关闭，防止所有异步回调访问已销毁的 UI
+        self._is_destroyed = True
+        
         if hasattr(self, 'backend') and self.backend:
             try:
                 self.backend.set_ui_valid(False)
+                # 清除 ChatEngine 的所有回调，防止异步回调访问已销毁的 widget
+                if self.backend.chat_engine:
+                    self.backend.chat_engine.clear_callbacks()
+                # 停止所有正在进行的流式输出
+                self.backend.stop_streaming()
+                # 清理 worker
+                self.backend.cleanup_worker()
             except Exception:
                 pass
         
@@ -5602,6 +5660,15 @@ class OpenAIChatToolWindow(ToolWindow):
             self._auto_save_current_session()
         except Exception:
             pass
+        
+        # 断开 aboutToQuit 信号，防止退出时访问已销毁的 widget
+        try:
+            app = QApplication.instance()
+            if app is not None:
+                app.aboutToQuit.disconnect(self._auto_save_current_session)
+        except Exception:
+            pass
+        
         super().closeEvent(event)
 
     def _toggle_send_stop(self, is_sending: bool):

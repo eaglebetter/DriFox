@@ -253,6 +253,7 @@ class ButtonStyles:
                 border-radius: 5px;
                 padding: 5px 16px;
                 font-size: 13px;
+                font-weight: bold;
             }}
             PrimaryPushButton:hover {{
                 background-color: #1a86d9;
