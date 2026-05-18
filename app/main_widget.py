@@ -4554,6 +4554,8 @@ class OpenAIChatToolWindow(ToolWindow):
         self._sync_batch_structures()
         # 给新创建的用户卡片设置正确的 _message_index（_append_user_message 中未设置）
         self._fix_new_card_message_index(user_text=user_text)
+        # 修复：扩展可见范围以覆盖新增的 batch，否则回收机制会误删新卡片
+        self._visible_batch_end = len(self._message_batch)
 
         self._maybe_generate_topic_summary()
 
@@ -4921,6 +4923,8 @@ class OpenAIChatToolWindow(ToolWindow):
             self._save_current_session_to_history()
             # 流式完成后同步 batch 结构，确保 _message_batch 包含完整的 assistant batch
             self._sync_batch_structures()
+            # 修复：同步可见范围，避免回收机制误删当前轮次的卡片
+            self._visible_batch_end = len(self._message_batch)
 
         if self.input_area:
             self.input_area.setFocus()

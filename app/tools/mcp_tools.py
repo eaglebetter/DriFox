@@ -481,17 +481,25 @@ class MCPClientManager:
 # ═══════════════════════════════════════════════════════════
 # MCP Server 自动发现
 # ═══════════════════════════════════════════════════════════
+# 配置路径来源参考：
+# - Claude Desktop: https://modelcontextprotocol.io/docs/getting-started/installation
+# - Cursor: https://www.rapidevelopers.com/mcp-tutorial/how-to-configure-mcp-in-cursor-settings
+# - Windsurf: https://deepwiki.com/hidao80/mcp-tutorial-1/3.3-windsurf-setup
+# - Claude Code: https://docs.code.claude.com/mcp/setup/
+# - VS Code (Cline/Continue): .vscode/mcp.json（项目级）
+# ═══════════════════════════════════════════════════════════
+
 
 def _discover_claude_desktop_servers() -> List[dict]:
     """
     扫描 Claude Desktop 配置，发现 MCP 服务器
 
-    Claude Desktop 在以下位置存储 MCP 配置：
+    配置路径：
     - Windows: %APPDATA%/Claude/claude_desktop_config.json
     - macOS:   ~/Library/Application Support/Claude/claude_desktop_config.json
     - Linux:   ~/.config/Claude/claude_desktop_config.json
 
-    格式示例：
+    配置格式：
     {
       "mcpServers": {
         "server-name": {
@@ -504,14 +512,13 @@ def _discover_claude_desktop_servers() -> List[dict]:
     servers = []
     config_paths = []
 
-    # 检测平台
     if os.name == "nt" or os.environ.get("OS") == "Windows_NT":
         appdata = os.environ.get("APPDATA", "")
         if appdata:
             config_paths.append(os.path.join(appdata, "Claude", "claude_desktop_config.json"))
-    elif os.uname().sysname == "Darwin":  # macOS
+    elif os.uname().sysname == "Darwin":
         config_paths.append(os.path.expanduser("~/Library/Application Support/Claude/claude_desktop_config.json"))
-    else:  # Linux
+    else:
         config_paths.append(os.path.expanduser("~/.config/Claude/claude_desktop_config.json"))
 
     for config_path in config_paths:
@@ -531,7 +538,6 @@ def _discover_claude_desktop_servers() -> List[dict]:
             if not isinstance(server_cfg, dict):
                 continue
 
-            # 跳过已是 DriFox 已配置的（按 command+args 去重）
             command = server_cfg.get("command", "")
             args = server_cfg.get("args", [])
             if not command:
@@ -543,7 +549,7 @@ def _discover_claude_desktop_servers() -> List[dict]:
                 "command": command,
                 "args": args,
                 "env": server_cfg.get("env"),
-                "enabled": False,  # 自动发现的不自动启用
+                "enabled": False,
                 "_source": "claude_desktop",
                 "_source_path": config_path,
             })
@@ -556,21 +562,23 @@ def _discover_cursor_servers() -> List[dict]:
     """
     扫描 Cursor IDE 配置，发现 MCP 服务器
 
-    Cursor 在以下位置存储 MCP 配置：
+    配置路径（全局）：
     - Windows: %APPDATA%/Cursor/User/globalStorage/mcp-settings.json
     - macOS:   ~/Library/Application Support/Cursor/User/globalStorage/mcp-settings.json
     - Linux:   ~/.config/Cursor/User/globalStorage/mcp-settings.json
 
-    格式示例：
+    配置格式：
     {
       "mcpServers": {
         "server-name": {
-          "type": "stdio",
           "command": "npx",
           "args": ["-y", "@modelcontextprotocol/server-filesystem"]
         }
       }
     }
+
+    注意：Cursor 还支持项目级 ~/.cursor/mcp.json（全局），
+    但由于是用户 home 目录，与全局配置重复，这里只扫描 globalStorage。
     """
     servers = []
     config_paths = []
