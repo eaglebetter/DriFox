@@ -158,15 +158,33 @@ class DiffHtmlGenerator:
             margin-right: 10px;
             font-size: 14px;
             opacity: 0.8;
+            flex-shrink: 0;
+        }
+
+        .file-info {
+            flex: 1;
+            min-width: 0;
+            margin-right: 8px;
+        }
+
+        .file-info .file-dir {
+            font-size: 10px;
+            color: var(--gh-text-secondary);
+            display: block;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            line-height: 1.3;
+            margin-top: 1px;
         }
 
         .file-item .file-name {
-            flex: 1;
             font-family: var(--gh-font-mono);
             font-size: 12px;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
+            display: block;
         }
 
         .file-item .file-badge {
@@ -453,6 +471,55 @@ class DiffHtmlGenerator:
             color: var(--gh-text-primary);
         }
 
+        /* === 文件搜索框 === */
+        .file-search-box {
+            padding: 6px 12px;
+            border-bottom: 1px solid var(--gh-border);
+            flex-shrink: 0;
+        }
+        .file-search-input {
+            width: 100%;
+            padding: 5px 8px;
+            background: var(--gh-bg-primary);
+            border: 1px solid var(--gh-border);
+            border-radius: 6px;
+            color: var(--gh-text-primary);
+            font-size: 12px;
+            outline: none;
+            font-family: var(--gh-font-sans);
+        }
+        .file-search-input:focus {
+            border-color: var(--gh-blue-text);
+        }
+        .file-search-input::placeholder {
+            color: var(--gh-text-secondary);
+            opacity: 0.6;
+        }
+
+        /* === 差异操作按钮 === */
+        .diff-actions {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-left: auto;
+        }
+        .btn-collapse-all {
+            padding: 2px 8px;
+            background: transparent;
+            border: 1px solid var(--gh-border);
+            border-radius: 4px;
+            color: var(--gh-text-secondary);
+            font-size: 11px;
+            cursor: pointer;
+            font-family: var(--gh-font-sans);
+            white-space: nowrap;
+            transition: border-color 0.15s, color 0.15s;
+        }
+        .btn-collapse-all:hover {
+            border-color: var(--gh-blue-text);
+            color: var(--gh-blue-text);
+        }
+
         ::-webkit-scrollbar {
             width: 8px;
             height: 8px;
@@ -528,6 +595,12 @@ class DiffHtmlGenerator:
             if i < preload_count:
                 file_blocks_html += cls._generate_file_block(file_info, file_id, i)
 
+        # 为懒加载文件创建占位块（用于 IntersectionObserver 触发自动加载）
+        if lazy_load:
+            for i in range(preload_count, total_files):
+                file_id = f"file-{i}"
+                file_blocks_html += f'<div class="file-block" id="{file_id}" data-placeholder="true"></div>'
+
         # 如果没有差异
         if not files:
             file_blocks_html = """
@@ -554,6 +627,9 @@ class DiffHtmlGenerator:
                 已修改的文件
                 <span class="file-count">({total_files})</span>
             </div>
+            <div class="file-search-box">
+                <input type="text" class="file-search-input" placeholder="搜索文件..." oninput="filterFiles(this.value)">
+            </div>
             <div class="diff-summary">
                 <span class="summary-item additions">
                     <span>+{total_additions}</span>
@@ -562,8 +638,8 @@ class DiffHtmlGenerator:
                 <span class="summary-item deletions">
                     <span>-{total_deletions}</span>
                 </span>
-                <span class="separator" style="margin-left: auto; opacity: 0.5;">
-                    {datetime.now().strftime("%H:%M")}
+                <span class="diff-actions">
+                    <button class="btn-collapse-all" onclick="toggleAllFolding()">全部展开</button>
                 </span>
             </div>
             <div class="file-list">
@@ -795,23 +871,25 @@ class DiffHtmlGenerator:
             const fileInfo = window._diffFiles[index];
             if (!fileInfo) return;
 
-            const container = document.getElementById('diff-content');
-            const placeholder = document.getElementById('placeholder-' + fileId);
             const blockHtml = generateFileBlockHtml(fileInfo);
+            const existing = document.getElementById(fileId);
 
-            if (placeholder) {{
-                placeholder.outerHTML = `<div class="file-block" id="${{fileId}}">${{blockHtml}}</div>`;
+            if (existing) {{
+                existing.innerHTML = blockHtml;
             }} else {{
                 const div = document.createElement('div');
                 div.id = fileId;
                 div.className = 'file-block';
                 div.innerHTML = blockHtml;
-                container.appendChild(div);
+                document.getElementById('diff-content').appendChild(div);
             }}
 
-            // 懒加载后对新生成的文件块执行折叠
+            // 懒加载后对新生成的文件块执行折叠，并注册到 IntersectionObserver
             const block = document.getElementById(fileId);
-            if (block) applyContextFolding(block);
+            if (block) {{
+                applyContextFolding(block);
+                if (window._diffObserver) window._diffObserver.observe(block);
+            }}
         }}
 
         // 上下文折叠：对连续超过阈值的 context 行，折叠中间部分
@@ -913,8 +991,58 @@ class DiffHtmlGenerator:
             }});
         }});
 
+        // 键盘导航：j/k 上下切换文件
+        document.addEventListener('keydown', function(e) {{
+            if (e.key === 'j' || e.key === 'ArrowDown' || e.key === 'k' || e.key === 'ArrowUp') {{
+                const items = Array.from(document.querySelectorAll('.file-item:not([style*=\"display: none\"])'));
+                if (items.length === 0) return;
+                const active = document.querySelector('.file-item.active');
+                let idx = items.indexOf(active);
+                if (idx === -1) idx = 0;
+                if (e.key === 'j' || e.key === 'ArrowDown') {{
+                    idx = Math.min(idx + 1, items.length - 1);
+                }} else {{
+                    idx = Math.max(idx - 1, 0);
+                }}
+                items[idx].click();
+                e.preventDefault();
+            }}
+        }});
+
+        // 文件搜索过滤
+        function filterFiles(query) {{
+            query = query.toLowerCase();
+            document.querySelectorAll('.file-item').forEach(item => {{
+                const name = (item.querySelector('.file-name')?.textContent || '').toLowerCase();
+                const dir = (item.querySelector('.file-dir')?.textContent || '').toLowerCase();
+                const title = (item.getAttribute('title') || '').toLowerCase();
+                const match = title.includes(query) || name.includes(query) || dir.includes(query);
+                item.style.display = match ? '' : 'none';
+            }});
+        }}
+
+        // 全部展开/折叠
+        let _allExpanded = false;
+        function toggleAllFolding() {{
+            _allExpanded = !_allExpanded;
+            document.querySelectorAll('.diff-expand').forEach(btn => {{
+                const foldedDiv = btn.nextElementSibling;
+                if (!foldedDiv || !foldedDiv.classList.contains('diff-collapsed-context')) return;
+                if (_allExpanded) {{
+                    foldedDiv.classList.add('expanded');
+                    btn.style.display = 'none';
+                    foldedDiv.querySelectorAll('.diff-line').forEach(row => row.style.display = '');
+                }} else {{
+                    foldedDiv.classList.remove('expanded');
+                    btn.style.display = '';
+                    foldedDiv.querySelectorAll('.diff-line').forEach(row => row.style.display = 'none');
+                }}
+            }});
+            document.querySelector('.btn-collapse-all').textContent = _allExpanded ? '全部折叠' : '全部展开';
+        }}
+
         // 滚动时懒加载可见区域的文件
-        const observer = new IntersectionObserver((entries) => {{
+        window._diffObserver = new IntersectionObserver((entries) => {{
             entries.forEach(entry => {{
                 if (entry.isIntersecting) {{
                     const id = entry.target.id;
@@ -933,7 +1061,7 @@ class DiffHtmlGenerator:
 
         // 观察已加载的文件块
         document.querySelectorAll('.file-block').forEach(block => {{
-            observer.observe(block);
+            window._diffObserver.observe(block);
         }});
 
         // 对预渲染的文件块执行上下文折叠
@@ -960,6 +1088,7 @@ class DiffHtmlGenerator:
         current_file = None
         current_lines = []
         current_stats = {"additions": 0, "deletions": 0}
+        current_status = "modified"
 
         for line in diff_output.split("\n"):
             # 检测新文件开始
@@ -971,12 +1100,18 @@ class DiffHtmlGenerator:
                             "path": current_file,
                             "additions": current_stats["additions"],
                             "deletions": current_stats["deletions"],
+                            "status": current_status,
                             "lines": current_lines,
                         }
                     )
 
-                # 提取文件名
+                # 判断文件状态：--- /dev/null 表示新增
                 parts = line[4:].strip()
+                if parts == "/dev/null":
+                    current_status = "added"
+                else:
+                    current_status = "modified"
+
                 if parts.startswith("a/") or parts.startswith("b/"):
                     current_file = parts[2:]
                 else:
@@ -984,6 +1119,13 @@ class DiffHtmlGenerator:
 
                 current_lines = []
                 current_stats = {"additions": 0, "deletions": 0}
+                continue
+
+            # 跳过 +++ 行（标记新文件的临时文件路径，不参与差异显示）
+            if line.startswith("+++ "):
+                # +++ /dev/null 表示文件被删除
+                if line[4:].strip() == "/dev/null" and current_status != "added":
+                    current_status = "deleted"
                 continue
 
             if current_file is None:
@@ -1004,6 +1146,7 @@ class DiffHtmlGenerator:
                     "path": current_file,
                     "additions": current_stats["additions"],
                     "deletions": current_stats["deletions"],
+                    "status": current_status,
                     "lines": current_lines,
                 }
             )
@@ -1016,20 +1159,34 @@ class DiffHtmlGenerator:
         path = file_info["path"]
         additions = file_info["additions"]
         deletions = file_info["deletions"]
+        status = file_info.get("status", "modified")
 
         icon = cls._get_file_icon(path)
         file_name = Path(path).name
+        file_dir = str(Path(path).parent).replace("\\", "/")
+        if file_dir == ".":
+            file_dir = ""
 
         badges = ""
-        if additions > 0:
-            badges += f'<span class="file-badge added">+{additions}</span>'
-        if deletions > 0:
-            badges += f'<span class="file-badge deleted">-{deletions}</span>'
+        if status == "added":
+            badges += '<span class="file-badge added">新增</span>'
+        elif status == "deleted":
+            badges += '<span class="file-badge deleted">删除</span>'
+        else:
+            if additions > 0:
+                badges += f'<span class="file-badge added">+{additions}</span>'
+            if deletions > 0:
+                badges += f'<span class="file-badge deleted">-{deletions}</span>'
+
+        dir_html = f'<span class="file-dir">{cls.escape_html(file_dir)}</span>' if file_dir else ''
 
         return f'''
         <a href="#{file_id}" class="file-item" data-target="{file_id}">
             <span class="file-icon">{icon}</span>
-            <span class="file-name" title="{cls.escape_html(path)}">{cls.escape_html(file_name)}</span>
+            <div class="file-info">
+                <span class="file-name" title="{cls.escape_html(path)}">{cls.escape_html(file_name)}</span>
+                {dir_html}
+            </div>
             {badges}
         </a>
         '''
@@ -1052,6 +1209,7 @@ class DiffHtmlGenerator:
                 "icon": icon,
                 "additions": additions,
                 "deletions": deletions,
+                "status": file_info.get("status", "modified"),
                 "lines": file_info["lines"]
             })
 
