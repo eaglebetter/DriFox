@@ -14,6 +14,7 @@ from PyQt5.QtWidgets import (
 )
 from qfluentwidgets import SimpleCardWidget
 
+from app.utils.design_tokens import Colors
 from app.utils.utils import get_unified_font
 
 
@@ -100,13 +101,11 @@ class ToolFloatingWidget(SimpleCardWidget):
 
         self.tool_name_label = QLabel("", self)
         self.tool_name_label.setFont(get_unified_font(10))
-        self.tool_name_label.setStyleSheet(
-            "color: #90caf9; background-color: rgba(144, 202, 249, 0.15); padding: 2px 8px; border-radius: 6px;"
-        )
+        self._apply_tool_name_style()
 
         self.title_label = QLabel("正在执行工具", self)
         self.title_label.setFont(get_unified_font(11, True))
-        self.title_label.setStyleSheet("color: #ffb74d;")
+        self.title_label.setStyleSheet(f"color: {Colors.REALTIME_ACCENT_WARM};")
 
         header.addWidget(self.icon_label)
         header.addWidget(self.tool_name_label)
@@ -117,21 +116,21 @@ class ToolFloatingWidget(SimpleCardWidget):
         self.cancel_btn.setFixedSize(52, 26)
         self.cancel_btn.setCursor(Qt.PointingHandCursor)
         self.cancel_btn.setFont(get_unified_font(9, True))
-        self.cancel_btn.setStyleSheet("""
-            QPushButton {
+        self.cancel_btn.setStyleSheet(f"""
+            QPushButton {{
                 background-color: rgba(239, 83, 80, 0.9);
                 color: white;
                 border: 1px solid rgba(239, 83, 80, 0.3);
                 border-radius: 6px;
-            }
-            QPushButton:hover {
+            }}
+            QPushButton:hover {{
                 background-color: rgba(239, 83, 80, 1);
                 border: 1px solid rgba(239, 83, 80, 0.6);
-            }
-            QPushButton:disabled {
+            }}
+            QPushButton:disabled {{
                 background-color: rgba(117, 117, 117, 0.6);
                 border: 1px solid rgba(117, 117, 117, 0.3);
-            }
+            }}
         """)
         self.cancel_btn.clicked.connect(self._on_cancel)
         header.addWidget(self.cancel_btn)
@@ -140,10 +139,17 @@ class ToolFloatingWidget(SimpleCardWidget):
 
         self.task_label = QLabel("等待执行...", self)
         self.task_label.setFont(get_unified_font(10))
-        self.task_label.setStyleSheet("color: rgba(255, 255, 255, 0.7);")
+        self.task_label.setStyleSheet(f"color: {Colors.REALTIME_TEXT_SECONDARY};")
         self.task_label.setWordWrap(True)
         self.task_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         main_layout.addWidget(self.task_label)
+
+    def _apply_tool_name_style(self):
+        Colors.refresh()
+        self.tool_name_label.setStyleSheet(
+            f"color: {Colors.REALTIME_ACCENT}; background-color: {Colors.REALTIME_TAG_BG}; "
+            f"padding: 2px 8px; border-radius: 6px;"
+        )
 
     # ── 旋转图标 ──────────────────────────────────────────
 
@@ -171,7 +177,7 @@ class ToolFloatingWidget(SimpleCardWidget):
         self.cancel_btn.setEnabled(False)
         self.cancel_btn.setText("已中止")
         self.title_label.setText("执行已中止")
-        self.title_label.setStyleSheet("color: #ef5350;")
+        self.title_label.setStyleSheet(f"color: {Colors.REALTIME_ERROR};")
         self._update_style(False)
         self.cancelled.emit()
         self._hide_timer.start()
@@ -181,19 +187,13 @@ class ToolFloatingWidget(SimpleCardWidget):
         old_suppressed = self._suppress_visible
         self._suppress_visible = suppressed
         if suppressed and not old_suppressed:
-            # 开始压制：如果卡片当前可见或有活跃任务，标记为待恢复
-            # 这覆盖两种场景：
-            #   1. 工具已完成且卡片正显示完成状态 → isVisible()=True
-            #   2. 工具正在执行中 → _is_running=True
             if self.isVisible() or self._is_running:
                 self._needs_show_after_unsuppress = True
         elif old_suppressed and not suppressed:
-            # 压制解除：如果有活跃任务或已完成任务等待显示，恢复显示
             if self._needs_show_after_unsuppress or self._is_running:
                 self.setVisible(True)
                 self.raise_()
                 self._needs_show_after_unsuppress = False
-                # 如果是已完成任务恢复显示（工具卡片已处于完成状态），启动 2 秒自动隐藏
                 if self.title_label.text() in ("执行完成", "执行失败"):
                     self._hide_timer.start()
 
@@ -215,7 +215,7 @@ class ToolFloatingWidget(SimpleCardWidget):
         self._current_process = None
 
         self.title_label.setText("正在执行工具")
-        self.title_label.setStyleSheet("color: #ffb74d;")
+        self.title_label.setStyleSheet(f"color: {Colors.REALTIME_ACCENT_WARM};")
         self._update_style(None)
 
         self._start_rotation()
@@ -282,27 +282,23 @@ class ToolFloatingWidget(SimpleCardWidget):
 
         if success:
             self.title_label.setText("执行完成")
-            self.title_label.setStyleSheet("color: #81c784;")
+            self.title_label.setStyleSheet(f"color: {Colors.REALTIME_SUCCESS};")
             self.task_label.setText("✓ 工具执行成功")
             self.cancel_btn.setVisible(False)  # 成功时立即隐藏中止按钮
         else:
             self.title_label.setText("执行失败")
-            self.title_label.setStyleSheet("color: #ef5350;")
+            self.title_label.setStyleSheet(f"color: {Colors.REALTIME_ERROR};")
             error_msg = result if result else "执行失败"
             self.task_label.setText(f"✗ {error_msg[:50]}")
 
-
         # 工具完成时根据压制状态决定是否显示
         if self._suppress_visible:
-            # 压制状态下先隐藏，等系统卡片关闭后由 set_suppress_visible(False) 显示
             self._needs_show_after_unsuppress = True
             self.setVisible(False)
         else:
             self.setVisible(True)
             self.raise_()
-            # 工具完成后 2 秒自动隐藏，但 start_tool 时会取消正在等待的定时器
             self._hide_timer.start()
-            #（clear 在新建会话、停止对话、出错时触发）
 
     def is_cancelled(self) -> bool:
         """检查是否已被中止"""
@@ -327,7 +323,7 @@ class ToolFloatingWidget(SimpleCardWidget):
         self.icon_label.setFixedSize(22, 22)
         self.icon_label.setStyleSheet("background: transparent; border: none;")
         self.title_label.setText("正在执行工具")
-        self.title_label.setStyleSheet("color: #ffb74d;")
+        self.title_label.setStyleSheet(f"color: {Colors.REALTIME_ACCENT_WARM};")
         self._update_style(None)
 
     def show_if_needed(self, elapsed: float):
@@ -342,37 +338,68 @@ class ToolFloatingWidget(SimpleCardWidget):
 
     def _update_style(self, success: bool = None):
         """更新卡片样式，根据状态改变边框颜色"""
+        Colors.refresh()
         if success is None:
             # 运行中
-            border_color = "#ffb74d"
+            border_color = Colors.REALTIME_ACCENT_WARM
         elif success:
             # 成功
-            border_color = "#81c784"
+            border_color = Colors.REALTIME_SUCCESS
         else:
             # 失败
-            border_color = "#ef5350"
+            border_color = Colors.REALTIME_ERROR
 
         self.setStyleSheet(f"""
             CardWidget {{
-                background-color: rgba(22, 30, 45, 240);
+                background-color: {Colors.REALTIME_BG};
                 border: 1px solid {border_color};
                 border-radius: 10px;
             }}
         """)
 
+    def refresh_style(self):
+        """响应主题切换"""
+        Colors.refresh()
+        self._apply_tool_name_style()
+        # 刷新标题颜色（根据当前状态）
+        if self._is_running:
+            self.title_label.setStyleSheet(f"color: {Colors.REALTIME_ACCENT_WARM};")
+        elif self.title_label.text() == "执行完成":
+            self.title_label.setStyleSheet(f"color: {Colors.REALTIME_SUCCESS};")
+        elif self.title_label.text() == "执行失败":
+            self.title_label.setStyleSheet(f"color: {Colors.REALTIME_ERROR};")
+        elif self.title_label.text() == "执行已中止":
+            self.title_label.setStyleSheet(f"color: {Colors.REALTIME_ERROR};")
+        else:
+            self.title_label.setStyleSheet(f"color: {Colors.REALTIME_ACCENT_WARM};")
+        self.task_label.setStyleSheet(f"color: {Colors.REALTIME_TEXT_SECONDARY};")
+        # 刷新边框样式
+        if self._is_running:
+            self._update_style(None)
+        elif self.title_label.text() == "执行完成":
+            self._update_style(True)
+        elif self.title_label.text() in ("执行失败", "执行已中止"):
+            self._update_style(False)
+        else:
+            self._update_style(None)
+
     def set_opacity(self, opacity: float):
         """设置透明度，用于响应全局透明度变化"""
-        alpha = int(240 * opacity)
+        Colors.refresh()
+        bg = Colors.REALTIME_BG
+        if bg.startswith("rgba("):
+            alpha = int(opacity * 255)
+            bg = bg.rsplit(",", 1)[0] + f", {alpha})"
         # 根据当前状态保持边框颜色
         if self._is_running:
-            border_color = "#ffb74d"
+            border_color = Colors.REALTIME_ACCENT_WARM
         elif self.title_label.text() == "执行完成":
-            border_color = "#81c784"
+            border_color = Colors.REALTIME_SUCCESS
         else:
-            border_color = "#ef5350"
+            border_color = Colors.REALTIME_ERROR
         self.setStyleSheet(f"""
             CardWidget {{
-                background-color: rgba(22, 30, 45, {alpha});
+                background-color: {bg};
                 border: 1px solid {border_color};
                 border-radius: 10px;
             }}

@@ -54,6 +54,20 @@ THEME_STYLE_OPTIONS = {
         "input_border": "#2B3850",
         "input_focus_border": "#C9A85C",
         "input_placeholder": "rgba(242, 246, 255, 0.4)",
+        # === 实时卡片色（对话类：todo/tool/question/sub_agent）===
+        "realtime_border": "#4a90d9",       # 活泼海蓝边框
+        "realtime_accent": "#7dd3fc",       # 明亮天蓝强调
+        "realtime_accent_warm": "#fbbf24",  # 暖金执行色（工具运行中）
+        "realtime_success": "#34d399",      # 成功绿
+        "realtime_error": "#f87171",        # 失败红
+        "realtime_bg": "rgba(18, 28, 48, 242)",  # 深蓝底
+        "realtime_text": "#f3f6fc",
+        "realtime_text_secondary": "rgba(226, 235, 249, 0.7)",
+        "realtime_tag_bg": "rgba(125, 211, 252, 0.15)",  # 标签背景
+        "realtime_tag_border": "rgba(125, 211, 252, 0.3)",
+        # === 系统卡片色 ===
+        "system_border": "#3d4a60",         # 沉稳灰蓝边框
+        "system_accent": "#66c6ff",         # 系统主强调
     },
     "obsidian": {
         "label": "曜石紫",
@@ -95,6 +109,20 @@ THEME_STYLE_OPTIONS = {
         "input_border": "#5a476f",
         "input_focus_border": "#b792ff",
         "input_placeholder": "rgba(240, 230, 255, 0.4)",
+        # === 实时卡片色（对话类：todo/tool/question/sub_agent）===
+        "realtime_border": "#8b5cf6",       # 活泼紫边框
+        "realtime_accent": "#c4b5fd",       # 淡紫强调
+        "realtime_accent_warm": "#fbbf24",  # 暖金执行色
+        "realtime_success": "#34d399",
+        "realtime_error": "#f87171",
+        "realtime_bg": "rgba(32, 22, 50, 242)",
+        "realtime_text": "#f7f2ff",
+        "realtime_text_secondary": "rgba(238, 228, 255, 0.7)",
+        "realtime_tag_bg": "rgba(196, 181, 253, 0.15)",
+        "realtime_tag_border": "rgba(196, 181, 253, 0.3)",
+        # === 系统卡片色 ===
+        "system_border": "#5a476f",
+        "system_accent": "#b792ff",
     },
     "forest": {
         "label": "松林暗绿",
@@ -136,6 +164,20 @@ THEME_STYLE_OPTIONS = {
         "input_border": "#31594f",
         "input_focus_border": "#57d29a",
         "input_placeholder": "rgba(218, 240, 232, 0.4)",
+        # === 实时卡片色（对话类：todo/tool/question/sub_agent）===
+        "realtime_border": "#2dd4bf",       # 活泼翠绿边框
+        "realtime_accent": "#5eead4",       # 明亮薄荷强调
+        "realtime_accent_warm": "#fbbf24",  # 暖金执行色
+        "realtime_success": "#34d399",
+        "realtime_error": "#f87171",
+        "realtime_bg": "rgba(12, 38, 32, 242)",
+        "realtime_text": "#effcf6",
+        "realtime_text_secondary": "rgba(222, 246, 236, 0.7)",
+        "realtime_tag_bg": "rgba(94, 234, 212, 0.15)",
+        "realtime_tag_border": "rgba(94, 234, 212, 0.3)",
+        # === 系统卡片色 ===
+        "system_border": "#31594f",
+        "system_accent": "#57d29a",
     },
     "graphite": {
         "label": "石墨铜",
@@ -177,6 +219,20 @@ THEME_STYLE_OPTIONS = {
         "input_border": "#5d554d",
         "input_focus_border": "#d69a5b",
         "input_placeholder": "rgba(237, 232, 224, 0.4)",
+        # === 实时卡片色（对话类：todo/tool/question/sub_agent）===
+        "realtime_border": "#e09f5f",       # 活泼铜橙边框
+        "realtime_accent": "#f0c080",       # 明亮暖铜强调
+        "realtime_accent_warm": "#7fc7ff",  # 冷蓝执行色（对比暖主色）
+        "realtime_success": "#6ee7b7",
+        "realtime_error": "#f87171",
+        "realtime_bg": "rgba(40, 34, 28, 242)",
+        "realtime_text": "#f7f4ef",
+        "realtime_text_secondary": "rgba(241, 233, 222, 0.7)",
+        "realtime_tag_bg": "rgba(240, 192, 128, 0.15)",
+        "realtime_tag_border": "rgba(240, 192, 128, 0.3)",
+        # === 系统卡片色 ===
+        "system_border": "#5d554d",
+        "system_accent": "#d69a5b",
     },
 }
 
@@ -302,6 +358,22 @@ class Colors:
     INPUT_FOCUS_BORDER = "#C9A85C"
     INPUT_PLACEHOLDER = "rgba(242, 246, 255, 0.4)"
 
+    # === 实时卡片色（对话类：todo/tool/question/sub_agent）===
+    REALTIME_BORDER = "#4a90d9"
+    REALTIME_ACCENT = "#7dd3fc"
+    REALTIME_ACCENT_WARM = "#fbbf24"
+    REALTIME_SUCCESS = "#34d399"
+    REALTIME_ERROR = "#f87171"
+    REALTIME_BG = "rgba(18, 28, 48, 242)"
+    REALTIME_TEXT = "#f3f6fc"
+    REALTIME_TEXT_SECONDARY = "rgba(226, 235, 249, 0.7)"
+    REALTIME_TAG_BG = "rgba(125, 211, 252, 0.15)"
+    REALTIME_TAG_BORDER = "rgba(125, 211, 252, 0.3)"
+
+    # === 系统卡片色 ===
+    SYSTEM_BORDER = "#3d4a60"
+    SYSTEM_ACCENT = "#66c6ff"
+
     # 语义色
     SUCCESS = "#22c55e"
     WARNING = "#f59e0b"
@@ -353,6 +425,20 @@ class Colors:
         cls.INPUT_PLACEHOLDER = theme.get("input_placeholder", cls.INPUT_PLACEHOLDER)
         cls.CAPSULE_BG = theme.get("capsule_bg", "rgba(27, 35, 50, 180)")
         cls.CAPSULE_BORDER = theme.get("capsule_border", "rgba(43, 56, 80, 200)")
+        # 实时卡片色
+        cls.REALTIME_BORDER = theme.get("realtime_border", cls.REALTIME_BORDER)
+        cls.REALTIME_ACCENT = theme.get("realtime_accent", cls.REALTIME_ACCENT)
+        cls.REALTIME_ACCENT_WARM = theme.get("realtime_accent_warm", cls.REALTIME_ACCENT_WARM)
+        cls.REALTIME_SUCCESS = theme.get("realtime_success", cls.REALTIME_SUCCESS)
+        cls.REALTIME_ERROR = theme.get("realtime_error", cls.REALTIME_ERROR)
+        cls.REALTIME_BG = theme.get("realtime_bg", cls.REALTIME_BG)
+        cls.REALTIME_TEXT = theme.get("realtime_text", cls.REALTIME_TEXT)
+        cls.REALTIME_TEXT_SECONDARY = theme.get("realtime_text_secondary", cls.REALTIME_TEXT_SECONDARY)
+        cls.REALTIME_TAG_BG = theme.get("realtime_tag_bg", cls.REALTIME_TAG_BG)
+        cls.REALTIME_TAG_BORDER = theme.get("realtime_tag_border", cls.REALTIME_TAG_BORDER)
+        # 系统卡片色
+        cls.SYSTEM_BORDER = theme.get("system_border", cls.SYSTEM_BORDER)
+        cls.SYSTEM_ACCENT = theme.get("system_accent", cls.SYSTEM_ACCENT)
 
 
 # ============ 圆角系统 ============

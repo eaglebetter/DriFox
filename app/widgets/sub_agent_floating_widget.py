@@ -16,6 +16,7 @@ from PyQt5.QtWidgets import (
 from qfluentwidgets import SegmentedWidget, BodyLabel
 from qfluentwidgets import SimpleCardWidget
 
+from app.utils.design_tokens import Colors
 from app.utils.utils import get_unified_font
 
 
@@ -235,13 +236,7 @@ class SubAgentFloatingWidget(SimpleCardWidget):
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         self.setMinimumHeight(100)
         self.setMaximumHeight(400)
-        self.setStyleSheet("""
-            SimpleCardWidget {
-                background-color: rgba(30, 30, 30, 240);
-                border: 1px solid #9C27B0;
-                border-radius: 8px;
-            }
-        """)
+        self._apply_card_style()
 
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(12, 8, 12, 8)
@@ -253,12 +248,12 @@ class SubAgentFloatingWidget(SimpleCardWidget):
 
         title = QLabel("🤖 子智能体", self)
         title.setFont(get_unified_font(11, True))
-        title.setStyleSheet("color: #9C27B0;")
+        title.setStyleSheet(f"color: {Colors.REALTIME_ACCENT};")
         header.addWidget(title)
 
         self.task_count_label = QLabel("0 个任务", self)
         self.task_count_label.setFont(get_unified_font(10))
-        self.task_count_label.setStyleSheet("color: #888;")
+        self.task_count_label.setStyleSheet(f"color: {Colors.REALTIME_TEXT_SECONDARY};")
         header.addWidget(self.task_count_label)
 
         header.addStretch()
@@ -339,6 +334,27 @@ class SubAgentFloatingWidget(SimpleCardWidget):
         widget.show()
 
         self._active_task_id = task_id
+
+    def _apply_card_style(self):
+        Colors.refresh()
+        self.setStyleSheet(f"""
+            SimpleCardWidget {{
+                background-color: {Colors.REALTIME_BG};
+                border: 1px solid {Colors.REALTIME_BORDER};
+                border-radius: 8px;
+            }}
+        """)
+
+    def refresh_style(self):
+        """响应主题切换"""
+        self._apply_card_style()
+        # 刷新标题颜色
+        for child in self.findChildren(QLabel):
+            text = child.text()
+            if text == "🤖 子智能体":
+                child.setStyleSheet(f"color: {Colors.REALTIME_ACCENT};")
+            elif child == self.task_count_label:
+                child.setStyleSheet(f"color: {Colors.REALTIME_TEXT_SECONDARY};")
 
     def _on_close(self):
         self.setVisible(False)
@@ -633,11 +649,15 @@ class SubAgentFloatingWidget(SimpleCardWidget):
 
     def set_opacity(self, opacity: float):
         """设置透明度，用于响应全局透明度变化"""
-        alpha = int(240 * opacity)
+        Colors.refresh()
+        bg = Colors.REALTIME_BG
+        if bg.startswith("rgba("):
+            alpha = int(opacity * 255)
+            bg = bg.rsplit(",", 1)[0] + f", {alpha})"
         self.setStyleSheet(f"""
             CardWidget {{
-                background-color: rgba(30, 30, 30, {alpha});
-                border: 1px solid #9C27B0;
+                background-color: {bg};
+                border: 1px solid {Colors.REALTIME_BORDER};
                 border-radius: 8px;
             }}
         """)

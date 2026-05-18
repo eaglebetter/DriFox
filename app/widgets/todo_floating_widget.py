@@ -3,6 +3,7 @@ from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import QVBoxLayout, QLabel, QHBoxLayout
 from qfluentwidgets import SimpleCardWidget, FluentIcon, TransparentToolButton
 
+from app.utils.design_tokens import Colors
 from app.utils.utils import get_unified_font
 
 
@@ -18,13 +19,7 @@ class TodoFloatingWidget(SimpleCardWidget):
 
     def _setup_ui(self):
         self.setSizePolicy(1, 0)
-        self.setStyleSheet("""
-            CardWidget {
-                background-color: rgba(40, 40, 45, 252);
-                border: 1px solid #6366f1;
-                border-radius: 10px;
-            }
-        """)
+        self._apply_style()
 
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(14, 10, 14, 10)
@@ -38,11 +33,11 @@ class TodoFloatingWidget(SimpleCardWidget):
 
         title = QLabel("待办事项", self)
         title.setFont(get_unified_font(11, True))
-        title.setStyleSheet("color: #f0f0f0;")
+        title.setStyleSheet(f"color: {Colors.REALTIME_TEXT};")
 
         self.progress_label = QLabel("", self)
         self.progress_label.setFont(get_unified_font(10, True))
-        self.progress_label.setStyleSheet("color: #818cf8;")
+        self.progress_label.setStyleSheet(f"color: {Colors.REALTIME_ACCENT}; font-weight: bold;")
 
         header.addWidget(title_icon)
         header.addWidget(title)
@@ -56,13 +51,42 @@ class TodoFloatingWidget(SimpleCardWidget):
 
         self.content_label = QLabel("暂无待办", self)
         self.content_label.setFont(get_unified_font(10))
-        self.content_label.setStyleSheet("color: #b0b0b0;")
+        self.content_label.setStyleSheet(f"color: {Colors.REALTIME_TEXT_SECONDARY};")
         self.content_label.setWordWrap(True)
         self.content_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self.content_label.setAlignment(Qt.AlignTop)
 
         main_layout.addLayout(header)
         main_layout.addWidget(self.content_label, 1)
+
+    def _apply_style(self):
+        Colors.refresh()
+        self.setStyleSheet(f"""
+            CardWidget {{
+                background-color: {Colors.REALTIME_BG};
+                border: 1px solid {Colors.REALTIME_BORDER};
+                border-radius: 10px;
+            }}
+        """)
+
+    def refresh_style(self):
+        """响应主题切换"""
+        self._apply_style()
+        # 刷新标题颜色
+        title_label = self.findChild(QLabel, "")
+        for child in self.findChildren(QLabel):
+            text = child.text()
+            if text == "待办事项":
+                child.setStyleSheet(f"color: {Colors.REALTIME_TEXT};")
+            elif child == self.progress_label:
+                # 进度标签颜色由 update_todos 控制，不在这里刷新
+                pass
+            elif child == self.content_label:
+                # 内容颜色由 update_todos 控制，不在这里刷新
+                pass
+        # 如果有数据，重新渲染
+        if self._todo_list:
+            self.update_todos(self._todo_list)
 
     def _on_close(self):
         self.setVisible(False)
@@ -75,8 +99,6 @@ class TodoFloatingWidget(SimpleCardWidget):
         if not self._todo_list:
             self.setVisible(False)
             return
-
-        # 不在这里 setVisible，由 main_widget 根据系统卡片状态决定是否显示
 
         lines = []
         completed = 0
@@ -95,21 +117,21 @@ class TodoFloatingWidget(SimpleCardWidget):
             else:
                 status_icon = "○"
 
-            priority_colors = {"high": "#f87171", "medium": "#fbbf24", "low": "#34d399"}
-            priority_color = priority_colors.get(priority, "#fbbf24")
+            priority_colors = {"high": Colors.REALTIME_ERROR, "medium": Colors.REALTIME_ACCENT_WARM, "low": Colors.REALTIME_SUCCESS}
+            priority_color = priority_colors.get(priority, Colors.REALTIME_ACCENT_WARM)
 
             priority_labels = {"high": "🔴", "medium": "🟡", "low": "🟢"}
             priority_icon = priority_labels.get(priority, "🟡")
 
             if status == "completed":
-                content_style = "color: #808080; text-decoration: line-through;"
+                content_style = f"color: {Colors.REALTIME_TEXT_SECONDARY}; text-decoration: line-through;"
             elif status == "in_progress":
-                content_style = "color: #60a5fa; font-weight: bold;"
+                content_style = f"color: {Colors.REALTIME_ACCENT}; font-weight: bold;"
             else:
-                content_style = "color: #e0e0e0;"
+                content_style = f"color: {Colors.REALTIME_TEXT};"
 
             lines.append(
-                f'<span style="color: #818cf8; font-weight: bold;">{status_icon}</span> '
+                f'<span style="color: {Colors.REALTIME_ACCENT}; font-weight: bold;">{status_icon}</span> '
                 f'<span style="color: {priority_color};">{priority_icon}</span> '
                 f'<span style="{content_style}">{content}</span>'
             )
@@ -119,13 +141,13 @@ class TodoFloatingWidget(SimpleCardWidget):
         if done_count == total and done_count > 0:
             if in_progress > 0:
                 progress_text = f"⏳ {in_progress}进行中 + {completed}完成"
-                self.progress_label.setStyleSheet("color: #60a5fa; font-weight: bold;")
+                self.progress_label.setStyleSheet(f"color: {Colors.REALTIME_ACCENT}; font-weight: bold;")
             else:
                 progress_text = f"🎉 {completed}/{total} 全部完成"
-                self.progress_label.setStyleSheet("color: #34d399; font-weight: bold;")
+                self.progress_label.setStyleSheet(f"color: {Colors.REALTIME_SUCCESS}; font-weight: bold;")
         else:
             progress_text = f"{completed}完成/{in_progress}进行中/{total}"
-            self.progress_label.setStyleSheet("color: #818cf8; font-weight: bold;")
+            self.progress_label.setStyleSheet(f"color: {Colors.REALTIME_ACCENT}; font-weight: bold;")
 
         self.progress_label.setText(progress_text)
         self.content_label.setText("<br>".join(lines))
@@ -137,11 +159,16 @@ class TodoFloatingWidget(SimpleCardWidget):
 
     def set_opacity(self, opacity: float):
         """设置透明度，用于响应全局透明度变化"""
-        alpha = int(252 * opacity)
+        Colors.refresh()
+        # 从 REALTIME_BG 提取 alpha 并替换
+        bg = Colors.REALTIME_BG
+        if bg.startswith("rgba("):
+            alpha = int(opacity * 255)
+            bg = bg.rsplit(",", 1)[0] + f", {alpha})"
         self.setStyleSheet(f"""
             CardWidget {{
-                background-color: rgba(40, 40, 45, {alpha});
-                border: 1px solid #6366f1;
+                background-color: {bg};
+                border: 1px solid {Colors.REALTIME_BORDER};
                 border-radius: 10px;
             }}
         """)

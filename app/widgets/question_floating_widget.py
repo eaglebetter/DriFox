@@ -15,6 +15,7 @@ from PyQt5.QtWidgets import (
 )
 from qfluentwidgets import PrimaryPushButton, SimpleCardWidget, TransparentToolButton, FluentIcon
 
+from app.utils.design_tokens import Colors
 from app.utils.utils import get_unified_font, get_font_family_css
 
 
@@ -39,14 +40,14 @@ class WrappedOptionButton(QPushButton):
         self.label.setWordWrap(True)
         self.label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self.label.setFont(get_unified_font(10))
-        self.label.setStyleSheet("color: #f4f7fb; background: transparent;")
+        self.label.setStyleSheet(f"color: {Colors.REALTIME_TEXT}; background: transparent;")
         self.label.setAttribute(Qt.WA_TransparentForMouseEvents, True)
 
         layout.addWidget(self.label)
 
         self.hint_label = QLabel("点击选择", self)
         self.hint_label.setFont(get_unified_font(9))
-        self.hint_label.setStyleSheet("color: #7dd3fc; background: transparent;")
+        self.hint_label.setStyleSheet(f"color: {Colors.REALTIME_ACCENT}; background: transparent;")
         self.hint_label.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         layout.addWidget(self.hint_label, 0, Qt.AlignRight | Qt.AlignVCenter)
 
@@ -56,29 +57,28 @@ class WrappedOptionButton(QPushButton):
         return self.label.text()
 
     def _apply_state_style(self):
-        border = "#607089"
+        Colors.refresh()
         background = "rgba(255, 255, 255, 0.05)"
-        text_color = "#f4f7fb"
-        hint_color = "#7dd3fc"
+        text_color = Colors.REALTIME_TEXT
+        hint_color = Colors.REALTIME_ACCENT
         if self._selected:
-            border = "#38bdf8"
-            background = "rgba(14, 165, 233, 0.20)"
+            background = Colors.REALTIME_TAG_BG
             text_color = "#ffffff"
         self.setStyleSheet(
             f"""
             QPushButton {{
                 background-color: {background};
-                border: 1px solid #607089;
+                border: 1px solid {Colors.REALTIME_TAG_BORDER};
                 border-radius: 8px;
                 text-align: left;
             }}
             QPushButton:hover {{
-                background-color: rgba(125, 211, 252, 0.12);
-                border: 1px solid #7dd3fc;
+                background-color: {Colors.REALTIME_TAG_BG};
+                border: 1px solid {Colors.REALTIME_ACCENT};
             }}
             QPushButton:pressed {{
-                background-color: rgba(14, 165, 233, 0.20);
-                border: 1px solid #38bdf8;
+                background-color: {Colors.REALTIME_TAG_BG};
+                border: 1px solid {Colors.REALTIME_ACCENT};
             }}
             """
         )
@@ -111,24 +111,24 @@ class WrappedCheckOption(QWidget):
         self.checkbox = QCheckBox("", self)
         self.checkbox.setCursor(Qt.PointingHandCursor)
         self.checkbox.setStyleSheet(
-            """
-            QCheckBox {
+            f"""
+            QCheckBox {{
                 background: transparent;
                 border: none;
                 padding: 0;
                 margin: 0;
-            }
-            QCheckBox::indicator {
+            }}
+            QCheckBox::indicator {{
                 width: 16px;
                 height: 16px;
                 border-radius: 4px;
-                border: 1px solid #72839c;
-                background-color: #141922;
-            }
-            QCheckBox::indicator:checked {
-                background-color: #0ea5e9;
-                border-color: #0ea5e9;
-            }
+                border: 1px solid {Colors.REALTIME_TAG_BORDER};
+                background-color: {Colors.REALTIME_BG};
+            }}
+            QCheckBox::indicator:checked {{
+                background-color: {Colors.REALTIME_ACCENT};
+                border-color: {Colors.REALTIME_ACCENT};
+            }}
             """
         )
 
@@ -136,7 +136,7 @@ class WrappedCheckOption(QWidget):
         self.label.setWordWrap(True)
         self.label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self.label.setFont(get_unified_font(10))
-        self.label.setStyleSheet("color: #f4f7fb; background: transparent;")
+        self.label.setStyleSheet(f"color: {Colors.REALTIME_TEXT}; background: transparent;")
         self.label.setAttribute(Qt.WA_TransparentForMouseEvents, True)
 
         layout.addWidget(self.checkbox, 0, Qt.AlignTop)
@@ -156,14 +156,15 @@ class WrappedCheckOption(QWidget):
         self.checkbox.setChecked(checked)
 
     def _apply_state_style(self):
-        border = "#425067"
+        Colors.refresh()
         background = "rgba(255, 255, 255, 0.04)"
+        border = Colors.REALTIME_TAG_BORDER
         if self._hovered:
-            border = "#5a6c88"
-            background = "rgba(125, 211, 252, 0.08)"
+            background = Colors.REALTIME_TAG_BG
+            border = Colors.REALTIME_ACCENT
         if self.checkbox.isChecked():
-            border = "#38bdf8"
-            background = "rgba(14, 165, 233, 0.12)"
+            border = Colors.REALTIME_ACCENT
+            background = Colors.REALTIME_TAG_BG
         self.setStyleSheet(
             f"""
             WrappedCheckOption {{
@@ -205,19 +206,23 @@ class QuestionFloatingWidget(SimpleCardWidget):
         self._option_widgets = []
         self._setup_ui()
 
+    def _apply_card_style(self):
+        Colors.refresh()
+        self.setStyleSheet(
+            f"""
+            CardWidget {{
+                background-color: {Colors.REALTIME_BG};
+                border: 1px solid {Colors.REALTIME_BORDER};
+                border-radius: 8px;
+            }}
+            """
+        )
+
     def _setup_ui(self):
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
         self.setMaximumHeight(420)
         self.setMinimumHeight(128)
-        self.setStyleSheet(
-            """
-            CardWidget {
-                background-color: rgba(33, 33, 38, 248);
-                border: 1px solid #3b4758;
-                border-radius: 8px;
-            }
-            """
-        )
+        self._apply_card_style()
 
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(16, 12, 16, 14)
@@ -228,23 +233,15 @@ class QuestionFloatingWidget(SimpleCardWidget):
 
         self.icon_label = QLabel("?", self)
         self.icon_label.setFont(get_unified_font(14, True))
-        self.icon_label.setStyleSheet("color: #7dd3fc;")
+        self.icon_label.setStyleSheet(f"color: {Colors.REALTIME_ACCENT};")
 
         self.title_label = QLabel("等待你的选择", self)
         self.title_label.setFont(get_unified_font(11, True))
-        self.title_label.setStyleSheet("color: #e6edf7;")
+        self.title_label.setStyleSheet(f"color: {Colors.REALTIME_TEXT};")
 
         self.mode_hint_label = QLabel("", self)
         self.mode_hint_label.setFont(get_unified_font(9))
-        self.mode_hint_label.setStyleSheet(
-            """
-            color: #7dd3fc;
-            background-color: rgba(125, 211, 252, 0.12);
-            border: 1px solid rgba(125, 211, 252, 0.24);
-            border-radius: 10px;
-            padding: 2px 8px;
-            """
-        )
+        self._apply_mode_hint_style()
         self.mode_hint_label.setVisible(False)
 
         header.addWidget(self.icon_label)
@@ -258,7 +255,7 @@ class QuestionFloatingWidget(SimpleCardWidget):
 
         self.question_label = QLabel("", self)
         self.question_label.setFont(get_unified_font(10))
-        self.question_label.setStyleSheet("color: #c8d1dd;")
+        self.question_label.setStyleSheet(f"color: {Colors.REALTIME_TEXT_SECONDARY};")
         self.question_label.setWordWrap(True)
         self.question_label.setMinimumHeight(28)
 
@@ -273,28 +270,11 @@ class QuestionFloatingWidget(SimpleCardWidget):
 
         self.custom_hint_label = QLabel("没有合适的选项？", self)
         self.custom_hint_label.setFont(get_unified_font(9))
-        self.custom_hint_label.setStyleSheet("color: #8b95a7;")
+        self.custom_hint_label.setStyleSheet(f"color: {Colors.REALTIME_TEXT_SECONDARY};")
 
         self.toggle_text_mode_btn = QPushButton("改为输入", self)
         self.toggle_text_mode_btn.setCursor(Qt.PointingHandCursor)
-        self.toggle_text_mode_btn.setStyleSheet(
-            f"""
-            QPushButton {{
-                color: #7dd3fc;
-                background-color: rgba(125, 211, 252, 0.08);
-                border: 1px solid rgba(125, 211, 252, 0.22);
-                border-radius: 6px;
-                padding: 6px 12px;
-                {get_font_family_css()} font-size: 11px;
-                font-weight: bold;
-            }}
-            QPushButton:hover {{
-                background-color: rgba(125, 211, 252, 0.16);
-                border-color: rgba(125, 211, 252, 0.36);
-            }}
-            """
-        )
-        self.toggle_text_mode_btn.clicked.connect(self._toggle_text_mode)
+        self._apply_toggle_btn_style()
 
         self.custom_entry_bar.addWidget(self.custom_hint_label)
         self.custom_entry_bar.addStretch()
@@ -306,52 +286,19 @@ class QuestionFloatingWidget(SimpleCardWidget):
         self.text_input.setMaximumHeight(104)
         self.text_input.setVisible(False)
         self.text_input.textChanged.connect(self._update_submit_state)
-        self.text_input.setStyleSheet(
-            """
-            QTextEdit {
-                background-color: rgba(18, 23, 31, 0.96);
-                color: #f4f7fb;
-                border: 1px solid #41516a;
-                border-radius: 8px;
-                padding: 10px 12px;
-                selection-background-color: #2563eb;
-            }
-            QTextEdit:focus {
-                border-color: #7dd3fc;
-            }
-            """
-        )
+        self._apply_text_input_style()
 
         self.footer_layout = QHBoxLayout()
         self.footer_layout.setSpacing(8)
 
         self.selection_hint_label = QLabel("", self)
         self.selection_hint_label.setFont(get_unified_font(9))
-        self.selection_hint_label.setStyleSheet("color: #8b95a7;")
+        self.selection_hint_label.setStyleSheet(f"color: {Colors.REALTIME_TEXT_SECONDARY};")
 
         self.confirm_btn = PrimaryPushButton("提交", self)
         self.confirm_btn.setCursor(Qt.PointingHandCursor)
         self.confirm_btn.clicked.connect(self._on_confirm)
-        self.confirm_btn.setStyleSheet(
-            f"""
-            PrimaryPushButton {{
-                background-color: #0f766e;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                padding: 7px 18px;
-                {get_font_family_css()} font-size: 11px;
-                font-weight: bold;
-            }}
-            PrimaryPushButton:hover {{
-                background-color: #0d9488;
-            }}
-            PrimaryPushButton:disabled {{
-                background-color: #3f4b5f;
-                color: #93a0b4;
-            }}
-            """
-        )
+        self._apply_confirm_btn_style()
 
         self.footer_layout.addWidget(self.selection_hint_label)
         self.footer_layout.addStretch()
@@ -365,6 +312,89 @@ class QuestionFloatingWidget(SimpleCardWidget):
         main_layout.addLayout(self.footer_layout)
 
         self._update_mode_ui()
+
+    def _apply_mode_hint_style(self):
+        self.mode_hint_label.setStyleSheet(
+            f"""
+            color: {Colors.REALTIME_ACCENT};
+            background-color: {Colors.REALTIME_TAG_BG};
+            border: 1px solid {Colors.REALTIME_TAG_BORDER};
+            border-radius: 10px;
+            padding: 2px 8px;
+            """
+        )
+
+    def _apply_toggle_btn_style(self):
+        self.toggle_text_mode_btn.setStyleSheet(
+            f"""
+            QPushButton {{
+                color: {Colors.REALTIME_ACCENT};
+                background-color: {Colors.REALTIME_TAG_BG};
+                border: 1px solid {Colors.REALTIME_TAG_BORDER};
+                border-radius: 6px;
+                padding: 6px 12px;
+                {get_font_family_css()} font-size: 11px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {Colors.REALTIME_TAG_BG.replace("0.15", "0.25")};
+                border-color: {Colors.REALTIME_ACCENT};
+            }}
+            """
+        )
+
+    def _apply_text_input_style(self):
+        self.text_input.setStyleSheet(
+            f"""
+            QTextEdit {{
+                background-color: {Colors.REALTIME_BG};
+                color: {Colors.REALTIME_TEXT};
+                border: 1px solid {Colors.REALTIME_TAG_BORDER};
+                border-radius: 8px;
+                padding: 10px 12px;
+                selection-background-color: {Colors.REALTIME_ACCENT};
+            }}
+            QTextEdit:focus {{
+                border-color: {Colors.REALTIME_ACCENT};
+            }}
+            """
+        )
+
+    def _apply_confirm_btn_style(self):
+        self.confirm_btn.setStyleSheet(
+            f"""
+            PrimaryPushButton {{
+                background-color: {Colors.REALTIME_ACCENT};
+                color: #ffffff;
+                border: none;
+                border-radius: 6px;
+                padding: 7px 18px;
+                {get_font_family_css()} font-size: 11px;
+                font-weight: bold;
+            }}
+            PrimaryPushButton:hover {{
+                background-color: {Colors.REALTIME_BORDER};
+            }}
+            PrimaryPushButton:disabled {{
+                background-color: #3f4b5f;
+                color: #93a0b4;
+            }}
+            """
+        )
+
+    def refresh_style(self):
+        """响应主题切换"""
+        Colors.refresh()
+        self._apply_card_style()
+        self.icon_label.setStyleSheet(f"color: {Colors.REALTIME_ACCENT};")
+        self.title_label.setStyleSheet(f"color: {Colors.REALTIME_TEXT};")
+        self.question_label.setStyleSheet(f"color: {Colors.REALTIME_TEXT_SECONDARY};")
+        self.custom_hint_label.setStyleSheet(f"color: {Colors.REALTIME_TEXT_SECONDARY};")
+        self.selection_hint_label.setStyleSheet(f"color: {Colors.REALTIME_TEXT_SECONDARY};")
+        self._apply_mode_hint_style()
+        self._apply_toggle_btn_style()
+        self._apply_text_input_style()
+        self._apply_confirm_btn_style()
 
     def _clear_options(self):
         self._option_widgets = []
@@ -547,11 +577,15 @@ class QuestionFloatingWidget(SimpleCardWidget):
 
     def set_opacity(self, opacity: float):
         """设置透明度，用于响应全局透明度变化"""
-        alpha = int(248 * opacity)
+        Colors.refresh()
+        bg = Colors.REALTIME_BG
+        if bg.startswith("rgba("):
+            alpha = int(opacity * 255)
+            bg = bg.rsplit(",", 1)[0] + f", {alpha})"
         self.setStyleSheet(f"""
             CardWidget {{
-                background-color: rgba(33, 33, 38, {alpha});
-                border: 1px solid #3b4758;
+                background-color: {bg};
+                border: 1px solid {Colors.REALTIME_BORDER};
                 border-radius: 8px;
             }}
         """)
