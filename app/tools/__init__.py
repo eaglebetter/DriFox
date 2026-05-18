@@ -816,12 +816,14 @@ TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "skill",
-            "description": "加载技能。当用户消息中包含 @技能名 时（如 @brainstorming），必须立即调用此工具加载对应技能。技能会提供特定领域的专业知识和工作流程。",
+            "description": "【强制触发】当用户消息中出现 `@技能名` 格式时，必须立即调用此工具加载技能，**不得以任何理由延迟或绕过**。禁止：先理解上下文、先做其他事、先问问题。正确流程：检测到 @技能 → 立即调用 skill 工具 → 按技能指引执行。\n\nArgs:\n    name: 技能名称（如 brainstorming, tdd, debugging 等）",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "name": {"type": "string",
-                             "description": "技能名称，如 brainstorming, writing-plans, find-skills, git-commit 等"},
+                    "name": {
+                        "type": "string",
+                        "description": "技能名称，如 brainstorming, tdd, find-skills, git-commit 等",
+                    },
                 },
                 "required": ["name"],
             },

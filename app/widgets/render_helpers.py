@@ -259,7 +259,7 @@ def render_tool_block(
     if is_mcp_tool:
         icon = "🌐"
         title_color = "#00BCD4"
-        tool_name = tool_name.split("__")[-1]
+        tool_name = "__".join(tool_name.split("__")[2:])
     elif is_sub_agent_task:
         icon = "🤖"
         title_color = "#9C27B0"
