@@ -88,6 +88,27 @@ def _make_row(label_text: str, widget: QWidget, label_width: int = 70) -> QHBoxL
     return row, label
 
 
+class _ElidedLabel(QLabel):
+    """自动根据可用宽度省略文本的 QLabel"""
+
+    def __init__(self, text: str = "", parent=None):
+        super().__init__(text, parent)
+        self._full_text = text
+
+    def setText(self, text: str):
+        self._full_text = text
+        self._update_elided()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._update_elided()
+
+    def _update_elided(self):
+        fm = self.fontMetrics()
+        elided = fm.elidedText(self._full_text, Qt.ElideRight, self.width())
+        super().setText(elided)
+
+
 # ═══════════════════════════════════════════════════════════
 # MCPEditCard — 添加/编辑 MCP Server 的表单卡片
 # ═══════════════════════════════════════════════════════════
@@ -280,8 +301,9 @@ class MCPServerRow(CardWidget):
             desc = f"{data.get('command', '')} {' '.join(data.get('args', []))}".strip()
         else:
             desc = data.get("url", "")
-        desc_label = QLabel(desc[:50] + "..." if len(desc) > 50 else desc)
+        desc_label = _ElidedLabel(desc)
         desc_label.setStyleSheet(f"color: {Colors.TEXT_MUTED}; font-size: 12px;")
+        desc_label.setMinimumWidth(40)
         layout.addWidget(desc_label, 1)
 
         self.switch = SwitchButton()

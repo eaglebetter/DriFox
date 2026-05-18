@@ -15,6 +15,7 @@ from qfluentwidgets import (
 )
 
 from app.utils.utils import get_app_data_dir
+from app.widgets.mcp_setting_card import _ElidedLabel
 from app.widgets.searchable_editable_combobox import SearchableEditableComboBox
 
 
@@ -37,9 +38,10 @@ class HookItem(QWidget):
         # 命令显示（截断到 50 字符）
         command = self.hook_data.get("command", self.hook_data.get("url", ""))
         display_cmd = command[:50] + ("..." if len(command) > 50 else "")
-        self.commandLabel = QLabel(display_cmd, self)
+        self.commandLabel = _ElidedLabel(display_cmd, self)
         self.commandLabel.setObjectName("titleLabel")
         self.commandLabel.setStyleSheet("font-size: 13px;")
+        self.commandLabel.setMinimumWidth(40)
         
         # Matcher 标签
         matcher = self.hook_data.get("matcher", "")
