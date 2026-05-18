@@ -133,16 +133,36 @@ class MCPEditCard(QWidget):
         self._init_ui()
 
     def _build_json_preview(self) -> str:
-        """从表单构建 JSON 预览文本"""
+        """从表单构建 JSON 预览文本（标准 mcpServers 格式）"""
         data = self._collect_form_data()
-        if data:
-            return json.dumps(data, indent=2, ensure_ascii=False)
-        return ""
+        if not data:
+            return ""
+        name = data.pop("name", "server")
+        srv_type = data.pop("type", "stdio")
+        data.pop("enabled", None)  # enabled 是 UI 字段，不输出
+        if srv_type != "stdio":
+            data["type"] = srv_type
+        result = {"mcpServers": {name: data}}
+        return json.dumps(result, indent=2, ensure_ascii=False)
 
     def _build_json_from_data(self) -> str:
-        """从已有 server_data 构建 JSON"""
+        """从已有 server_data 构建 JSON（标准 mcpServers 格式）"""
         data = dict(self._server_data)
-        return json.dumps(data, indent=2, ensure_ascii=False)
+        name = data.pop("name", "my-server")
+        # 去掉内部字段
+        enabled = data.pop("enabled", True)
+        server_type = data.pop("type", "stdio")
+        # 如果是 stdio，type 不输出（标准格式默认 stdio）
+        # 如果是 sse/http，输出 url/headers 标准结构
+        if server_type != "stdio":
+            data["type"] = server_type
+        # 组装 mcpServers 格式
+        result = {
+            "mcpServers": {
+                name: data
+            }
+        }
+        return json.dumps(result, indent=2, ensure_ascii=False)
 
     def _init_ui(self):
         self.setStyleSheet(EDIT_CARD_STYLE)
@@ -248,21 +268,23 @@ class MCPEditCard(QWidget):
         self.jsonEdit = QPlainTextEdit()
         self.jsonEdit.setStyleSheet(EDIT_CARD_STYLE)
         self.jsonEdit.setPlaceholderText(
-            'MCP Server JSON 配置格式：\n\n'
+            '粘贴标准 MCP 配置（支持两种格式）:\n\n'
+            '【格式一】Claude Desktop / Cursor 标准格式:\n'
+            '{\n'
+            '  "mcpServers": {\n'
+            '    "brave-search": {\n'
+            '      "command": "npx",\n'
+            '      "args": ["-y", "@brave/brave-search-mcp-server"],\n'
+            '      "env": {"BRAVE_API_KEY": "xxx"}\n'
+            '    }\n'
+            '  }\n'
+            '}\n\n'
+            '【格式二】简化单服务器格式:\n'
             '{\n'
             '  "name": "my-server",\n'
-            '  "type": "stdio",\n'
             '  "command": "npx",\n'
-            '  "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path"],\n'
-            '  "env": {"API_KEY": "xxx"},\n'
-            '  "enabled": true\n'
-            '}\n\n'
-            '或:\n'
-            '{\n'
-            '  "name": "my-api",\n'
-            '  "type": "sse",\n'
-            '  "url": "https://api.example.com/mcp",\n'
-            '  "headers": {"Authorization": "Bearer xxx"}\n'
+            '  "args": ["-y", "some-package"],\n'
+            '  "env": {"KEY": "value"}\n'
             '}'
         )
         json_data = self._build_json_from_data() if self._server_data else ""
@@ -280,24 +302,26 @@ class MCPEditCard(QWidget):
         """切换表单/JSON 编辑模式"""
         self._json_mode = not self._json_mode
         if self._json_mode:
-            # 切到 JSON 模式：同步表单数据到 JSON 编辑器
+            # 切到 JSON 模式：同步表单数据到 JSON 编辑器（标准格式）
             self.jsonToggle.setText("表单模式")
             self._mode_hint.setText("JSON 模式：直接编辑 JSON 配置")
             form_data = self._collect_form_data()
             if form_data:
-                self.jsonEdit.setPlainText(json.dumps(form_data, indent=2, ensure_ascii=False))
+                preview = self._build_json_preview()
+                self.jsonEdit.setPlainText(preview if preview else json.dumps(form_data, indent=2, ensure_ascii=False))
             self._stack.setCurrentIndex(1)
         else:
-            # 切回表单模式：从 JSON 解析回表单（如果有有效 JSON）
+            # 切回表单模式：从 JSON 解析回表单（支持两种格式）
             self.jsonToggle.setText("JSON 模式")
             self._mode_hint.setText("表单模式：分字段填写")
             json_text = self.jsonEdit.toPlainText().strip()
             if json_text:
                 try:
                     parsed = json.loads(json_text)
+                    parsed = self._parse_mcp_json(parsed)
                     self._apply_json_to_form(parsed)
-                except json.JSONDecodeError:
-                    InfoBar.warning("提示", "JSON 格式错误，无法切换回表单模式",
+                except (json.JSONDecodeError, ValueError, KeyError, TypeError) as e:
+                    InfoBar.warning("提示", f"JSON 解析失败: {e}，无法切换回表单模式",
                                     parent=self.window(), duration=3000,
                                     position=InfoBarPosition.BOTTOM)
                     self._json_mode = True  # 保持 JSON 模式
@@ -343,6 +367,49 @@ class MCPEditCard(QWidget):
                     return None
         return data
 
+    def _parse_mcp_json(self, parsed: dict) -> dict:
+        """
+        将 JSON 格式转为内部 server_data 格式。
+        支持输入：
+        - 标准 mcpServers 格式: {"mcpServers": {"name": {...}}}
+        - 简化格式: {"name": "...", "command": "...", ...}
+        返回: {"name": "...", "type": "...", "command": "...", ...}
+        """
+        # 格式一：mcpServers 包裹格式
+        if "mcpServers" in parsed:
+            servers_dict = parsed["mcpServers"]
+            if not isinstance(servers_dict, dict) or not servers_dict:
+                raise ValueError("mcpServers 必须包含至少一个服务器")
+            # 取第一个服务器
+            server_name = next(iter(servers_dict))
+            server_cfg = servers_dict[server_name]
+            if not isinstance(server_cfg, dict):
+                raise ValueError(f"服务器 '{server_name}' 配置格式错误")
+            result = {"name": server_name}
+            result.update(server_cfg)
+            # 检测 type（标准 mcpServers 格式无 type 字段）
+            if "type" not in result:
+                if "url" in result:
+                    result["type"] = "sse"  # 有 url 默认为 sse
+                else:
+                    result["type"] = "stdio"  # 默认为 stdio
+            if "enabled" not in result:
+                result["enabled"] = True
+            return result
+
+        # 格式二：简化格式（平铺键值）
+        if "name" not in parsed:
+            raise ValueError("缺少 'name' 字段或 'mcpServers' 包裹")
+        result = dict(parsed)
+        if "type" not in result:
+            if "url" in result:
+                result["type"] = "sse"
+            else:
+                result["type"] = "stdio"
+        if "enabled" not in result:
+            result["enabled"] = True
+        return result
+
     def _apply_json_to_form(self, parsed: dict):
         """将解析后的 JSON dict 写回表单字段"""
         self.nameEdit.setText(parsed.get("name", ""))
@@ -386,25 +453,24 @@ class MCPEditCard(QWidget):
 
     def _on_save(self):
         if self._json_mode:
-            # JSON 模式：直接解析 JSON 保存
+            # JSON 模式：支持标准 mcpServers 格式和简化格式
             json_text = self.jsonEdit.toPlainText().strip()
             if not json_text:
                 InfoBar.warning("提示", "请输入 JSON 配置", parent=self.window(),
                                 duration=2000, position=InfoBarPosition.BOTTOM)
                 return
             try:
-                server_data = json.loads(json_text)
+                parsed = json.loads(json_text)
             except json.JSONDecodeError as e:
                 InfoBar.warning("提示", f"JSON 格式错误: {e}", parent=self.window(),
                                 duration=3000, position=InfoBarPosition.BOTTOM)
                 return
-            if not server_data.get("name"):
-                InfoBar.warning("提示", "JSON 中必须包含 name 字段", parent=self.window(),
-                                duration=2000, position=InfoBarPosition.BOTTOM)
+            try:
+                server_data = self._parse_mcp_json(parsed)
+            except (ValueError, KeyError, TypeError) as e:
+                InfoBar.warning("提示", f"配置解析失败: {e}", parent=self.window(),
+                                duration=3000, position=InfoBarPosition.BOTTOM)
                 return
-            # 确保 enabled 字段
-            if "enabled" not in server_data:
-                server_data["enabled"] = self._server_data.get("enabled", True)
             self.saved.emit(server_data)
             return
 
