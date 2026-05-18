@@ -338,11 +338,21 @@ class MCPListSettingCard(ExpandSettingCard):
     showAddCard = pyqtSignal()
     showEditCard = pyqtSignal(str, dict)
 
+    # 内部信号（从后台线程桥接到主线程 UI 更新）
+    _hotConnectResult = pyqtSignal(str, bool)
+
     def __init__(self, icon, title: str, content: str = None, parent=None):
         self.cfg = Settings.get_instance()
         super().__init__(icon, title, content, parent)
         self._setup_ui()
         self._refresh()
+
+        # 连接信号（主线程处理 UI）
+        self._hotConnectResult.connect(self._on_hot_connect_result)
+
+    def _get_mcp_manager(self):
+        from app.tools.mcp_tools import MCPClientManager
+        return MCPClientManager.get_instance()
 
     def _setup_ui(self):
         self.viewLayout.setSpacing(2)
@@ -374,9 +384,48 @@ class MCPListSettingCard(ExpandSettingCard):
                     card.hBoxLayout.insertSpacing(i, 4)
                     break
 
+    # ── 热更新操作（全部后台，不阻塞 UI）────────────
+
+    def _hot_connect(self, name: str, config: dict):
+        """后台连接单个服务器（不阻塞 UI）"""
+        mgr = self._get_mcp_manager()
+        if not self.cfg.mcp_enabled.value:
+            return
+
+        def on_done(n, success):
+            self._hotConnectResult.emit(n, success)
+
+        mgr.connect_server_background(name, config, on_done=on_done)
+
+    def _on_hot_connect_result(self, name: str, success: bool):
+        """连接结果回调（主线程，可安全操作 UI）"""
+        self.serversChanged.emit()
+
+    def _hot_disconnect(self, name: str):
+        """后台断开单个服务器"""
+        mgr = self._get_mcp_manager()
+        mgr.disconnect_server_background(name)
+
+    def _hot_disconnect_all(self):
+        """后台断开所有服务器"""
+        mgr = self._get_mcp_manager()
+        mgr.disconnect_all_background()
+        logger.info("[MCP] 后台断开所有服务器中...")
+
+    # ── 全局开关 ──────────────────────────────────────
+
     def _on_global_switch(self, enabled: bool):
         self.cfg.set(self.cfg.mcp_enabled, enabled, save=True)
+        if enabled:
+            servers = self.cfg.mcp_servers.value or []
+            for s in servers:
+                if s.get("enabled", True):
+                    self._hot_connect(s.get("name", ""), s)
+        else:
+            self._hot_disconnect_all()
         self.serversChanged.emit()
+
+    # ── 列表刷新 ──────────────────────────────────────
 
     def _refresh(self):
         while self.viewLayout.count():
@@ -420,6 +469,8 @@ class MCPListSettingCard(ExpandSettingCard):
         w.exec_()
 
     def _do_remove(self, name: str):
+        # 热断开
+        self._hot_disconnect(name)
         servers = list(self.cfg.mcp_servers.value or [])
         servers = [s for s in servers if s.get("name") != name]
         self._save_servers(servers)
@@ -437,7 +488,17 @@ class MCPListSettingCard(ExpandSettingCard):
                 s["enabled"] = enabled
                 break
         self.cfg.set(self.cfg.mcp_servers, servers, save=True)
+
+        # 热连接/断开
+        if enabled and self.cfg.mcp_enabled.value:
+            server_data = next((s for s in servers if s.get("name") == name), {})
+            self._hot_connect(name, server_data)
+        else:
+            self._hot_disconnect(name)
+
         self.serversChanged.emit()
+
+    # ── 供外部调用的添加/更新方法 ──────────────────────
 
     def add_server(self, server_data: dict):
         servers = list(self.cfg.mcp_servers.value or [])
@@ -448,6 +509,9 @@ class MCPListSettingCard(ExpandSettingCard):
             return False
         servers.append(server_data)
         self._save_servers(servers)
+        # 热连接
+        if server_data.get("enabled", True) and self.cfg.mcp_enabled.value:
+            self._hot_connect(name, server_data)
         return True
 
     def update_server(self, name: str, server_data: dict):
@@ -457,3 +521,7 @@ class MCPListSettingCard(ExpandSettingCard):
                 servers[i] = server_data
                 break
         self._save_servers(servers)
+        # 先断开旧连接，再重新连接
+        self._hot_disconnect(name)
+        if server_data.get("enabled", True) and self.cfg.mcp_enabled.value:
+            self._hot_connect(name, server_data)

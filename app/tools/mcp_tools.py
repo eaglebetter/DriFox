@@ -5,7 +5,8 @@ MCP 工具模块 - 管理 MCP Server 连接、工具发现与调用
 核心设计：
 - MCPClientManager 是全局单例，多窗口共享连接池
 - 所有 MCP 异步操作在一个专用后台线程的事件循环中执行
-- 外部调用通过 run_coroutine_threadsafe 调度到该循环，同步等待结果
+- 每个连接由一个持久 Task 管理，__aenter__/__aexit__ 在同一 Task 中
+- 断开连接通过 Event 信号通知 Task 自然退出 async with 块
 """
 
 import asyncio
@@ -30,7 +31,11 @@ class MCPServerConnection:
         self.config = config
         self.session: Optional[ClientSession] = None
         self.tools: List[mcp_types.Tool] = []
-        self._cm_stack = None
+        # 持久 Task 管理（__aenter__/__aexit__ 在同一 Task 中）
+        self._task: Optional[asyncio.Task] = None
+        self._disconnect_event: Optional[asyncio.Event] = None
+        self._ready_event: Optional[asyncio.Event] = None
+        self._connect_error: Optional[Exception] = None
 
     @property
     def server_type(self) -> str:
@@ -45,8 +50,11 @@ class MCPClientManager:
     """
     MCP 客户端管理器（全局单例）
 
-    所有异步 MCP 操作在专用后台线程的持久事件循环中执行，
-    解决跨线程/跨事件循环问题。
+    所有异步 MCP 操作在专用后台线程的持久事件循环中执行。
+    每个服务器连接由一个持久 asyncio.Task 管理：
+    - Task 内部用 async with 持有 transport + session
+    - 断开时设置 Event 信号，Task 自然退出 async with 块
+    - 确保 __aenter__ / __aexit__ 在同一 Task 中执行
     """
 
     TOOL_PREFIX = "mcp__"
@@ -88,31 +96,96 @@ class MCPClientManager:
         logger.info("[MCP] 后台事件循环已启动")
 
     def _run_async(self, coro, timeout: float = 60):
-        """
-        在后台事件循环中执行协程，同步等待结果。
-
-        这是所有外部调用 MCP 异步方法的统一入口。
-        """
+        """在后台事件循环中执行协程，同步等待结果"""
         if not self._loop or self._loop.is_closed():
             raise RuntimeError("MCP 事件循环未运行")
         future = asyncio.run_coroutine_threadsafe(coro, self._loop)
         return future.result(timeout=timeout)
 
-    # ── 连接管理 ──────────────────────────────────────
+    # ── 连接生命周期（持久 Task 模式）──────────────
+
+    async def _server_lifespan(self, conn: MCPServerConnection) -> None:
+        """
+        连接生命周期 — 在专属 Task 中运行。
+
+        用 async with 管理 transport 和 session，
+        保证 __aenter__/__aexit__ 在同一 Task 中执行。
+        断开时通过 _disconnect_event 信号自然退出。
+        """
+        server_type = conn.server_type
+        try:
+            if server_type == "stdio":
+                await self._lifespan_stdio(conn)
+            elif server_type == "sse":
+                await self._lifespan_sse(conn)
+            elif server_type == "http":
+                await self._lifespan_http(conn)
+            else:
+                conn._connect_error = ValueError(f"不支持的 MCP 服务器类型: {server_type}")
+                conn._ready_event.set()
+        except asyncio.CancelledError:
+            logger.debug(f"[MCP] 服务器 '{conn.name}' 的生命周期 Task 被取消")
+        except Exception as e:
+            if not conn._ready_event.is_set():
+                conn._connect_error = e
+                conn._ready_event.set()
+            else:
+                logger.warning(f"[MCP] 服务器 '{conn.name}' 生命周期异常: {e}")
+        finally:
+            conn.session = None
+            conn.tools = []
+            logger.info(f"[MCP] 已断开服务器 '{conn.name}'")
+
+    async def _lifespan_stdio(self, conn: MCPServerConnection) -> None:
+        command = conn.config.get("command", "")
+        args = conn.config.get("args", [])
+        env = conn.config.get("env")
+
+        params = StdioServerParameters(command=command, args=args, env=env)
+
+        async with stdio_client(params) as (read_stream, write_stream):
+            async with ClientSession(read_stream, write_stream) as session:
+                await session.initialize()
+                result = await session.list_tools()
+                conn.session = session
+                conn.tools = result.tools
+                conn._ready_event.set()
+                await conn._disconnect_event.wait()
+
+    async def _lifespan_sse(self, conn: MCPServerConnection) -> None:
+        url = conn.config.get("url", "")
+        headers = conn.config.get("headers")
+
+        async with sse_client(url=url, headers=headers) as (read_stream, write_stream):
+            async with ClientSession(read_stream, write_stream) as session:
+                await session.initialize()
+                result = await session.list_tools()
+                conn.session = session
+                conn.tools = result.tools
+                conn._ready_event.set()
+                await conn._disconnect_event.wait()
+
+    async def _lifespan_http(self, conn: MCPServerConnection) -> None:
+        url = conn.config.get("url", "")
+        headers = conn.config.get("headers")
+
+        async with streamablehttp_client(url=url, headers=headers) as (read_stream, write_stream, _):
+            async with ClientSession(read_stream, write_stream) as session:
+                await session.initialize()
+                result = await session.list_tools()
+                conn.session = session
+                conn.tools = result.tools
+                conn._ready_event.set()
+                await conn._disconnect_event.wait()
+
+    # ── 连接操作 ──────────────────────────────────────
 
     def connect_all_sync(self, servers_config: List[dict]) -> None:
         """同步连接所有 MCP 服务器（阻塞调用线程，慎用）"""
         self._run_async(self._connect_all(servers_config))
 
     def connect_all_background(self, servers_config: List[dict], on_done=None) -> None:
-        """
-        后台连接所有 MCP 服务器（不阻塞 UI 线程）。
-
-        Args:
-            servers_config: 服务器配置列表
-            on_done: 可选回调，签名 on_done(connected_count, total_count, failed_names: list)
-                     在后台线程中执行，如需更新 UI 请用信号转发到主线程。
-        """
+        """后台连接所有 MCP 服务器（不阻塞 UI 线程）"""
         def _worker():
             try:
                 self._run_async(self._connect_all(servers_config))
@@ -145,115 +218,150 @@ class MCPClientManager:
                 logger.info(f"[MCP] 跳过已禁用的服务器: {name}")
                 continue
 
-            conn = MCPServerConnection(name, server_cfg)
             try:
-                await self._connect_server(conn)
-                self._connections[name] = conn
-                logger.info(f"[MCP] 已连接服务器 '{name}'，发现 {len(conn.tools)} 个工具")
+                await self._connect_single(name, server_cfg)
             except Exception as e:
                 logger.error(f"[MCP] 连接服务器 '{name}' 失败: {e}")
 
         self._connected = True
 
-    async def _connect_server(self, conn: MCPServerConnection) -> None:
-        server_type = conn.server_type
-        if server_type == "stdio":
-            await self._connect_stdio(conn)
-        elif server_type == "sse":
-            await self._connect_sse(conn)
-        elif server_type == "http":
-            await self._connect_http(conn)
-        else:
-            raise ValueError(f"不支持的 MCP 服务器类型: {server_type}")
+    def connect_server_sync(self, name: str, config: dict) -> bool:
+        """同步连接单个 MCP 服务器（热添加）"""
+        try:
+            return self._run_async(self._connect_single(name, config))
+        except Exception as e:
+            logger.error(f"[MCP] 热添加服务器 '{name}' 失败: {e}")
+            return False
 
-    async def _connect_stdio(self, conn: MCPServerConnection) -> None:
-        command = conn.config.get("command", "")
-        args = conn.config.get("args", [])
-        env = conn.config.get("env")
+    def connect_server_background(self, name: str, config: dict, on_done=None) -> None:
+        """后台连接单个 MCP 服务器（不阻塞 UI）"""
+        def _worker():
+            success = False
+            try:
+                success = self._run_async(self._connect_single(name, config))
+            except Exception as e:
+                logger.error(f"[MCP] 热添加服务器 '{name}' 失败: {e}")
+            finally:
+                if on_done:
+                    try:
+                        on_done(name, success)
+                    except Exception as e:
+                        logger.warning(f"[MCP] on_done 回调异常: {e}")
 
-        server_params = StdioServerParameters(command=command, args=args, env=env)
+        threading.Thread(target=_worker, name="mcp-hot-add", daemon=True).start()
 
-        cm = stdio_client(server_params)
-        read_stream, write_stream = await cm.__aenter__()
-        conn._cm_stack = [cm]
+    async def _connect_single(self, name: str, config: dict) -> bool:
+        """连接单个服务器：启动生命周期 Task 并等待就绪"""
+        # 如果已存在，先断开
+        if name in self._connections:
+            await self._disconnect_single(name)
 
-        session_cm = ClientSession(read_stream, write_stream)
-        session = await session_cm.__aenter__()
-        conn._cm_stack.append(session_cm)
+        conn = MCPServerConnection(name, config)
+        conn._disconnect_event = asyncio.Event()
+        conn._ready_event = asyncio.Event()
+        conn._connect_error = None
 
-        await session.initialize()
-        conn.session = session
+        # 在后台事件循环中启动生命周期 Task
+        conn._task = asyncio.ensure_future(self._server_lifespan(conn), loop=self._loop)
 
-        result = await session.list_tools()
-        conn.tools = result.tools
+        # 等待就绪或出错（最多 30 秒）
+        try:
+            await asyncio.wait_for(conn._ready_event.wait(), timeout=30)
+        except asyncio.TimeoutError:
+            conn._task.cancel()
+            logger.error(f"[MCP] 连接服务器 '{name}' 超时")
+            return False
 
-    async def _connect_sse(self, conn: MCPServerConnection) -> None:
-        url = conn.config.get("url", "")
-        headers = conn.config.get("headers")
+        if conn._connect_error:
+            logger.error(f"[MCP] 连接服务器 '{name}' 失败: {conn._connect_error}")
+            return False
 
-        cm = sse_client(url=url, headers=headers)
-        read_stream, write_stream = await cm.__aenter__()
-        conn._cm_stack = [cm]
-
-        session_cm = ClientSession(read_stream, write_stream)
-        session = await session_cm.__aenter__()
-        conn._cm_stack.append(session_cm)
-
-        await session.initialize()
-        conn.session = session
-
-        result = await session.list_tools()
-        conn.tools = result.tools
-
-    async def _connect_http(self, conn: MCPServerConnection) -> None:
-        url = conn.config.get("url", "")
-        headers = conn.config.get("headers")
-
-        cm = streamablehttp_client(url=url, headers=headers)
-        read_stream, write_stream, _ = await cm.__aenter__()
-        conn._cm_stack = [cm]
-
-        session_cm = ClientSession(read_stream, write_stream)
-        session = await session_cm.__aenter__()
-        conn._cm_stack.append(session_cm)
-
-        await session.initialize()
-        conn.session = session
-
-        result = await session.list_tools()
-        conn.tools = result.tools
+        self._connections[name] = conn
+        self._connected = True
+        logger.info(f"[MCP] 已连接服务器 '{name}'，发现 {len(conn.tools)} 个工具")
+        return True
 
     # ── 断开连接 ──────────────────────────────────────
 
+    def disconnect_server_sync(self, name: str) -> bool:
+        """同步断开单个 MCP 服务器（快，不等待 Task 清理）"""
+        try:
+            return self._run_async(self._disconnect_single(name))
+        except Exception as e:
+            logger.error(f"[MCP] 热断开服务器 '{name}' 失败: {e}")
+            return False
+
+    def disconnect_server_background(self, name: str, on_done=None) -> None:
+        """后台断开单个 MCP 服务器（不阻塞 UI）"""
+        def _worker():
+            try:
+                self._run_async(self._disconnect_single(name))
+            except Exception as e:
+                logger.error(f"[MCP] 热断开服务器 '{name}' 失败: {e}")
+            finally:
+                if on_done:
+                    try:
+                        on_done(name)
+                    except Exception as e:
+                        logger.warning(f"[MCP] on_done 回调异常: {e}")
+
+        threading.Thread(target=_worker, name="mcp-hot-disconnect", daemon=True).start()
+
+    async def _disconnect_single(self, name: str) -> bool:
+        """断开单个服务器：信号通知 + 取消 Task，不等待清理完成"""
+        conn = self._connections.pop(name, None)
+        if not conn:
+            return False
+
+        # 通知生命周期 Task 退出（走 async with 正常清理路径）
+        if conn._disconnect_event:
+            conn._disconnect_event.set()
+
+        # 取消 Task 作为备份（CancelledError 在 async with 内触发 __aexit__）
+        if conn._task and not conn._task.done():
+            conn._task.cancel()
+
+        # 立即清除引用，不等待 Task 完成
+        conn.session = None
+        conn.tools = []
+
+        if not self._connections:
+            self._connected = False
+        return True
+
     def disconnect_all_sync(self) -> None:
-        """同步断开所有连接（供外部调用）"""
+        """同步断开所有连接（快，不等待 Task 清理）"""
         try:
             self._run_async(self._disconnect_all())
         except Exception as e:
             logger.warning(f"[MCP] 断开连接失败: {e}")
 
-    async def _disconnect_all(self) -> None:
-        for name, conn in self._connections.items():
+    def disconnect_all_background(self, on_done=None) -> None:
+        """后台断开所有连接（不阻塞 UI）"""
+        def _worker():
             try:
-                await self._disconnect_server(conn)
+                self._run_async(self._disconnect_all())
+            except Exception as e:
+                logger.error(f"[MCP] 后台断开所有连接失败: {e}")
+            finally:
+                if on_done:
+                    try:
+                        on_done()
+                    except Exception as e:
+                        logger.warning(f"[MCP] on_done 回调异常: {e}")
+
+        threading.Thread(target=_worker, name="mcp-disconnect-all", daemon=True).start()
+
+    async def _disconnect_all(self) -> None:
+        names = list(self._connections.keys())
+        for name in names:
+            try:
+                await self._disconnect_single(name)
             except Exception as e:
                 logger.error(f"[MCP] 断开服务器 '{name}' 失败: {e}")
 
         self._connections.clear()
         self._connected = False
-
-    async def _disconnect_server(self, conn: MCPServerConnection) -> None:
-        if conn._cm_stack:
-            for cm in reversed(conn._cm_stack):
-                try:
-                    await cm.__aexit__(None, None, None)
-                except Exception as e:
-                    logger.warning(f"[MCP] 清理连接时出错: {e}")
-            conn._cm_stack = None
-
-        conn.session = None
-        conn.tools = []
-        logger.info(f"[MCP] 已断开服务器 '{conn.name}'")
 
     # ── 工具 Schema ──────────────────────────────────
 

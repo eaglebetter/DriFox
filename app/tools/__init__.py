@@ -8,17 +8,16 @@ for manual method forwarding in a shallow facade.
 """
 
 from pathlib import Path
-from typing import Dict, List, Any, Callable, Optional
+from typing import Dict, List, Any
 
 from PyQt5.QtCore import QObject, pyqtSignal
 from loguru import logger
-
-from app.tools.result import ToolResult
 
 # Import all tool modules
 from app.tools.diagnostics_tools import DiagnosticsTools
 from app.tools.file_tools import FileTools
 from app.tools.mcp_tools import MCPClientManager
+from app.tools.result import ToolResult
 from app.tools.task_tools import TaskTools
 from app.tools.terminal_tools import TerminalTools
 from app.tools.web_tools import WebTools
