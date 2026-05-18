@@ -9,11 +9,13 @@ import orjson as json
 import difflib
 import re
 
-from datetime import datetime
 from pathlib import Path
 from typing import List, Dict
-
 from loguru import logger
+from PyQt5.QtWidgets import QDialog, QHBoxLayout
+from PyQt5.QtCore import Qt
+from PyQt5.QtWebEngineWidgets import QWebEngineView
+
 
 # 预编译正则表达式
 _HUNK_HEADER_PATTERN = re.compile(r"@@ -(\d+),?\d* \+(\d+),?\d* @@")
@@ -1445,7 +1447,7 @@ class DiffHtmlGenerator:
                         fromfile=abs_path,
                         tofile=abs_path,
                         lineterm="\n",
-                        n=5,
+                        n=10,
                     )
 
                     diff_text = "".join(diff)
@@ -1493,10 +1495,6 @@ class DiffViewerWindow:
 
     def __init__(self, parent=None):
         """初始化窗口"""
-        from PyQt5.QtWidgets import QDialog, QHBoxLayout
-        from PyQt5.QtCore import Qt
-        from PyQt5.QtWebEngineWidgets import QWebEngineView
-
         self._window = QDialog(parent)
         self._dialog_class = QDialog
         self._window.setWindowTitle("文件差异对比")

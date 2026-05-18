@@ -427,21 +427,27 @@ class HookListSettingCard(ExpandSettingCard):
     
     def _refresh(self):
         """刷新 hook 列表（保留添加/刷新按钮和展开状态）"""
-        # 保存展开状态
-        was_expanded = getattr(self, 'isExpand', False)
+        was_expanded = self.isExpand
         
         self._load_hooks()
-        # 移除 viewLayout 中除了按钮外的所有 widgets
-        for i in reversed(range(self.viewLayout.count())):
-            item = self.viewLayout.itemAt(i)
-            widget = item.widget()
-            if widget and widget.objectName() not in ("_hook_add_btn", "_hook_refresh_btn"):
-                self.viewLayout.removeItem(item)
-                widget.deleteLater()
+        # 稳妥方式清空 viewLayout：takeAt + 删除 widget
+        while self.viewLayout.count():
+            item = self.viewLayout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
         # 重新渲染
         self._render_hooks()
+        
+        # 处理异步删除（deleteLater）+ 强制布局计算，确保 sizeHint 正确
+        from PyQt5.QtCore import QCoreApplication
+        QCoreApplication.processEvents()
+        self.viewLayout.activate()
+        self.view.updateGeometry()
+        
         # 调整展开区域高度
         self._adjustViewSize()
-        # 恢复展开状态
+        # 恢复展开状态：直接强制刷新高度，不用 setExpand（已展开时是空操作）
         if was_expanded:
-            self.setExpand(True)
+            h = self.viewLayout.sizeHint().height()
+            if h > 0:
+                self.setFixedHeight(self.card.height() + h)

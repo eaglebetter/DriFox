@@ -649,7 +649,7 @@ class OpenAIChatToolWindow(ToolWindow):
 
     def eventFilter(self, obj, event):
         """处理 viewport 大小变化，调整背景图片"""
-        if obj == self.chat_scroll_area.viewport() and event.type() == event.Type.Resize:
+        if hasattr(self, "chat_scroll_area") and obj == self.chat_scroll_area.viewport() and event.type() == event.Type.Resize:
             if hasattr(self, "_bg_label"):
                 self._bg_label.resize(self.chat_scroll_area.viewport().size())
         return super().eventFilter(obj, event)
@@ -1406,8 +1406,7 @@ class OpenAIChatToolWindow(ToolWindow):
     def _on_hook_edit_saved(self, values: dict):
         """Hook 保存回调"""
         self._hook_edit_card.hide()
-        self._settings_popup.show()
-        # 通过 HookListSettingCard 添加 hook
+        # 先刷新再显示弹窗，避免布局异步计算导致内容不可见
         if hasattr(self._settings_popup, 'hookListCard'):
             self._settings_popup.hookListCard._add_hook(
                 event=values["event"],
@@ -1416,6 +1415,7 @@ class OpenAIChatToolWindow(ToolWindow):
                 hook_type=values["type"],
                 enabled=values["enabled"]
             )
+        self._settings_popup.show()
 
     def _on_hook_edit_closed(self):
         """Hook 编辑关闭回调"""
@@ -1464,6 +1464,7 @@ class OpenAIChatToolWindow(ToolWindow):
         self._mcp_edit_card.set_save_button_handler(
             lambda: self._mcp_edit_popup._on_save()
         )
+        self._setup_mcp_edit_mode_buttons()
         self._mcp_edit_card.show()
 
     def _show_mcp_edit_card(self, name: str, server_data: dict):
@@ -1481,7 +1482,30 @@ class OpenAIChatToolWindow(ToolWindow):
         self._mcp_edit_card.set_save_button_handler(
             lambda: self._mcp_edit_popup._on_save()
         )
+        self._setup_mcp_edit_mode_buttons()
         self._mcp_edit_card.show()
+
+    def _setup_mcp_edit_mode_buttons(self):
+        """设置 MCP 编辑卡头的模式切换按钮"""
+        self._mcp_edit_popup.modeChanged.connect(self._refresh_mcp_mode_buttons)
+        self._refresh_mcp_mode_buttons(self._mcp_edit_popup._json_mode)
+
+    def _refresh_mcp_mode_buttons(self, is_json: bool):
+        """刷新 MCP 编辑卡头的模式切换按钮状态"""
+        self._mcp_edit_card.set_mode_buttons([
+            {"label": "表单", "active": not is_json, "handler": lambda: self._try_toggle_to_form()},
+            {"label": "JSON", "active": is_json, "handler": lambda: self._try_toggle_to_json()},
+        ])
+
+    def _try_toggle_to_form(self):
+        if self._mcp_edit_popup and not self._mcp_edit_popup._json_mode:
+            return
+        self._mcp_edit_popup._toggle_mode()
+
+    def _try_toggle_to_json(self):
+        if self._mcp_edit_popup and self._mcp_edit_popup._json_mode:
+            return
+        self._mcp_edit_popup._toggle_mode()
 
     def _on_mcp_edit_saved(self, server_data: dict):
         """MCP 编辑保存回调"""
@@ -1495,11 +1519,15 @@ class OpenAIChatToolWindow(ToolWindow):
                 self._settings_popup.mcpListCard.update_server(name, server_data)
             else:
                 self._settings_popup.mcpListCard.add_server(server_data)
+            # 确保连接状态同步
+            QTimer.singleShot(500, self._settings_popup.mcpListCard.refresh_connections)
 
     def _on_mcp_edit_closed(self):
         """MCP 编辑关闭回调"""
         self._mcp_edit_card.hide()
         self._settings_popup.show()
+        if hasattr(self._settings_popup, 'mcpListCard'):
+            self._settings_popup.mcpListCard.refresh_connections()
         self._restore_after_system_close()
 
     def _on_hook_edit_card_closed(self):

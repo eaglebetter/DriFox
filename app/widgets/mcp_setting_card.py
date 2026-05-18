@@ -17,6 +17,7 @@ from PyQt5.QtWidgets import (
     QVBoxLayout,
     QWidget,
     QPlainTextEdit,
+    QStackedWidget,
 )
 from loguru import logger
 from qfluentwidgets import (
@@ -114,7 +115,12 @@ class _ElidedLabel(QLabel):
 # ═══════════════════════════════════════════════════════════
 
 class MCPEditCard(QWidget):
-    """MCP Server 编辑卡片 — 承载在 BaseSettingsCard 中"""
+    """MCP Server 编辑卡片 — 承载在 BaseSettingsCard 中
+
+    支持两种编辑模式：
+    - 表单模式（默认）：分字段填写
+    - JSON 模式：直接编辑 JSON 格式配置
+    """
 
     saved = pyqtSignal(dict)
     closed = pyqtSignal()
@@ -123,7 +129,43 @@ class MCPEditCard(QWidget):
         super().__init__(parent)
         self._server_data = server_data or {}
         self._is_edit = bool(server_data)
+        self._json_mode = False
         self._init_ui()
+
+    def _build_json_preview(self) -> str:
+        """从表单构建 JSON 预览文本（标准 mcpServers 格式）"""
+        data = self._collect_form_data()
+        if not data:
+            return ""
+        name = data.pop("name", "server")
+        srv_type = data.pop("type", "stdio")
+        data.pop("enabled", None)  # enabled 是 UI 字段，不输出
+        if srv_type != "stdio":
+            data["type"] = srv_type
+        result = {"mcpServers": {name: data}}
+        return json.dumps(result, indent=2, ensure_ascii=False)
+
+    def _build_json_from_data(self) -> str:
+        """从已有 server_data 构建 JSON（标准 mcpServers 格式）"""
+        data = dict(self._server_data)
+        name = data.pop("name", "my-server")
+        # 去掉内部字段
+        enabled = data.pop("enabled", True)
+        server_type = data.pop("type", "stdio")
+        # 如果是 stdio，type 不输出（标准格式默认 stdio）
+        # 如果是 sse/http，输出 url/headers 标准结构
+        if server_type != "stdio":
+            data["type"] = server_type
+        # 组装 mcpServers 格式
+        result = {
+            "mcpServers": {
+                name: data
+            }
+        }
+        return json.dumps(result, indent=2, ensure_ascii=False)
+
+    # 模式切换信号（通知外层更新头部按钮）
+    modeChanged = pyqtSignal(bool)  # True=JSON模式, False=表单模式
 
     def _init_ui(self):
         self.setStyleSheet(EDIT_CARD_STYLE)
@@ -132,6 +174,17 @@ class MCPEditCard(QWidget):
         main_layout.setContentsMargins(4, 2, 4, 2)
         main_layout.setSpacing(6)
 
+        # ── QStackedWidget：表单页(0) / JSON页(1) ──
+        self._stack = QStackedWidget()
+        main_layout.addWidget(self._stack, 1)
+
+        # ── 表单页 ──
+        self._form_page = QWidget()
+        self._form_page.setStyleSheet("background: transparent;")
+        form_layout = QVBoxLayout(self._form_page)
+        form_layout.setContentsMargins(0, 0, 0, 0)
+        form_layout.setSpacing(6)
+
         # ── 名称 ──
         self.nameEdit = QLineEdit()
         self.nameEdit.setPlaceholderText("例如: github, filesystem, my-api")
@@ -139,7 +192,7 @@ class MCPEditCard(QWidget):
             self.nameEdit.setText(self._server_data.get("name", ""))
             self.nameEdit.setReadOnly(True)
         row, _ = _make_row("名称:", self.nameEdit)
-        main_layout.addLayout(row)
+        form_layout.addLayout(row)
 
         # ── 类型 ──
         self.typeCombo = SearchableEditableComboBox()
@@ -147,14 +200,14 @@ class MCPEditCard(QWidget):
         self.typeCombo.setCurrentText(self._server_data.get("type", "stdio"))
         self.typeCombo.currentTextChanged.connect(self._on_type_changed)
         row, _ = _make_row("类型:", self.typeCombo)
-        main_layout.addLayout(row)
+        form_layout.addLayout(row)
 
         # ── Command（stdio） ──
         self.commandEdit = QLineEdit()
         self.commandEdit.setPlaceholderText("例如: npx")
         self.commandEdit.setText(self._server_data.get("command", ""))
         self._cmd_row, self._cmd_label = _make_row("Command:", self.commandEdit)
-        main_layout.addLayout(self._cmd_row)
+        form_layout.addLayout(self._cmd_row)
 
         # ── Args（stdio） ──
         self.argsEdit = QLineEdit()
@@ -163,14 +216,14 @@ class MCPEditCard(QWidget):
         if isinstance(saved_args, list):
             self.argsEdit.setText(" ".join(saved_args))
         self._args_row, self._args_label = _make_row("Args:", self.argsEdit)
-        main_layout.addLayout(self._args_row)
+        form_layout.addLayout(self._args_row)
 
         # ── URL（sse/http） ──
         self.urlEdit = QLineEdit()
         self.urlEdit.setPlaceholderText("例如: https://api.example.com/mcp")
         self.urlEdit.setText(self._server_data.get("url", ""))
         self._url_row, self._url_label = _make_row("URL:", self.urlEdit)
-        main_layout.addLayout(self._url_row)
+        form_layout.addLayout(self._url_row)
 
         # ── Headers（sse/http） ──
         self.headersEdit = QPlainTextEdit()
@@ -180,7 +233,7 @@ class MCPEditCard(QWidget):
         if saved_headers and isinstance(saved_headers, dict):
             self.headersEdit.setPlainText(json.dumps(saved_headers, indent=2, ensure_ascii=False))
         self._headers_row, self._headers_label = _make_row("Headers:", self.headersEdit)
-        main_layout.addLayout(self._headers_row)
+        form_layout.addLayout(self._headers_row)
 
         # ── 环境变量（stdio） ──
         self.envEdit = QPlainTextEdit()
@@ -190,12 +243,195 @@ class MCPEditCard(QWidget):
         if saved_env and isinstance(saved_env, dict):
             self.envEdit.setPlainText(json.dumps(saved_env, indent=2, ensure_ascii=False))
         self._env_row, self._env_label = _make_row("环境变量:", self.envEdit)
-        main_layout.addLayout(self._env_row)
+        form_layout.addLayout(self._env_row)
 
-        # 初始显隐
+        # 表单页加入 stack 索引 0
+        self._stack.addWidget(self._form_page)
+
+        # ── JSON 页 ──
+        self._json_page = QWidget()
+        self._json_page.setStyleSheet("background: transparent;")
+        json_layout = QVBoxLayout(self._json_page)
+        json_layout.setContentsMargins(0, 0, 0, 0)
+        self.jsonEdit = QPlainTextEdit()
+        self.jsonEdit.setStyleSheet(EDIT_CARD_STYLE)
+        self.jsonEdit.setPlaceholderText(
+            '粘贴标准 MCP 配置（支持两种格式）:\n\n'
+            '【格式一】Claude Desktop / Cursor 标准格式:\n'
+            '{\n'
+            '  "mcpServers": {\n'
+            '    "brave-search": {\n'
+            '      "command": "npx",\n'
+            '      "args": ["-y", "@brave/brave-search-mcp-server"],\n'
+            '      "env": {"BRAVE_API_KEY": "xxx"}\n'
+            '    }\n'
+            '  }\n'
+            '}\n\n'
+            '【格式二】简化单服务器格式:\n'
+            '{\n'
+            '  "name": "my-server",\n'
+            '  "command": "npx",\n'
+            '  "args": ["-y", "some-package"],\n'
+            '  "env": {"KEY": "value"}\n'
+            '}\n\n'
+            '💡 提示: args 含 "--transport http/sse" 时，系统会自动设置连接类型为 http'
+        )
+        json_data = self._build_json_from_data() if self._server_data else ""
+        if json_data:
+            self.jsonEdit.setPlainText(json_data)
+        json_layout.addWidget(self.jsonEdit)
+        # JSON 页加入 stack 索引 1
+        self._stack.addWidget(self._json_page)
+
+        # 初始显隐（表单模式按类型显示字段）
+        self._stack.setCurrentIndex(0)  # 默认表单模式
         self._on_type_changed(self.typeCombo.currentText())
 
+    def _toggle_mode(self):
+        """切换表单/JSON 编辑模式"""
+        self._json_mode = not self._json_mode
+        if self._json_mode:
+            # 切到 JSON 模式：同步表单数据到 JSON 编辑器（标准格式）
+            form_data = self._collect_form_data()
+            if form_data:
+                preview = self._build_json_preview()
+                self.jsonEdit.setPlainText(preview if preview else json.dumps(form_data, indent=2, ensure_ascii=False))
+            self._stack.setCurrentIndex(1)
+        else:
+            # 切回表单模式：从 JSON 解析回表单（支持两种格式）
+            json_text = self.jsonEdit.toPlainText().strip()
+            if json_text:
+                try:
+                    parsed = json.loads(json_text)
+                    parsed = self._parse_mcp_json(parsed)
+                    self._apply_json_to_form(parsed)
+                except (json.JSONDecodeError, ValueError, KeyError, TypeError) as e:
+                    InfoBar.warning("提示", f"JSON 解析失败: {e}，无法切换回表单模式",
+                                    parent=self.window(), duration=3000,
+                                    position=InfoBarPosition.BOTTOM)
+                    self._json_mode = True  # 保持 JSON 模式
+                    self._stack.setCurrentIndex(1)
+                    return
+            self._stack.setCurrentIndex(0)
+        self.modeChanged.emit(self._json_mode)
+
+    def _collect_form_data(self) -> dict:
+        """收集表单当前值，返回 dict"""
+        name = self.nameEdit.text().strip()
+        if not name:
+            return None
+        server_type = self.typeCombo.currentText()
+        data = {
+            "name": name,
+            "type": server_type,
+            "enabled": self._server_data.get("enabled", True),
+        }
+        if server_type == "stdio":
+            cmd = self.commandEdit.text().strip()
+            if not cmd:
+                return None
+            data["command"] = cmd
+            args_text = self.argsEdit.text().strip()
+            data["args"] = args_text.split() if args_text else []
+            env_text = self.envEdit.toPlainText().strip()
+            if env_text:
+                try:
+                    data["env"] = json.loads(env_text)
+                except json.JSONDecodeError:
+                    return None
+        else:
+            url = self.urlEdit.text().strip()
+            if not url:
+                return None
+            data["url"] = url
+            headers_text = self.headersEdit.toPlainText().strip()
+            if headers_text:
+                try:
+                    data["headers"] = json.loads(headers_text)
+                except json.JSONDecodeError:
+                    return None
+        return data
+
+    def _parse_mcp_json(self, parsed: dict) -> dict:
+        """
+        将 JSON 格式转为内部 server_data 格式。
+        支持输入：
+        - 标准 mcpServers 格式: {"mcpServers": {"name": {...}}}
+        - 简化格式: {"name": "...", "command": "...", ...}
+        返回: {"name": "...", "type": "...", "command": "...", ...}
+
+        自动检测：
+        - args 含 --transport http → 自动设 type=http 并提示
+        """
+        # 格式一：mcpServers 包裹格式
+        if "mcpServers" in parsed:
+            servers_dict = parsed["mcpServers"]
+            if not isinstance(servers_dict, dict) or not servers_dict:
+                raise ValueError("mcpServers 必须包含至少一个服务器")
+            # 取第一个服务器
+            server_name = next(iter(servers_dict))
+            server_cfg = servers_dict[server_name]
+            if not isinstance(server_cfg, dict):
+                raise ValueError(f"服务器 '{server_name}' 配置格式错误")
+            result = {"name": server_name}
+            result.update(server_cfg)
+            return self._normalize_server_data(result)
+
+        # 格式二：简化格式（平铺键值）
+        if "name" not in parsed:
+            raise ValueError("缺少 'name' 字段或 'mcpServers' 包裹")
+        return self._normalize_server_data(dict(parsed))
+
+    def _normalize_server_data(self, data: dict) -> dict:
+        """规范化 server_data，补充缺失字段、检测类型"""
+        if "enabled" not in data:
+            data["enabled"] = True
+
+        # 自动检测类型
+        if "type" not in data:
+            args = data.get("args", [])
+            has_http_transport = any(
+                isinstance(a, str) and "--transport" in a and
+                i + 1 < len(args) and args[i + 1] in ("http", "sse")
+                for i, a in enumerate(args)
+            )
+            if has_http_transport:
+                data["type"] = "http"
+            elif "url" in data:
+                data["type"] = "sse"
+            else:
+                data["type"] = "stdio"
+        return data
+
+    def _apply_json_to_form(self, parsed: dict):
+        """将解析后的 JSON dict 写回表单字段"""
+        self.nameEdit.setText(parsed.get("name", ""))
+        if self._is_edit:
+            self.nameEdit.setReadOnly(True)
+
+        srv_type = parsed.get("type", "stdio")
+        idx = self.typeCombo.findText(srv_type)
+        if idx >= 0:
+            self.typeCombo.setCurrentIndex(idx)
+
+        self.commandEdit.setText(parsed.get("command", ""))
+        args = parsed.get("args", [])
+        self.argsEdit.setText(" ".join(args) if isinstance(args, list) else "")
+        self.urlEdit.setText(parsed.get("url", ""))
+        headers = parsed.get("headers")
+        if headers and isinstance(headers, dict):
+            self.headersEdit.setPlainText(json.dumps(headers, indent=2, ensure_ascii=False))
+        else:
+            self.headersEdit.clear()
+        env = parsed.get("env")
+        if env and isinstance(env, dict):
+            self.envEdit.setPlainText(json.dumps(env, indent=2, ensure_ascii=False))
+        else:
+            self.envEdit.clear()
+
     def _on_type_changed(self, server_type: str):
+        if self._json_mode:
+            return  # JSON 模式下不处理字段显隐
         is_stdio = server_type == "stdio"
         for w in (self._cmd_label, self.commandEdit):
             w.setVisible(is_stdio)
@@ -209,6 +445,29 @@ class MCPEditCard(QWidget):
             w.setVisible(is_stdio)
 
     def _on_save(self):
+        if self._json_mode:
+            # JSON 模式：支持标准 mcpServers 格式和简化格式
+            json_text = self.jsonEdit.toPlainText().strip()
+            if not json_text:
+                InfoBar.warning("提示", "请输入 JSON 配置", parent=self.window(),
+                                duration=2000, position=InfoBarPosition.BOTTOM)
+                return
+            try:
+                parsed = json.loads(json_text)
+            except json.JSONDecodeError as e:
+                InfoBar.warning("提示", f"JSON 格式错误: {e}", parent=self.window(),
+                                duration=3000, position=InfoBarPosition.BOTTOM)
+                return
+            try:
+                server_data = self._parse_mcp_json(parsed)
+            except (ValueError, KeyError, TypeError) as e:
+                InfoBar.warning("提示", f"配置解析失败: {e}", parent=self.window(),
+                                duration=3000, position=InfoBarPosition.BOTTOM)
+                return
+            self.saved.emit(server_data)
+            return
+
+        # 表单模式
         name = self.nameEdit.text().strip()
         if not name:
             InfoBar.warning("提示", "请输入服务器名称", parent=self.window(),
@@ -337,7 +596,7 @@ class MCPListSettingCard(ExpandSettingCard):
     showEditCard = pyqtSignal(str, dict)
 
     # 内部信号（从后台线程桥接到主线程 UI 更新）
-    _hotConnectResult = pyqtSignal(str, bool)
+    _hotConnectResult = pyqtSignal(str, bool, str)
 
     def __init__(self, icon, title: str, content: str = None, parent=None):
         self.cfg = Settings.get_instance()
@@ -398,13 +657,56 @@ class MCPListSettingCard(ExpandSettingCard):
         if not self.cfg.mcp_enabled.value:
             return
 
-        def on_done(n, success):
-            self._hotConnectResult.emit(n, success)
+        # 防重复：已连接的不再触发
+        status_list = mgr.get_status()
+        already = any(st["name"] == name and st["connected"] for st in status_list)
+        if already:
+            logger.debug(f"[MCP] '{name}' 已连接，跳过热连接")
+            return
+
+        def on_done(n, success, error_msg=""):
+            self._hotConnectResult.emit(n, success, error_msg)
 
         mgr.connect_server_background(name, config, on_done=on_done)
 
-    def _on_hot_connect_result(self, name: str, success: bool):
+    def _on_hot_connect_result(self, name: str, success: bool, error_msg: str = ""):
         """连接结果回调（主线程，可安全操作 UI）"""
+        if success:
+            logger.info(f"[MCP] '{name}' 热连接成功")
+        else:
+            # 提取友好提示
+            hint = error_msg or "未知错误"
+            if "请检查配置类型是否正确" in hint:
+                # 拆分为标题和内容
+                parts = hint.split("（", 1)
+                display_msg = parts[0]
+                detail = "（" + parts[1] if len(parts) > 1 else ""
+                logger.warning(f"[MCP] '{name}' 热连接失败: {display_msg}")
+                InfoBar.error(
+                    title=f"MCP 连接失败: {name}",
+                    content=f"{display_msg}\n{detail}" if detail else display_msg,
+                    parent=self.window(),
+                    duration=8000,
+                    position=InfoBarPosition.BOTTOM,
+                )
+            elif hint != "未知错误":
+                logger.warning(f"[MCP] '{name}' 热连接失败: {hint}")
+                InfoBar.error(
+                    title=f"MCP 连接失败: {name}",
+                    content=hint,
+                    parent=self.window(),
+                    duration=6000,
+                    position=InfoBarPosition.BOTTOM,
+                )
+            else:
+                logger.warning(f"[MCP] '{name}' 热连接失败")
+                InfoBar.error(
+                    title=f"MCP 连接失败",
+                    content=f"'{name}' 连接失败，请检查配置是否正确",
+                    parent=self.window(),
+                    duration=5000,
+                    position=InfoBarPosition.BOTTOM,
+                )
         self.serversChanged.emit()
 
     def _hot_disconnect(self, name: str):
@@ -458,6 +760,9 @@ class MCPListSettingCard(ExpandSettingCard):
         enabled_count = sum(1 for s in servers if s.get("enabled", True))
         self.setCount(f"{enabled_count}/{count}")
 
+        # 强制更新展开视图高度（Fix: 添加后列表不刷新）
+        self._adjustViewSize()
+
     def setCount(self, text: str):
         card = self.card
         if hasattr(card, 'contentLabel'):
@@ -503,6 +808,24 @@ class MCPListSettingCard(ExpandSettingCard):
             self._hot_disconnect(name)
 
         self.serversChanged.emit()
+
+    # ── 公开刷新方法（供 settings 弹窗 show 时调用） ──
+
+    def refresh_connections(self):
+        """重新连接所有已启用但未连接的服务器（修复新配置不生效问题）"""
+        mgr = self._get_mcp_manager()
+        servers = self.cfg.mcp_servers.value or []
+        if not self.cfg.mcp_enabled.value:
+            return
+        for s in servers:
+            if not s.get("enabled", True):
+                continue
+            name = s.get("name", "")
+            # 只重新连接已断开或未连接过的
+            status_list = mgr.get_status()
+            already = any(st["name"] == name and st["connected"] for st in status_list)
+            if not already:
+                self._hot_connect(name, s)
 
     # ── 供外部调用的添加/更新方法 ──────────────────────
 

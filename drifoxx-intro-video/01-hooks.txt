@@ -1,0 +1,15 @@
+你的AI助手在后台偷偷调了一个你不希望它用的工具，怎么办？DriFoxx的Hooks系统就是干这个的——在AI对话流程的关键节点，插一道关卡，你说了算。
+
+七个事件钩子，从会话开始到工具调用，全链条覆盖。SessionStart是会话刚创建的时候，PreUserMessage是你发消息之前，PostUserMessage是消息发出去之后。AI那边也一样，PreAssistantMessage和PostAssistantMessage夹住它的回复。最关键的是PreToolUse和PostToolUse，这两个一个在工具执行前，一个在工具执行后。
+
+PreToolUse为什么最关键？因为只有它能拦截操作。你在PreToolUse上挂一个hook，返回block，工具就不执行了。比如你想防止AI随便抓网页，加一个matcher写tool:webfetch，命令填exit 2，搞定了。AI一调webfetch，直接被拦住。
+
+Hook支持三种类型。command类型最直接，跑一条shell命令，stdout就是输出。http类型适合通知外部系统，每次AI干完活给你的企业微信推一条消息。python类型最灵活，直接调项目里的函数，做复杂逻辑不在话下。
+
+Matcher是精度控制。写tool:webfetch，只在调webfetch时触发。写正则匹配帮助关键词，只在用户消息包含帮助时才拦。不写matcher，所有操作都触发。
+
+还有条件系统，env、file、tool、regex四种维度，全部满足才执行。比如你可以设一个条件：只在DEBUG模式下、文件是Python的时候才跑某个hook。
+
+技能也能注册自己的hook。比如using-superpowers技能就有一个SessionStart hook，每次会话开始自动注入提示。技能hook在界面上标成只读，你关得了但删不掉。全局hook和技能hook在同一个事件分组里显示，一眼看全。
+
+配置存在.drifox/hooks/hooks.json里，界面上添加、编辑、开关、删除都行。改完热重载，不用重启。Hook的输出还能自动注入回AI的上下文，让AI知道刚才hook做了什么。

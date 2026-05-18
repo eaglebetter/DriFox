@@ -12,6 +12,7 @@ MCP 工具模块 - 管理 MCP Server 连接、工具发现与调用
 import asyncio
 import json
 import os
+import re
 import threading
 from typing import Dict, List, Optional, Tuple
 
@@ -23,6 +24,24 @@ from mcp.client.sse import sse_client
 from mcp.client.streamable_http import streamablehttp_client
 
 from app.tools.result import ToolResult
+
+
+def _extract_real_error(exc: Exception) -> Exception:
+    """
+    从嵌套的 ExceptionGroup/BaseExceptionGroup 中提取最底层的真实错误。
+    如果无法提取，返回原异常。
+    """
+    # Python 3.11+ ExceptionGroup
+    if hasattr(exc, "exceptions"):
+        group = exc
+        # 遍历所有层级，找到第一个非 ExceptionGroup 的异常
+        while hasattr(group, "exceptions") and group.exceptions:
+            for e in group.exceptions:
+                if not hasattr(e, "exceptions") or not e.exceptions:
+                    return e
+            # 所有子异常都是 ExceptionGroup → 继续深入第一支
+            group = group.exceptions[0]
+    return exc
 
 
 class MCPServerConnection:
@@ -121,7 +140,11 @@ class MCPClientManager:
             elif server_type == "sse":
                 await self._lifespan_sse(conn)
             elif server_type == "http":
-                await self._lifespan_http(conn)
+                # 如果 http 类型但含有 command 字段(无预设 URL)，需要先启动进程获取 URL
+                if conn.config.get("command"):
+                    await self._lifespan_http_from_stdio(conn)
+                else:
+                    await self._lifespan_http(conn)
             else:
                 conn._connect_error = ValueError(f"不支持的 MCP 服务器类型: {server_type}")
                 conn._ready_event.set()
@@ -129,7 +152,9 @@ class MCPClientManager:
             logger.debug(f"[MCP] 服务器 '{conn.name}' 的生命周期 Task 被取消")
         except Exception as e:
             if not conn._ready_event.is_set():
-                conn._connect_error = e
+                # 尝试从 ExceptionGroup 中提取真实错误信息
+                actual = _extract_real_error(e)
+                conn._connect_error = actual
                 conn._ready_event.set()
             else:
                 logger.warning(f"[MCP] 服务器 '{conn.name}' 生命周期异常: {e}")
@@ -179,6 +204,102 @@ class MCPClientManager:
                 conn.tools = result.tools
                 conn._ready_event.set()
                 await conn._disconnect_event.wait()
+
+    async def _lifespan_http_from_stdio(self, conn: MCPServerConnection) -> None:
+        """
+        两阶段连接：先通过 stdio 启动服务器进程 -> 捕获 stdout 中的 URL -> 切换 HTTP 连接。
+
+        适用场景：服务器使用 --transport http 参数，启动后输出 URL 到 stdout
+        （如 @brave/brave-search-mcp-server --transport http）
+        """
+        command = conn.config.get("command", "")
+        args = conn.config.get("args", [])
+        env = conn.config.get("env")
+        merged_env = {**os.environ, **(env or {})}
+
+        logger.info(f"[MCP] '{conn.name}' 启动进程中获取 URL...")
+
+        # 阶段一：启动进程并捕获 stdout（寻找 URL）
+        process = await asyncio.create_subprocess_exec(
+            command,
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=merged_env,
+        )
+
+        found_url = None
+        try:
+            # 读取 stdout 寻找 URL（最大等待 15 秒）
+            async def _find_url():
+                nonlocal found_url
+                assert process.stdout is not None
+                url_pattern = re.compile(r'http[s]?://[^\s"\']+')
+                while True:
+                    line = await asyncio.wait_for(process.stdout.readline(), timeout=15)
+                    if not line:
+                        break
+                    decoded = line.decode("utf-8", errors="replace").strip()
+                    logger.debug(f"[MCP] '{conn.name}' stdout: {decoded}")
+                    # 尝试匹配 URL
+                    match = url_pattern.search(decoded)
+                    if match:
+                        found_url = match.group(0)
+                        return
+                    # 也检查是否为纯 URL 行
+                    if decoded.startswith("http://") or decoded.startswith("https://"):
+                        found_url = decoded
+                        return
+
+            await _find_url()
+        except asyncio.TimeoutError:
+            # 超时未找到 URL，尝试杀掉进程后回退到 stdio
+            try:
+                process.kill()
+            except Exception:
+                pass
+            raise TimeoutError(
+                f"启动服务器 '{conn.name}' 后未能在 stdout 中找到 URL（15秒超时），"
+                f"请确认服务器使用了正确的 --transport 参数"
+            )
+
+        if not found_url:
+            try:
+                process.kill()
+            except Exception:
+                pass
+            raise RuntimeError(
+                f"启动服务器 '{conn.name}' 后未能从输出中解析到 URL"
+            )
+
+        # 清理 URL 中的尾部分隔符
+        found_url = found_url.rstrip("/,.;")
+        # 如果 URL 是 0.0.0.0，替换为 localhost
+        found_url = found_url.replace("0.0.0.0", "127.0.0.1")
+        logger.info(f"[MCP] '{conn.name}' 获取到 URL: {found_url}")
+
+        # 阶段二：用获取到的 URL 建立 HTTP 连接
+        # 保持子进程运行（HTTP 服务器进程），连接关闭时杀掉进程
+        try:
+            async with streamablehttp_client(url=found_url) as (read_stream, write_stream, _):
+                async with ClientSession(read_stream, write_stream) as session:
+                    await session.initialize()
+                    result = await session.list_tools()
+                    conn.session = session
+                    conn.tools = result.tools
+                    conn._ready_event.set()
+                    logger.info(f"[MCP] '{conn.name}' HTTP 连接成功，发现 {len(conn.tools)} 个工具")
+                    await conn._disconnect_event.wait()
+        finally:
+            # 断开连接时杀掉子进程
+            try:
+                process.terminate()
+                try:
+                    await asyncio.wait_for(process.wait(), timeout=5)
+                except asyncio.TimeoutError:
+                    process.kill()
+            except Exception:
+                pass
 
     # ── 连接操作 ──────────────────────────────────────
 
@@ -230,7 +351,10 @@ class MCPClientManager:
     def connect_server_sync(self, name: str, config: dict) -> bool:
         """同步连接单个 MCP 服务器（热添加）"""
         try:
-            return self._run_async(self._connect_single(name, config))
+            success, err = self._run_async(self._connect_single(name, config))
+            if not success and err:
+                logger.error(f"[MCP] 热添加服务器 '{name}' 失败: {err}")
+            return success
         except Exception as e:
             logger.error(f"[MCP] 热添加服务器 '{name}' 失败: {e}")
             return False
@@ -239,21 +363,26 @@ class MCPClientManager:
         """后台连接单个 MCP 服务器（不阻塞 UI）"""
         def _worker():
             success = False
+            error_msg = ""
             try:
-                success = self._run_async(self._connect_single(name, config))
+                success, error_msg = self._run_async(self._connect_single(name, config))
             except Exception as e:
+                error_msg = str(e)
                 logger.error(f"[MCP] 热添加服务器 '{name}' 失败: {e}")
             finally:
                 if on_done:
                     try:
-                        on_done(name, success)
+                        on_done(name, success, error_msg)
                     except Exception as e:
                         logger.warning(f"[MCP] on_done 回调异常: {e}")
 
         threading.Thread(target=_worker, name="mcp-hot-add", daemon=True).start()
 
-    async def _connect_single(self, name: str, config: dict) -> bool:
-        """连接单个服务器：启动生命周期 Task 并等待就绪"""
+    async def _connect_single(self, name: str, config: dict) -> tuple:
+        """
+        连接单个服务器：启动生命周期 Task 并等待就绪
+        返回: (success: bool, error_msg: str)
+        """
         # 如果已存在，先断开
         if name in self._connections:
             await self._disconnect_single(name)
@@ -271,17 +400,25 @@ class MCPClientManager:
             await asyncio.wait_for(conn._ready_event.wait(), timeout=30)
         except asyncio.TimeoutError:
             conn._task.cancel()
-            logger.error(f"[MCP] 连接服务器 '{name}' 超时")
-            return False
+            msg = f"连接服务器 '{name}' 超时（30秒）"
+            logger.error(f"[MCP] {msg}")
+            return False, msg
 
         if conn._connect_error:
-            logger.error(f"[MCP] 连接服务器 '{name}' 失败: {conn._connect_error}")
-            return False
+            err = conn._connect_error
+            # 尝试提取更友好的错误信息
+            err_str = str(err)
+            if "JSONRPC" in err_str and "Invalid JSON" in err_str:
+                # 服务器 stdout 输出了非 JSON 内容 → 可能是 http/sse 服务器却用了 stdio 类型
+                err_str += "（服务器输出了非 JSON 内容到 stdout，请检查配置类型是否正确）"
+            msg = f"连接服务器 '{name}' 失败: {err_str}"
+            logger.error(f"[MCP] {msg}")
+            return False, msg
 
         self._connections[name] = conn
         self._connected = True
         logger.info(f"[MCP] 已连接服务器 '{name}'，发现 {len(conn.tools)} 个工具")
-        return True
+        return True, ""
 
     # ── 断开连接 ──────────────────────────────────────
 
