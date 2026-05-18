@@ -431,7 +431,7 @@ class DiffHtmlGenerator:
         }
 
         .diff-collapsed-context.expanded {
-            display: flex;
+            display: block;
         }
 
         .no-diff {
@@ -817,8 +817,8 @@ class DiffHtmlGenerator:
         // 上下文折叠：对连续超过阈值的 context 行，折叠中间部分
         function applyContextFolding(container) {{
             const CONTEXT_THRESHOLD = 3;  // 连续 context 行超过此值时折叠中间部分
-            const KEEP_HEAD = 1;          // 折叠区域前后各保留的行数
-            const KEEP_TAIL = 1;
+            const KEEP_HEAD = 1;           // 折叠区域前部保留的行数
+            const KEEP_TAIL = 1;           // 折叠区域后部保留的行数
 
             const diffTables = container.querySelectorAll('.diff-table');
             diffTables.forEach(table => {{
@@ -859,7 +859,7 @@ class DiffHtmlGenerator:
                     // 展开按钮
                     const expandBtn = document.createElement('div');
                     expandBtn.className = 'diff-expand';
-                    expandBtn.innerHTML = `<span class="expand-icon">&#9662;</span> <span class="expand-lines">${{foldCount}} unchanged lines</span>`;
+                    expandBtn.innerHTML = `<span class="expand-icon">&#9662;</span> <span class="expand-lines">${{foldCount}} 行未更改</span>`;
                     expandBtn.addEventListener('click', function() {{
                         // 展开：显示折叠的行，隐藏按钮
                         foldedDiv.classList.add('expanded');
@@ -871,9 +871,9 @@ class DiffHtmlGenerator:
 
                     // 将中间行移入折叠容器
                     const rows = Array.from(allRows);
-                    // 在移动行之前，先保存锚点：折叠区域之后的那一行（未移动的行）
-                    // 因为折叠区域尾部之后的行不会被移动，它的位置是稳定的
-                    const anchorRow = (range.end + 1 < rows.length) ? rows[range.end + 1] : null;
+                    // 锚点：第一个 KEEP_TAIL 行（折叠区之后、keep_tail 保留行之前）
+                    // 注意不能拿 range.end+1（整个context区之后），否则折叠容器会插在 keep_tail 行后面
+                    const anchorRow = (foldEnd + 1 < rows.length) ? rows[foldEnd + 1] : null;
                     for (let i = foldEnd; i >= foldStart; i--) {{
                         rows[i].style.display = 'none';
                         foldedDiv.insertBefore(rows[i], foldedDiv.firstChild);
@@ -1340,6 +1340,7 @@ class DiffHtmlGenerator:
                         fromfile=abs_path,
                         tofile=abs_path,
                         lineterm="\n",
+                        n=5,
                     )
 
                     diff_text = "".join(diff)
