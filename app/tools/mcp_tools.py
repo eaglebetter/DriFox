@@ -26,6 +26,24 @@ from mcp.client.streamable_http import streamablehttp_client
 from app.tools.result import ToolResult
 
 
+def _extract_real_error(exc: Exception) -> Exception:
+    """
+    从嵌套的 ExceptionGroup/BaseExceptionGroup 中提取最底层的真实错误。
+    如果无法提取，返回原异常。
+    """
+    # Python 3.11+ ExceptionGroup
+    if hasattr(exc, "exceptions"):
+        group = exc
+        # 遍历所有层级，找到第一个非 ExceptionGroup 的异常
+        while hasattr(group, "exceptions") and group.exceptions:
+            for e in group.exceptions:
+                if not hasattr(e, "exceptions") or not e.exceptions:
+                    return e
+            # 所有子异常都是 ExceptionGroup → 继续深入第一支
+            group = group.exceptions[0]
+    return exc
+
+
 class MCPServerConnection:
     """单个 MCP Server 的连接管理"""
 
@@ -134,7 +152,9 @@ class MCPClientManager:
             logger.debug(f"[MCP] 服务器 '{conn.name}' 的生命周期 Task 被取消")
         except Exception as e:
             if not conn._ready_event.is_set():
-                conn._connect_error = e
+                # 尝试从 ExceptionGroup 中提取真实错误信息
+                actual = _extract_real_error(e)
+                conn._connect_error = actual
                 conn._ready_event.set()
             else:
                 logger.warning(f"[MCP] 服务器 '{conn.name}' 生命周期异常: {e}")
