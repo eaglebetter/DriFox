@@ -297,7 +297,7 @@ def _render_think_block(content: str, completed: bool = True) -> str:
     <button type="button" class="cm-collapsible__summary think-block__summary" aria-expanded="{expanded_attr}" style="{font_style}">
         <span class="cm-collapsible__chevron" aria-hidden="true"></span>
         <span style="white-space: nowrap;">{status_text}</span>
-        <span style="color: #666; font-weight: normal; margin-left: auto; font-size: {scale_font_size(11)}px;">{escape(content_preview)}</span>
+        <span style="color: #909090; font-weight: normal; margin-left: 12px; font-size: {scale_font_size(11)}px;">{escape(content_preview)}</span>
     </button>
     <div class="cm-collapsible__body"{body_style}>
         <div class="think-content loading" style="white-space: normal; word-break: break-word; line-height: 1.6; {font_style}">{content}</div>
@@ -336,7 +336,7 @@ def _render_think_block_lightweight(content: str, completed: bool = True) -> str
     <button type="button" class="cm-collapsible__summary think-block__summary" aria-expanded="{expanded_attr}" style="{font_style}">
         <span class="cm-collapsible__chevron" aria-hidden="true"></span>
         <span style="white-space: nowrap;">{status_text}</span>
-        <span style="color: #666; font-weight: normal; margin-left: auto; font-size: {scale_font_size(11)}px;">{escape(content_preview)}</span>
+        <span style="color: #909090; font-weight: normal; margin-left: 12px; font-size: {scale_font_size(11)}px;">{escape(content_preview)}</span>
     </button>
     <div class="cm-collapsible__body"{body_style}>
         <div class="think-content loading" style="white-space: normal; word-break: break-word; line-height: 1.6; {font_style}">{content_escaped}</div>
