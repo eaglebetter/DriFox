@@ -14,6 +14,7 @@ ICON_NAME_TO_FILE = {
     "qwen": "qwen.svg",
     "siliconflow": "siliconflow.png",
     "主题风格": "主题风格.svg",
+    "云通信": "云通信.svg",
     "分支": "分支.svg",
     "复制": "复制.svg",
     "大模型": "大模型.svg",

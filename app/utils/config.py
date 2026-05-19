@@ -208,3 +208,15 @@ class Settings(QConfig):
         "SerpAPI",
         "42e2b2817bf48352d3caa227212ebb82d6f8839cdd39b304c68cf58b42961c27",
     )
+
+    # ========== Gateway 通讯平台配置 ==========
+    # 企业微信
+    gateway_wecom_enabled = ConfigItem("Gateway", "WeCom/Enabled", False, BoolValidator())
+    gateway_wecom_bot_id = ConfigItem("Gateway", "WeCom/BotID", "")
+    gateway_wecom_secret = ConfigItem("Gateway", "WeCom/Secret", "")
+    gateway_wecom_websocket_url = ConfigItem("Gateway", "WeCom/WebSocketURL", "wss://openws.work.weixin.qq.com")
+
+    # 钉钉
+    gateway_dingtalk_enabled = ConfigItem("Gateway", "DingTalk/Enabled", False, BoolValidator())
+    gateway_dingtalk_client_id = ConfigItem("Gateway", "DingTalk/ClientID", "")
+    gateway_dingtalk_client_secret = ConfigItem("Gateway", "DingTalk/ClientSecret", "")
