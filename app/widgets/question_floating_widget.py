@@ -275,6 +275,7 @@ class QuestionFloatingWidget(SimpleCardWidget):
         self.toggle_text_mode_btn = QPushButton("改为输入", self)
         self.toggle_text_mode_btn.setCursor(Qt.PointingHandCursor)
         self._apply_toggle_btn_style()
+        self.toggle_text_mode_btn.clicked.connect(self._toggle_text_mode)
 
         self.custom_entry_bar.addWidget(self.custom_hint_label)
         self.custom_entry_bar.addStretch()
@@ -353,6 +354,7 @@ class QuestionFloatingWidget(SimpleCardWidget):
                 border-radius: 8px;
                 padding: 10px 12px;
                 selection-background-color: {Colors.REALTIME_ACCENT};
+                {get_font_family_css()} font-size: 10pt;
             }}
             QTextEdit:focus {{
                 border-color: {Colors.REALTIME_ACCENT};

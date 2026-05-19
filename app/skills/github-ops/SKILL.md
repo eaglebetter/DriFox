@@ -34,7 +34,19 @@ py -3 <skill>/scripts/github_ops.py branch-log dev master
 py -3 <skill>/scripts/github_ops.py push dev
 ```
 
-### 场景 2：回复 Issue
+### 场景 2：创建 Issue
+
+```bash
+# 方法1：使用文件路径
+echo "【优化建议】标题" > title.txt
+echo "Issue 内容..." > body.txt
+py -3 <skill>/scripts/github_ops.py create-issue owner repo title.txt body.txt
+
+# 方法2：直接传入文本
+py -3 <skill>/scripts/github_ops.py create-issue owner repo "标题" "内容"
+```
+
+### 场景 3：回复 Issue
 
 ```python
 # 1. 查看 issue 上下文
@@ -48,7 +60,7 @@ echo "感谢你的提议！" > body.txt
 py -3 <skill>/scripts/github_ops.py reply-issue owner repo 63 body.txt
 ```
 
-### 场景 3：创建 PR
+### 场景 4：创建 PR
 
 ```bash
 # 1. 查看分支差异
@@ -58,7 +70,7 @@ py -3 <skill>/scripts/github_ops.py branch-log dev master
 py -3 <skill>/scripts/github_ops.py create-pr owner repo title.txt body.txt dev master
 ```
 
-### 场景 4：推送并创建 PR
+### 场景 5：推送并创建 PR
 
 ```bash
 # 1. 提交并推送

@@ -18,9 +18,10 @@ Actions:
     get-issue     <owner> <repo> <issue_num>            查看 Issue 详情
     get-comments  <owner> <repo> <issue_num>            查看 Issue 评论
     reply-issue   <owner> <repo> <issue_num> <body>    回复 Issue
+    create-issue  <owner> <repo> <title> <body> [labels] 创建 Issue（支持文件路径或直接文本）
 
     # GitHub PR 操作
-    create-pr     <owner> <repo> <title> <body> <head> <base>  创建 PR
+    create-pr     <owner> <repo> <title> <body> <head> <base>  创建 PR（支持文件路径或直接文本）
 
     # 仓库信息
     get-repo      <owner> <repo>                        查看仓库信息
@@ -266,6 +267,38 @@ def get_issue(owner: str, repo: str, issue_num: str) -> bool:
         return False
 
 
+def create_issue(owner: str, repo: str, title: str, body: str, labels: list = None) -> bool:
+    """创建 Issue"""
+    # 支持文件路径或直接文本
+    if os.path.exists(title):
+        with open(title, 'r', encoding='utf-8') as f:
+            title = f.read().strip()
+    
+    if os.path.exists(body):
+        with open(body, 'r', encoding='utf-8') as f:
+            body = f.read()
+    
+    url = f'{BASE_URL}/repos/{owner}/{repo}/issues'
+    data = {
+        'title': title,
+        'body': body,
+    }
+    if labels:
+        data['labels'] = labels
+    
+    resp = requests.post(url, headers=HEADERS, json=data)
+    
+    if resp.status_code == 201:
+        issue = resp.json()
+        print(f"✓ Issue created successfully")
+        print(f"Number: #{issue['number']}")
+        print(f"URL: {issue['html_url']}")
+        return True
+    else:
+        print(f"[Error] {resp.status_code}: {resp.text}")
+        return False
+
+
 def get_comments(owner: str, repo: str, issue_num: str) -> bool:
     """获取 Issue 评论列表"""
     url = f'{BASE_URL}/repos/{owner}/{repo}/issues/{issue_num}/comments'
@@ -411,6 +444,15 @@ def main():
         branch = sys.argv[2]
         path = sys.argv[3] if len(sys.argv) == 4 else '.'
         sys.exit(0 if push(branch, path) else 1)
+    
+    elif action == 'create-issue' and len(sys.argv) >= 5:
+        # create-issue <owner> <repo> <title> <body> [labels...]
+        owner = sys.argv[2]
+        repo = sys.argv[3]
+        title = sys.argv[4]
+        body = sys.argv[5]
+        labels = sys.argv[6].split(',') if len(sys.argv) >= 7 else None
+        sys.exit(0 if create_issue(owner, repo, title, body, labels) else 1)
     
     # GitHub Issue 操作
     elif action == 'get-issue' and len(sys.argv) == 5:
