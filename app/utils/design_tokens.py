@@ -270,7 +270,8 @@ def apply_font_size_to_widget(widget, base_size: int = 14):
     """递归设置 widget 及其所有子控件的字体像素大小
     
     用于解决 qfluentwidgets 组件字体不随配置变化的问题。
-    qfluentwidgets 的 setFont 只设置单个 widget，不递归子控件。
+    qfluentwidgets 的 QSS 使用硬编码字体大小（如 font: 14px），
+    setFont() 无法覆盖，必须通过 stylesheet 强制覆盖。
     
     Args:
         widget: 要设置字体的 widget
@@ -278,10 +279,46 @@ def apply_font_size_to_widget(widget, base_size: int = 14):
     """
     from PyQt5.QtWidgets import QWidget
     scaled = scale_font_size(base_size)
+    content_scaled = scale_font_size(11)
+    font_family = _get_global_font()
+    
     for child in widget.findChildren(QWidget):
         child_font = child.font()
         child_font.setPixelSize(scaled)
+        child_font.setFamily(font_family)
         child.setFont(child_font)
+    
+    # qfluentwidgets SettingCard / ExpandSettingCard 的 titleLabel / contentLabel
+    # 使用硬编码 QSS（font: 14px / font: 11px），setFont 无法覆盖，必须用 stylesheet 强制
+    from qfluentwidgets.components.settings.setting_card import SettingCard
+    from qfluentwidgets.components.settings.expand_setting_card import ExpandSettingCard
+    from qfluentwidgets.components.widgets.switch_button import SwitchButton
+    
+    for card in widget.findChildren(SettingCard):
+        card.titleLabel.setStyleSheet(
+            f"QLabel {{ font-size: {scaled}px; font-family: '{font_family}'; }}"
+        )
+        card.contentLabel.setStyleSheet(
+            f"QLabel#contentLabel {{ font-size: {content_scaled}px; font-family: '{font_family}'; }}"
+        )
+    
+    for card in widget.findChildren(ExpandSettingCard):
+        # ExpandSettingCard 内部的 HeaderSettingCard 继承 SettingCard，已在上面处理
+        # 但其 titleLabel objectName 是 "titleLabel"，需要额外用 objectName 选择器覆盖
+        if hasattr(card, 'card') and hasattr(card.card, 'titleLabel'):
+            card.card.titleLabel.setStyleSheet(
+                f"QLabel#titleLabel {{ font-size: {scaled}px; font-family: '{font_family}'; }}"
+            )
+        if hasattr(card, 'card') and hasattr(card.card, 'contentLabel'):
+            card.card.contentLabel.setStyleSheet(
+                f"QLabel#contentLabel {{ font-size: {content_scaled}px; font-family: '{font_family}'; }}"
+            )
+    
+    # SwitchButton 内部 QLabel 也硬编码了 font: 14px
+    for switch in widget.findChildren(SwitchButton):
+        switch.setStyleSheet(
+            f"SwitchButton>QLabel {{ font-size: {scaled}px; font-family: '{font_family}'; }}"
+        )
 
 
 def get_theme_style_key() -> str:
