@@ -736,6 +736,10 @@ class MCPListSettingCard(ExpandSettingCard):
     # ── 列表刷新 ──────────────────────────────────────
 
     def _refresh(self):
+        """刷新服务器列表（保留展开状态）"""
+        was_expanded = self.isExpand
+
+        # 稳妥方式清空 viewLayout：takeAt + 删除 widget
         while self.viewLayout.count():
             item = self.viewLayout.takeAt(0)
             if item.widget():
@@ -747,21 +751,31 @@ class MCPListSettingCard(ExpandSettingCard):
             empty_label.setStyleSheet(f"color: #888; padding: 16px; {get_font_family_css()} font-size: {scale_font_size(12)}px;")
             empty_label.setAlignment(Qt.AlignCenter)
             self.viewLayout.addWidget(empty_label)
-            return
+        else:
+            for server_data in servers:
+                row = MCPServerRow(server_data, self.view)
+                row.removeRequested.connect(self._on_remove_server)
+                row.editRequested.connect(self._show_edit_dialog)
+                row.enabledChanged.connect(self._on_enabled_changed)
+                self.viewLayout.addWidget(row)
 
-        for server_data in servers:
-            row = MCPServerRow(server_data, self.view)
-            row.removeRequested.connect(self._on_remove_server)
-            row.editRequested.connect(self._show_edit_dialog)
-            row.enabledChanged.connect(self._on_enabled_changed)
-            self.viewLayout.addWidget(row)
+            count = len(servers)
+            enabled_count = sum(1 for s in servers if s.get("enabled", True))
+            self.setCount(f"{enabled_count}/{count}")
 
-        count = len(servers)
-        enabled_count = sum(1 for s in servers if s.get("enabled", True))
-        self.setCount(f"{enabled_count}/{count}")
+        # 处理异步删除（deleteLater）+ 强制布局计算，确保 sizeHint 正确
+        from PyQt5.QtCore import QCoreApplication
+        QCoreApplication.processEvents()
+        self.viewLayout.activate()
+        self.view.updateGeometry()
 
-        # 强制更新展开视图高度（Fix: 添加后列表不刷新）
+        # 调整展开区域高度
         self._adjustViewSize()
+        # 恢复展开状态：已展开时强制刷新高度
+        if was_expanded:
+            h = self.viewLayout.sizeHint().height()
+            if h > 0:
+                self.setFixedHeight(self.card.height() + h)
 
     def setCount(self, text: str):
         card = self.card

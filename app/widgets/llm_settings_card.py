@@ -4,7 +4,7 @@
 现已迁移到 SystemCardFrame 基类，获得统一头部布局和固定边框
 """
 
-from PyQt5.QtCore import Qt, pyqtSignal, QTimer
+from PyQt5.QtCore import Qt, pyqtSignal, QTimer, QRect
 from PyQt5.QtGui import QFont, QColor
 from PyQt5.QtWidgets import (
     QFontComboBox,
@@ -180,6 +180,17 @@ class LLMSettingsCard(SystemCardFrame):
         self._save_timer.setInterval(500)
         self._save_timer.timeout.connect(self._perform_save)
 
+        # 存储各区域分隔标签的位置
+        self._section_anchors = {}
+
+        # 设置顶部 Tab 导航
+        self.setup_tabs([
+            ("common", "通用设置"),
+            ("appearance", "外观样式"),
+            ("update", "版本更新"),
+        ], default_tab="common")
+        self.tabChanged.connect(self._on_tab_changed)
+
         self._setup_content()
 
     def _make_sep_label(self, text: str) -> StrongBodyLabel:
@@ -245,6 +256,11 @@ class LLMSettingsCard(SystemCardFrame):
         )
         content_layout.addWidget(self.mcpListCard)
 
+        # ---- 通用设置分隔标签 ----
+        self._sep_common_label = self._make_sep_label("通用设置")
+        self._section_anchors["common"] = self._sep_common_label
+        content_layout.addWidget(self._sep_common_label)
+
         # 开机自启
         self.autoStartCard = AutoStartCard(
             "开机自启",
@@ -277,8 +293,9 @@ class LLMSettingsCard(SystemCardFrame):
 
 
         # ---- 外观样式分隔标签 ----
-        sep_appearance_label = self._make_sep_label("外观样式")
-        content_layout.addWidget(sep_appearance_label)
+        self._sep_appearance_label = self._make_sep_label("外观样式")
+        self._section_anchors["appearance"] = self._sep_appearance_label
+        content_layout.addWidget(self._sep_appearance_label)
 
         # 界面字号、主题风格
         self._setup_appearance_cards()
@@ -290,8 +307,9 @@ class LLMSettingsCard(SystemCardFrame):
         content_layout.addWidget(self.llmFontCard)
 
         # ---- 版本更新分隔标签 ----
-        sep_update_label = self._make_sep_label("版本更新")
-        content_layout.addWidget(sep_update_label)
+        self._sep_update_label = self._make_sep_label("版本更新")
+        self._section_anchors["update"] = self._sep_update_label
+        content_layout.addWidget(self._sep_update_label)
 
         # 自动检查更新
         self.autoUpdateCard = SwitchSettingCard(
@@ -323,6 +341,31 @@ class LLMSettingsCard(SystemCardFrame):
         self.cfg.ui_theme_style.valueChanged.connect(self._on_config_changed)
         self.cfg.llm_api_enabled.valueChanged.connect(self._on_llm_api_enabled_changed)
         self.cfg.llm_api_port.valueChanged.connect(self._on_llm_api_port_changed)
+
+    def _on_tab_changed(self, tab_id: str):
+        """Tab 切换时滚动到对应区域"""
+        if tab_id in self._section_anchors:
+            anchor_widget = self._section_anchors[tab_id]
+            # 延迟滚动，等布局稳定后再执行
+            QTimer.singleShot(50, lambda: self._scroll_to_widget(anchor_widget))
+
+    def _scroll_to_widget(self, target_widget):
+        """滚动到目标控件位置"""
+        scroll_area = self.scroll_area
+        scroll_bar = scroll_area.verticalScrollBar()
+        
+        # 计算目标 widget 在 scroll area 可视区域的绝对位置
+        # target 的 geometry 相对于 scroll_area 的内容 widget
+        target_rect = QRect(
+            target_widget.x(),
+            target_widget.y(),
+            target_widget.width(),
+            target_widget.height()
+        )
+        
+        # 直接设置滚动到目标位置（减去一点边距）
+        target_scroll = max(0, target_widget.y() - 10)
+        scroll_bar.setValue(target_scroll)
 
     def _setup_appearance_cards(self):
         class AppearanceComboCard(SettingCard):
