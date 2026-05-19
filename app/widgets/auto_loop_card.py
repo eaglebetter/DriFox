@@ -24,7 +24,7 @@ from qfluentwidgets.components.widgets.flyout import IconWidget
 
 from app.core.auto_loop_config import AutoLoopConfig
 from app.utils.utils import get_font_family_css, get_icon
-from app.utils.design_tokens import font_size_css
+from app.utils.design_tokens import font_size_css, scale_font_size
 
 FONT_CSS = get_font_family_css()
 
@@ -43,6 +43,56 @@ class AutoLoopConfigCard(QFrame):
         self.setObjectName("autoLoopConfigCard")
         self._refresh_theme_style()
         self._build_ui()
+
+    def refresh_font_size(self):
+        """刷新字体大小配置"""
+        self._refresh_theme_style()
+        self._refresh_component_styles()
+
+    def _refresh_component_styles(self):
+        """刷新内部组件样式"""
+        # 刷新 BodyLabel 字体大小
+        for label in self.findChildren(BodyLabel):
+            label.setStyleSheet(f"color: #B4C2D9; {FONT_CSS} font-size: {scale_font_size(14)}px;")
+        # 刷新按钮
+        self._start_btn.setStyleSheet(f"""
+            PrimaryPushButton {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #C9A85C, stop:1 #B8956A);
+                color: #1A1F2B;
+                border: none;
+                border-radius: 8px;
+                padding: 4px 14px;
+                {FONT_CSS} font-size: {scale_font_size(12)}px;
+                font-weight: bold;
+            }}
+            PrimaryPushButton:hover {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #D4B878, stop:1 #C9A060);
+            }}
+        """)
+        self._iteration_spin.setStyleSheet(self._spin_style())
+        self._token_spin.setStyleSheet(self._spin_style())
+        self._duration_spin.setStyleSheet(self._spin_style())
+        self._signal_edit.setStyleSheet(self._line_style())
+        self._threshold_spin.setStyleSheet(self._spin_style())
+        self._path_edit.setStyleSheet(self._line_style())
+        self._prompt_edit.setStyleSheet(f"""
+            QTextEdit {{
+                background: rgba(255, 255, 255, 0.05);
+                color: #EAF2FF;
+                border: 1px solid rgba(255, 255, 255, 0.12);
+                border-radius: 8px;
+                padding: 6px 10px;
+                {FONT_CSS} font-size: {scale_font_size(13)}px;
+            }}
+            QTextEdit:focus {{
+                border: 1px solid #C9A85C;
+            }}
+        """)
+        # 刷新标题
+        for label in self.findChildren(StrongBodyLabel):
+            label.setStyleSheet(f"color: #EAF2FF; font-size: {scale_font_size(14)}px; {FONT_CSS}")
 
     def _refresh_theme_style(self):
         """刷新主题色，响应全局主题切换"""
@@ -251,6 +301,60 @@ class AutoLoopConfigCard(QFrame):
 
     def _on_close(self):
         self.setVisible(False)
+
+    def refresh_font_size(self):
+        """刷新字体大小配置"""
+        self._refresh_theme_style()
+        self._refresh_component_styles()
+
+    def _refresh_component_styles(self):
+        """刷新内部组件样式"""
+        from qfluentwidgets import StrongBodyLabel
+        # 刷新 StrongBodyLabel
+        for label in self.findChildren(StrongBodyLabel):
+            label.setStyleSheet(f"color: #EAF2FF; font-size: {scale_font_size(14)}px; {FONT_CSS}")
+        # 刷新停止按钮
+        self._stop_btn.setStyleSheet(f"""
+            PushButton {{
+                background: rgba(255, 80, 80, 0.8);
+                color: white;
+                border: none;
+                border-radius: 6px;
+                {FONT_CSS} font-size: {scale_font_size(12)}px;
+                font-weight: bold;
+            }}
+            PushButton:hover {{
+                background: rgba(255, 60, 60, 1.0);
+            }}
+        """)
+        # 刷新任务标签
+        if hasattr(self, '_task_label'):
+            self._task_label.setStyleSheet(f"""
+                color: #9BB0D3;
+                font-size: {scale_font_size(12)}px;
+                {FONT_CSS}
+                padding: 4px 8px;
+                background: rgba(0,0,0,0.15);
+                border-radius: 6px;
+            """)
+        # 刷新信息标签
+        for label in [self._iter_label, self._time_label, self._token_label, 
+                      self._status_label, self._phase_label]:
+            if hasattr(self, label.property('objectName')) or hasattr(label, 'setStyleSheet'):
+                label.setStyleSheet(f"font-size: {scale_font_size(13)}px; {FONT_CSS}")
+        # 刷新 Token 百分比标签
+        if self._token_percent_label:
+            self._token_percent_label.setStyleSheet(f"color: #7FDBFF; font-size: {scale_font_size(12)}px; {FONT_CSS}")
+        # 刷新日志标签
+        if hasattr(self, '_log_label'):
+            self._log_label.setStyleSheet(f"""
+                color: #7A9BBF;
+                font-size: {scale_font_size(11)}px;
+                {FONT_CSS}
+                padding: 3px 6px;
+                background: rgba(0,0,0,0.1);
+                border-radius: 4px;
+            """)
 
 
 # ============================================================

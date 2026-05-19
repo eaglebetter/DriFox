@@ -8,10 +8,27 @@ from PyQt5.QtCore import Qt, pyqtSignal, QTimer, QRect
 from PyQt5.QtGui import QFont, QColor
 from PyQt5.QtWidgets import (
     QFontComboBox,
-    QHBoxLayout,
 )
 from loguru import logger
+from qfluentwidgets import (
+    StrongBodyLabel,
+    SwitchSettingCard,
+    OptionsSettingCard,
+    FluentIcon, SettingCard, PrimaryPushButton, ComboBox, SwitchButton,
+)
 
+from app.utils.config import Settings
+from app.utils.design_tokens import (
+    ButtonStyles,
+    ComboBoxStyles,
+    FONT_SIZE_OPTIONS,
+    THEME_STYLE_OPTIONS,
+    Colors,
+)
+from app.utils.design_tokens import get_ui_font_size, apply_font_size_to_widget
+from app.utils.startup_manager import set_auto_start
+from app.utils.utils import get_icon, get_unified_font, get_font_family_css
+from app.widgets.base_settings_card import BaseSettingsCard
 from app.widgets.list_setting_card import SkillListSettingCard
 from app.widgets.mcp_setting_card import MCPListSettingCard
 from app.widgets.provider_setting_card import ProviderListSettingCard
@@ -23,24 +40,6 @@ class NoWheelFontComboBox(QFontComboBox):
 
     def wheelEvent(self, event):
         event.ignore()
-
-from qfluentwidgets import (
-    StrongBodyLabel,
-    SwitchSettingCard,
-    OptionsSettingCard,
-    FluentIcon, SettingCard, PrimaryPushButton, ComboBox, SwitchButton,
-)
-
-from app.utils.config import Settings
-from app.utils.startup_manager import set_auto_start, is_auto_start_enabled
-from app.utils.utils import get_icon, get_unified_font, get_font_family_css
-from app.utils.design_tokens import (
-    ButtonStyles,
-    ComboBoxStyles,
-    FONT_SIZE_OPTIONS,
-    THEME_STYLE_OPTIONS,
-    Colors,
-)
 
 
 class NoWheelComboBox(ComboBox):
@@ -192,6 +191,9 @@ class LLMSettingsCard(SystemCardFrame):
         self.tabChanged.connect(self._on_tab_changed)
 
         self._setup_content()
+        
+        # 初始化时应用配置中的字体大小和主题样式
+        QTimer.singleShot(0, self._refresh_appearance_from_config)
 
     def _make_sep_label(self, text: str) -> StrongBodyLabel:
         """创建带主题色的分隔标签"""
@@ -501,6 +503,28 @@ class LLMSettingsCard(SystemCardFrame):
     def _on_config_changed(self):
         self.configChanged.emit()
         self._save_timer.start()
+        # 立即刷新字体大小和主题样式（不等待保存定时器）
+        QTimer.singleShot(0, self._refresh_appearance_from_config)
+
+    def _refresh_appearance_from_config(self):
+        """根据当前配置刷新外观样式"""
+        # 刷新字体大小
+        actual_size = get_ui_font_size()
+        apply_font_size_to_widget(self, actual_size)
+        
+        # 刷新主题样式
+        Colors.refresh()
+        if hasattr(self, "refresh_style"):
+            self.refresh_style()
+        
+        # 刷新所有子设置卡片的主题样式
+        for frame in self.findChildren(SystemCardFrame):
+            if hasattr(frame, "refresh_style"):
+                frame.refresh_style()
+        # 刷新 BaseSettingsCard 子卡片
+        for card in self.findChildren(BaseSettingsCard):
+            if hasattr(card, "refresh_style"):
+                card.refresh_style()
 
     def _perform_save(self):
         try:

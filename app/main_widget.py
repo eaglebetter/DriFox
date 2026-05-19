@@ -5234,19 +5234,6 @@ class OpenAIChatToolWindow(ToolWindow):
         if not saved_messages:
             return
 
-        # 跳过只有 hook 输出 assistant 消息的会话（没有用户消息）
-        has_user_message = any(
-            msg.get("role") == "user" 
-            for msg in saved_messages
-        )
-        if not has_user_message:
-            hook_only = all(
-                msg.get("role") == "assistant" and ("<hook " in (msg.get("content") or ""))
-                for msg in saved_messages
-            )
-            if hook_only:
-                return
-
         system_prompt = getattr(session, "system_prompt", "") or ""
         # 优先使用已有的 topic_summary，避免被用户消息前30字覆盖
         session_title = getattr(session, "topic_summary", "") or ""
@@ -5799,20 +5786,13 @@ class OpenAIChatToolWindow(ToolWindow):
         if not session or not session.messages:
             return
         
-        # 跳过只有 hook 输出 assistant 消息的会话（没有用户消息）
-        # 这种会话是 SessionStart hook 产生的，但用户没有真正开始对话
+        # 跳过没有用户消息的会话（SessionStart hook 产生的空会话不应保存到历史）
         has_user_message = any(
             msg.get("role") == "user" 
             for msg in session.messages
         )
         if not has_user_message:
-            # 检查是否是 hook 输出消息（兼容新旧格式）
-            hook_only = all(
-                msg.get("role") == "assistant" and ("# Hook Output" in (msg.get("content") or "") or "<hook " in (msg.get("content") or ""))
-                for msg in session.messages
-            )
-            if hook_only:
-                return
+            return
 
         system_prompt = getattr(session, "system_prompt", "") or ""
 
