@@ -5199,9 +5199,13 @@ class OpenAIChatToolWindow(ToolWindow):
                     from app.core import content_to_text
 
                     content = content_to_text(content)
-                preview = content[:50] + "..." if len(content) > 50 else content
-                current_title = self.title_edit.text() if self.title_edit else "对话完成"
-                self._notify_if_inactive(current_title, preview)
+                # 如果最后一条消息是hook消息，不触发通知（例如新建会话时的SessionStart）
+                if content.strip().startswith("<hook "):
+                    logger.debug("[Notify] Skip notification for hook message")
+                else:
+                    preview = content[:50] + "..." if len(content) > 50 else content
+                    current_title = self.title_edit.text() if self.title_edit else "对话完成"
+                    self._notify_if_inactive(current_title, preview)
 
         # 对话完成后刷新余额显示
         self._refresh_balance()

@@ -354,6 +354,7 @@ class QuestionFloatingWidget(SimpleCardWidget):
                 border-radius: 8px;
                 padding: 10px 12px;
                 selection-background-color: {Colors.REALTIME_ACCENT};
+                {get_font_family_css()} font-size: 10pt;
             }}
             QTextEdit:focus {{
                 border-color: {Colors.REALTIME_ACCENT};
