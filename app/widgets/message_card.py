@@ -2967,9 +2967,14 @@ class MessageCard(SimpleCardWidget):
 
     def _update_anim(self):
         self._pulse_phase = (self._pulse_phase + 0.035) % (math.pi * 2)
-        # 重试模式下同步更新状态栏的旋转图标
+        # 重试状态栏降频更新（每200ms一次，避免和paintEvent双重刷新导致卡顿）
         if self._retrying:
-            self._update_retry_status_bar()
+            if not hasattr(self, '_retry_status_tick'):
+                self._retry_status_tick = 0
+            self._retry_status_tick += 1
+            if self._retry_status_tick >= 4:  # 50ms * 4 = 200ms
+                self._retry_status_tick = 0
+                self._update_retry_status_bar()
         self.update()
 
     def _apply_card_style(self, border: str = None, bg: str = None):
@@ -3296,114 +3301,6 @@ class MessageCard(SimpleCardWidget):
             top_color = QColor(self._theme["accent"])
             top_color.setAlpha(int(30 * breathe))
         painter.fillRect(0, 0, w, 5, top_color)
-
-        # ══════════════════════════════════════════════════════
-        #  层6（重试模式）：内部微红光晕 + 白色光点沿边框旋转
-        # ══════════════════════════════════════════════════════
-        if self._retrying and self.role == "assistant":
-            # 内部微红光晕脉动
-            inner_glow_clip = QPainterPath()
-            inner_glow_clip.addRoundedRect(3, 3, w - 6, h - 6, radius - 2, radius - 2)
-            painter.setClipPath(inner_glow_clip)
-            glow_alpha = int(12 * (0.5 + 0.5 * (math.sin(self._pulse_phase * 0.8) + 1) / 2))
-            inner_red = QColor(255, 0, 0, glow_alpha)
-            painter.fillRect(0, 0, w, h, inner_red)
-
-            # 白色光点：数量随重试次数递增
-            attempt = self._retry_attempt
-            if attempt <= 3:
-                dot_count = 1
-            elif attempt <= 7:
-                dot_count = 2
-            elif attempt <= 11:
-                dot_count = 3
-            else:
-                dot_count = 4
-
-            # 计算边框路径参数
-            perimeter = 2 * (w + h) - 8 * radius + 2 * math.pi * radius
-
-            for dot_idx in range(dot_count):
-                # 每个光点沿边框等距分布，整体随时间旋转
-                phase = (self._pulse_phase / (math.pi * 2) * 0.35 + dot_idx / dot_count) % 1.0
-                pos = phase * perimeter
-
-                # 沿圆角矩形路径计算坐标
-                seg_w = w - 2 * radius
-                seg_h = h - 2 * radius
-                corner_len = math.pi * radius / 2
-
-                top_len = seg_w
-                tr_len = corner_len
-                right_len = seg_h
-                br_len = corner_len
-                bot_len = seg_w
-                bl_len = corner_len
-                left_len = seg_h
-                tl_len = corner_len
-
-                p = pos
-                dx, dy = 0.0, 0.0
-                if p < top_len:
-                    dx, dy = radius + p, 0
-                else:
-                    p -= top_len
-                    if p < tr_len:
-                        angle = (p / tr_len) * (math.pi / 2)
-                        dx = w - radius + math.sin(angle) * radius
-                        dy = radius - math.cos(angle) * radius
-                    else:
-                        p -= tr_len
-                        if p < right_len:
-                            dx, dy = w, radius + p
-                        else:
-                            p -= right_len
-                            if p < br_len:
-                                angle = (p / br_len) * (math.pi / 2)
-                                dx = w - radius + math.cos(angle) * radius
-                                dy = h - radius + math.sin(angle) * radius
-                            else:
-                                p -= br_len
-                                if p < bot_len:
-                                    dx, dy = w - radius - p, h
-                                else:
-                                    p -= bot_len
-                                    if p < bl_len:
-                                        angle = (p / bl_len) * (math.pi / 2)
-                                        dx = radius - math.cos(angle) * radius
-                                        dy = h - radius + math.sin(angle) * radius
-                                    else:
-                                        p -= bl_len
-                                        if p < left_len:
-                                            dx, dy = 0, h - radius - p
-                                        else:
-                                            p -= left_len
-                                            if p < tl_len:
-                                                angle = (p / tl_len) * (math.pi / 2)
-                                                dx = radius - math.sin(angle) * radius
-                                                dy = radius - math.cos(angle) * radius
-                                            else:
-                                                dx, dy = radius, 0
-
-                # 绘制白色光点（径向渐变 + 发光）
-                dot_radius = 8
-                dot_clip = QPainterPath()
-                dot_clip.addEllipse(dx - dot_radius - 4, dy - dot_radius - 4,
-                                    (dot_radius + 4) * 2, (dot_radius + 4) * 2)
-                painter.setClipPath(dot_clip)
-
-                # 外层光晕
-                glow_color = QColor(255, 255, 255, int(60 * shimmer))
-                painter.setPen(Qt.NoPen)
-                painter.setBrush(glow_color)
-                painter.drawEllipse(dx - dot_radius - 3, dy - dot_radius - 3,
-                                    (dot_radius + 3) * 2, (dot_radius + 3) * 2)
-
-                # 内核亮点
-                core_color = QColor(255, 255, 255, int(200 * shimmer))
-                painter.setBrush(core_color)
-                painter.drawEllipse(dx - dot_radius * 0.4, dy - dot_radius * 0.4,
-                                    dot_radius * 0.8, dot_radius * 0.8)
 
     def set_error_state(self, is_error: bool):
         self.error = is_error
