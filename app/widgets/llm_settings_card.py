@@ -8,9 +8,11 @@ from PyQt5.QtCore import Qt, pyqtSignal, QTimer
 from PyQt5.QtGui import QFont, QColor
 from PyQt5.QtWidgets import (
     QFontComboBox,
+    QHBoxLayout,
 )
 from loguru import logger
 
+from app.widgets.list_setting_card import SkillListSettingCard
 from app.widgets.mcp_setting_card import MCPListSettingCard
 from app.widgets.provider_setting_card import ProviderListSettingCard
 from app.widgets.system_card_frame import SystemCardFrame
@@ -26,10 +28,11 @@ from qfluentwidgets import (
     StrongBodyLabel,
     SwitchSettingCard,
     OptionsSettingCard,
-    FluentIcon, SettingCard, PrimaryPushButton, ComboBox,
+    FluentIcon, SettingCard, PrimaryPushButton, ComboBox, SwitchButton,
 )
 
 from app.utils.config import Settings
+from app.utils.startup_manager import set_auto_start, is_auto_start_enabled
 from app.utils.utils import get_icon, get_unified_font, get_font_family_css
 from app.utils.design_tokens import (
     ButtonStyles,
@@ -96,6 +99,69 @@ class ManualUpdateCard(SettingCard):
             print(f"_on_error error: {e}")
 
 
+
+class AutoStartCard(SettingCard):
+    """开机自启设置卡片"""
+
+    def __init__(self, title: str, content: str, cfg: Settings, parent=None):
+        super().__init__(get_icon("开机自动启动"), title, content, parent)
+        self.cfg = cfg
+
+        self.switch = SwitchButton(self)
+        self.switch.setFixedSize(48, 24)
+        self.switch.setOnText("")
+        self.switch.setOffText("")
+
+        # 从配置读取初始状态
+        initial_state = cfg.auto_start.value
+        self.switch.setChecked(initial_state)
+        self.switch.checkedChanged.connect(self._on_toggled)
+
+        self.hBoxLayout.addWidget(self.switch)
+        self.hBoxLayout.addSpacing(16)
+
+    def _on_toggled(self, enabled: bool):
+        """开关切换时：更新注册表 + 保存配置"""
+        if enabled:
+            # 开启前检查平台支持
+            import os
+            if os.name != "nt":
+                self.switch.setChecked(False)
+                from qfluentwidgets import InfoBar, InfoBarPosition
+                InfoBar.error(
+                    title="开机自启",
+                    content="当前平台不支持开机自启配置。",
+                    position=InfoBarPosition.BOTTOM,
+                    duration=3000,
+                    parent=self.parent().parent(),
+                ).show()
+                return
+
+        try:
+            set_auto_start(enabled)
+            self.cfg.set(self.cfg.auto_start, enabled, save=True)
+            status = "已开启" if enabled else "已关闭"
+            from qfluentwidgets import InfoBar, InfoBarPosition
+            InfoBar.success(
+                title="开机自启",
+                content=f"开机自启{status}",
+                position=InfoBarPosition.BOTTOM,
+                duration=2000,
+                parent=self.parent().parent(),
+            ).show()
+        except Exception as exc:
+            # 失败时回退开关状态
+            self.switch.setChecked(not enabled)
+            from qfluentwidgets import InfoBar, InfoBarPosition
+            InfoBar.error(
+                title="开机自启设置失败",
+                content=str(exc),
+                position=InfoBarPosition.BOTTOM,
+                duration=3000,
+                parent=self.parent().parent(),
+            ).show()
+
+
 class LLMSettingsCard(SystemCardFrame):
     """大模型设置卡片 - 固定边框 + 垂直列表布局"""
 
@@ -143,9 +209,6 @@ class LLMSettingsCard(SystemCardFrame):
         )
         content_layout.addWidget(self.llmProviderCard)
 
-        # 启用技能
-        from app.widgets.list_setting_card import SkillListSettingCard
-
         self.llmSkillsCard = SkillListSettingCard(
             icon=get_icon("智能体"),
             configItem=self.cfg.llm_enabled_skills,
@@ -181,6 +244,15 @@ class LLMSettingsCard(SystemCardFrame):
             parent=self,
         )
         content_layout.addWidget(self.mcpListCard)
+
+        # 开机自启
+        self.autoStartCard = AutoStartCard(
+            "开机自启",
+            "系统启动时自动运行 Drifox",
+            self.cfg,
+            self,
+        )
+        content_layout.addWidget(self.autoStartCard)
 
         # 智能体完成通知
         self.llmNotifyCard = SwitchSettingCard(

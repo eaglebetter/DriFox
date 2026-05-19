@@ -2272,7 +2272,7 @@ class OpenAIChatToolWindow(ToolWindow):
         if self._is_auto_loop_running:
             InfoBar.warning("AutoLoop", "运行中无法新建会话，请先停止 AutoLoop", parent=self, duration=3000, position=InfoBarPosition.BOTTOM)
             return
-        if self.backend.chat_engine:
+        if self._is_streaming and self.backend.chat_engine:
             self.backend.stop_streaming()
 
         self._is_streaming = False
@@ -5233,6 +5233,19 @@ class OpenAIChatToolWindow(ToolWindow):
         saved_messages = list(session.messages or []) if session else []
         if not saved_messages:
             return
+
+        # 跳过只有 hook 输出 assistant 消息的会话（没有用户消息）
+        has_user_message = any(
+            msg.get("role") == "user" 
+            for msg in saved_messages
+        )
+        if not has_user_message:
+            hook_only = all(
+                msg.get("role") == "assistant" and ("<hook " in (msg.get("content") or ""))
+                for msg in saved_messages
+            )
+            if hook_only:
+                return
 
         system_prompt = getattr(session, "system_prompt", "") or ""
         # 优先使用已有的 topic_summary，避免被用户消息前30字覆盖

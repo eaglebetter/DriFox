@@ -127,6 +127,9 @@ class Settings(QConfig):
         with open(self.file, "wb") as f:
             f.write(json.dumps(self.toDict(), option=json.OPT_INDENT_2))
 
+    # 开机自启
+    auto_start = ConfigItem("General", "AutoStart", False, BoolValidator())
+
     # 版本信息
     current_version = "v0.1.8"
     # 通用设置
