@@ -18,7 +18,7 @@ from PyQt5.QtWidgets import (
     QTextEdit, QFrame, QProgressBar, )
 from qfluentwidgets import (
     PrimaryPushButton, PushButton, BodyLabel, StrongBodyLabel, LineEdit,
-    SpinBox, FluentIcon, ToolButton, )
+    SpinBox, FluentIcon, ToolButton, TransparentToolButton, )
 from qfluentwidgets.components.widgets.card_widget import CardSeparator
 from qfluentwidgets.components.widgets.flyout import IconWidget
 
@@ -73,8 +73,7 @@ class AutoLoopConfigCard(QFrame):
         title_layout.addWidget(title)
         title_layout.addStretch()
 
-        self._start_btn = PrimaryPushButton("▶ 开始 AutoLoop")
-        self._start_btn.setFixedSize(120, 28)
+        self._start_btn = PrimaryPushButton("▶ 开始")
         self._start_btn.setStyleSheet(f"""
             PrimaryPushButton {{
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
@@ -93,6 +92,13 @@ class AutoLoopConfigCard(QFrame):
         """)
         self._start_btn.clicked.connect(self._on_start)
         title_layout.addWidget(self._start_btn)
+
+        # 关闭按钮
+        self.close_btn = TransparentToolButton(FluentIcon.CLOSE)
+        self.close_btn.setFixedSize(24, 24)
+        self.close_btn.mousePressEvent = lambda e: self._on_close()
+        title_layout.addWidget(self.close_btn)
+
         layout.addLayout(title_layout)
 
         layout.addWidget(CardSeparator())
@@ -242,6 +248,9 @@ class AutoLoopConfigCard(QFrame):
                 border-color: #C9A85C;
             }}
         """
+
+    def _on_close(self):
+        self.setVisible(False)
 
 
 # ============================================================
