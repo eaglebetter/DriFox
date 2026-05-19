@@ -2272,7 +2272,7 @@ class OpenAIChatToolWindow(ToolWindow):
         if self._is_auto_loop_running:
             InfoBar.warning("AutoLoop", "运行中无法新建会话，请先停止 AutoLoop", parent=self, duration=3000, position=InfoBarPosition.BOTTOM)
             return
-        if self.backend.chat_engine:
+        if self._is_streaming and self.backend.chat_engine:
             self.backend.stop_streaming()
 
         self._is_streaming = False
@@ -5099,13 +5099,9 @@ class OpenAIChatToolWindow(ToolWindow):
         if sound_type != "none":
             QApplication.beep()
 
-        # 从当前窗口的顶层窗口获取 tray_icon（self.window() 返回包含此 widget 的顶层窗口）
-        win = self.window()
-        if win and hasattr(win, "tray_icon") and win.tray_icon:
-            if win.tray_icon.isVisible():
-                win.tray_icon.showMessage(
-                    title, message, win.tray_icon.MessageIcon(1), 4000
-                )
+        # 使用全局 TrayManager 发送通知（避免多窗口多个托盘图标的问题）
+        from app.tray_manager import TrayManager
+        TrayManager.get_instance().notify(title, message)
 
     def _should_show_inactive_notification(self) -> bool:
         """Only notify when the app window is not effectively visible to the user."""
@@ -5786,20 +5782,13 @@ class OpenAIChatToolWindow(ToolWindow):
         if not session or not session.messages:
             return
         
-        # 跳过只有 hook 输出 assistant 消息的会话（没有用户消息）
-        # 这种会话是 SessionStart hook 产生的，但用户没有真正开始对话
+        # 跳过没有用户消息的会话（SessionStart hook 产生的空会话不应保存到历史）
         has_user_message = any(
             msg.get("role") == "user" 
             for msg in session.messages
         )
         if not has_user_message:
-            # 检查是否是 hook 输出消息（兼容新旧格式）
-            hook_only = all(
-                msg.get("role") == "assistant" and ("# Hook Output" in (msg.get("content") or "") or "<hook " in (msg.get("content") or ""))
-                for msg in session.messages
-            )
-            if hook_only:
-                return
+            return
 
         system_prompt = getattr(session, "system_prompt", "") or ""
 

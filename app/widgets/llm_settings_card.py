@@ -4,13 +4,32 @@
 现已迁移到 SystemCardFrame 基类，获得统一头部布局和固定边框
 """
 
-from PyQt5.QtCore import Qt, pyqtSignal, QTimer
+from PyQt5.QtCore import Qt, pyqtSignal, QTimer, QRect
 from PyQt5.QtGui import QFont, QColor
 from PyQt5.QtWidgets import (
     QFontComboBox,
 )
 from loguru import logger
+from qfluentwidgets import (
+    StrongBodyLabel,
+    SwitchSettingCard,
+    OptionsSettingCard,
+    FluentIcon, SettingCard, PrimaryPushButton, ComboBox, SwitchButton,
+)
 
+from app.utils.config import Settings
+from app.utils.design_tokens import (
+    ButtonStyles,
+    ComboBoxStyles,
+    FONT_SIZE_OPTIONS,
+    THEME_STYLE_OPTIONS,
+    Colors,
+)
+from app.utils.design_tokens import get_ui_font_size, apply_font_size_to_widget
+from app.utils.startup_manager import set_auto_start
+from app.utils.utils import get_icon, get_unified_font, get_font_family_css
+from app.widgets.base_settings_card import BaseSettingsCard
+from app.widgets.list_setting_card import SkillListSettingCard
 from app.widgets.mcp_setting_card import MCPListSettingCard
 from app.widgets.provider_setting_card import ProviderListSettingCard
 from app.widgets.system_card_frame import SystemCardFrame
@@ -21,23 +40,6 @@ class NoWheelFontComboBox(QFontComboBox):
 
     def wheelEvent(self, event):
         event.ignore()
-
-from qfluentwidgets import (
-    StrongBodyLabel,
-    SwitchSettingCard,
-    OptionsSettingCard,
-    FluentIcon, SettingCard, PrimaryPushButton, ComboBox,
-)
-
-from app.utils.config import Settings
-from app.utils.utils import get_icon, get_unified_font, get_font_family_css
-from app.utils.design_tokens import (
-    ButtonStyles,
-    ComboBoxStyles,
-    FONT_SIZE_OPTIONS,
-    THEME_STYLE_OPTIONS,
-    Colors,
-)
 
 
 class NoWheelComboBox(ComboBox):
@@ -96,6 +98,69 @@ class ManualUpdateCard(SettingCard):
             print(f"_on_error error: {e}")
 
 
+
+class AutoStartCard(SettingCard):
+    """开机自启设置卡片"""
+
+    def __init__(self, title: str, content: str, cfg: Settings, parent=None):
+        super().__init__(get_icon("开机自动启动"), title, content, parent)
+        self.cfg = cfg
+
+        self.switch = SwitchButton(self)
+        self.switch.setFixedSize(48, 24)
+        self.switch.setOnText("")
+        self.switch.setOffText("")
+
+        # 从配置读取初始状态
+        initial_state = cfg.auto_start.value
+        self.switch.setChecked(initial_state)
+        self.switch.checkedChanged.connect(self._on_toggled)
+
+        self.hBoxLayout.addWidget(self.switch)
+        self.hBoxLayout.addSpacing(16)
+
+    def _on_toggled(self, enabled: bool):
+        """开关切换时：更新注册表 + 保存配置"""
+        if enabled:
+            # 开启前检查平台支持
+            import os
+            if os.name != "nt":
+                self.switch.setChecked(False)
+                from qfluentwidgets import InfoBar, InfoBarPosition
+                InfoBar.error(
+                    title="开机自启",
+                    content="当前平台不支持开机自启配置。",
+                    position=InfoBarPosition.BOTTOM,
+                    duration=3000,
+                    parent=self.parent().parent(),
+                ).show()
+                return
+
+        try:
+            set_auto_start(enabled)
+            self.cfg.set(self.cfg.auto_start, enabled, save=True)
+            status = "已开启" if enabled else "已关闭"
+            from qfluentwidgets import InfoBar, InfoBarPosition
+            InfoBar.success(
+                title="开机自启",
+                content=f"开机自启{status}",
+                position=InfoBarPosition.BOTTOM,
+                duration=2000,
+                parent=self.parent().parent(),
+            ).show()
+        except Exception as exc:
+            # 失败时回退开关状态
+            self.switch.setChecked(not enabled)
+            from qfluentwidgets import InfoBar, InfoBarPosition
+            InfoBar.error(
+                title="开机自启设置失败",
+                content=str(exc),
+                position=InfoBarPosition.BOTTOM,
+                duration=3000,
+                parent=self.parent().parent(),
+            ).show()
+
+
 class LLMSettingsCard(SystemCardFrame):
     """大模型设置卡片 - 固定边框 + 垂直列表布局"""
 
@@ -114,7 +179,21 @@ class LLMSettingsCard(SystemCardFrame):
         self._save_timer.setInterval(500)
         self._save_timer.timeout.connect(self._perform_save)
 
+        # 存储各区域分隔标签的位置
+        self._section_anchors = {}
+
+        # 设置顶部 Tab 导航
+        self.setup_tabs([
+            ("common", "通用设置"),
+            ("appearance", "外观样式"),
+            ("update", "版本更新"),
+        ], default_tab="common")
+        self.tabChanged.connect(self._on_tab_changed)
+
         self._setup_content()
+        
+        # 初始化时应用配置中的字体大小和主题样式
+        QTimer.singleShot(0, self._refresh_appearance_from_config)
 
     def _make_sep_label(self, text: str) -> StrongBodyLabel:
         """创建带主题色的分隔标签"""
@@ -142,9 +221,6 @@ class LLMSettingsCard(SystemCardFrame):
             home=self,
         )
         content_layout.addWidget(self.llmProviderCard)
-
-        # 启用技能
-        from app.widgets.list_setting_card import SkillListSettingCard
 
         self.llmSkillsCard = SkillListSettingCard(
             icon=get_icon("智能体"),
@@ -182,6 +258,20 @@ class LLMSettingsCard(SystemCardFrame):
         )
         content_layout.addWidget(self.mcpListCard)
 
+        # ---- 通用设置分隔标签 ----
+        self._sep_common_label = self._make_sep_label("通用设置")
+        self._section_anchors["common"] = self._sep_common_label
+        content_layout.addWidget(self._sep_common_label)
+
+        # 开机自启
+        self.autoStartCard = AutoStartCard(
+            "开机自启",
+            "系统启动时自动运行 Drifox",
+            self.cfg,
+            self,
+        )
+        content_layout.addWidget(self.autoStartCard)
+
         # 智能体完成通知
         self.llmNotifyCard = SwitchSettingCard(
             get_icon("提示"),
@@ -205,8 +295,9 @@ class LLMSettingsCard(SystemCardFrame):
 
 
         # ---- 外观样式分隔标签 ----
-        sep_appearance_label = self._make_sep_label("外观样式")
-        content_layout.addWidget(sep_appearance_label)
+        self._sep_appearance_label = self._make_sep_label("外观样式")
+        self._section_anchors["appearance"] = self._sep_appearance_label
+        content_layout.addWidget(self._sep_appearance_label)
 
         # 界面字号、主题风格
         self._setup_appearance_cards()
@@ -218,8 +309,9 @@ class LLMSettingsCard(SystemCardFrame):
         content_layout.addWidget(self.llmFontCard)
 
         # ---- 版本更新分隔标签 ----
-        sep_update_label = self._make_sep_label("版本更新")
-        content_layout.addWidget(sep_update_label)
+        self._sep_update_label = self._make_sep_label("版本更新")
+        self._section_anchors["update"] = self._sep_update_label
+        content_layout.addWidget(self._sep_update_label)
 
         # 自动检查更新
         self.autoUpdateCard = SwitchSettingCard(
@@ -251,6 +343,31 @@ class LLMSettingsCard(SystemCardFrame):
         self.cfg.ui_theme_style.valueChanged.connect(self._on_config_changed)
         self.cfg.llm_api_enabled.valueChanged.connect(self._on_llm_api_enabled_changed)
         self.cfg.llm_api_port.valueChanged.connect(self._on_llm_api_port_changed)
+
+    def _on_tab_changed(self, tab_id: str):
+        """Tab 切换时滚动到对应区域"""
+        if tab_id in self._section_anchors:
+            anchor_widget = self._section_anchors[tab_id]
+            # 延迟滚动，等布局稳定后再执行
+            QTimer.singleShot(50, lambda: self._scroll_to_widget(anchor_widget))
+
+    def _scroll_to_widget(self, target_widget):
+        """滚动到目标控件位置"""
+        scroll_area = self.scroll_area
+        scroll_bar = scroll_area.verticalScrollBar()
+        
+        # 计算目标 widget 在 scroll area 可视区域的绝对位置
+        # target 的 geometry 相对于 scroll_area 的内容 widget
+        target_rect = QRect(
+            target_widget.x(),
+            target_widget.y(),
+            target_widget.width(),
+            target_widget.height()
+        )
+        
+        # 直接设置滚动到目标位置（减去一点边距）
+        target_scroll = max(0, target_widget.y() - 10)
+        scroll_bar.setValue(target_scroll)
 
     def _setup_appearance_cards(self):
         class AppearanceComboCard(SettingCard):
@@ -386,6 +503,28 @@ class LLMSettingsCard(SystemCardFrame):
     def _on_config_changed(self):
         self.configChanged.emit()
         self._save_timer.start()
+        # 立即刷新字体大小和主题样式（不等待保存定时器）
+        QTimer.singleShot(0, self._refresh_appearance_from_config)
+
+    def _refresh_appearance_from_config(self):
+        """根据当前配置刷新外观样式"""
+        # 刷新字体大小
+        actual_size = get_ui_font_size()
+        apply_font_size_to_widget(self, actual_size)
+        
+        # 刷新主题样式
+        Colors.refresh()
+        if hasattr(self, "refresh_style"):
+            self.refresh_style()
+        
+        # 刷新所有子设置卡片的主题样式
+        for frame in self.findChildren(SystemCardFrame):
+            if hasattr(frame, "refresh_style"):
+                frame.refresh_style()
+        # 刷新 BaseSettingsCard 子卡片
+        for card in self.findChildren(BaseSettingsCard):
+            if hasattr(card, "refresh_style"):
+                card.refresh_style()
 
     def _perform_save(self):
         try:

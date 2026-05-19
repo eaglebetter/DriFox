@@ -258,6 +258,11 @@ def get_ui_font_size_key() -> str:
     return key if key in FONT_SIZE_OPTIONS else "medium"
 
 
+def get_ui_font_size() -> int:
+    """获取当前配置的基础字体大小（未缩放）"""
+    return FONT_SIZE_OPTIONS[get_ui_font_size_key()]["base"]
+
+
 def scale_font_size(size: int) -> int:
     return max(8, int(size) + FONT_SIZE_OPTIONS[get_ui_font_size_key()]["delta"])
 

@@ -26,7 +26,10 @@ from qfluentwidgets import (
 )
 
 from app.utils.utils import get_icon, get_unified_font
-from app.utils.design_tokens import ItemStyles, Colors, get_font_family_css, font_size_css
+from app.utils.design_tokens import (
+    ItemStyles, Colors, get_font_family_css, font_size_css,
+    get_ui_font_size, apply_font_size_to_widget, scale_font_size,
+)
 
 
 def format_relative_time(time_str: str) -> str:
@@ -167,8 +170,9 @@ class _HistoryItemCard(SimpleCardWidget):
 
         self.title_label = BodyLabel(title[:100], self)
         self.title_label.setWordWrap(True)
+        font_size = scale_font_size(14)
         self.title_label.setStyleSheet(
-            f"color: white; font-weight: bold; {get_font_family_css()}" if is_current else f"color: white; {get_font_family_css()}"
+            f"color: white; font-weight: bold; font-size: {font_size}px; {get_font_family_css()}" if is_current else f"color: white; font-size: {font_size}px; {get_font_family_css()}"
         )
         top_row.addWidget(self.title_label, 1)
 
@@ -192,7 +196,10 @@ class _HistoryItemCard(SimpleCardWidget):
         top_row.addWidget(self.title_edit, 1, Qt.AlignLeft)
 
         self.current_indicator = CaptionLabel("🔥 活跃中", self)
-        self.current_indicator.setStyleSheet(ItemStyles.tag() + get_font_family_css())
+        caption_size = scale_font_size(12)
+        self.current_indicator.setStyleSheet(
+            f"font-size: {caption_size}px; " + ItemStyles.tag() + get_font_family_css()
+        )
         self.current_indicator.setVisible(is_current)
         top_row.addWidget(self.current_indicator, 0, Qt.AlignTop)
 
@@ -221,8 +228,9 @@ class _HistoryItemCard(SimpleCardWidget):
         rel_time = format_relative_time(last_time)
         meta_text = f"{rel_time} · {message_count} 轮对话 · "
         self.meta_label = CaptionLabel(meta_text, self)
+        caption_size = scale_font_size(12)
         self.meta_label.setStyleSheet(
-            f"color: #ffb65c; {get_font_family_css()}" if is_current else f"color: rgba(255, 255, 255, 0.5); {get_font_family_css()}"
+            f"color: #ffb65c; font-size: {caption_size}px; {get_font_family_css()}" if is_current else f"color: rgba(255, 255, 255, 0.5); font-size: {caption_size}px; {get_font_family_css()}"
         )
         bottom_row.addWidget(self.meta_label)
 
@@ -230,8 +238,9 @@ class _HistoryItemCard(SimpleCardWidget):
 
         if preview:
             self.preview_label = CaptionLabel(preview, self)
+            caption_size = scale_font_size(12)
             self.preview_label.setStyleSheet(
-                f"color: rgba(255, 255, 255, 0.4); font-style: italic; {get_font_family_css()}"
+                f"color: rgba(255, 255, 255, 0.4); font-style: italic; font-size: {caption_size}px; {get_font_family_css()}"
             )
             self.preview_label.setWordWrap(True)
             bottom_row.addSpacing(25)
@@ -322,7 +331,8 @@ class _ArchivedItemCard(CardWidget):
 
         self.title_label = BodyLabel(title[:100], self)
         self.title_label.setWordWrap(True)
-        self.title_label.setStyleSheet(f"color: white; {get_font_family_css()}")
+        body_size = scale_font_size(14)
+        self.title_label.setStyleSheet(f"color: white; font-size: {body_size}px; {get_font_family_css()}")
         top_row.addWidget(self.title_label, 1)
 
         self.title_edit = QLineEdit(title[:100], self)
@@ -349,9 +359,10 @@ class _ArchivedItemCard(CardWidget):
         # 项目标签（归档会话显示原项目）
         if project:
             project_label = QLabel(f"📁 {project}", self)
+            caption_size = scale_font_size(11)
             project_label.setStyleSheet(f"""
                 color: rgba(245, 158, 11, 0.7);
-                {get_font_family_css()} font-size: 11px;
+                {get_font_family_css()} font-size: {caption_size}px;
                 padding: 2px 0px 2px 0px;
             """)
             layout.addWidget(project_label)
@@ -385,15 +396,17 @@ class _ArchivedItemCard(CardWidget):
         if message_count > 0:
             meta_text += f" · {message_count} 轮对话"
         self.meta_label = CaptionLabel(meta_text, self)
-        self.meta_label.setStyleSheet(f"color: rgba(255, 255, 255, 0.5); {get_font_family_css()}")
+        caption_size = scale_font_size(12)
+        self.meta_label.setStyleSheet(f"color: rgba(255, 255, 255, 0.5); font-size: {caption_size}px; {get_font_family_css()}")
         bottom_row.addWidget(self.meta_label)
 
         bottom_row.addStretch()
 
         if preview:
             self.preview_label = CaptionLabel(preview, self)
+            caption_size = scale_font_size(12)
             self.preview_label.setStyleSheet(
-                f"color: rgba(255, 255, 255, 0.4); font-style: italic; {get_font_family_css()}"
+                f"color: rgba(255, 255, 255, 0.4); font-style: italic; font-size: {caption_size}px; {get_font_family_css()}"
             )
             self.preview_label.setWordWrap(True)
             bottom_row.addSpacing(25)
@@ -434,10 +447,11 @@ class _SectionHeader(QLabel):
         super().__init__(parent)
         display_text = text if count == 0 else f"{text} ({count})"
         self.setText(display_text)
+        caption_size = scale_font_size(12)
         self.setStyleSheet(
             f"""
             color: rgba(255, 255, 255, 0.45);
-            {get_font_family_css()} font-size: 12px;
+            {get_font_family_css()} font-size: {caption_size}px;
             font-weight: bold;
             padding: 4px 2px;
             """
@@ -468,6 +482,15 @@ class HistoryCard(QWidget):
         self._setup_ui()
         # 启用拖放支持
         self.setAcceptDrops(True)
+        
+        # 初始化时应用配置中的字体大小
+        from PyQt5.QtCore import QTimer
+        QTimer.singleShot(0, self._refresh_font_size)
+
+    def _refresh_font_size(self):
+        """刷新字体大小"""
+        actual_size = get_ui_font_size()
+        apply_font_size_to_widget(self, actual_size)
 
     def _setup_ui(self):
         """不需要创建自己的布局，直接使用父控件的 scroll_area"""
@@ -578,6 +601,9 @@ class HistoryCard(QWidget):
         if content_widget:
             content_widget.setUpdatesEnabled(True)
             content_widget.repaint()
+
+        # 刷新字体大小（会话卡片创建后应用）
+        self._refresh_font_size()
 
     def _update_history_display(self, layout: QVBoxLayout):
         """更新历史会话显示"""

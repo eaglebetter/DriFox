@@ -137,6 +137,10 @@ def main():
     fake_page = FakePage()
     chat_window = OpenAIChatToolWindow(fake_page, None)
 
+    # 初始化全局 TrayManager（必须在创建任何 ToolPopupDialog 之前）
+    from app.tray_manager import TrayManager
+    TrayManager.get_instance()
+
     # 使用 ToolPopupDialog 包装
     popup = ToolPopupDialog(chat_window, None)
     popup.setWindowTitle("Drifox")

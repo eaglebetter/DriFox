@@ -1,18 +1,13 @@
 # -*- coding: utf-8 -*-
 import platform
-import os
 from PyQt5.QtCore import Qt, QSize, QTimer, QEvent, QPoint, pyqtSignal
-from PyQt5.QtGui import QPainter, QColor, QIcon
+from PyQt5.QtGui import QPainter, QColor
 from PyQt5.QtWidgets import (
     QWidget,
     QStackedWidget,
     QDialog,
     QVBoxLayout,
-    QSystemTrayIcon,
-    QMenu,
-    QAction,
     QApplication,
-    QStyle,
 )
 from loguru import logger
 from qfluentwidgets import (
@@ -338,8 +333,9 @@ class ToolPopupDialog(QDialog):
         self._lock_mode = False
         self._slider_desktop_pos = None
 
-        # 初始化系统托盘图标（用于 Windows 通知）
-        self._init_tray_icon()
+        # 注册到全局 TrayManager（确保只有一个托盘图标）
+        from app.tray_manager import TrayManager
+        TrayManager.get_instance().register_window(self)
 
         # 创建独立的锁定按钮（在穿透模式下仍可交互）
         self._lock_btn_widget = LockButtonWidget()
@@ -434,52 +430,6 @@ class ToolPopupDialog(QDialog):
         else:
             ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE)
             SetWindowLongW(hwnd, GWL_EXSTYLE, ex_style & ~WS_EX_TRANSPARENT)
-
-    def _init_tray_icon(self):
-        """初始化系统托盘图标，用于显示 Windows 通知"""
-        import os
-
-        # 使用应用程序的图标
-        icon_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "images",
-            "drifox.ico",
-        )
-        if os.path.exists(icon_path):
-            tray_icon = QIcon(icon_path)
-        else:
-            # 如果找不到图标，使用默认图标
-            tray_icon = self.style().standardIcon(QStyle.SP_ComputerIcon)
-
-        self.tray_icon = QSystemTrayIcon(self)
-        self.tray_icon.setIcon(tray_icon)
-        self.tray_icon.setToolTip("Drifox")
-
-        # 创建上下文菜单
-        tray_menu = QMenu(self)
-        show_action = QAction("显示窗口", self)
-        show_action.triggered.connect(self._show_from_tray)
-        tray_menu.addAction(show_action)
-        tray_menu.addSeparator()
-        quit_action = QAction("退出", self)
-        quit_action.triggered.connect(self._quit_from_tray)
-        tray_menu.addAction(quit_action)
-
-        self.tray_icon.setContextMenu(tray_menu)
-        self.tray_icon.show()
-
-    def _show_from_tray(self):
-        """从托盘恢复窗口"""
-        self.show()
-        if self.isMinimized():
-            self.showNormal()
-        self.activateWindow()
-
-    def _quit_from_tray(self):
-        """从托盘退出应用"""
-        self._is_closing = True
-        self.close()
-        QApplication.instance().quit()
 
     def _show_settings(self):
         """ "显示设置弹窗 - 已被移除，按钮已移到主窗口"""
@@ -782,6 +732,12 @@ class ToolPopupDialog(QDialog):
     def _on_destroyed(self):
         if hasattr(self.tool_instance, "set_allowed_update"):
             self.tool_instance.set_allowed_update(False)
+        # 从全局 TrayManager 注销
+        try:
+            from app.tray_manager import TrayManager
+            TrayManager.get_instance().unregister_window(self)
+        except Exception:
+            pass
 
     def _show_opacity_slider(self):
         if self._opacity_slider is None:
