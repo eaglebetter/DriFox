@@ -28,7 +28,7 @@ from qfluentwidgets import (
     TextEdit,
 )
 
-from app.utils.design_tokens import scale_font_size
+from app.utils.design_tokens import scale_font_size, font_size_css
 from app.utils.utils import get_font_family_css, get_icon
 
 # Tab 标识
@@ -121,7 +121,7 @@ class EntryMemoryItemWidget(QWidget):
         self.content_label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.MinimumExpanding)
         self.content_label.setMinimumWidth(100)
         self.content_label.setStyleSheet(
-            f"padding: 4px; {get_font_family_css()} font-size: 12px;"
+            f"padding: 4px; {get_font_family_css()} {font_size_css(12)}"
         )
         text_layout.addWidget(self.content_label)
 
@@ -146,7 +146,7 @@ class EntryMemoryItemWidget(QWidget):
                 color: #e0e0e0;
                 padding: 4px 6px;
                 border-radius: 3px;
-                {get_font_family_css()} font-size: 12px;
+                {get_font_family_css()} {font_size_css(12)}
             }}
         """)
         self.edit_text.setMinimumHeight(36)
@@ -336,13 +336,13 @@ class KeyDocumentItemWidget(QWidget):
         # 文件/文件夹图标（根据类型显示不同图标）
         icon = self._get_icon(file_name, file_path)
         icon_label = BodyLabel(icon, self)
-        icon_label.setStyleSheet(f"font-size: 16px; padding: 0 4px;")
+        icon_label.setStyleSheet(f"{font_size_css(16)} padding: 0 4px;")
 
         name_label = BodyLabel(file_name, self)
         name_label.setWordWrap(True)
         name_label.setSizePolicy(1, 0)
         name_label.setStyleSheet(
-            f"{get_font_family_css()} font-size: 12px; padding: 0 4px;"
+            f"{get_font_family_css()} {font_size_css(12)} padding: 0 4px;"
         )
 
         main_layout.addWidget(icon_label)
@@ -351,7 +351,7 @@ class KeyDocumentItemWidget(QWidget):
         # 显示绝对路径
         path_label = BodyLabel(self.file_path, self)
         path_label.setStyleSheet(
-            f"color: #8c99ad; {get_font_family_css()} font-size: 10px;"
+            f"color: #8c99ad; {get_font_family_css()} {font_size_css(10)}"
         )
         path_label.setMaximumWidth(200)
         main_layout.addWidget(path_label)
@@ -420,13 +420,13 @@ class DropZoneWidget(QWidget):
 
         icon_label = BodyLabel("📁", self)
         icon_label.setAlignment(Qt.AlignCenter)
-        icon_label.setStyleSheet("font-size: 20px;")
+        icon_label.setStyleSheet(font_size_css(20))
         layout.addWidget(icon_label)
 
         label = BodyLabel("拖拽文件到此处 或 点击选择文件", self)
         label.setAlignment(Qt.AlignCenter)
         label.setStyleSheet(
-            f"color: #8c99ad; {get_font_family_css()} font-size: 11px;"
+            f"color: #8c99ad; {get_font_family_css()} {font_size_css(11)}"
         )
         layout.addWidget(label)
 
@@ -531,7 +531,7 @@ class MemoryCardContent(QWidget):
                 color: #e0e0e0;
                 border-radius: 6px;
                 padding: 8px;
-                {get_font_family_css()} font-size: 12px;
+                {get_font_family_css()} {font_size_css(13)}
             }}
         """)
 
@@ -598,22 +598,22 @@ class MemoryCardContent(QWidget):
                 color: #e0e0e0;
                 padding: 4px 8px;
                 border-radius: 4px;
-                {get_font_family_css()} font-size: 12px;
+                {get_font_family_css()} {font_size_css(12)}
             }}
         """)
         self.entry_add_btn = PrimaryPushButton("添加", self)
         self.entry_add_btn.setFixedSize(50, 28)
-        self.entry_add_btn.setStyleSheet("""
-            QPushButton {
+        self.entry_add_btn.setStyleSheet(f"""
+            QPushButton {{
                 background-color: #0e639c;
                 color: white;
                 border: none;
                 border-radius: 4px;
-                font-size: 12px;
-            }
-            QPushButton:hover {
+                {font_size_css(12)}
+            }}
+            QPushButton:hover {{
                 background-color: #1177bb;
-            }
+            }}
         """)
         self.entry_add_btn.clicked.connect(self._add_entry)
         self.entry_input.returnPressed.connect(self._add_entry)
@@ -637,7 +637,7 @@ class MemoryCardContent(QWidget):
         # 项目名标签
         self.project_name_label = BodyLabel(f"项目: {self._current_project}", self)
         self.project_name_label.setStyleSheet(
-            f"color: #8c99ad; {get_font_family_css()} font-size: 11px; padding: 0 4px;"
+            f"color: #8c99ad; {get_font_family_css()} {font_size_css(11)} padding: 0 4px;"
         )
         top_layout.addWidget(self.project_name_label)
 
@@ -647,7 +647,7 @@ class MemoryCardContent(QWidget):
         # 字数/token统计标签
         self.notes_stats_label = BodyLabel("0 字 / 0 token", self)
         self.notes_stats_label.setStyleSheet(
-            f"color: #8c99ad; {get_font_family_css()} font-size: 11px; padding: 0 4px;"
+            f"color: #8c99ad; {get_font_family_css()} {font_size_css(11)} padding: 0 4px;"
         )
         top_layout.addWidget(self.notes_stats_label)
 

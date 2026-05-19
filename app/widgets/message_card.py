@@ -78,7 +78,7 @@ from app.core import (
 )
 from app.core.message_content import make_tool_result_block
 from app.utils.utils import get_font_family_css, get_icon
-from app.utils.design_tokens import current_theme, scale_font_size, Colors, font_size_css
+from app.utils.design_tokens import current_theme, scale_font_size, Colors, font_size_css, _get_global_font
 from app.widgets.render_helpers import (
     render_tool_block,
 )
@@ -191,7 +191,7 @@ def _wrap_code_blocks_with_copy_button_web(html: str) -> str:
                 linenos=False,
                 noclasses=True,
                 cssclass="code-block",
-                prestyles="margin:0; padding:0; background:transparent; font-family: Consolas, monospace; font-size:13px; color:#D4D4D4;",
+                prestyles="margin:0; padding:0; background:transparent; font-family: Consolas, monospace; font-size:{scale_font_size(13)}px; color:#D4D4D4;",
             )
             highlighted = highlight(copy_text, lexer, formatter)
             # 提取 <pre> 内部内容
@@ -226,7 +226,7 @@ def _wrap_code_blocks_with_copy_button_web(html: str) -> str:
             box-shadow: 0 4px 12px rgba(0,0,0,0.18), 0 1px 3px rgba(0,0,0,0.2);
             backdrop-filter: blur(8px);
             font-family: Consolas, monospace;
-            font-size: 13px;
+            font-size: {scale_font_size(13)}px;
         ">
             <!-- 顶部工具栏区域 -->
             <div style="
@@ -234,7 +234,7 @@ def _wrap_code_blocks_with_copy_button_web(html: str) -> str:
                 padding: 6px 10px; height: 30px; background: rgba(28, 28, 36, 0.18);
                 border-bottom: 1px solid rgba(45, 45, 57, 0.5); border-radius: 10px 10px 0 0;
             ">
-                {f'<span style="color: #FFA500; font-size: 13px; font-weight: bold;">{lang}</span>' if lang else '<span style="color: #888;">Plain Text</span>'}
+                {f'<span style="color: #FFA500; font-size: {scale_font_size(13)}px; font-weight: bold;">{lang}</span>' if lang else '<span style="color: #888;">Plain Text</span>'}
                 <div style="display: flex; gap: 12px; align-items: center; padding-right: 4px;">
                     <button type="button" data-action="save_file" data-lang="{lang}" data-copy="{b64_copy}" class="code-btn" data-tooltip="保存本地文件" style="width: 30px; height: 30px; background: transparent; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 0; border-radius: 6px;">
                         <img src="qrc:/icons/导入.svg" style="width:22px; height:22px; pointer-events: none;" />
@@ -1401,6 +1401,11 @@ class CodeWebViewer(QWebEngineView):
         theme = current_theme()
         body_font_size = scale_font_size(14)
         code_font_size = scale_font_size(13)
+        tag_font_size = scale_font_size(12)
+        small_font_size = scale_font_size(11)
+        tiny_font_size = scale_font_size(10)
+        mono_font = f"{_get_global_font()}, Consolas, monospace"
+        font_family = _get_global_font()
 
         html = f"""
         <!DOCTYPE html>
@@ -1458,7 +1463,8 @@ class CodeWebViewer(QWebEngineView):
                     color: #9bddff !important;
                     padding: 2px 6px; 
                     border-radius: 5px; 
-                    font-family: Consolas, monospace;
+                    font-family: {mono_font};
+                    font-size: {code_font_size}px;
                 }}
                 hr {{ border: none; border-top: 1px solid var(--border); margin: 14px 0; }}
 
@@ -1478,6 +1484,8 @@ class CodeWebViewer(QWebEngineView):
                     border-radius: 10px;
                     overflow: hidden;
                     border: 1px solid var(--border);
+                    font-family: '{font_family}', sans-serif;
+                    font-size: {body_font_size}px;
                 }}
                 table:not(.code-table) th {{
                     background: rgba(50, 66, 94, 0.35);
@@ -1501,7 +1509,7 @@ class CodeWebViewer(QWebEngineView):
                     margin: 0 2px;
                     border: 1px solid transparent;
                     border-radius: 999px;
-                    font-size: 12px;
+                    font-size: {tag_font_size}px;
                     font-weight: 700;
                     cursor: pointer;
                     transition: 0.18s ease;
@@ -1524,7 +1532,7 @@ class CodeWebViewer(QWebEngineView):
                 /* session 时间显示在标题下方 */
                 .session-tag .session-time {{
                     display: block;
-                    font-size: 10px;
+                    font-size: {tiny_font_size}px;
                     font-weight: normal;
                     opacity: 0.6;
                     margin-top: 4px;
@@ -1541,6 +1549,8 @@ class CodeWebViewer(QWebEngineView):
                     border: 1px solid rgba(100, 198, 255, 0.3);
                     padding: 8px 12px;
                     text-align: left;
+                    font-family: '{font_family}', sans-serif;
+                    font-size: {body_font_size}px;
                 }}
                 .session-table th {{
                     background: rgba(100, 198, 255, 0.1);
@@ -1558,14 +1568,14 @@ class CodeWebViewer(QWebEngineView):
                 /* 代码块通用样式 */
                 .code-table {{ width: 100%; border-collapse: collapse; }}
                 .code-table td {{ padding: 0; vertical-align: top; }}
-                .lineno {{ width: 32px; text-align: right; padding-right: 8px !important; color: #606060; border-right: 1px solid #404040; user-select: none; font-size: 12px; line-height: 1.5; }}
+                .lineno {{ width: 32px; text-align: right; padding-right: 8px !important; color: #606060; border-right: 1px solid #404040; user-select: none; font-size: {small_font_size}px; line-height: 1.5; }}
                 /* 优化后的代码块布局：行号固定，代码可横向滚动 */
                 .code-container {{
                     display: flex;
                     overflow-x: auto;
                     overflow-y: hidden;
                     background: rgba(20, 25, 35, 0.7);
-                    font-family: Consolas, monospace;
+                    font-family: {mono_font};
                     font-size: {code_font_size}px;
                     line-height: 1.5;
                     padding: 0 10px 8px 0;
@@ -1594,11 +1604,11 @@ class CodeWebViewer(QWebEngineView):
                     word-wrap: normal;
                     overflow: visible;
                     background: transparent !important;
-                    font-family: Consolas, monospace !important;
+                    font-family: {mono_font} !important;
                     font-size: {code_font_size}px !important;
                     line-height: 1.5 !important;
                 }}
-                .code-line {{ padding-left: 12px !important; white-space: pre; font-family: Consolas, monospace; }}
+                .code-line {{ padding-left: 12px !important; white-space: pre; font-family: {mono_font}; }}
 
                 .code-btn:hover {{ background: rgba(255,255,255,0.08) !important; }}
 
@@ -1669,7 +1679,8 @@ class CodeWebViewer(QWebEngineView):
                     background: rgba(30, 32, 40, 0.18);
                     color: var(--text-muted) !important;
                     font-style: italic;
-                    font-size: 13px;
+                    font-size: {code_font_size}px;
+                    font-family: '{font_family}', sans-serif;
                     line-height: 1.6;
                 }}
                 /* 思考内容加载骨架屏动画 */
@@ -1703,7 +1714,8 @@ class CodeWebViewer(QWebEngineView):
                     padding: 8px 12px;
                     color: var(--accent);
                     font-weight: 600;
-                    font-size: 13px;
+                    font-size: {code_font_size}px;
+                    font-family: '{font_family}', sans-serif;
                     white-space: normal;
                 }}
                 .tool-expanded-content {{
@@ -1715,7 +1727,7 @@ class CodeWebViewer(QWebEngineView):
                 }}
                 .tool-section-label {{
                     color: #888;
-                    font-size: 11px;
+                    font-size: {small_font_size}px;
                     font-weight: 500;
                     padding: 8px 12px 4px;
                     text-transform: uppercase;
@@ -1732,7 +1744,7 @@ class CodeWebViewer(QWebEngineView):
                     align-items: flex-start;
                     padding: 6px 12px;
                     border-bottom: 1px solid rgba(58, 63, 71, 0.4);
-                    font-size: 12px;
+                    font-size: {tag_font_size}px;
                 }}
                 .args-row:last-child {{
                     border-bottom: none;
@@ -1763,16 +1775,16 @@ class CodeWebViewer(QWebEngineView):
                     flex: 1 1 auto;
                     color: #d4d4d4;
                     word-break: break-all;
-                    font-family: Consolas, monospace;
-                    font-size: 11px;
+                    font-family: {mono_font};
+                    font-size: {small_font_size}px;
                 }}
                 .result-content {{
                     padding: 6px 12px 10px;
                     color: #d4d4d4;
-                    font-size: 12px;
+                    font-size: {tag_font_size}px;
                     line-height: 1.5;
                     word-break: break-word;
-                    font-family: Consolas, monospace;
+                    font-family: {mono_font};
                     max-height: 400px;
                     overflow-y: auto;
                 }}
@@ -1780,7 +1792,7 @@ class CodeWebViewer(QWebEngineView):
                     padding: 6px 12px 10px;
                     color: #666;
                     font-style: italic;
-                    font-size: 12px;
+                    font-size: {tag_font_size}px;
                 }}
                 .tool-content {{
                     padding: 10px 12px;
@@ -1790,8 +1802,8 @@ class CodeWebViewer(QWebEngineView):
                 .tool-content pre {{
                     margin: 0;
                     color: #d8b68d;
-                    font-size: 12px;
-                    font-family: Consolas, monospace;
+                    font-size: {tag_font_size}px;
+                    font-family: {mono_font};
                     white-space: pre-wrap;
                     word-break: break-word;
                 }}
@@ -1812,15 +1824,16 @@ class CodeWebViewer(QWebEngineView):
                     padding: 8px 12px;
                     color: #00BCD4;
                     font-weight: 600;
-                    font-size: 13px;
+                    font-size: {code_font_size}px;
+                    font-family: '{font_family}', sans-serif;
                     white-space: normal;
                 }}
                 .hook-content {{
                     padding: 10px 12px;
                     border-top: 1px solid rgba(0, 188, 212, 0.2);
                     background: rgba(0, 188, 212, 0.05);
-                    font-family: Consolas, monospace;
-                    font-size: 12px;
+                    font-family: {mono_font};
+                    font-size: {tag_font_size}px;
                     color: #e0e0e0;
                     white-space: pre-wrap;
                     word-break: break-word;
@@ -2622,20 +2635,20 @@ class MessageCard(SimpleCardWidget):
         if hasattr(self, '_name_label'):
             font_css = get_font_family_css()
             self._name_label.setStyleSheet(
-                f"{font_css} font-size:14px;color:{self._theme['text']};font-weight:700;"
+                f"{font_css} font-size:{scale_font_size(14)}px;color:{self._theme['text']};font-weight:700;"
             )
         # 更新副标题
         if hasattr(self, '_subtitle_label'):
             font_css = get_font_family_css()
             self._subtitle_label.setStyleSheet(
-                f"{font_css} font-size:11px;color:{self._theme['muted']};font-weight:500;letter-spacing:0.02em;"
+                f"{font_css} font-size:{scale_font_size(11)}px;color:{self._theme['muted']};font-weight:500;letter-spacing:0.02em;"
             )
         # 更新时间戳
         if hasattr(self, '_ts_label'):
             self._ts_label.setStyleSheet(
                 f"""
                 QLabel {{
-                    font-size: 11px;
+                    font-size: {scale_font_size(11)}px;
                     color: {self._theme["muted"]};
                     background: rgba(255,255,255,0.03);
                     border: 1px solid rgba(255,255,255,0.06);
@@ -2654,7 +2667,7 @@ class MessageCard(SimpleCardWidget):
             return ""
         return f"""
             QLabel {{
-                {font_css} font-size: 12px;
+                {font_css} font-size: {scale_font_size(12)}px;
                 color: #FFFFFF;
                 font-weight: 700;
                 background: {self._theme["accent"]};
@@ -2697,12 +2710,12 @@ class MessageCard(SimpleCardWidget):
         nm_l = QLabel(self._theme["title"], self)
         self._name_label = nm_l
         nm_l.setStyleSheet(
-            f"{font_css} font-size:14px;color:{self._theme['text']};font-weight:700;"
+            f"{font_css} font-size:{scale_font_size(14)}px;color:{self._theme['text']};font-weight:700;"
         )
         sub_l = QLabel(self._theme["subtitle"], self)
         self._subtitle_label = sub_l
         sub_l.setStyleSheet(
-            f"{font_css} font-size:11px;color:{self._theme['muted']};font-weight:500;letter-spacing:0.02em;"
+            f"{font_css} font-size:{scale_font_size(11)}px;color:{self._theme['muted']};font-weight:500;letter-spacing:0.02em;"
         )
         title_layout.addWidget(nm_l)
         title_layout.addWidget(sub_l)
@@ -2715,7 +2728,7 @@ class MessageCard(SimpleCardWidget):
             ts.setStyleSheet(
                 f"""
                 QLabel {{
-                    font-size: 11px;
+                    font-size: {scale_font_size(11)}px;
                     color: {self._theme["muted"]};
                     background: rgba(255,255,255,0.03);
                     border: 1px solid rgba(255,255,255,0.06);
@@ -2793,7 +2806,7 @@ class MessageCard(SimpleCardWidget):
         else:
             # 懒渲染：占位符，不立即创建QWebEngine，进入可视区域再创建
             placeholder = QLabel("加载中...", self)
-            placeholder.setStyleSheet("color: #888888; font-size: 14px; padding: 8px;")
+            placeholder.setStyleSheet(f"color: #888888; font-size: {scale_font_size(14)}px; padding: 8px; {get_font_family_css()}")
             placeholder.setAlignment(Qt.AlignCenter)
             self._viewer_layout.addWidget(placeholder)
             main.addWidget(self._viewer_container)

@@ -68,7 +68,7 @@ class SkillListItem(QWidget):
         self._label.setStyleSheet(f"""
             QLabel {{
                 color: #EAF2FF;
-                {get_font_family_css()} font-size: 13px;
+                {get_font_family_css()} {font_size_css(13)}
             }}
         """)
 

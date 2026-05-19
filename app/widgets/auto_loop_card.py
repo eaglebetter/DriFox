@@ -24,6 +24,7 @@ from qfluentwidgets.components.widgets.flyout import IconWidget
 
 from app.core.auto_loop_config import AutoLoopConfig
 from app.utils.utils import get_font_family_css, get_icon
+from app.utils.design_tokens import font_size_css
 
 FONT_CSS = get_font_family_css()
 
@@ -68,7 +69,7 @@ class AutoLoopConfigCard(QFrame):
         title_layout.addWidget(icon_label)
         title_layout.addSpacing(6)
         title = StrongBodyLabel("AutoLoop 自动循环")
-        title.setStyleSheet(f"color: #EAF2FF; font-size: 14px; {FONT_CSS}")
+        title.setStyleSheet(f"color: #EAF2FF; {font_size_css(14)} {FONT_CSS}")
         title_layout.addWidget(title)
         title_layout.addStretch()
 
@@ -82,7 +83,7 @@ class AutoLoopConfigCard(QFrame):
                 border: none;
                 border-radius: 8px;
                 padding: 4px 14px;
-                {FONT_CSS} font-size: 12px;
+                {FONT_CSS} {font_size_css(12)}
                 font-weight: bold;
             }}
             PrimaryPushButton:hover {{
@@ -182,7 +183,7 @@ class AutoLoopConfigCard(QFrame):
                 border: 1px solid rgba(255, 255, 255, 0.12);
                 border-radius: 8px;
                 padding: 6px 10px;
-                {FONT_CSS} font-size: 13px;
+                {FONT_CSS} {font_size_css(13)}
             }}
             QTextEdit:focus {{
                 border: 1px solid #C9A85C;
@@ -220,7 +221,7 @@ class AutoLoopConfigCard(QFrame):
                 border: 1px solid rgba(255, 255, 255, 0.08);
                 border-radius: 6px;
                 padding: 4px 8px;
-                {FONT_CSS} font-size: 13px;
+                {FONT_CSS} {font_size_css(13)}
             }}
             SpinBox:focus {{
                 border-color: #C9A85C;
@@ -235,7 +236,7 @@ class AutoLoopConfigCard(QFrame):
                 border: 1px solid rgba(255, 255, 255, 0.08);
                 border-radius: 6px;
                 padding: 6px 8px;
-                {FONT_CSS} font-size: 13px;
+                {FONT_CSS} {font_size_css(13)}
             }}
             LineEdit:focus {{
                 border-color: #C9A85C;
@@ -303,10 +304,10 @@ class AutoLoopRunningCard(QFrame):
         title_bar = QHBoxLayout()
         title_bar.setSpacing(8)
         icon_label = QLabel("🤖")
-        icon_label.setStyleSheet("font-size: 18px;")
+        icon_label.setStyleSheet(font_size_css(18))
         title_bar.addWidget(icon_label)
         title = QLabel("AutoLoop 运行中")
-        title.setStyleSheet(f"color: #EAF2FF; font-size: 14px; font-weight: bold; {FONT_CSS}")
+        title.setStyleSheet(f"color: #EAF2FF; {font_size_css(14)} font-weight: bold; {FONT_CSS}")
         title_bar.addWidget(title)
         title_bar.addStretch()
         self._stop_btn = PushButton("⏹ 停止")
@@ -317,7 +318,7 @@ class AutoLoopRunningCard(QFrame):
                 color: white;
                 border: none;
                 border-radius: 6px;
-                {FONT_CSS} font-size: 12px;
+                {FONT_CSS} {font_size_css(12)}
                 font-weight: bold;
             }}
             PushButton:hover {{
@@ -332,7 +333,7 @@ class AutoLoopRunningCard(QFrame):
         self._task_label = QLabel("")
         self._task_label.setStyleSheet(f"""
             color: #9BB0D3;
-            font-size: 12px;
+            {font_size_css(12)}
             {FONT_CSS}
             padding: 4px 8px;
             background: rgba(0,0,0,0.15);
@@ -359,7 +360,7 @@ class AutoLoopRunningCard(QFrame):
         iter_layout.setSpacing(6)
         iter_layout.addWidget(QLabel("📚"))
         self._iter_label = QLabel("0 / 0")
-        self._iter_label.setStyleSheet(f"color: #C9A85C; font-weight: bold; font-size: 13px; {FONT_CSS}")
+        self._iter_label.setStyleSheet(f"color: #C9A85C; font-weight: bold; {font_size_css(13)} {FONT_CSS}")
         iter_layout.addWidget(self._iter_label)
         row1.addWidget(iter_w)
 
@@ -370,7 +371,7 @@ class AutoLoopRunningCard(QFrame):
         time_layout.setSpacing(6)
         time_layout.addWidget(QLabel("⏱"))
         self._time_label = QLabel("0秒")
-        self._time_label.setStyleSheet(f"color: #7FDBFF; font-weight: bold; font-size: 13px; {FONT_CSS}")
+        self._time_label.setStyleSheet(f"color: #7FDBFF; font-weight: bold; {font_size_css(13)} {FONT_CSS}")
         time_layout.addWidget(self._time_label)
         row1.addWidget(time_w)
 
@@ -381,7 +382,7 @@ class AutoLoopRunningCard(QFrame):
         token_layout.setSpacing(8)
         token_layout.addWidget(QLabel("🔢"))
         self._token_label = QLabel("0 / 500K")
-        self._token_label.setStyleSheet(f"color: #A7F3D0; font-weight: bold; font-size: 13px; {FONT_CSS}")
+        self._token_label.setStyleSheet(f"color: #A7F3D0; font-weight: bold; {font_size_css(13)} {FONT_CSS}")
         token_layout.addWidget(self._token_label)
         self._token_progress = QProgressBar()
         self._token_progress.setRange(0, 100)
@@ -403,7 +404,7 @@ class AutoLoopRunningCard(QFrame):
         """)
         token_layout.addWidget(self._token_progress)
         self._token_percent_label = QLabel("0%")
-        self._token_percent_label.setStyleSheet(f"color: #7FDBFF; font-size: 12px; {FONT_CSS}")
+        self._token_percent_label.setStyleSheet(f"color: #7FDBFF; {font_size_css(12)} {FONT_CSS}")
         self._token_percent_label.setFixedWidth(32)
         token_layout.addWidget(self._token_percent_label)
         row1.addWidget(token_w, 1)
@@ -420,7 +421,7 @@ class AutoLoopRunningCard(QFrame):
         status_layout2.setSpacing(6)
         status_layout2.addWidget(QLabel("📊"))
         self._status_label = QLabel("▶ 准备中...")
-        self._status_label.setStyleSheet(f"color: #E5E7EB; font-size: 13px; {FONT_CSS}")
+        self._status_label.setStyleSheet(f"color: #E5E7EB; {font_size_css(13)} {FONT_CSS}")
         status_layout2.addWidget(self._status_label)
         row2.addWidget(status_w)
 
@@ -430,7 +431,7 @@ class AutoLoopRunningCard(QFrame):
         phase_layout.setSpacing(6)
         phase_layout.addWidget(QLabel("🎯"))
         self._phase_label = QLabel("待开始")
-        self._phase_label.setStyleSheet(f"color: #C9A85C; font-weight: bold; font-size: 13px; {FONT_CSS}")
+        self._phase_label.setStyleSheet(f"color: #C9A85C; font-weight: bold; {font_size_css(13)} {FONT_CSS}")
         phase_layout.addWidget(self._phase_label)
         row2.addWidget(phase_w)
 
@@ -444,7 +445,7 @@ class AutoLoopRunningCard(QFrame):
         self._log_label.setFixedHeight(20)
         self._log_label.setStyleSheet(f"""
             color: #7A9BBF;
-            font-size: 11px;
+            {font_size_css(11)}
             {FONT_CSS}
             padding: 3px 6px;
             background: rgba(0,0,0,0.1);
@@ -544,7 +545,7 @@ class AutoLoopRunningCard(QFrame):
             "completed": "#10B981",  # 绿色
         }
         color = color_map.get(phase, "#C9A85C")
-        self._phase_label.setStyleSheet(f"color: {color}; font-weight: bold; font-size: 13px; {FONT_CSS}")
+        self._phase_label.setStyleSheet(f"color: {color}; font-weight: bold; {font_size_css(13)} {FONT_CSS}")
         
         # 阶段变更时更新状态文本
         if phase == "planning":
