@@ -128,7 +128,7 @@ class Settings(QConfig):
             f.write(json.dumps(self.toDict(), option=json.OPT_INDENT_2))
 
     # 版本信息
-    current_version = "v0.1.7"
+    current_version = "v0.1.8"
     # 通用设置
     auto_check_update = ConfigItem("General", "AutoCheckUpdate", True, BoolValidator())
 
