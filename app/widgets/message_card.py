@@ -220,8 +220,8 @@ def _wrap_code_blocks_with_copy_button_web(html: str) -> str:
         <div style="
             position: relative;
             margin: 12px 0;
-            background: rgba(30, 32, 40, 0.20);
-            border: 1px solid rgba(58, 63, 71, 0.6);
+            background: transparent;
+            border: 1px solid var(--code-border, rgba(58, 63, 71, 0.6));
             border-radius: 10px;
             box-shadow: 0 4px 12px rgba(0,0,0,0.18), 0 1px 3px rgba(0,0,0,0.2);
             backdrop-filter: blur(8px);
@@ -231,8 +231,8 @@ def _wrap_code_blocks_with_copy_button_web(html: str) -> str:
             <!-- 顶部工具栏区域 -->
             <div style="
                 display: flex; justify-content: space-between; align-items: center;
-                padding: 6px 10px; height: 30px; background: rgba(28, 28, 36, 0.18);
-                border-bottom: 1px solid rgba(45, 45, 57, 0.5); border-radius: 10px 10px 0 0;
+                padding: 6px 10px; height: 30px; background: rgba(255, 255, 255, 0.03);
+                border-bottom: 1px solid var(--code-border, rgba(45, 45, 57, 0.5)); border-radius: 10px 10px 0 0;
             ">
                 {f'<span style="color: #FFA500; font-size: {scale_font_size(13)}px; font-weight: bold;">{lang}</span>' if lang else '<span style="color: #888;">Plain Text</span>'}
                 <div style="display: flex; gap: 12px; align-items: center; padding-right: 4px;">
@@ -1426,8 +1426,8 @@ class CodeWebViewer(QWebEngineView):
                     --text-muted: {theme["text_muted"]};
                     --accent: {theme["accent"]};
                     --accent-warm: {theme["accent_warm"]};
-                    --code-bg: rgba(15, 20, 29, 0.85);
-                    --code-toolbar: rgba(28, 28, 36, 0.7);
+                    --code-bg: transparent;
+                    --code-toolbar: rgba(255, 255, 255, 0.03);
                     --code-border: #2a3447;
                     --success: #5fd18c;
                     --danger: #ff7b7b;
@@ -1479,16 +1479,15 @@ class CodeWebViewer(QWebEngineView):
                     width: 100%;
                     border-collapse: collapse;
                     margin: 10px 0;
-                    background: rgba(30, 32, 40, 0.30);
-                    border: 1px solid rgba(58, 63, 71, 0.5);
+                    background: transparent;
+                    border: 1px solid var(--border);
                     border-radius: 10px;
                     overflow: hidden;
-                    border: 1px solid var(--border);
                     font-family: '{font_family}', sans-serif;
                     font-size: {body_font_size}px;
                 }}
                 table:not(.code-table) th {{
-                    background: rgba(50, 66, 94, 0.35);
+                    background: rgba(255, 255, 255, 0.04);
                     padding: 8px 12px;
                     text-align: left;
                     font-weight: 600;
@@ -1497,11 +1496,11 @@ class CodeWebViewer(QWebEngineView):
                 }}
                 table:not(.code-table) td {{
                     padding: 8px 12px;
-                    border-bottom: 1px solid rgba(37, 48, 68, 0.8);
+                    border-bottom: 1px solid var(--border);
                     color: var(--text-secondary) !important;
                 }}
-                table:not(.code-table) tr:nth-child(even) {{ background: rgba(29, 37, 51, 0.35); }}
-                table:not(.code-table) tr:hover {{ background: rgba(38, 50, 69, 0.6); }}
+                table:not(.code-table) tr:nth-child(even) {{ background: rgba(255, 255, 255, 0.02); }}
+                table:not(.code-table) tr:hover {{ background: rgba(255, 255, 255, 0.05); }}
 
                 .context-tag {{
                     display: inline-block;
@@ -1553,16 +1552,16 @@ class CodeWebViewer(QWebEngineView):
                     font-size: {body_font_size}px;
                 }}
                 .session-table th {{
-                    background: rgba(100, 198, 255, 0.1);
+                    background: rgba(100, 198, 255, 0.06);
                     color: #66c6ff;
                     font-weight: 600;
                 }}
                 .session-table td {{
-                    background: rgba(30, 40, 60, 0.5);
+                    background: transparent;
                     vertical-align: middle;
                 }}
                 .session-table tr:hover td {{
-                    background: rgba(100, 198, 255, 0.08);
+                    background: rgba(100, 198, 255, 0.04);
                 }}
 
                 /* 代码块通用样式 */
@@ -1574,7 +1573,7 @@ class CodeWebViewer(QWebEngineView):
                     display: flex;
                     overflow-x: auto;
                     overflow-y: hidden;
-                    background: rgba(20, 25, 35, 0.7);
+                    background: transparent;
                     font-family: {mono_font};
                     font-size: {code_font_size}px;
                     line-height: 1.5;
@@ -1660,7 +1659,7 @@ class CodeWebViewer(QWebEngineView):
 
                 .think-block {{
                     margin: 8px 0;
-                    background: rgba(30, 32, 40, 0.28);
+                    background: transparent;
                     border: 1px solid var(--border);
                     border-radius: 10px;
                     transition: border-color 220ms ease;
@@ -1676,7 +1675,7 @@ class CodeWebViewer(QWebEngineView):
                 .think-content {{
                     padding: 10px 12px;
                     border-top: 1px solid var(--border);
-                    background: rgba(30, 32, 40, 0.18);
+                    background: transparent;
                     color: var(--text-muted) !important;
                     font-style: italic;
                     font-size: {code_font_size}px;
@@ -1687,9 +1686,9 @@ class CodeWebViewer(QWebEngineView):
                 .think-content.loading {{
                     background-image: linear-gradient(
                         90deg,
-                        rgba(30, 32, 40, 0.18) 25%,
-                        rgba(40, 44, 55, 0.28) 50%,
-                        rgba(30, 32, 40, 0.18) 75%
+                        rgba(255, 255, 255, 0.02) 25%,
+                        rgba(255, 255, 255, 0.05) 50%,
+                        rgba(255, 255, 255, 0.02) 75%
                     );
                     background-size: 200% 100%;
                     animation: think-shimmer 1.5s ease-in-out infinite;
@@ -1701,7 +1700,7 @@ class CodeWebViewer(QWebEngineView):
 
                 .tool-block {{
                     margin: 8px 0;
-                    background: rgba(30, 32, 40, 0.28);
+                    background: transparent;
                     border: 1px solid var(--border);
                     border-radius: 10px;
                     box-shadow: none;
@@ -1797,7 +1796,7 @@ class CodeWebViewer(QWebEngineView):
                 .tool-content {{
                     padding: 10px 12px;
                     border-top: 1px solid var(--border);
-                    background: rgba(18, 24, 35, 0.25);
+                    background: transparent;
                 }}
                 .tool-content pre {{
                     margin: 0;
@@ -1810,7 +1809,7 @@ class CodeWebViewer(QWebEngineView):
 
                 .hook-block {{
                     margin: 8px 0;
-                    background: rgba(0, 188, 212, 0.08);
+                    background: transparent;
                     border: 1px solid rgba(0, 188, 212, 0.2);
                     border-left: 3px solid #00BCD4;
                     border-radius: 10px;
@@ -1831,7 +1830,7 @@ class CodeWebViewer(QWebEngineView):
                 .hook-content {{
                     padding: 10px 12px;
                     border-top: 1px solid rgba(0, 188, 212, 0.2);
-                    background: rgba(0, 188, 212, 0.05);
+                    background: transparent;
                     font-family: {mono_font};
                     font-size: {tag_font_size}px;
                     color: #e0e0e0;
