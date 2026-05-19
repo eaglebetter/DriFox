@@ -7,6 +7,18 @@
 from PyQt5.QtCore import QSize
 
 
+def _get_global_font() -> str:
+    """获取全局字体名称，用于样式表"""
+    try:
+        from app.utils.config import Settings
+        return Settings.get_instance().llm_font_family.value
+    except Exception:
+        try:
+            return Settings.get_instance().canvas_font_selected.value
+        except Exception:
+            return "Segoe UI"
+
+
 FONT_SIZE_OPTIONS = {
     "small": {"label": "小", "delta": -1, "base": 13},
     "medium": {"label": "中", "delta": 0, "base": 14},
@@ -586,9 +598,10 @@ class TabStyles:
                 padding: 3px 8px;
                 border-radius: 4px;
                 background-color: {Colors.TAB_ACTIVE_BG};
+                font-family: '{_get_global_font()}';
             }}
         """
-    
+
     @staticmethod
     def inactive() -> str:
         Colors.refresh()
@@ -599,6 +612,7 @@ class TabStyles:
                 padding: 3px 8px;
                 border-radius: 4px;
                 cursor: pointer;
+                font-family: '{_get_global_font()}';
             }}
             QLabel:hover {{
                 color: {Colors.TEXT_PRIMARY};

@@ -1,28 +1,32 @@
 from PyQt5.QtCore import Qt, QStringListModel
 from PyQt5.QtWidgets import QCompleter
 from qfluentwidgets import EditableComboBox
+from app.utils.utils import get_font_family_css
+from app.utils.design_tokens import font_size_css
 
 
 class SearchableEditableComboBox(EditableComboBox):
     def __init__(self, parent=None):
         super().__init__(parent)
 
-        # 设置深色样式
-        self.setStyleSheet("""
-            QLineEdit {
+        # 设置深色样式 + 全局字体
+        self.setStyleSheet(f"""
+            QLineEdit {{
                 background-color: #2d2d2d;
                 color: #ffffff;
                 border: 1px solid #3a3a3a;
                 border-radius: 4px;
                 padding: 4px 8px;
                 selection-background-color: #0078d4;
-            }
-            QLineEdit:focus {
+                {font_size_css(12)}
+                {get_font_family_css()}
+            }}
+            QLineEdit:focus {{
                 border-color: #0078d4;
-            }
-            QLineEdit::placeholder {
+            }}
+            QLineEdit::placeholder {{
                 color: #888888;
-            }
+            }}
         """)
 
         # 1. 使用私有变量名 _search_completer，避免覆盖基类的 completer() 方法

@@ -25,7 +25,8 @@ from app.constants import (
     PROVIDER_ICONS,
 )
 from app.utils.design_tokens import Colors, Sizes, ButtonStyles
-from app.utils.utils import get_icon, get_unified_font
+from app.utils.design_tokens import font_size_css
+from app.utils.utils import get_icon, get_unified_font, get_font_family_css
 
 
 def _is_text_chat_model(model_id: str) -> bool:
@@ -244,10 +245,10 @@ class ProviderItem(QWidget):
         info_layout.setSpacing(2)
         self.nameLabel = QLabel(self.provider_name)
         self.nameLabel.setStyleSheet(
-            f"color: {Colors.TEXT_PRIMARY}; font-size: 14px; font-weight: 500;"
+            f"color: {Colors.TEXT_PRIMARY}; {font_size_css(14)} font-weight: 500; {get_font_family_css()}"
         )
         self.modelLabel = QLabel(self.provider_info.get("模型名称", ""))
-        self.modelLabel.setStyleSheet(f"color: {Colors.TEXT_MUTED}; font-size: 12px;")
+        self.modelLabel.setStyleSheet(f"color: {Colors.TEXT_MUTED}; {font_size_css(12)}; {get_font_family_css()}")
 
         info_layout.addWidget(self.nameLabel)
         info_layout.addWidget(self.modelLabel)
