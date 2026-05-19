@@ -23,9 +23,20 @@ class UpdateChecker(QWidget):
     """优化后的更新检查器：保留 InfoBar 交互，适配 Inno Setup EXE"""
     finished = pyqtSignal(object)  # 供外部监听检查结果
     error = pyqtSignal(str)  # 供外部监听错误
+    _instance = None
+    _initialized = False
+
+    def __new__(cls, parent=None):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        if self._initialized:
+            self.parent = parent  # 允许更新 parent
+            return
+        self._initialized = True
         self.parent = parent
         self.cfg = Settings.get_instance()
 
@@ -39,6 +50,15 @@ class UpdateChecker(QWidget):
         self.progress_dialog = None
         self.download_thread = None
         self.installer_path = None
+
+    @classmethod
+    def get_instance(cls, parent=None):
+        """获取单例实例"""
+        if cls._instance is None:
+            cls._instance = cls(parent)
+        elif parent is not None:
+            cls._instance.parent = parent
+        return cls._instance
 
     def check_update(self):
         """检查更新入口"""

@@ -51,6 +51,7 @@ from app.core.auto_loop_config import AutoLoopConfig
 from app.core.workers.auto_loop_worker import AutoLoopWorker
 from app.tool_window import ToolWindow
 from app.tools import get_builtin_tools_schema
+from app.update_checker import UpdateChecker
 from app.utils.config import Settings
 from app.utils.diff_viewer import (
     DiffHtmlGenerator,
@@ -183,8 +184,6 @@ class OpenAIChatToolWindow(ToolWindow):
         self._current_project = self.cfg.current_project.value or "默认项目"  # 当前项目
         # 标记窗口是否已销毁，防止异步回调访问已销毁的 widget
         self._is_destroyed = False
-        # 自动检查更新（启动时静默检查）
-        self._init_auto_update_check()
         # 创建后端（后端自己创建所有组件）- 需要在 super() 之前创建并初始化
         # 因为 setup_ui() 中会用到 self.backend.get_primary_agents()
         self.backend = ChatBackend()
@@ -302,15 +301,16 @@ class OpenAIChatToolWindow(ToolWindow):
         if self.backend.tool_executor:
             self.backend.set_session_context(self._current_session_id)
 
+        # 自动检查更新（启动时静默检查）
+        self._init_auto_update_check()
+
     def _init_auto_update_check(self):
         """启动时静默检查更新"""
         # 检查是否启用自动更新
         if not self.cfg.auto_check_update.value:
             return
 
-        from app.update_checker import UpdateChecker
-
-        checker = UpdateChecker(self)
+        checker = UpdateChecker.get_instance()
         checker.check_update()
 
     def _setup_engine_callbacks(self):
@@ -1470,7 +1470,7 @@ class OpenAIChatToolWindow(ToolWindow):
     def _show_mcp_edit_card(self, name: str, server_data: dict):
         """显示编辑 MCP 服务器卡片"""
         self._settings_popup.hide()
-        self._mcp_edit_card.set_title(f"🔌 编辑: {name}")
+        self._mcp_edit_card.set_title(f"🌐 编辑: {name}")
         self._mcp_edit_popup = MCPEditCard(server_data=server_data, parent=self)
         self._mcp_edit_popup.saved.connect(self._on_mcp_edit_saved)
         self._mcp_edit_popup.closed.connect(self._on_mcp_edit_closed)

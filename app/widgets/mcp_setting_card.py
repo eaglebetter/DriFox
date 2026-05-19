@@ -7,7 +7,7 @@ MCP Server 配置卡片
 - MCPEditCard: 编辑/添加服务器的表单卡片（承载在 BaseSettingsCard 中）
 """
 
-import json
+import orjson as json
 
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import (
@@ -143,7 +143,7 @@ class MCPEditCard(QWidget):
         if srv_type != "stdio":
             data["type"] = srv_type
         result = {"mcpServers": {name: data}}
-        return json.dumps(result, indent=2, ensure_ascii=False)
+        return json.dumps(result).decode("utf-8")
 
     def _build_json_from_data(self) -> str:
         """从已有 server_data 构建 JSON（标准 mcpServers 格式）"""
@@ -162,7 +162,7 @@ class MCPEditCard(QWidget):
                 name: data
             }
         }
-        return json.dumps(result, indent=2, ensure_ascii=False)
+        return json.dumps(result).decode("utf-8")
 
     # 模式切换信号（通知外层更新头部按钮）
     modeChanged = pyqtSignal(bool)  # True=JSON模式, False=表单模式
@@ -295,7 +295,7 @@ class MCPEditCard(QWidget):
             form_data = self._collect_form_data()
             if form_data:
                 preview = self._build_json_preview()
-                self.jsonEdit.setPlainText(preview if preview else json.dumps(form_data, indent=2, ensure_ascii=False))
+                self.jsonEdit.setPlainText(preview if preview else json.dumps(form_data).decode("utf-8"))
             self._stack.setCurrentIndex(1)
         else:
             # 切回表单模式：从 JSON 解析回表单（支持两种格式）
@@ -420,12 +420,12 @@ class MCPEditCard(QWidget):
         self.urlEdit.setText(parsed.get("url", ""))
         headers = parsed.get("headers")
         if headers and isinstance(headers, dict):
-            self.headersEdit.setPlainText(json.dumps(headers, indent=2, ensure_ascii=False))
+            self.headersEdit.setPlainText(json.dumps(headers).decode("utf-8"))
         else:
             self.headersEdit.clear()
         env = parsed.get("env")
         if env and isinstance(env, dict):
-            self.envEdit.setPlainText(json.dumps(env, indent=2, ensure_ascii=False))
+            self.envEdit.setPlainText(json.dumps(env).decode("utf-8"))
         else:
             self.envEdit.clear()
 
