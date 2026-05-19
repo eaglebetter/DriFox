@@ -2533,7 +2533,17 @@ class MessageCard(SimpleCardWidget):
         super().__init__(parent)
         self.parent = parent
         self.role = role
-        self.timestamp = timestamp or datetime.now().strftime("%Y-%m-%d %H:%M")
+        self.timestamp = timestamp or datetime.now().strftime("%m-%d %H:%M")
+        # 历史数据 timestamp 格式为 %Y-%m-%d %H:%M:%S，转为 %m-%d %H:%M
+        if self.timestamp and len(self.timestamp) >= 19:
+            try:
+                dt = datetime.strptime(self.timestamp[:19], "%Y-%m-%d %H:%M:%S")
+                self.timestamp = dt.strftime("%m-%d %H:%M")
+            except ValueError:
+                self.timestamp = self.timestamp[:14]
+        # 助手卡片初始不显示时间，流完成后再设持续时长
+        if role == "assistant" and not timestamp:
+            self.timestamp = ""
         self.error = error
         self._interactive_options: List[dict] = []
         self._content_data: Any = [] if role == "assistant" else ""
@@ -2648,7 +2658,7 @@ class MessageCard(SimpleCardWidget):
             self._ts_label.setStyleSheet(
                 f"""
                 QLabel {{
-                    font-size: {scale_font_size(11)}px;
+                    {get_font_family_css()} font-size: {scale_font_size(11)}px;
                     color: {self._theme["muted"]};
                     background: rgba(255,255,255,0.03);
                     border: 1px solid rgba(255,255,255,0.06);
@@ -2660,6 +2670,37 @@ class MessageCard(SimpleCardWidget):
         # 刷新富文本视图字体
         if hasattr(self, 'viewer') and self.viewer and hasattr(self.viewer, '_refresh_viewer_font'):
             self.viewer._refresh_viewer_font()
+
+    def set_duration(self, duration_seconds: int):
+        """设置执行持续时间显示（用于 assistant 卡片）"""
+        if self.role != "assistant":
+            return
+        if duration_seconds <= 0:
+            return
+        # 格式化为 mm:ss 或 h:mm:ss
+        h, rem = divmod(duration_seconds, 3600)
+        m, s = divmod(rem, 60)
+        if h > 0:
+            duration_text = f"{h}:{m:02d}:{s:02d}"
+        else:
+            duration_text = f"{m:02d}:{s:02d}"
+        # 更新时间戳显示为持续时间
+        if hasattr(self, '_ts_label'):
+            self._ts_label.setText(duration_text)
+            self._ts_label.setToolTip(f"执行持续时间: {duration_text}")
+            self._ts_label.setVisible(True)
+            self._ts_label.setStyleSheet(
+                f"""
+                QLabel {{
+                    {get_font_family_css()} font-size: {scale_font_size(11)}px;
+                    color: {self._theme["muted"]};
+                    background: rgba(255,255,255,0.03);
+                    border: 1px solid rgba(255,255,255,0.06);
+                    border-radius: 9px;
+                    padding: 2px 8px;
+                }}
+                """
+            )
 
     def _build_avatar_style(self):
         font_css = get_font_family_css()
@@ -2722,22 +2763,23 @@ class MessageCard(SimpleCardWidget):
 
         top.addWidget(av)
         top.addWidget(title_wrap)
-        if self.role != "user":
-            ts = QLabel(self.timestamp, self)
-            self._ts_label = ts
-            ts.setStyleSheet(
-                f"""
-                QLabel {{
-                    font-size: {scale_font_size(11)}px;
-                    color: {self._theme["muted"]};
-                    background: rgba(255,255,255,0.03);
-                    border: 1px solid rgba(255,255,255,0.06);
-                    border-radius: 9px;
-                    padding: 2px 8px;
-                }}
-                """
-            )
-            top.addWidget(ts)
+        # 所有卡片都显示时间（用户卡片显示时间戳，助手卡片显示持续时间）
+        ts = QLabel(self.timestamp, self)
+        self._ts_label = ts
+        ts.setVisible(bool(self.timestamp))
+        ts.setStyleSheet(
+            f"""
+            QLabel {{
+                {get_font_family_css()} font-size: {scale_font_size(11)}px;
+                color: {self._theme["muted"]};
+                background: rgba(255,255,255,0.03);
+                border: 1px solid rgba(255,255,255,0.06);
+                border-radius: 9px;
+                padding: 2px 8px;
+            }}
+            """
+        )
+        top.addWidget(ts)
         top.addStretch()
 
         btns = QWidget(self)

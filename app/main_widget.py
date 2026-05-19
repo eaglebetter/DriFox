@@ -257,6 +257,7 @@ class OpenAIChatToolWindow(ToolWindow):
             self._handle_tool_start_ui_sync, type=Qt.BlockingQueuedConnection
         )
         self._is_streaming = False
+        self._response_start_time = None
         # 使用 try-except 保护 homepage 操作，防止 C++ 对象已删除错误
         try:
             from PyQt5 import sip
@@ -4760,6 +4761,10 @@ class OpenAIChatToolWindow(ToolWindow):
 
         assistant_card = self._append_assistant_message()
 
+        # 先设置当前卡片（必须在 send_message 之前，否则回调触发时 _current_assistant_card 为 None）
+        self._current_assistant_card = assistant_card
+        # 记录响应开始时间（供 _on_stream_finished 计算持续时间）
+        self._response_start_time = time.time()
         self._is_streaming = True
         self._toggle_send_stop(True)
 
@@ -4775,8 +4780,6 @@ class OpenAIChatToolWindow(ToolWindow):
             assistant_card.deleteLater()
             return
 
-        self._current_assistant_card = assistant_card
-
         # 同步 batch 结构：_message_batch 已包含新 user batch
         self._sync_batch_structures()
         # 给新创建的用户卡片设置正确的 _message_index（_append_user_message 中未设置）
@@ -4790,6 +4793,7 @@ class OpenAIChatToolWindow(ToolWindow):
         if getattr(self, '_is_destroyed', False):
             return
         self._is_streaming = True
+        self._response_start_time = time.time()
         self._accumulated_content = ""
         if self._current_assistant_card:
             self._current_assistant_card.start_streaming_anim()
@@ -5167,6 +5171,12 @@ class OpenAIChatToolWindow(ToolWindow):
         self._tool_cancelled_by_user = False
         self._cancelled_tool_call_id = None
         self._toggle_send_stop(False)
+
+        # 计算并显示执行持续时间
+        if self._current_assistant_card and self._response_start_time:
+            duration_seconds = int(time.time() - self._response_start_time)
+            self._current_assistant_card.set_duration(duration_seconds)
+            self._response_start_time = None
 
         if self._current_assistant_card:
             self._current_assistant_card.finish_streaming()

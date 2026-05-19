@@ -424,6 +424,9 @@ class ChatEngine:
 
         self._current_worker.start()
         
+        # UI 模式：立即发射 stream_started 信号（用于记录开始时间）
+        if not self._api_mode:
+            self._emit("stream_started")
         # API 模式：engine 也需要在主线程发射事件（用于 stream_started）
         if self._api_mode:
             import threading
@@ -527,6 +530,9 @@ class ChatEngine:
                 worker.cleanup()
             except Exception as exc:
                 logger.warning(f"[ChatEngine] Failed to cleanup worker: {exc}")
+
+        # 发射 stream_finished 回调（更新持续时间显示）
+        self._emit("stream_finished", "")
 
         return interrupted_messages
     
