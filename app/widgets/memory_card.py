@@ -28,6 +28,7 @@ from qfluentwidgets import (
     TextEdit,
 )
 
+from app.utils.design_tokens import scale_font_size
 from app.utils.utils import get_font_family_css, get_icon
 
 # Tab 标识

@@ -34,7 +34,7 @@ from qfluentwidgets import (
 )
 
 from app.utils.config import Settings
-from app.utils.design_tokens import Colors, Sizes, ButtonStyles, SwitchStyles
+from app.utils.design_tokens import Colors, Sizes, ButtonStyles, SwitchStyles, scale_font_size
 from app.utils.utils import get_icon, get_font_family_css
 from app.widgets.searchable_editable_combobox import SearchableEditableComboBox
 
