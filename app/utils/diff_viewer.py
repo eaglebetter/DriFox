@@ -844,16 +844,16 @@ class DiffHtmlGenerator:
 
         // 上下文折叠：对连续超过阈值的 context 行，折叠中间部分
         function applyContextFolding(container) {{
-            const CONTEXT_THRESHOLD = 3;  // 连续 context 行超过此值时折叠中间部分
-            const KEEP_HEAD = 1;           // 折叠区域前部保留的行数
-            const KEEP_TAIL = 1;           // 折叠区域后部保留的行数
+            const CONTEXT_THRESHOLD = 8;  // 连续 context 行超过此值时折叠中间部分
+            const KEEP_HEAD = 3;           // 折叠区域前部保留的行数（与 GitHub 一致）
+            const KEEP_TAIL = 3;           // 折叠区域后部保留的行数（与 GitHub 一致）
 
             const diffTables = container.querySelectorAll('.diff-table');
             diffTables.forEach(table => {{
                 const allRows = table.querySelectorAll('.diff-line');
                 if (allRows.length === 0) return;
 
-                // 找出连续 context 行的区间
+                // 找出连续 context 行的区间，并记录每个区间前后的行类型
                 const ranges = [];
                 let rangeStart = -1;
                 for (let i = 0; i < allRows.length; i++) {{
@@ -861,24 +861,40 @@ class DiffHtmlGenerator:
                         if (rangeStart === -1) rangeStart = i;
                     }} else {{
                         if (rangeStart !== -1) {{
-                            ranges.push({{ start: rangeStart, end: i - 1 }});
+                            ranges.push({{
+                                start: rangeStart,
+                                end: i - 1,
+                                prevType: rangeStart > 0 ? allRows[rangeStart - 1].getAttribute('data-type') : null,
+                                nextType: allRows[i].getAttribute('data-type')
+                            }});
                             rangeStart = -1;
                         }}
                     }}
                 }}
-                if (rangeStart !== -1) ranges.push({{ start: rangeStart, end: allRows.length - 1 }});
+                if (rangeStart !== -1) {{
+                    ranges.push({{
+                        start: rangeStart,
+                        end: allRows.length - 1,
+                        prevType: rangeStart > 0 ? allRows[rangeStart - 1].getAttribute('data-type') : null,
+                        nextType: null
+                    }});
+                }}
 
                 // 对每个连续区间，如果行数超过阈值，折叠中间部分
                 // 需要从后往前处理，避免索引偏移
                 for (let r = ranges.length - 1; r >= 0; r--) {{
                     const range = ranges[r];
                     const count = range.end - range.start + 1;
-                    const foldCount = count - KEEP_HEAD - KEEP_TAIL;
+                    // 紧邻 hunk-header 或文件头/尾时，不保留相邻侧的行
+                    // 让折叠条直接紧贴 hunk-header，与 GitHub 行为一致
+                    const keepHead = (range.prevType === 'hunk-header' || range.prevType === null) ? 0 : KEEP_HEAD;
+                    const keepTail = (range.nextType === 'hunk-header' || range.nextType === null) ? 0 : KEEP_TAIL;
+                    const foldCount = count - keepHead - keepTail;
 
                     if (foldCount <= 0) continue;  // 不需要折叠
 
-                    const foldStart = range.start + KEEP_HEAD;
-                    const foldEnd = range.end - KEEP_TAIL;
+                    const foldStart = range.start + keepHead;
+                    const foldEnd = range.end - keepTail;
 
                     // 展开按钮
                     const expandBtn = document.createElement('div');

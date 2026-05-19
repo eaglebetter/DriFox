@@ -78,7 +78,7 @@ from app.core import (
 )
 from app.core.message_content import make_tool_result_block
 from app.utils.utils import get_font_family_css, get_icon
-from app.utils.design_tokens import current_theme, scale_font_size, Colors
+from app.utils.design_tokens import current_theme, scale_font_size, Colors, font_size_css
 from app.widgets.render_helpers import (
     render_tool_block,
 )
@@ -267,6 +267,11 @@ def _sanitize_incomplete_markdown(md_text: str) -> str:
     return md_text
 
 
+def _get_think_block_styles() -> str:
+    """获取思考块的全局字体样式"""
+    return f"{get_font_family_css()} font-size: {scale_font_size(13)}px;"
+
+
 def _render_think_block(content: str, completed: bool = True) -> str:
     status_text = "💡 思考过程" if completed else "🧠 正在思考..."
     expanded = not completed
@@ -285,14 +290,17 @@ def _render_think_block(content: str, completed: bool = True) -> str:
     content = _strip_code_blocks(content)
     content = escape(content)
 
+    # 获取全局字体样式
+    font_style = _get_think_block_styles()
+
     return f"""<div class="cm-collapsible think-block" data-block-key="{block_key}" data-expanded="{expanded_attr}">
-    <button type="button" class="cm-collapsible__summary think-block__summary" aria-expanded="{expanded_attr}">
+    <button type="button" class="cm-collapsible__summary think-block__summary" aria-expanded="{expanded_attr}" style="{font_style}">
         <span class="cm-collapsible__chevron" aria-hidden="true"></span>
         <span style="white-space: nowrap;">{status_text}</span>
-        <span style="color: #666; font-size: 11px; font-weight: normal; margin-left: auto;">{escape(content_preview)}</span>
+        <span style="color: #666; font-weight: normal; margin-left: auto; font-size: {scale_font_size(11)}px;">{escape(content_preview)}</span>
     </button>
     <div class="cm-collapsible__body"{body_style}>
-        <div class="think-content loading" style="white-space: normal; word-break: break-word; line-height: 1.6;">{content}</div>
+        <div class="think-content loading" style="white-space: normal; word-break: break-word; line-height: 1.6; {font_style}">{content}</div>
     </div>
 </div>"""
 
@@ -321,14 +329,17 @@ def _render_think_block_lightweight(content: str, completed: bool = True) -> str
     # 轻量级处理：只做转义，不处理代码块
     content_escaped = escape(content)
 
+    # 获取全局字体样式
+    font_style = _get_think_block_styles()
+
     return f"""<div class="cm-collapsible think-block" data-block-key="think-light" data-expanded="{expanded_attr}">
-    <button type="button" class="cm-collapsible__summary think-block__summary" aria-expanded="{expanded_attr}">
+    <button type="button" class="cm-collapsible__summary think-block__summary" aria-expanded="{expanded_attr}" style="{font_style}">
         <span class="cm-collapsible__chevron" aria-hidden="true"></span>
         <span style="white-space: nowrap;">{status_text}</span>
-        <span style="color: #666; font-size: 11px; font-weight: normal; margin-left: auto;">{escape(content_preview)}</span>
+        <span style="color: #666; font-weight: normal; margin-left: auto; font-size: {scale_font_size(11)}px;">{escape(content_preview)}</span>
     </button>
     <div class="cm-collapsible__body"{body_style}>
-        <div class="think-content loading" style="white-space: normal; word-break: break-word; line-height: 1.6;">{content_escaped}</div>
+        <div class="think-content loading" style="white-space: normal; word-break: break-word; line-height: 1.6; {font_style}">{content_escaped}</div>
     </div>
 </div>"""
 
@@ -2671,8 +2682,9 @@ class MessageCard(SimpleCardWidget):
             av.setAlignment(Qt.AlignCenter)
         else:
             # user 和其他：圆形文字头像
-            av.setText(self._theme["avatar"])
-            av.setStyleSheet(self._build_avatar_style())
+            av_icon = get_icon("用户")
+            pixmap = av_icon.pixmap(28, 28)
+            av.setPixmap(pixmap)
             av.setFixedSize(30, 30)
             av.setAlignment(Qt.AlignCenter)
 
