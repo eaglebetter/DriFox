@@ -332,6 +332,7 @@ class OpenAIChatToolWindow(ToolWindow):
             "skill_requested": self._on_skill_requested,
             "question_asked": self._on_question_asked,
             "agent_switched": self._on_agent_switched,
+            "retry_status": self._on_retry_status,
             "permission_approval_requested": self._on_permission_approval_requested,
             "compaction_updated": self._on_compaction_updated,  # 子智能体压缩完成回调
         }
@@ -5303,6 +5304,16 @@ class OpenAIChatToolWindow(ToolWindow):
 
         current_title = self.title_edit.text() if self.title_edit else "对话"
         self._notify_if_inactive(f"{current_title} - 错误", error[:100])
+
+    def _on_retry_status(self, error_type: str, attempt: int, max_retries: int, wait_time: float):
+        """API 重试状态通知 - 更新卡片边框和状态栏"""
+        if getattr(self, '_is_destroyed', False):
+            return
+        if self._current_assistant_card:
+            if not self._current_assistant_card._retrying:
+                self._current_assistant_card.start_retry_anim(error_type, attempt, max_retries, wait_time)
+            else:
+                self._current_assistant_card.update_retry_status(error_type, attempt, max_retries, wait_time)
 
     def _on_user_message_added(self, user_text: str):
         """TODO: 实现用户消息添加时的回调处理"""

@@ -44,6 +44,7 @@ class OpenAIChatWorker(QThread):
     tool_result_received = pyqtSignal(str, str, dict, object)
     question_asked = pyqtSignal(str, str, list, bool)
     permission_approval_requested = pyqtSignal(str, str, dict)
+    retry_status = pyqtSignal(str, int, int, float)  # error_type, attempt, max_retries, wait_time
     _DEFERRED_PREVIEW_TOOLS = {"question", "task", "todowrite", "todoread"}
 
     def __init__(
@@ -494,6 +495,8 @@ class OpenAIChatWorker(QThread):
 
                 # 使用 API 消息缓存（首次会重建，后续复用）
                 tool_calls_found, tool_args_pending = self._make_api_call(current_messages, use_cache=True)
+                if self._is_cancelled:
+                    return
                 if tool_calls_found and tool_args_pending:
                     continue
                 if self._is_cancelled:
@@ -977,6 +980,10 @@ class OpenAIChatWorker(QThread):
         last_error = None
 
         for attempt in range(max_retries):
+            # 用户取消时立即退出重试循环
+            if self._is_cancelled:
+                logger.info("[API] 重试被用户取消")
+                return None
             try:
                 response = client.chat.completions.create(**req_kwargs)
                 break
@@ -1068,7 +1075,17 @@ class OpenAIChatWorker(QThread):
                         f"[API] {retry_reason} ({error_type}): {error_str[:120]}, "
                         f"retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})"
                     )
-                    time.sleep(wait_time)
+                    # 通知 UI 重试状态
+                    self.retry_status.emit(retry_reason, attempt + 1, max_retries, wait_time)
+                    # 可取消的睡眠：每0.5秒检查一次取消标志
+                    elapsed = 0.0
+                    step = 0.5
+                    while elapsed < wait_time:
+                        if self._is_cancelled:
+                            logger.info("[API] 重试等待被用户取消")
+                            return None
+                        time.sleep(min(step, wait_time - elapsed))
+                        elapsed += step
                     continue
 
                 if hasattr(e, "response") and e.response is not None:
@@ -1076,6 +1093,9 @@ class OpenAIChatWorker(QThread):
                     logger.error(f"[API] Error response body: {resp_body[:500]}")
                 raise
 
+        # 用户在重试等待中取消时 response 可能为 None
+        if response is None:
+            return False, False
         return self._process_response(response)
 
     def _cap_max_output_tokens(self, model: str, requested: int) -> int:

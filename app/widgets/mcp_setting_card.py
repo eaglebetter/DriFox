@@ -540,17 +540,17 @@ class MCPServerRow(CardWidget):
         layout.setSpacing(8)
 
         server_type = data.get("type", "stdio")
-        type_colors = {"stdio": "#2196F3", "sse": "#FF9800", "http": "#4CAF50"}
-        color = type_colors.get(server_type, "#999")
-
-        type_label = QLabel(server_type.upper())
-        type_label.setStyleSheet(
-            f"background-color: {color}22; color: {color}; "
-            f"{get_font_family_css()} font-size: {scale_font_size(11)}px; padding: 2px 8px; border-radius: 4px; font-weight: bold;"
-        )
-        type_label.setFixedWidth(55)
-        type_label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(type_label)
+        # type_colors = {"stdio": "#2196F3", "sse": "#FF9800", "http": "#4CAF50"}
+        # color = type_colors.get(server_type, "#999")
+        #
+        # type_label = QLabel(server_type.upper())
+        # type_label.setStyleSheet(
+        #     f"background-color: {color}22; color: {color}; "
+        #     f"{get_font_family_css()} font-size: {scale_font_size(11)}px; padding: 2px 8px; border-radius: 4px; font-weight: bold;"
+        # )
+        # type_label.setFixedWidth(55)
+        # type_label.setAlignment(Qt.AlignCenter)
+        # layout.addWidget(type_label)
 
         name_label = StrongBodyLabel(data.get("name", ""))
         name_label.setFixedWidth(100)

@@ -220,8 +220,8 @@ def _wrap_code_blocks_with_copy_button_web(html: str) -> str:
         <div style="
             position: relative;
             margin: 12px 0;
-            background: rgba(30, 32, 40, 0.20);
-            border: 1px solid rgba(58, 63, 71, 0.6);
+            background: transparent;
+            border: 1px solid var(--code-border, rgba(58, 63, 71, 0.6));
             border-radius: 10px;
             box-shadow: 0 4px 12px rgba(0,0,0,0.18), 0 1px 3px rgba(0,0,0,0.2);
             backdrop-filter: blur(8px);
@@ -231,8 +231,8 @@ def _wrap_code_blocks_with_copy_button_web(html: str) -> str:
             <!-- 顶部工具栏区域 -->
             <div style="
                 display: flex; justify-content: space-between; align-items: center;
-                padding: 6px 10px; height: 30px; background: rgba(28, 28, 36, 0.18);
-                border-bottom: 1px solid rgba(45, 45, 57, 0.5); border-radius: 10px 10px 0 0;
+                padding: 6px 10px; height: 30px; background: rgba(255, 255, 255, 0.03);
+                border-bottom: 1px solid var(--code-border, rgba(45, 45, 57, 0.5)); border-radius: 10px 10px 0 0;
             ">
                 {f'<span style="color: #FFA500; font-size: {scale_font_size(13)}px; font-weight: bold;">{lang}</span>' if lang else '<span style="color: #888;">Plain Text</span>'}
                 <div style="display: flex; gap: 12px; align-items: center; padding-right: 4px;">
@@ -297,7 +297,7 @@ def _render_think_block(content: str, completed: bool = True) -> str:
     <button type="button" class="cm-collapsible__summary think-block__summary" aria-expanded="{expanded_attr}" style="{font_style}">
         <span class="cm-collapsible__chevron" aria-hidden="true"></span>
         <span style="white-space: nowrap;">{status_text}</span>
-        <span style="color: #909090; font-weight: normal; margin-left: 12px; font-size: {scale_font_size(11)}px;">{escape(content_preview)}</span>
+        <span style="color: {Colors.TEXT_SECONDARY}; font-weight: normal; margin-left: 12px; font-size: {scale_font_size(11)}px;">{escape(content_preview)}</span>
     </button>
     <div class="cm-collapsible__body"{body_style}>
         <div class="think-content loading" style="white-space: normal; word-break: break-word; line-height: 1.6; {font_style}">{content}</div>
@@ -336,7 +336,7 @@ def _render_think_block_lightweight(content: str, completed: bool = True) -> str
     <button type="button" class="cm-collapsible__summary think-block__summary" aria-expanded="{expanded_attr}" style="{font_style}">
         <span class="cm-collapsible__chevron" aria-hidden="true"></span>
         <span style="white-space: nowrap;">{status_text}</span>
-        <span style="color: #909090; font-weight: normal; margin-left: 12px; font-size: {scale_font_size(11)}px;">{escape(content_preview)}</span>
+        <span style="color: {Colors.TEXT_SECONDARY}; font-weight: normal; margin-left: 12px; font-size: {scale_font_size(11)}px;">{escape(content_preview)}</span>
     </button>
     <div class="cm-collapsible__body"{body_style}>
         <div class="think-content loading" style="white-space: normal; word-break: break-word; line-height: 1.6; {font_style}">{content_escaped}</div>
@@ -1426,8 +1426,8 @@ class CodeWebViewer(QWebEngineView):
                     --text-muted: {theme["text_muted"]};
                     --accent: {theme["accent"]};
                     --accent-warm: {theme["accent_warm"]};
-                    --code-bg: rgba(15, 20, 29, 0.85);
-                    --code-toolbar: rgba(28, 28, 36, 0.7);
+                    --code-bg: transparent;
+                    --code-toolbar: rgba(255, 255, 255, 0.03);
                     --code-border: #2a3447;
                     --success: #5fd18c;
                     --danger: #ff7b7b;
@@ -1479,16 +1479,15 @@ class CodeWebViewer(QWebEngineView):
                     width: 100%;
                     border-collapse: collapse;
                     margin: 10px 0;
-                    background: rgba(30, 32, 40, 0.30);
-                    border: 1px solid rgba(58, 63, 71, 0.5);
+                    background: transparent;
+                    border: 1px solid var(--border);
                     border-radius: 10px;
                     overflow: hidden;
-                    border: 1px solid var(--border);
                     font-family: '{font_family}', sans-serif;
                     font-size: {body_font_size}px;
                 }}
                 table:not(.code-table) th {{
-                    background: rgba(50, 66, 94, 0.35);
+                    background: rgba(255, 255, 255, 0.04);
                     padding: 8px 12px;
                     text-align: left;
                     font-weight: 600;
@@ -1497,11 +1496,11 @@ class CodeWebViewer(QWebEngineView):
                 }}
                 table:not(.code-table) td {{
                     padding: 8px 12px;
-                    border-bottom: 1px solid rgba(37, 48, 68, 0.8);
+                    border-bottom: 1px solid var(--border);
                     color: var(--text-secondary) !important;
                 }}
-                table:not(.code-table) tr:nth-child(even) {{ background: rgba(29, 37, 51, 0.35); }}
-                table:not(.code-table) tr:hover {{ background: rgba(38, 50, 69, 0.6); }}
+                table:not(.code-table) tr:nth-child(even) {{ background: rgba(255, 255, 255, 0.02); }}
+                table:not(.code-table) tr:hover {{ background: rgba(255, 255, 255, 0.05); }}
 
                 .context-tag {{
                     display: inline-block;
@@ -1553,16 +1552,16 @@ class CodeWebViewer(QWebEngineView):
                     font-size: {body_font_size}px;
                 }}
                 .session-table th {{
-                    background: rgba(100, 198, 255, 0.1);
+                    background: rgba(100, 198, 255, 0.06);
                     color: #66c6ff;
                     font-weight: 600;
                 }}
                 .session-table td {{
-                    background: rgba(30, 40, 60, 0.5);
+                    background: transparent;
                     vertical-align: middle;
                 }}
                 .session-table tr:hover td {{
-                    background: rgba(100, 198, 255, 0.08);
+                    background: rgba(100, 198, 255, 0.04);
                 }}
 
                 /* 代码块通用样式 */
@@ -1574,7 +1573,7 @@ class CodeWebViewer(QWebEngineView):
                     display: flex;
                     overflow-x: auto;
                     overflow-y: hidden;
-                    background: rgba(20, 25, 35, 0.7);
+                    background: transparent;
                     font-family: {mono_font};
                     font-size: {code_font_size}px;
                     line-height: 1.5;
@@ -1660,7 +1659,7 @@ class CodeWebViewer(QWebEngineView):
 
                 .think-block {{
                     margin: 8px 0;
-                    background: rgba(30, 32, 40, 0.28);
+                    background: transparent;
                     border: 1px solid var(--border);
                     border-radius: 10px;
                     transition: border-color 220ms ease;
@@ -1676,7 +1675,7 @@ class CodeWebViewer(QWebEngineView):
                 .think-content {{
                     padding: 10px 12px;
                     border-top: 1px solid var(--border);
-                    background: rgba(30, 32, 40, 0.18);
+                    background: transparent;
                     color: var(--text-muted) !important;
                     font-style: italic;
                     font-size: {code_font_size}px;
@@ -1687,9 +1686,9 @@ class CodeWebViewer(QWebEngineView):
                 .think-content.loading {{
                     background-image: linear-gradient(
                         90deg,
-                        rgba(30, 32, 40, 0.18) 25%,
-                        rgba(40, 44, 55, 0.28) 50%,
-                        rgba(30, 32, 40, 0.18) 75%
+                        rgba(255, 255, 255, 0.02) 25%,
+                        rgba(255, 255, 255, 0.05) 50%,
+                        rgba(255, 255, 255, 0.02) 75%
                     );
                     background-size: 200% 100%;
                     animation: think-shimmer 1.5s ease-in-out infinite;
@@ -1701,7 +1700,7 @@ class CodeWebViewer(QWebEngineView):
 
                 .tool-block {{
                     margin: 8px 0;
-                    background: rgba(30, 32, 40, 0.28);
+                    background: transparent;
                     border: 1px solid var(--border);
                     border-radius: 10px;
                     box-shadow: none;
@@ -1797,7 +1796,7 @@ class CodeWebViewer(QWebEngineView):
                 .tool-content {{
                     padding: 10px 12px;
                     border-top: 1px solid var(--border);
-                    background: rgba(18, 24, 35, 0.25);
+                    background: transparent;
                 }}
                 .tool-content pre {{
                     margin: 0;
@@ -1810,7 +1809,7 @@ class CodeWebViewer(QWebEngineView):
 
                 .hook-block {{
                     margin: 8px 0;
-                    background: rgba(0, 188, 212, 0.08);
+                    background: transparent;
                     border: 1px solid rgba(0, 188, 212, 0.2);
                     border-left: 3px solid #00BCD4;
                     border-radius: 10px;
@@ -1831,7 +1830,7 @@ class CodeWebViewer(QWebEngineView):
                 .hook-content {{
                     padding: 10px 12px;
                     border-top: 1px solid rgba(0, 188, 212, 0.2);
-                    background: rgba(0, 188, 212, 0.05);
+                    background: transparent;
                     font-family: {mono_font};
                     font-size: {tag_font_size}px;
                     color: #e0e0e0;
@@ -2551,6 +2550,11 @@ class MessageCard(SimpleCardWidget):
         if role == "assistant" and reasoning_content:
             self._content_data.append({"type": "reasoning", "content": reasoning_content})
         self._streaming = False
+        self._retrying = False  # 重试模式标志
+        self._retry_error_type = ""  # 重试错误类型
+        self._retry_attempt = 0  # 当前重试次数
+        self._retry_max = 15  # 最大重试次数
+        self._retry_wait_time = 0.0  # 等待时间
         self._round_index: Optional[int] = None  # 用于卡片差异功能
         self._message_index: Optional[int] = None  # 用于卡片差异和撤销功能：消息在 session.messages 中的索引
         self._anim_timer = QTimer(self)
@@ -2875,6 +2879,70 @@ class MessageCard(SimpleCardWidget):
         self.options_widget.setVisible(False)
         main.addWidget(self.options_widget)
 
+        # 重试状态栏（默认隐藏）
+        self._retry_status_widget = QWidget(self)
+        self._retry_status_widget.setVisible(False)
+        retry_layout = QHBoxLayout(self._retry_status_widget)
+        retry_layout.setContentsMargins(12, 6, 12, 6)
+        retry_layout.setSpacing(8)
+        self._retry_status_widget.setStyleSheet(
+            """
+            QWidget {
+                background: rgba(255, 40, 40, 0.08);
+                border-top: 1px solid rgba(255, 60, 60, 0.2);
+                border-radius: 0px;
+            }
+            """
+        )
+        # 旋转图标（CSS动画模拟）
+        self._retry_spinner = QLabel("⟳", self)
+        self._retry_spinner.setStyleSheet(
+            f"""
+            QLabel {{
+                color: rgba(255, 80, 80, 0.8);
+                font-size: {scale_font_size(14)}px;
+                font-weight: bold;
+            }}
+            """
+        )
+        retry_layout.addWidget(self._retry_spinner)
+        # 错误类型
+        self._retry_type_label = QLabel("", self)
+        self._retry_type_label.setStyleSheet(
+            f"""
+            QLabel {{
+                color: #ff6b6b;
+                font-size: {scale_font_size(12)}px;
+                font-weight: 600;
+            }}
+            """
+        )
+        retry_layout.addWidget(self._retry_type_label)
+        # 重试次数
+        self._retry_attempt_label = QLabel("", self)
+        self._retry_attempt_label.setStyleSheet(
+            f"""
+            QLabel {{
+                color: #ffaa44;
+                font-size: {scale_font_size(12)}px;
+            }}
+            """
+        )
+        retry_layout.addWidget(self._retry_attempt_label)
+        retry_layout.addStretch()
+        # 等待倒计时
+        self._retry_wait_label = QLabel("", self)
+        self._retry_wait_label.setStyleSheet(
+            f"""
+            QLabel {{
+                color: #888;
+                font-size: {scale_font_size(11)}px;
+            }}
+            """
+        )
+        retry_layout.addWidget(self._retry_wait_label)
+        main.addWidget(self._retry_status_widget)
+
         main.addWidget(CardSeparator(self))
         self.setStyleSheet(
             f"""
@@ -2899,6 +2967,14 @@ class MessageCard(SimpleCardWidget):
 
     def _update_anim(self):
         self._pulse_phase = (self._pulse_phase + 0.035) % (math.pi * 2)
+        # 重试状态栏降频更新（每200ms一次，避免和paintEvent双重刷新导致卡顿）
+        if self._retrying:
+            if not hasattr(self, '_retry_status_tick'):
+                self._retry_status_tick = 0
+            self._retry_status_tick += 1
+            if self._retry_status_tick >= 4:  # 50ms * 4 = 200ms
+                self._retry_status_tick = 0
+                self._update_retry_status_bar()
         self.update()
 
     def _apply_card_style(self, border: str = None, bg: str = None):
@@ -2914,13 +2990,66 @@ class MessageCard(SimpleCardWidget):
 
     def stop_streaming_anim(self):
         self._streaming = False
+        self._retrying = False
         try:
             self._anim_timer.stop()
         except RuntimeError:
             return
         self._apply_card_style()
+        self._retry_status_widget.setVisible(False)
         self.update()
         self.repaint()
+
+    def start_retry_anim(self, error_type: str, attempt: int, max_retries: int, wait_time: float):
+        """切换到重试边框模式（红色流动+白光点）"""
+        self._retrying = True
+        self._retry_error_type = error_type
+        self._retry_attempt = attempt
+        self._retry_max = max_retries
+        self._retry_wait_time = wait_time
+        # 确保动画定时器运行
+        if not self._streaming:
+            self._streaming = True
+            self._pulse_phase = 0.0
+            try:
+                self._anim_timer.start(50)
+            except RuntimeError:
+                return
+        # 更新状态栏
+        self._update_retry_status_bar()
+        self._retry_status_widget.setVisible(True)
+        self.update()
+
+    def update_retry_status(self, error_type: str, attempt: int, max_retries: int, wait_time: float):
+        """更新重试状态信息"""
+        self._retry_error_type = error_type
+        self._retry_attempt = attempt
+        self._retry_max = max_retries
+        self._retry_wait_time = wait_time
+        self._update_retry_status_bar()
+        self.update()
+
+    def stop_retry_anim(self):
+        """停止重试动画，恢复正常边框"""
+        self._retrying = False
+        self._retry_status_widget.setVisible(False)
+        if not self._streaming:
+            return
+        # 继续正常的流式动画（彩虹边框）
+        self.update()
+
+    def _update_retry_status_bar(self):
+        """更新重试状态栏的文本内容"""
+        # 旋转图标动画
+        spin_chars = ["◜", "◝", "◞", "◟"]
+        idx = int(self._pulse_phase * 2) % 4
+        self._retry_spinner.setText(spin_chars[idx])
+        # 错误类型
+        self._retry_type_label.setText(self._retry_error_type)
+        # 重试次数
+        self._retry_attempt_label.setText(f"第 {self._retry_attempt}/{self._retry_max} 次重试")
+        # 等待时间
+        self._retry_wait_label.setText(f"等待 {self._retry_wait_time:.0f}s")
 
     def _on_webengine_context_lost(self):
         """WebEngine 上下文丢失时显示恢复提示"""
@@ -3003,29 +3132,9 @@ class MessageCard(SimpleCardWidget):
             return
 
         # ══════════════════════════════════════════════════════
-        #  辅助：准备彩虹色板（10色精细渐变 + 流光相位）
+        #  辅助：准备色板 + 流光相位
         # ══════════════════════════════════════════════════════
         if self.role == "assistant":
-            # 10 色精细彩虹（蓝→青→紫→粉→橙→绿→蓝 形成闭环）
-            rainbow = [
-                QColor("#60D4FF"),  # 天蓝
-                QColor("#40C8FF"),  # 青蓝
-                QColor("#4DA6FF"),  # 柔蓝
-                QColor("#8B7BFF"),  # 薰衣草
-                QColor("#C084FC"),  # 紫罗兰
-                QColor("#F472B6"),  # 玫瑰粉
-                QColor("#FB7185"),  # 珊瑚红
-                QColor("#F59E0B"),  # 琥珀金
-                QColor("#34D399"),  # 翠绿
-                QColor("#22D3EE"),  # 青色
-            ]
-            N = len(rainbow)
-            # 主边框连续相位（小数，可精确到颜色之间的过渡）
-            shift_main = (self._pulse_phase / (math.pi * 2)) * N  # 0~N 的连续值
-            # 发光层更慢（产生柔和光晕延伸感）
-            shift_glow = shift_main * 0.5
-            # 流光带相位（比主边框略快）
-            shift_shimmer = shift_main * 1.15
             # 呼吸：极缓慢脉动
             breathe = 0.55 + 0.45 * (math.sin(self._pulse_phase * 0.3) + 1) / 2
             # 流光闪烁：柔和放缓
@@ -3037,6 +3146,40 @@ class MessageCard(SimpleCardWidget):
                 g = int(a.green() + (b.green() - a.green()) * t)
                 bl = int(a.blue() + (b.blue() - a.blue()) * t)
                 return QColor(r, g, bl)
+
+            if self._retrying:
+                # ── 重试模式：红色流动渐变 ──
+                rainbow = [
+                    QColor("#ff2222"),  # 鲜红
+                    QColor("#aa0000"),  # 暗红
+                    QColor("#ff3333"),  # 亮红
+                    QColor("#880000"),  # 深红
+                    QColor("#ff1111"),  # 火红
+                    QColor("#bb0000"),  # 酒红
+                    QColor("#ff4444"),  # 浅红
+                    QColor("#990000"),  # 暗深红
+                ]
+            else:
+                # ── 正常模式：10 色精细彩虹 ──
+                rainbow = [
+                    QColor("#60D4FF"),  # 天蓝
+                    QColor("#40C8FF"),  # 青蓝
+                    QColor("#4DA6FF"),  # 柔蓝
+                    QColor("#8B7BFF"),  # 薰衣草
+                    QColor("#C084FC"),  # 紫罗兰
+                    QColor("#F472B6"),  # 玫瑰粉
+                    QColor("#FB7185"),  # 珊瑚红
+                    QColor("#F59E0B"),  # 琥珀金
+                    QColor("#34D399"),  # 翠绿
+                    QColor("#22D3EE"),  # 青色
+                ]
+            N = len(rainbow)
+            # 主边框连续相位
+            shift_main = (self._pulse_phase / (math.pi * 2)) * N
+            # 发光层更慢
+            shift_glow = shift_main * 0.5
+            # 流光带相位
+            shift_shimmer = shift_main * 1.15
 
             def build_gradient(shift: float, stops: list, alpha_base: float) -> QLinearGradient:
                 """用连续相位生成平滑渐变：每个 stop 点用前后两色插值"""
@@ -3149,7 +3292,10 @@ class MessageCard(SimpleCardWidget):
         top_clip.addRoundedRect(0, 0, w, h, radius, radius)
         painter.setClipPath(top_clip)
         if self.role == "assistant":
-            top_color = QColor("#60D4FF")
+            if self._retrying:
+                top_color = QColor("#ff2222")
+            else:
+                top_color = QColor("#60D4FF")
             top_color.setAlpha(int(22 * breathe))
         else:
             top_color = QColor(self._theme["accent"])
@@ -3159,6 +3305,8 @@ class MessageCard(SimpleCardWidget):
     def set_error_state(self, is_error: bool):
         self.error = is_error
         if is_error:
+            self._retrying = False
+            self._retry_status_widget.setVisible(False)
             bd, bg = "#ff4d4d", "#2a1f1f"
         else:
             bd, bg = self._base_border, self._base_bg
