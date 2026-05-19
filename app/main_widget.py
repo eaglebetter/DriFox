@@ -5099,13 +5099,9 @@ class OpenAIChatToolWindow(ToolWindow):
         if sound_type != "none":
             QApplication.beep()
 
-        # 从当前窗口的顶层窗口获取 tray_icon（self.window() 返回包含此 widget 的顶层窗口）
-        win = self.window()
-        if win and hasattr(win, "tray_icon") and win.tray_icon:
-            if win.tray_icon.isVisible():
-                win.tray_icon.showMessage(
-                    title, message, win.tray_icon.MessageIcon(1), 4000
-                )
+        # 使用全局 TrayManager 发送通知（避免多窗口多个托盘图标的问题）
+        from app.tray_manager import TrayManager
+        TrayManager.get_instance().notify(title, message)
 
     def _should_show_inactive_notification(self) -> bool:
         """Only notify when the app window is not effectively visible to the user."""
