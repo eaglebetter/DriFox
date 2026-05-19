@@ -27,6 +27,9 @@ from app.widgets.provider_edit_card import ProviderEditCard
 # 对话框
 from app.widgets.file_undo_dialog import FileUndoPreviewDialog
 
+# Gateway
+from app.widgets.gateway_setting_card import GatewaySettingCard
+
 __all__ = [
     # 核心卡片
     "BaseSettingsCard",
@@ -49,4 +52,8 @@ __all__ = [
     "MemoryCardContent",
     # 对话框
     "FileUndoPreviewDialog",
+    # Gateway
+    "GatewaySettingsWidget",
+    "WeComSettingsCard",
+    "DingTalkSettingsCard",
 ]

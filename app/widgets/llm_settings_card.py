@@ -195,6 +195,18 @@ class LLMSettingsCard(SystemCardFrame):
         )
         content_layout.addWidget(self.mcpListCard)
 
+        # Gateway 通讯平台接入
+        from app.widgets.gateway_setting_card import GatewaySettingCard
+
+        self.gatewayCard = GatewaySettingCard(
+            icon=get_icon("云通信"),
+            title="通讯平台接入",
+            content="接入企业微信/钉钉",
+            parent=self,
+            home=self,
+        )
+        content_layout.addWidget(self.gatewayCard)
+
         # ---- 通用设置分隔标签 ----
         self._sep_common_label = self._make_sep_label("通用设置")
         self._section_anchors["common"] = self._sep_common_label
@@ -294,16 +306,6 @@ class LLMSettingsCard(SystemCardFrame):
         """滚动到目标控件位置"""
         scroll_area = self.scroll_area
         scroll_bar = scroll_area.verticalScrollBar()
-        
-        # 计算目标 widget 在 scroll area 可视区域的绝对位置
-        # target 的 geometry 相对于 scroll_area 的内容 widget
-        target_rect = QRect(
-            target_widget.x(),
-            target_widget.y(),
-            target_widget.width(),
-            target_widget.height()
-        )
-        
         # 直接设置滚动到目标位置（减去一点边距）
         target_scroll = max(0, target_widget.y() - 10)
         scroll_bar.setValue(target_scroll)
