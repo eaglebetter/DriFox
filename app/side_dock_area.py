@@ -82,10 +82,13 @@ class OpacitySlider(QWidget):
             self.rect(), Qt.AlignBottom | Qt.AlignHCenter, f"{self._opacity}%"
         )
 
-    def setOpacity(self, value: int):
-        self._opacity = max(0, min(100, value))
+    def setOpacity(self, value: int, *, emit_change: bool = True):
+        clamped = max(0, min(100, value))
+        changed = clamped != self._opacity
+        self._opacity = clamped
         self.update()
-        self.opacityChanged.emit(self._opacity)
+        if emit_change and changed:
+            self.opacityChanged.emit(self._opacity)
 
     def opacity(self) -> int:
         return self._opacity
@@ -743,7 +746,8 @@ class ToolPopupDialog(QDialog):
         if self._opacity_slider is None:
             self._opacity_slider = OpacitySlider(self)
             self._opacity_slider.opacityChanged.connect(self._on_opacity_changed)
-        self._opacity_slider.setOpacity(int(self.windowOpacity() * 100))
+        # 同步滑块位置但不触发 opacityChanged 信号（避免无意义的重绘链）
+        self._opacity_slider.setOpacity(int(self.windowOpacity() * 100), emit_change=False)
         if self._lock_mode:
             self._reparent_slider_to_desktop()
         else:
@@ -766,6 +770,10 @@ class ToolPopupDialog(QDialog):
 
     def _check_hide_slider(self):
         if not self._opacity_slider or self._opacity_slider._is_dragging:
+            return
+        # 窗口非激活时跳过检查，避免鼠标在其他应用移动时误触发 show/hide 循环
+        if not self.isActiveWindow():
+            self._hide_opacity_slider()
             return
         slider_pos = self._opacity_slider.mapFromGlobal(self.cursor().pos())
         if self._opacity_slider.rect().contains(slider_pos):
@@ -803,8 +811,10 @@ class ToolPopupDialog(QDialog):
 
     def enterEvent(self, e):
         super().enterEvent(e)
-        self._show_opacity_slider()
-        self._hide_timer.stop()
+        # 仅在窗口激活时显示透明度滑块，避免鼠标在其他窗口移动时反复触发
+        if self.isActiveWindow():
+            self._show_opacity_slider()
+            self._hide_timer.stop()
 
     def leaveEvent(self, e):
         super().leaveEvent(e)
