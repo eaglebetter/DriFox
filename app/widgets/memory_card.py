@@ -718,36 +718,38 @@ class MemoryCardContent(QWidget):
         self.add_doc_btn = PrimaryPushButton("📄 添加文件", self)
         self.add_doc_btn.setFixedHeight(28)
         self.add_doc_btn.setFixedWidth(110)
-        self.add_doc_btn.setStyleSheet("""
-            QPushButton {
+        self.add_doc_btn.setStyleSheet(f"""
+            QPushButton {{
                 background-color: #0e639c;
                 color: white;
                 border: none;
                 border-radius: 4px;
-                font-size: 12px;
+                {get_font_family_css()}
+                font-size: {scale_font_size(12)}px;
                 padding: 0 8px;
-            }
-            QPushButton:hover {
+            }}
+            QPushButton:hover {{
                 background-color: #1177bb;
-            }
+            }}
         """)
         self.add_doc_btn.clicked.connect(self._on_add_file_clicked)
         
         self.add_folder_btn = PrimaryPushButton("📁 添加文件夹", self)
         self.add_folder_btn.setFixedHeight(28)
         self.add_folder_btn.setFixedWidth(120)
-        self.add_folder_btn.setStyleSheet("""
-            QPushButton {
+        self.add_folder_btn.setStyleSheet(f"""
+            QPushButton {{
                 background-color: #2d882d;
                 color: white;
                 border: none;
                 border-radius: 4px;
-                font-size: 12px;
+                {get_font_family_css()}
+                font-size: {scale_font_size(12)}px;
                 padding: 0 8px;
-            }
-            QPushButton:hover {
+            }}
+            QPushButton:hover {{
                 background-color: #3a9e3a;
-            }
+            }}
         """)
         self.add_folder_btn.clicked.connect(self._on_add_folder_clicked)
         

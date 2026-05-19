@@ -7,7 +7,9 @@ from PyQt5.QtWidgets import QWidget, QHBoxLayout, QLabel
 from qfluentwidgets import TransparentToolButton
 
 from app.utils.config import Settings
-from app.utils.utils import get_icon
+from app.utils.utils import get_icon, get_font_family_css
+from app.utils.design_tokens import scale_font_size, get_font_family_css
+from app.utils.design_tokens import scale_font_size
 
 
 class ToolWindowTitleBar(QWidget):
@@ -57,7 +59,7 @@ class ToolWindowTitleBar(QWidget):
         self._memory_label = QLabel(self)
         self._memory_label.setObjectName("memoryLabel")
         self._memory_label.setFixedHeight(22)
-        self._memory_label.setStyleSheet("color: #ffffff; font-size: 12px; padding: 2px 6px; background-color: transparent; border: none; border-radius: 4px;")
+        self._memory_label.setStyleSheet(f"color: #ffffff; {get_font_family_css()} font-size: {scale_font_size(12)}px; padding: 2px 6px; background-color: transparent; border: none; border-radius: 4px;")
         self._memory_label.hide()  # 默认隐藏，子类可以控制显示
         layout.insertWidget(layout.indexOf(self._action_container) - 1, self._memory_label)
 
@@ -113,7 +115,7 @@ class ToolWindowTitleBar(QWidget):
             }}
             #titleLabel {{
                 color: {title_color};
-                font-size: 15px;
+                font-size: {scale_font_size(15)}px;
                 font-weight: bold;
                 font-family: "{font_name}";
                 padding: 0 4px;

@@ -14,7 +14,8 @@ from qfluentwidgets import (
     SwitchButton,
 )
 
-from app.utils.utils import get_app_data_dir
+from app.utils.utils import get_app_data_dir, get_font_family_css
+from app.utils.design_tokens import scale_font_size
 from app.widgets.mcp_setting_card import _ElidedLabel
 from app.widgets.searchable_editable_combobox import SearchableEditableComboBox
 
@@ -40,7 +41,7 @@ class HookItem(QWidget):
         display_cmd = command[:50] + ("..." if len(command) > 50 else "")
         self.commandLabel = _ElidedLabel(display_cmd, self)
         self.commandLabel.setObjectName("titleLabel")
-        self.commandLabel.setStyleSheet("font-size: 13px;")
+        self.commandLabel.setStyleSheet(f"{get_font_family_css()} font-size: {scale_font_size(13)}px;")
         self.commandLabel.setMinimumWidth(40)
         
         # Matcher 标签
@@ -48,7 +49,7 @@ class HookItem(QWidget):
         if matcher:
             self.matcherLabel = QLabel(matcher, self)
             self.matcherLabel.setStyleSheet(
-                "background-color: #E0E0E0; color: #666; font-size: 11px; padding: 2px 6px; border-radius: 4px;"
+                f"background-color: #E0E0E0; color: #666; {get_font_family_css()} font-size: {scale_font_size(11)}px; padding: 2px 6px; border-radius: 4px;"
             )
         else:
             self.matcherLabel = QLabel("")
@@ -311,7 +312,7 @@ class HookListSettingCard(ExpandSettingCard):
         has_visible = any(rules for event_name, rules in self.all_hooks.items() if rules)
         if not has_visible:
             empty_label = QLabel("暂无 Hooks，点击「+ 添加」创建", self.view)
-            empty_label.setStyleSheet("color: #888; padding: 16px; font-size: 12px;")
+            empty_label.setStyleSheet(f"color: #888; {get_font_family_css()} font-size: {scale_font_size(12)}px; padding: 16px;")
             empty_label.setAlignment(Qt.AlignCenter)
             self.viewLayout.addWidget(empty_label)
             return
@@ -324,8 +325,8 @@ class HookListSettingCard(ExpandSettingCard):
             # 事件标题
             header = QLabel(f"Event: {event_name}", self.view)
             header.setStyleSheet(
-                "background-color: #F0F0F0; color: #333; font-weight: bold; "
-                "padding: 6px 48px; font-size: 12px;"
+                f"background-color: #F0F0F0; color: #333; font-weight: bold; "
+                f"{get_font_family_css()} font-size: {scale_font_size(12)}px; padding: 6px 48px;"
             )
             self.viewLayout.addWidget(header)
             

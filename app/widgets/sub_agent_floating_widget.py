@@ -17,7 +17,8 @@ from qfluentwidgets import SegmentedWidget, BodyLabel
 from qfluentwidgets import SimpleCardWidget
 
 from app.utils.design_tokens import Colors
-from app.utils.utils import get_unified_font
+from app.utils.utils import get_unified_font, get_font_family_css
+from app.utils.design_tokens import scale_font_size
 
 
 class SubTaskLogWidget(QFrame):
@@ -260,18 +261,19 @@ class SubAgentFloatingWidget(SimpleCardWidget):
 
         close_btn = QPushButton("✕", self)
         close_btn.setFixedSize(20, 20)
-        close_btn.setStyleSheet("""
-            QPushButton {
+        close_btn.setStyleSheet(f"""
+            QPushButton {{
                 background-color: transparent;
                 color: #757575;
                 border: none;
-                font-size: 12px;
-            }
-            QPushButton:hover {
+                {get_font_family_css()}
+                font-size: {scale_font_size(12)}px;
+            }}
+            QPushButton:hover {{
                 color: #ffffff;
                 background-color: #404040;
                 border-radius: 3px;
-            }
+            }}
         """)
         close_btn.clicked.connect(self._on_close)
         header.addWidget(close_btn)

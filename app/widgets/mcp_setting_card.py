@@ -546,7 +546,7 @@ class MCPServerRow(CardWidget):
         type_label = QLabel(server_type.upper())
         type_label.setStyleSheet(
             f"background-color: {color}22; color: {color}; "
-            f"font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: bold;"
+            f"{get_font_family_css()} font-size: {scale_font_size(11)}px; padding: 2px 8px; border-radius: 4px; font-weight: bold;"
         )
         type_label.setFixedWidth(55)
         type_label.setAlignment(Qt.AlignCenter)
@@ -561,7 +561,7 @@ class MCPServerRow(CardWidget):
         else:
             desc = data.get("url", "")
         desc_label = _ElidedLabel(desc)
-        desc_label.setStyleSheet(f"color: {Colors.TEXT_MUTED}; font-size: 12px;")
+        desc_label.setStyleSheet(f"color: {Colors.TEXT_MUTED}; {get_font_family_css()} font-size: {scale_font_size(12)}px;")
         desc_label.setMinimumWidth(40)
         layout.addWidget(desc_label, 1)
 
@@ -744,7 +744,7 @@ class MCPListSettingCard(ExpandSettingCard):
         servers = self.cfg.mcp_servers.value
         if not servers:
             empty_label = QLabel("暂无 MCP 服务器，点击「添加服务器」创建", self.view)
-            empty_label.setStyleSheet("color: #888; padding: 16px; font-size: 12px;")
+            empty_label.setStyleSheet(f"color: #888; padding: 16px; {get_font_family_css()} font-size: {scale_font_size(12)}px;")
             empty_label.setAlignment(Qt.AlignCenter)
             self.viewLayout.addWidget(empty_label)
             return

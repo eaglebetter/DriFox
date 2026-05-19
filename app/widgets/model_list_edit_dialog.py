@@ -4,6 +4,8 @@
 Enter 新增，Delete 删除，双击编辑，拖拽排序
 """
 from PyQt5.QtCore import Qt
+from app.utils.utils import get_font_family_css
+from app.utils.design_tokens import scale_font_size
 from PyQt5.QtWidgets import (
     QDialog,
     QVBoxLayout,
@@ -23,45 +25,47 @@ class ModelListEditDialog(QDialog):
         self.setWindowTitle("编辑模型列表")
         self.setMinimumWidth(380)
         self.setMinimumHeight(320)
-        self.setStyleSheet("""
-            QDialog {
+        self.setStyleSheet(f"""
+            QDialog {{
                 background-color: #1e1e1e;
-            }
-            QListWidget {
+            }}
+            QListWidget {{
                 background-color: #252526;
                 color: #cccccc;
                 border: 1px solid #3c3c3c;
                 border-radius: 6px;
-                font-size: 13px;
+                {get_font_family_css()}
+                font-size: {scale_font_size(13)}px;
                 outline: none;
-            }
-            QListWidget::item {
+            }}
+            QListWidget::item {{
                 background-color: #252526;
                 padding: 4px 8px;
                 border-radius: 3px;
-            }
-            QListWidget::item:hover {
+            }}
+            QListWidget::item:hover {{
                 background-color: #2a2d2e;
-            }
-            QListWidget::item:selected {
+            }}
+            QListWidget::item:selected {{
                 background-color: #094771;
                 color: #ffffff;
-            }
-            QListWidget::item:selected:hover {
+            }}
+            QListWidget::item:selected:hover {{
                 background-color: #1177bb;
-            }
-            QPushButton {
+            }}
+            QPushButton {{
                 background: transparent;
                 border: 1px solid #3c3c3c;
                 border-radius: 4px;
                 color: #cccccc;
-                font-size: 12px;
+                {get_font_family_css()}
+                font-size: {scale_font_size(12)}px;
                 padding: 4px 12px;
-            }
-            QPushButton:hover {
+            }}
+            QPushButton:hover {{
                 border-color: #007acc;
                 color: #ffffff;
-            }
+            }}
         """)
         self._init_ui(models)
 
@@ -71,7 +75,7 @@ class ModelListEditDialog(QDialog):
 
         # 提示行
         hint_label = QLabel("<span style='color:#808080;'>双击编辑</span> · <span style='color:#606060;'>Enter 新增</span> · <span style='color:#606060;'>Delete 删除</span> · <span style='color:#606060;'>拖拽排序</span>")
-        hint_label.setStyleSheet("background: transparent; border: none; font-size: 11px; padding: 0;")
+        hint_label.setStyleSheet(f"background: transparent; border: none; {get_font_family_css()} font-size: {scale_font_size(11)}px; padding: 0;")
         layout.addWidget(hint_label)
 
         # 列表
@@ -97,17 +101,18 @@ class ModelListEditDialog(QDialog):
 
         okBtn = QPushButton("确定")
         okBtn.setFixedSize(60, 28)
-        okBtn.setStyleSheet("""
-            QPushButton {
+        okBtn.setStyleSheet(f"""
+            QPushButton {{
                 background: #0078d4;
                 border: none;
                 border-radius: 4px;
                 color: #fff;
-                font-size: 12px;
-            }
-            QPushButton:hover {
+                {get_font_family_css()}
+                font-size: {scale_font_size(12)}px;
+            }}
+            QPushButton:hover {{
                 background: #1a8ae5;
-            }
+            }}
         """)
         okBtn.clicked.connect(self.accept)
         bottom.addWidget(okBtn)
