@@ -341,12 +341,7 @@ class PlatformStatusRow(CardWidget):
             manager = get_platform_manager()
             if manager:
                 platform_enum = Platform.WECOM if self._platform == "wecom" else Platform.DINGTALK
-                
-                import asyncio
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                success = loop.run_until_complete(manager.start_platform(platform_enum))
-                loop.close()
+                success = manager.start_platform(platform_enum)
                 
                 if success:
                     self.update_status(connected=True)

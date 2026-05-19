@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 from typing import Any, Callable, Dict, List, Optional
 
 from loguru import logger
@@ -59,6 +60,11 @@ class PlatformManager:
         self._adapters: Dict[Platform, BasePlatformAdapter] = {}
         self._running = False
         
+        # 持久事件循环（后台线程运行）
+        self._loop = asyncio.new_event_loop()
+        self._loop_thread = threading.Thread(target=self._run_loop, daemon=True)
+        self._loop_thread.start()
+        
         # 会话管理器
         self._session_manager = GatewaySessionManager()
         
@@ -76,6 +82,25 @@ class PlatformManager:
         
         # 加载适配器
         self._load_adapters()
+    
+    def _run_loop(self) -> None:
+        """持久事件循环"""
+        asyncio.set_event_loop(self._loop)
+        self._loop.run_forever()
+    
+    def _run_coro(self, coro) -> Any:
+        """在后台事件循环上执行协程，返回结果"""
+        import concurrent.futures
+        future = asyncio.run_coroutine_threadsafe(coro, self._loop)
+        try:
+            return future.result(timeout=30)
+        except concurrent.futures.TimeoutError:
+            logger.error("[PlatformManager] Coroutine timeout")
+            return False
+    
+    def _schedule_coro(self, coro) -> None:
+        """在后台事件循环上调度协程，不等待结果"""
+        asyncio.run_coroutine_threadsafe(coro, self._loop)
     
     def _load_adapters(self) -> None:
         """加载平台适配器"""
@@ -125,12 +150,22 @@ class PlatformManager:
         for adapter in self._adapters.values():
             adapter.set_message_handler(self._message_handler.handle)
     
-    async def start_all(self) -> Dict[Platform, bool]:
+    def start_all(self) -> Dict[Platform, bool]:
         """
         启动所有启用的平台
         
         Returns:
             启动结果: platform -> success
+        """
+        return self._run_coro(self._start_all_async())
+    
+    def stop_all(self) -> None:
+        """停止所有平台"""
+        self._schedule_coro(self._stop_all_async())
+    
+    async def _start_all_async(self) -> Dict[Platform, bool]:
+        """
+        后台启动所有启用的平台
         """
         if self._running:
             logger.warning("[PlatformManager] Already running")
@@ -189,8 +224,8 @@ class PlatformManager:
         self._notify_status()
         return results
     
-    async def stop_all(self) -> None:
-        """停止所有平台"""
+    async def _stop_all_async(self) -> None:
+        """后台停止所有平台"""
         if not self._running:
             return
         
@@ -206,37 +241,40 @@ class PlatformManager:
         
         self._notify_status()
     
-    async def start_platform(self, platform: Platform) -> bool:
+    def start_platform(self, platform: Platform) -> bool:
         """启动指定平台"""
+        return self._run_coro(self._start_platform_async(platform))
+    
+    def stop_platform(self, platform: Platform) -> None:
+        """停止指定平台"""
+        self._schedule_coro(self._stop_platform_async(platform))
+    
+    async def _start_platform_async(self, platform: Platform) -> bool:
+        """在后台事件循环上启动平台"""
         adapter = self._adapters.get(platform)
         if not adapter:
             logger.error("[PlatformManager] No adapter for %s", platform.value)
             return False
         
-        # 重新从配置读取（确保拿到最新配置）
         config = self._config.get_platform_config(platform)
         
-        # 检查配置是否有效
         if platform == Platform.WECOM:
             if not config.bot_id or not config.secret:
                 logger.error("[PlatformManager] WeCom bot_id and secret are required")
                 adapter._last_error = "bot_id and secret are required"
                 self._notify_status()
                 return False
+            adapter._bot_id = config.bot_id
+            adapter._secret = config.secret
         elif platform == Platform.DINGTALK:
             if not config.client_id or not config.client_secret:
                 logger.error("[PlatformManager] DingTalk client_id and client_secret are required")
                 adapter._last_error = "client_id and client_secret are required"
                 self._notify_status()
                 return False
+            adapter._client_id = config.client_id
+            adapter._client_secret = config.client_secret
         
-        # 更新适配器配置
-        adapter._client_id = config.client_id
-        adapter._client_secret = config.client_secret
-        adapter._bot_id = config.bot_id
-        adapter._secret = config.secret
-        
-        # 设置消息处理器
         if self._message_handler:
             adapter.set_message_handler(self._message_handler.handle)
         
@@ -244,8 +282,8 @@ class PlatformManager:
         self._notify_status()
         return success
     
-    async def stop_platform(self, platform: Platform) -> None:
-        """停止指定平台"""
+    async def _stop_platform_async(self, platform: Platform) -> None:
+        """在后台事件循环上停止平台"""
         adapter = self._adapters.get(platform)
         if adapter and adapter.is_connected:
             await adapter.stop()

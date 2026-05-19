@@ -9,6 +9,7 @@
 
 配置持久化到 JSON 文件。
 """
+import atexit
 import orjson as json
 
 from copy import deepcopy
@@ -53,11 +54,20 @@ class QuickComponentsSerializer(ConfigSerializer):
 
 class Settings(QConfig):
     _instance = None
+    # 类级别关闭标志 — 一旦设置，任何实例的 save() 都会跳过
+    _closing_down = False
 
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
         return cls._instance
+
+    @classmethod
+    def _set_closing_down(cls):
+        """设置关闭标志，阻止所有后续写入"""
+        cls._closing_down = True
+        if cls._instance is not None:
+            cls._instance._closing = True
 
     @classmethod
     def get_instance(cls):
@@ -97,9 +107,6 @@ class Settings(QConfig):
         copy: bool
             whether to deep copy the new value
         """
-        if item.value == value:
-            return
-
         # deepcopy new value
         try:
             item.value = deepcopy(value) if copy else value
@@ -120,7 +127,18 @@ class Settings(QConfig):
             self._cfg.themeColorChanged.emit(value)
 
     def save(self):
-        """save config"""
+        """save config - 关闭时不写入磁盘，防止覆盖用户粘贴的配置"""
+        # 三层防护：类级别关闭标志 | 实例级别关闭标志 | app 正在退出
+        if Settings._closing_down:
+            return
+        if getattr(self, '_closing', False):
+            return
+        try:
+            from PyQt5.QtWidgets import QApplication
+            if QApplication.closingDown():
+                return
+        except Exception:
+            pass
         # 确保目录存在
         self.file.parent.mkdir(parents=True, exist_ok=True)
         # 写入文件
@@ -220,3 +238,7 @@ class Settings(QConfig):
     gateway_dingtalk_enabled = ConfigItem("Gateway", "DingTalk/Enabled", False, BoolValidator())
     gateway_dingtalk_client_id = ConfigItem("Gateway", "DingTalk/ClientID", "")
     gateway_dingtalk_client_secret = ConfigItem("Gateway", "DingTalk/ClientSecret", "")
+
+
+# 注册解释器退出时关闭配置写入保护
+atexit.register(Settings._set_closing_down)

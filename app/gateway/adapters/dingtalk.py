@@ -201,6 +201,8 @@ class DingTalkAdapter(BasePlatformAdapter):
         
         if session_webhook and chat_id:
             self._session_webhooks[chat_id] = (session_webhook, session_webhook_expired_time)
+            logger.debug("[DingTalk] Stored webhook for %s: %s",
+                        str(chat_id)[:30], str(session_webhook)[:50])
         
         # 提取文本
         text = self._extract_text(message)
@@ -356,35 +358,39 @@ class DingTalkAdapter(BasePlatformAdapter):
     
     async def send(self, chat_id: str, content: str, **kwargs) -> SendResult:
         """发送消息"""
+        logger.debug("[DingTalk] send() called, chat_id=%s, content_len=%d, webhooks=%s",
+                     chat_id[:20], len(content), list(self._session_webhooks.keys()))
+        
         webhook_info = self._session_webhooks.get(chat_id)
         if not webhook_info:
+            logger.warning("[DingTalk] No session webhook for chat_id=%s", chat_id[:30])
             return SendResult(success=False, error="No session webhook available", retryable=True)
         
         webhook, expired_time = webhook_info
         
+        if not self._http_client:
+            return SendResult(success=False, error="HTTP client not initialized", retryable=False)
+        
         try:
-            # 钉钉使用 markdown 格式
+            # 钉钉 session_webhook API 格式
             payload = {
-                "msg": {
-                    "msgtype": "markdown",
-                    "markdown": {
-                        "title": "DriFox",
-                        "text": content
-                    }
+                "msgtype": "markdown",
+                "markdown": {
+                    "title": "DriFox",
+                    "text": content
                 }
             }
             
-            async with self._http_client as client:
-                response = await client.post(webhook, json=payload)
-                
-                if response.status_code == 200:
-                    return SendResult(success=True)
-                else:
-                    return SendResult(
-                        success=False,
-                        error=f"HTTP {response.status_code}: {response.text}",
-                        retryable=response.status_code >= 500
-                    )
+            response = await self._http_client.post(webhook, json=payload)
+            
+            if response.status_code == 200:
+                return SendResult(success=True)
+            else:
+                return SendResult(
+                    success=False,
+                    error=f"HTTP {response.status_code}: {response.text}",
+                    retryable=response.status_code >= 500
+                )
                     
         except asyncio.TimeoutError:
             return SendResult(success=False, error="Request timeout", retryable=True)
@@ -510,7 +516,7 @@ class _IncomingHandler(ChatbotHandler):
         self._adapter = adapter
         self._ChatbotMessage = ChatbotMessage
     
-    def process(self, callback) -> tuple:
+    async def process(self, callback) -> tuple:
         """
         处理消息回调
         
@@ -521,20 +527,23 @@ class _IncomingHandler(ChatbotHandler):
             (status_code, response)
         """
         try:
+            from dingtalk_stream import AckMessage
+            
             # 获取消息数据
             data = callback.data if hasattr(callback, 'data') else callback
             
             # 创建 ChatbotMessage
             message = self._ChatbotMessage.from_dict(data)
             
-            # 处理消息（同步调用）
-            self._adapter._on_message_sync(message)
+            # 异步处理消息
+            await self._adapter._on_message(message)
             
             # 返回成功状态
             return AckMessage.STATUS_OK, 'OK'
             
         except Exception as e:
             logger.error("[DingTalk] Handler process error: %s", e, exc_info=True)
+            from dingtalk_stream import AckMessage
             return AckMessage.STATUS_FAIL, str(e)
 
 
