@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
-from PyQt5.QtCore import Qt, QTimer
-from PyQt5.QtGui import QColor, QPainter, QPen
+from PyQt5.QtCore import Qt, QTimer, QPoint
+from PyQt5.QtGui import QColor, QPainter, QPen, QFontMetrics
 from PyQt5.QtWidgets import QWidget, QApplication, QToolTip
+
+from app.utils.design_tokens import _get_global_font, scale_font_size, Colors
 
 
 class ContextUsageRing(QWidget):
@@ -98,7 +100,6 @@ class ContextUsageRing(QWidget):
 
         # 获取全局字体信息
         try:
-            from app.utils.design_tokens import _get_global_font, scale_font_size, Colors
             Colors.refresh()
             font_family = _get_global_font()
             font_size = scale_font_size(12)
@@ -133,8 +134,6 @@ class ContextUsageRing(QWidget):
 
         # 计算 tooltip 实际尺寸（根据文本内容）
         try:
-            from PyQt5.QtGui import QFontMetrics
-            from PyQt5.QtWidgets import QApplication
             app = QApplication.instance()
             font = app.font()
             font.setFamily(font_family)
@@ -162,7 +161,7 @@ class ContextUsageRing(QWidget):
         # 圆环左边缘 x
         top_left_global = self.mapToGlobal(self.rect().topLeft())
         ring_left_x = top_left_global.x()
-        x = ring_left_x - tooltip_width + 10
+        x = ring_left_x - tooltip_width + 30
         y = top_right_global.y()
 
         # 边界检查
@@ -174,7 +173,6 @@ class ContextUsageRing(QWidget):
         if y + tooltip_height > screen.bottom():
             y = screen.bottom() - tooltip_height - 5
 
-        from PyQt5.QtCore import QPoint
         QToolTip.showText(QPoint(x, y), tooltip_text, self)
 
     def _is_dark_theme(self, app) -> bool:
