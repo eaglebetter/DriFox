@@ -297,7 +297,7 @@ def _render_think_block(content: str, completed: bool = True) -> str:
     <button type="button" class="cm-collapsible__summary think-block__summary" aria-expanded="{expanded_attr}" style="{font_style}">
         <span class="cm-collapsible__chevron" aria-hidden="true"></span>
         <span style="white-space: nowrap;">{status_text}</span>
-        <span style="color: #909090; font-weight: normal; margin-left: 12px; font-size: {scale_font_size(11)}px;">{escape(content_preview)}</span>
+        <span style="color: {Colors.TEXT_SECONDARY}; font-weight: normal; margin-left: 12px; font-size: {scale_font_size(11)}px;">{escape(content_preview)}</span>
     </button>
     <div class="cm-collapsible__body"{body_style}>
         <div class="think-content loading" style="white-space: normal; word-break: break-word; line-height: 1.6; {font_style}">{content}</div>
@@ -336,7 +336,7 @@ def _render_think_block_lightweight(content: str, completed: bool = True) -> str
     <button type="button" class="cm-collapsible__summary think-block__summary" aria-expanded="{expanded_attr}" style="{font_style}">
         <span class="cm-collapsible__chevron" aria-hidden="true"></span>
         <span style="white-space: nowrap;">{status_text}</span>
-        <span style="color: #909090; font-weight: normal; margin-left: 12px; font-size: {scale_font_size(11)}px;">{escape(content_preview)}</span>
+        <span style="color: {Colors.TEXT_SECONDARY}; font-weight: normal; margin-left: 12px; font-size: {scale_font_size(11)}px;">{escape(content_preview)}</span>
     </button>
     <div class="cm-collapsible__body"{body_style}>
         <div class="think-content loading" style="white-space: normal; word-break: break-word; line-height: 1.6; {font_style}">{content_escaped}</div>
@@ -2550,6 +2550,11 @@ class MessageCard(SimpleCardWidget):
         if role == "assistant" and reasoning_content:
             self._content_data.append({"type": "reasoning", "content": reasoning_content})
         self._streaming = False
+        self._retrying = False  # 重试模式标志
+        self._retry_error_type = ""  # 重试错误类型
+        self._retry_attempt = 0  # 当前重试次数
+        self._retry_max = 15  # 最大重试次数
+        self._retry_wait_time = 0.0  # 等待时间
         self._round_index: Optional[int] = None  # 用于卡片差异功能
         self._message_index: Optional[int] = None  # 用于卡片差异和撤销功能：消息在 session.messages 中的索引
         self._anim_timer = QTimer(self)
@@ -2874,6 +2879,70 @@ class MessageCard(SimpleCardWidget):
         self.options_widget.setVisible(False)
         main.addWidget(self.options_widget)
 
+        # 重试状态栏（默认隐藏）
+        self._retry_status_widget = QWidget(self)
+        self._retry_status_widget.setVisible(False)
+        retry_layout = QHBoxLayout(self._retry_status_widget)
+        retry_layout.setContentsMargins(12, 6, 12, 6)
+        retry_layout.setSpacing(8)
+        self._retry_status_widget.setStyleSheet(
+            """
+            QWidget {
+                background: rgba(255, 40, 40, 0.08);
+                border-top: 1px solid rgba(255, 60, 60, 0.2);
+                border-radius: 0px;
+            }
+            """
+        )
+        # 旋转图标（CSS动画模拟）
+        self._retry_spinner = QLabel("⟳", self)
+        self._retry_spinner.setStyleSheet(
+            f"""
+            QLabel {{
+                color: rgba(255, 80, 80, 0.8);
+                font-size: {scale_font_size(14)}px;
+                font-weight: bold;
+            }}
+            """
+        )
+        retry_layout.addWidget(self._retry_spinner)
+        # 错误类型
+        self._retry_type_label = QLabel("", self)
+        self._retry_type_label.setStyleSheet(
+            f"""
+            QLabel {{
+                color: #ff6b6b;
+                font-size: {scale_font_size(12)}px;
+                font-weight: 600;
+            }}
+            """
+        )
+        retry_layout.addWidget(self._retry_type_label)
+        # 重试次数
+        self._retry_attempt_label = QLabel("", self)
+        self._retry_attempt_label.setStyleSheet(
+            f"""
+            QLabel {{
+                color: #ffaa44;
+                font-size: {scale_font_size(12)}px;
+            }}
+            """
+        )
+        retry_layout.addWidget(self._retry_attempt_label)
+        retry_layout.addStretch()
+        # 等待倒计时
+        self._retry_wait_label = QLabel("", self)
+        self._retry_wait_label.setStyleSheet(
+            f"""
+            QLabel {{
+                color: #888;
+                font-size: {scale_font_size(11)}px;
+            }}
+            """
+        )
+        retry_layout.addWidget(self._retry_wait_label)
+        main.addWidget(self._retry_status_widget)
+
         main.addWidget(CardSeparator(self))
         self.setStyleSheet(
             f"""
@@ -2898,6 +2967,9 @@ class MessageCard(SimpleCardWidget):
 
     def _update_anim(self):
         self._pulse_phase = (self._pulse_phase + 0.035) % (math.pi * 2)
+        # 重试模式下同步更新状态栏的旋转图标
+        if self._retrying:
+            self._update_retry_status_bar()
         self.update()
 
     def _apply_card_style(self, border: str = None, bg: str = None):
@@ -2913,13 +2985,66 @@ class MessageCard(SimpleCardWidget):
 
     def stop_streaming_anim(self):
         self._streaming = False
+        self._retrying = False
         try:
             self._anim_timer.stop()
         except RuntimeError:
             return
         self._apply_card_style()
+        self._retry_status_widget.setVisible(False)
         self.update()
         self.repaint()
+
+    def start_retry_anim(self, error_type: str, attempt: int, max_retries: int, wait_time: float):
+        """切换到重试边框模式（红色流动+白光点）"""
+        self._retrying = True
+        self._retry_error_type = error_type
+        self._retry_attempt = attempt
+        self._retry_max = max_retries
+        self._retry_wait_time = wait_time
+        # 确保动画定时器运行
+        if not self._streaming:
+            self._streaming = True
+            self._pulse_phase = 0.0
+            try:
+                self._anim_timer.start(50)
+            except RuntimeError:
+                return
+        # 更新状态栏
+        self._update_retry_status_bar()
+        self._retry_status_widget.setVisible(True)
+        self.update()
+
+    def update_retry_status(self, error_type: str, attempt: int, max_retries: int, wait_time: float):
+        """更新重试状态信息"""
+        self._retry_error_type = error_type
+        self._retry_attempt = attempt
+        self._retry_max = max_retries
+        self._retry_wait_time = wait_time
+        self._update_retry_status_bar()
+        self.update()
+
+    def stop_retry_anim(self):
+        """停止重试动画，恢复正常边框"""
+        self._retrying = False
+        self._retry_status_widget.setVisible(False)
+        if not self._streaming:
+            return
+        # 继续正常的流式动画（彩虹边框）
+        self.update()
+
+    def _update_retry_status_bar(self):
+        """更新重试状态栏的文本内容"""
+        # 旋转图标动画
+        spin_chars = ["◜", "◝", "◞", "◟"]
+        idx = int(self._pulse_phase * 2) % 4
+        self._retry_spinner.setText(spin_chars[idx])
+        # 错误类型
+        self._retry_type_label.setText(self._retry_error_type)
+        # 重试次数
+        self._retry_attempt_label.setText(f"第 {self._retry_attempt}/{self._retry_max} 次重试")
+        # 等待时间
+        self._retry_wait_label.setText(f"等待 {self._retry_wait_time:.0f}s")
 
     def _on_webengine_context_lost(self):
         """WebEngine 上下文丢失时显示恢复提示"""
@@ -3002,29 +3127,9 @@ class MessageCard(SimpleCardWidget):
             return
 
         # ══════════════════════════════════════════════════════
-        #  辅助：准备彩虹色板（10色精细渐变 + 流光相位）
+        #  辅助：准备色板 + 流光相位
         # ══════════════════════════════════════════════════════
         if self.role == "assistant":
-            # 10 色精细彩虹（蓝→青→紫→粉→橙→绿→蓝 形成闭环）
-            rainbow = [
-                QColor("#60D4FF"),  # 天蓝
-                QColor("#40C8FF"),  # 青蓝
-                QColor("#4DA6FF"),  # 柔蓝
-                QColor("#8B7BFF"),  # 薰衣草
-                QColor("#C084FC"),  # 紫罗兰
-                QColor("#F472B6"),  # 玫瑰粉
-                QColor("#FB7185"),  # 珊瑚红
-                QColor("#F59E0B"),  # 琥珀金
-                QColor("#34D399"),  # 翠绿
-                QColor("#22D3EE"),  # 青色
-            ]
-            N = len(rainbow)
-            # 主边框连续相位（小数，可精确到颜色之间的过渡）
-            shift_main = (self._pulse_phase / (math.pi * 2)) * N  # 0~N 的连续值
-            # 发光层更慢（产生柔和光晕延伸感）
-            shift_glow = shift_main * 0.5
-            # 流光带相位（比主边框略快）
-            shift_shimmer = shift_main * 1.15
             # 呼吸：极缓慢脉动
             breathe = 0.55 + 0.45 * (math.sin(self._pulse_phase * 0.3) + 1) / 2
             # 流光闪烁：柔和放缓
@@ -3036,6 +3141,40 @@ class MessageCard(SimpleCardWidget):
                 g = int(a.green() + (b.green() - a.green()) * t)
                 bl = int(a.blue() + (b.blue() - a.blue()) * t)
                 return QColor(r, g, bl)
+
+            if self._retrying:
+                # ── 重试模式：红色流动渐变 ──
+                rainbow = [
+                    QColor("#ff2222"),  # 鲜红
+                    QColor("#aa0000"),  # 暗红
+                    QColor("#ff3333"),  # 亮红
+                    QColor("#880000"),  # 深红
+                    QColor("#ff1111"),  # 火红
+                    QColor("#bb0000"),  # 酒红
+                    QColor("#ff4444"),  # 浅红
+                    QColor("#990000"),  # 暗深红
+                ]
+            else:
+                # ── 正常模式：10 色精细彩虹 ──
+                rainbow = [
+                    QColor("#60D4FF"),  # 天蓝
+                    QColor("#40C8FF"),  # 青蓝
+                    QColor("#4DA6FF"),  # 柔蓝
+                    QColor("#8B7BFF"),  # 薰衣草
+                    QColor("#C084FC"),  # 紫罗兰
+                    QColor("#F472B6"),  # 玫瑰粉
+                    QColor("#FB7185"),  # 珊瑚红
+                    QColor("#F59E0B"),  # 琥珀金
+                    QColor("#34D399"),  # 翠绿
+                    QColor("#22D3EE"),  # 青色
+                ]
+            N = len(rainbow)
+            # 主边框连续相位
+            shift_main = (self._pulse_phase / (math.pi * 2)) * N
+            # 发光层更慢
+            shift_glow = shift_main * 0.5
+            # 流光带相位
+            shift_shimmer = shift_main * 1.15
 
             def build_gradient(shift: float, stops: list, alpha_base: float) -> QLinearGradient:
                 """用连续相位生成平滑渐变：每个 stop 点用前后两色插值"""
@@ -3148,16 +3287,129 @@ class MessageCard(SimpleCardWidget):
         top_clip.addRoundedRect(0, 0, w, h, radius, radius)
         painter.setClipPath(top_clip)
         if self.role == "assistant":
-            top_color = QColor("#60D4FF")
+            if self._retrying:
+                top_color = QColor("#ff2222")
+            else:
+                top_color = QColor("#60D4FF")
             top_color.setAlpha(int(22 * breathe))
         else:
             top_color = QColor(self._theme["accent"])
             top_color.setAlpha(int(30 * breathe))
         painter.fillRect(0, 0, w, 5, top_color)
 
+        # ══════════════════════════════════════════════════════
+        #  层6（重试模式）：内部微红光晕 + 白色光点沿边框旋转
+        # ══════════════════════════════════════════════════════
+        if self._retrying and self.role == "assistant":
+            # 内部微红光晕脉动
+            inner_glow_clip = QPainterPath()
+            inner_glow_clip.addRoundedRect(3, 3, w - 6, h - 6, radius - 2, radius - 2)
+            painter.setClipPath(inner_glow_clip)
+            glow_alpha = int(12 * (0.5 + 0.5 * (math.sin(self._pulse_phase * 0.8) + 1) / 2))
+            inner_red = QColor(255, 0, 0, glow_alpha)
+            painter.fillRect(0, 0, w, h, inner_red)
+
+            # 白色光点：数量随重试次数递增
+            attempt = self._retry_attempt
+            if attempt <= 3:
+                dot_count = 1
+            elif attempt <= 7:
+                dot_count = 2
+            elif attempt <= 11:
+                dot_count = 3
+            else:
+                dot_count = 4
+
+            # 计算边框路径参数
+            perimeter = 2 * (w + h) - 8 * radius + 2 * math.pi * radius
+
+            for dot_idx in range(dot_count):
+                # 每个光点沿边框等距分布，整体随时间旋转
+                phase = (self._pulse_phase / (math.pi * 2) * 0.35 + dot_idx / dot_count) % 1.0
+                pos = phase * perimeter
+
+                # 沿圆角矩形路径计算坐标
+                seg_w = w - 2 * radius
+                seg_h = h - 2 * radius
+                corner_len = math.pi * radius / 2
+
+                top_len = seg_w
+                tr_len = corner_len
+                right_len = seg_h
+                br_len = corner_len
+                bot_len = seg_w
+                bl_len = corner_len
+                left_len = seg_h
+                tl_len = corner_len
+
+                p = pos
+                dx, dy = 0.0, 0.0
+                if p < top_len:
+                    dx, dy = radius + p, 0
+                else:
+                    p -= top_len
+                    if p < tr_len:
+                        angle = (p / tr_len) * (math.pi / 2)
+                        dx = w - radius + math.sin(angle) * radius
+                        dy = radius - math.cos(angle) * radius
+                    else:
+                        p -= tr_len
+                        if p < right_len:
+                            dx, dy = w, radius + p
+                        else:
+                            p -= right_len
+                            if p < br_len:
+                                angle = (p / br_len) * (math.pi / 2)
+                                dx = w - radius + math.cos(angle) * radius
+                                dy = h - radius + math.sin(angle) * radius
+                            else:
+                                p -= br_len
+                                if p < bot_len:
+                                    dx, dy = w - radius - p, h
+                                else:
+                                    p -= bot_len
+                                    if p < bl_len:
+                                        angle = (p / bl_len) * (math.pi / 2)
+                                        dx = radius - math.cos(angle) * radius
+                                        dy = h - radius + math.sin(angle) * radius
+                                    else:
+                                        p -= bl_len
+                                        if p < left_len:
+                                            dx, dy = 0, h - radius - p
+                                        else:
+                                            p -= left_len
+                                            if p < tl_len:
+                                                angle = (p / tl_len) * (math.pi / 2)
+                                                dx = radius - math.sin(angle) * radius
+                                                dy = radius - math.cos(angle) * radius
+                                            else:
+                                                dx, dy = radius, 0
+
+                # 绘制白色光点（径向渐变 + 发光）
+                dot_radius = 8
+                dot_clip = QPainterPath()
+                dot_clip.addEllipse(dx - dot_radius - 4, dy - dot_radius - 4,
+                                    (dot_radius + 4) * 2, (dot_radius + 4) * 2)
+                painter.setClipPath(dot_clip)
+
+                # 外层光晕
+                glow_color = QColor(255, 255, 255, int(60 * shimmer))
+                painter.setPen(Qt.NoPen)
+                painter.setBrush(glow_color)
+                painter.drawEllipse(dx - dot_radius - 3, dy - dot_radius - 3,
+                                    (dot_radius + 3) * 2, (dot_radius + 3) * 2)
+
+                # 内核亮点
+                core_color = QColor(255, 255, 255, int(200 * shimmer))
+                painter.setBrush(core_color)
+                painter.drawEllipse(dx - dot_radius * 0.4, dy - dot_radius * 0.4,
+                                    dot_radius * 0.8, dot_radius * 0.8)
+
     def set_error_state(self, is_error: bool):
         self.error = is_error
         if is_error:
+            self._retrying = False
+            self._retry_status_widget.setVisible(False)
             bd, bg = "#ff4d4d", "#2a1f1f"
         else:
             bd, bg = self._base_border, self._base_bg

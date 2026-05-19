@@ -366,6 +366,7 @@ class LLMSettingsCard(SystemCardFrame):
                 self._parent = parent
 
                 self.fontCombo = NoWheelFontComboBox()
+                self.fontCombo.setFixedWidth(180)
                 self.fontCombo.setSizeAdjustPolicy(QFontComboBox.SizeAdjustPolicy.AdjustToContents)
                 self._apply_font_combo_style()
                 current_font = cfg.llm_font_family.value

@@ -421,6 +421,7 @@ class ChatEngine:
             self._current_worker.permission_approval_requested.connect(
                 self._on_permission_approval_requested
             )
+            self._current_worker.retry_status.connect(self._on_retry_status)
 
         self._current_worker.start()
         
@@ -507,6 +508,10 @@ class ChatEngine:
     def _on_error(self, error: str):
         self._is_streaming = False
         self._emit("error", error)
+
+    def _on_retry_status(self, error_type: str, attempt: int, max_retries: int, wait_time: float):
+        """API 重试状态通知"""
+        self._emit("retry_status", error_type, attempt, max_retries, wait_time)
 
     def stop(self) -> List[Dict]:
         

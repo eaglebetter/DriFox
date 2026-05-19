@@ -183,7 +183,8 @@ class Settings(QConfig):
         "UI",
         "ThemeStyle",
         "midnight",
-        OptionsValidator(["midnight", "obsidian", "forest", "graphite"]),
+        OptionsValidator(["midnight", "obsidian", "forest", "graphite",
+                          "bordeaux", "amber", "ocean", "sakura", "slate", "jade"]),
     )
 
     # ========== 会话项目管理 ==========
