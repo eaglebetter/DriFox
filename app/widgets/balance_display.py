@@ -7,6 +7,8 @@ from typing import Optional
 from PyQt5.QtCore import QTimer, Qt, pyqtSignal
 from PyQt5.QtWidgets import QWidget, QHBoxLayout, QLabel
 from PyQt5.QtGui import QColor
+from app.utils.utils import get_font_family_css
+from app.utils.design_tokens import scale_font_size
 
 
 # 支持余额查询的服务商及其接口
@@ -54,14 +56,15 @@ class BalanceDisplay(QWidget):
         # 金额标签
         self._balance_label = QLabel("", self)
         self._balance_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        self._balance_label.setStyleSheet("""
-            QLabel {
+        self._balance_label.setStyleSheet(f"""
+            QLabel {{
                 color: #5aa9ff;
-                font-size: 12px;
+                {get_font_family_css()}
+                font-size: {scale_font_size(12)}px;
                 font-weight: 500;
                 background: transparent;
                 padding: 0px;
-            }
+            }}
         """)
         
         layout.addWidget(self._icon_label)
@@ -222,7 +225,8 @@ class BalanceDisplay(QWidget):
         self._balance_label.setStyleSheet(f"""
             QLabel {{
                 color: {color};
-                font-size: 12px;
+                {get_font_family_css()}
+                font-size: {scale_font_size(12)}px;
                 font-weight: 500;
                 background: transparent;
                 padding: 0px;

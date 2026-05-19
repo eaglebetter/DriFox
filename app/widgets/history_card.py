@@ -26,7 +26,7 @@ from qfluentwidgets import (
 )
 
 from app.utils.utils import get_icon, get_unified_font
-from app.utils.design_tokens import ItemStyles, Colors, get_font_family_css
+from app.utils.design_tokens import ItemStyles, Colors, get_font_family_css, font_size_css
 
 
 def format_relative_time(time_str: str) -> str:

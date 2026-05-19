@@ -63,20 +63,36 @@ def main():
     app.setApplicationName("Drifox")
     app.setApplicationDisplayName("Drifox")
 
-    app.setStyleSheet("""
-        QToolTip {
-            color: white;
-            background-color: black;
-            border: none;
-            padding: 2px;
-            font-size: 12px;
-        }
-    """)
-
     # 设置主题
     from qfluentwidgets import Theme, setTheme
     setTheme(Theme.DARK)
+    # 获取全局字体配置
+    try:
+        from app.utils.config import Settings
+        font_family = Settings.get_instance().llm_font_family.value
+    except Exception:
+        try:
+            font_family = Settings.get_instance().canvas_font_selected.value
+        except Exception:
+            font_family = "Segoe UI"
 
+    try:
+        from app.utils.design_tokens import scale_font_size
+        tooltip_font_size = scale_font_size(12)
+    except Exception:
+        tooltip_font_size = 12
+
+    app.setStyleSheet(f"""
+            QToolTip {{
+                color: #ffffff;
+                background-color: rgba(30, 30, 32, 240);
+                border: 1px solid #3d3d3d;
+                border-radius: 4px;
+                padding: 2px 2px;
+                font-size: {tooltip_font_size}px;
+                font-family: '{font_family}';
+            }}
+        """)
     # 创建并显示窗口 - 直接使用 ToolPopupDialog
     logger.info("LLM Chatter 启动中...")
 

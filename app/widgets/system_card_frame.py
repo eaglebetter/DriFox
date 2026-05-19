@@ -16,7 +16,7 @@ from qfluentwidgets import (
     StrongBodyLabel, TransparentToolButton, FluentIcon, PrimaryToolButton)
 
 from app.utils.design_tokens import Colors, TabStyles, font_size_css
-from app.utils.utils import get_unified_font, get_icon
+from app.utils.utils import get_unified_font, get_icon, get_font_family_css
 
 
 class SystemCardFrame(QFrame):
@@ -203,6 +203,7 @@ class SystemCardFrame(QFrame):
                 color: {Colors.TEXT_PRIMARY};
                 padding: 2px 8px;
                 {font_size_css(11)}
+                {get_font_family_css()}
             }}
             QLineEdit:focus {{
                 border: 1px solid {Colors.TEXT_ACCENT};

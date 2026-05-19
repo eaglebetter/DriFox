@@ -28,7 +28,8 @@ from qfluentwidgets import (
     ComboBox,
     PrimaryPushButton,
 )
-from app.utils.design_tokens import ItemStyles, Sizes, ButtonStyles
+from app.utils.design_tokens import ItemStyles, Sizes, ButtonStyles, font_size_css
+from app.utils.utils import get_font_family_css
 
 
 class ListValidator(ConfigValidator):
@@ -269,7 +270,8 @@ class SkillItem(QWidget):
 
         self.nameLabel.setFixedWidth(140)
         self.nameLabel.setObjectName("titleLabel")
-        self.descLabel.setStyleSheet("color: #888888; font-size: 12px;")
+        self.nameLabel.setStyleSheet(f"font-weight: bold; {font_size_css(12)}; {get_font_family_css()}")
+        self.descLabel.setStyleSheet(f"color: #888888; {font_size_css(12)}; {get_font_family_css()}")
         self.descLabel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
         self.setFixedHeight(53)
@@ -380,16 +382,16 @@ class SkillListSettingCard(ExpandSettingCard):
         header_title = QLabel("技能名称", header_widget)
         header_title.setFixedWidth(140)
         header_title.setStyleSheet(
-            "color: #888888; font-size: 12px; font-weight: bold;"
+            f"color: #888888; {font_size_css(12)} font-weight: bold; {get_font_family_css()}"
         )
 
         header_desc = QLabel("描述", header_widget)
-        header_desc.setStyleSheet("color: #888888; font-size: 12px; font-weight: bold;")
+        header_desc.setStyleSheet(f"color: #888888; {font_size_css(12)} font-weight: bold; {get_font_family_css()}")
 
         header_state = QLabel("启用", header_widget)
         header_state.setFixedWidth(80)
         header_state.setStyleSheet(
-            "color: #888888; font-size: 12px; font-weight: bold;"
+            f"color: #888888; {font_size_css(12)} font-weight: bold; {get_font_family_css()}"
         )
         header_state.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
 

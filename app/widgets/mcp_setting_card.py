@@ -7,7 +7,7 @@ MCP Server 配置卡片
 - MCPEditCard: 编辑/添加服务器的表单卡片（承载在 BaseSettingsCard 中）
 """
 
-import json
+import orjson as json
 
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import (
@@ -34,7 +34,7 @@ from qfluentwidgets import (
 )
 
 from app.utils.config import Settings
-from app.utils.design_tokens import Colors, Sizes, ButtonStyles, SwitchStyles
+from app.utils.design_tokens import Colors, Sizes, ButtonStyles, SwitchStyles, scale_font_size
 from app.utils.utils import get_icon, get_font_family_css
 from app.widgets.searchable_editable_combobox import SearchableEditableComboBox
 
@@ -143,7 +143,7 @@ class MCPEditCard(QWidget):
         if srv_type != "stdio":
             data["type"] = srv_type
         result = {"mcpServers": {name: data}}
-        return json.dumps(result, indent=2, ensure_ascii=False)
+        return json.dumps(result).decode("utf-8")
 
     def _build_json_from_data(self) -> str:
         """从已有 server_data 构建 JSON（标准 mcpServers 格式）"""
@@ -162,7 +162,7 @@ class MCPEditCard(QWidget):
                 name: data
             }
         }
-        return json.dumps(result, indent=2, ensure_ascii=False)
+        return json.dumps(result).decode("utf-8")
 
     # 模式切换信号（通知外层更新头部按钮）
     modeChanged = pyqtSignal(bool)  # True=JSON模式, False=表单模式
@@ -295,7 +295,7 @@ class MCPEditCard(QWidget):
             form_data = self._collect_form_data()
             if form_data:
                 preview = self._build_json_preview()
-                self.jsonEdit.setPlainText(preview if preview else json.dumps(form_data, indent=2, ensure_ascii=False))
+                self.jsonEdit.setPlainText(preview if preview else json.dumps(form_data).decode("utf-8"))
             self._stack.setCurrentIndex(1)
         else:
             # 切回表单模式：从 JSON 解析回表单（支持两种格式）
@@ -420,12 +420,12 @@ class MCPEditCard(QWidget):
         self.urlEdit.setText(parsed.get("url", ""))
         headers = parsed.get("headers")
         if headers and isinstance(headers, dict):
-            self.headersEdit.setPlainText(json.dumps(headers, indent=2, ensure_ascii=False))
+            self.headersEdit.setPlainText(json.dumps(headers).decode("utf-8"))
         else:
             self.headersEdit.clear()
         env = parsed.get("env")
         if env and isinstance(env, dict):
-            self.envEdit.setPlainText(json.dumps(env, indent=2, ensure_ascii=False))
+            self.envEdit.setPlainText(json.dumps(env).decode("utf-8"))
         else:
             self.envEdit.clear()
 
@@ -546,7 +546,7 @@ class MCPServerRow(CardWidget):
         type_label = QLabel(server_type.upper())
         type_label.setStyleSheet(
             f"background-color: {color}22; color: {color}; "
-            f"font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: bold;"
+            f"{get_font_family_css()} font-size: {scale_font_size(11)}px; padding: 2px 8px; border-radius: 4px; font-weight: bold;"
         )
         type_label.setFixedWidth(55)
         type_label.setAlignment(Qt.AlignCenter)
@@ -561,7 +561,7 @@ class MCPServerRow(CardWidget):
         else:
             desc = data.get("url", "")
         desc_label = _ElidedLabel(desc)
-        desc_label.setStyleSheet(f"color: {Colors.TEXT_MUTED}; font-size: 12px;")
+        desc_label.setStyleSheet(f"color: {Colors.TEXT_MUTED}; {get_font_family_css()} font-size: {scale_font_size(12)}px;")
         desc_label.setMinimumWidth(40)
         layout.addWidget(desc_label, 1)
 
@@ -744,7 +744,7 @@ class MCPListSettingCard(ExpandSettingCard):
         servers = self.cfg.mcp_servers.value
         if not servers:
             empty_label = QLabel("暂无 MCP 服务器，点击「添加服务器」创建", self.view)
-            empty_label.setStyleSheet("color: #888; padding: 16px; font-size: 12px;")
+            empty_label.setStyleSheet(f"color: #888; padding: 16px; {get_font_family_css()} font-size: {scale_font_size(12)}px;")
             empty_label.setAlignment(Qt.AlignCenter)
             self.viewLayout.addWidget(empty_label)
             return
